@@ -1,0 +1,10 @@
+{
+  "title": "Collapsible group headers demo",
+  "description": "A Scheduler with collapsible grouped columns in its grid section",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

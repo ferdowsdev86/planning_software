@@ -1,0 +1,399 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"      : 1,
+        "name"    : "Truck 1",
+        "iconCls" : "fa fa-truck",
+        "image"   : false
+      },
+      {
+        "id"      : 2,
+        "name"    : "Truck 2",
+        "iconCls" : "fa fa-truck",
+        "image"   : false
+      },
+      {
+        "id"      : 3,
+        "name"    : "Truck 3",
+        "iconCls" : "fa fa-truck",
+        "image"   : false
+      },
+      {
+        "id"      : 4,
+        "name"    : "Train 1",
+        "iconCls" : "fa fa-train",
+        "image"   : false
+      },
+      {
+        "id"      : 5,
+        "name"    : "Train 2",
+        "iconCls" : "fa fa-train",
+        "image"   : false
+      },
+      {
+        "id"      : 6,
+        "name"    : "Pickup 1",
+        "iconCls" : "fa fa-truck-pickup",
+        "image"   : false
+      },
+      {
+        "id"      : 7,
+        "name"    : "Pickup 2",
+        "iconCls" : "fa fa-truck-pickup",
+        "image"   : false
+      },
+      {
+        "id"      : 8,
+        "name"    : "Pickup 3",
+        "iconCls" : "fa fa-truck-pickup",
+        "image"   : false
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Arrive",
+        "startDate"    : "2022-03-23T03:00",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 2,
+        "name"         : "Unload",
+        "duration"     : 3,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-snowplow",
+        "eventColor"   : "orange"
+      },
+      {
+        "id"           : 3,
+        "name"         : "Load",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-truck-loading",
+        "eventColor"   : "green"
+      },
+      {
+        "id"           : 4,
+        "name"         : "Depart",
+        "duration"     : 1.5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "cls"          : "depart",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 5,
+        "name"         : "Arrive",
+        "startDate"    : "2022-03-23T07:00",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 6,
+        "name"         : "Unload",
+        "duration"     : 1.5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-snowplow",
+        "eventColor"   : "orange"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Load",
+        "duration"     : 1.5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-truck-loading",
+        "eventColor"   : "green"
+      },
+      {
+        "id"           : 8,
+        "name"         : "Depart",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "cls"          : "depart",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 9,
+        "name"         : "Yearly maintenance",
+        "startDate"    : "2022-03-23T03:00",
+        "duration"     : 5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-wrench",
+        "eventColor"   : "gray"
+      },
+      {
+        "id"           : 10,
+        "name"         : "Arrive",
+        "startDate"    : "2022-03-23T01:00",
+        "duration"     : 1.5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 11,
+        "name"         : "Unload",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-snowplow",
+        "eventColor"   : "orange"
+      },
+      {
+        "id"           : 12,
+        "name"         : "Load",
+        "duration"     : 3,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-truck-loading",
+        "eventColor"   : "green"
+      },
+      {
+        "id"           : 13,
+        "name"         : "Depart",
+        "duration"     : 2,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "cls"          : "depart",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 14,
+        "name"         : "Arrive",
+        "startDate"    : "2022-03-23T02:00",
+        "duration"     : 5,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "eventColor"   : "blue"
+      },
+      {
+        "id"           : 15,
+        "name"         : "Reload",
+        "duration"     : 6,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-snowplow",
+        "eventColor"   : "orange"
+      },
+      {
+        "id"           : 16,
+        "name"         : "Depart",
+        "duration"     : 4,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-arrow-right",
+        "cls"          : "depart",
+        "eventColor"   : "blue"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 1
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 1
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 4
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 4
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 7
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 7
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 8
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 8
+      },
+      {
+        "id"       : 9,
+        "event"    : 9,
+        "resource" : 2
+      },
+      {
+        "id"       : 10,
+        "event"    : 9,
+        "resource" : 3
+      },
+      {
+        "id"       : 11,
+        "event"    : 9,
+        "resource" : 6
+      },
+      {
+        "id"       : 12,
+        "event"    : 10,
+        "resource" : 2
+      },
+      {
+        "id"       : 13,
+        "event"    : 11,
+        "resource" : 2
+      },
+      {
+        "id"       : 14,
+        "event"    : 12,
+        "resource" : 5
+      },
+      {
+        "id"       : 15,
+        "event"    : 13,
+        "resource" : 5
+      },
+      {
+        "id"       : 16,
+        "event"    : 14,
+        "resource" : 11
+      },
+      {
+        "id"       : 17,
+        "event"    : 15,
+        "resource" : 11
+      },
+      {
+        "id"       : 18,
+        "event"    : 16,
+        "resource" : 11
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "fromEvent" : 1,
+        "toEvent"   : 2,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 2,
+        "fromEvent" : 2,
+        "toEvent"   : 3,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 3,
+        "fromEvent" : 3,
+        "toEvent"   : 4,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 4,
+        "fromEvent" : 5,
+        "toEvent"   : 6,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 5,
+        "fromEvent" : 6,
+        "toEvent"   : 7,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 6,
+        "fromEvent" : 7,
+        "toEvent"   : 8,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 7,
+        "fromEvent" : 9,
+        "toEvent"   : 10,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 8,
+        "fromEvent" : 10,
+        "toEvent"   : 11,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 9,
+        "fromEvent" : 11,
+        "toEvent"   : 12,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 10,
+        "fromEvent" : 13,
+        "toEvent"   : 14,
+        "lag"       : 2,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 11,
+        "fromEvent" : 14,
+        "toEvent"   : 15,
+        "lag"       : 2,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 12,
+        "fromEvent" : 17,
+        "toEvent"   : 18,
+        "lag"       : 1,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 13,
+        "fromEvent" : 18,
+        "toEvent"   : 19,
+        "lag"       : 2,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 14,
+        "fromEvent" : 19,
+        "toEvent"   : 20,
+        "lag"       : 3,
+        "lagUnit"   : "hour"
+      },
+      {
+        "id"        : 16,
+        "fromEvent" : 22,
+        "toEvent"   : 23,
+        "lag"       : 3,
+        "lagUnit"   : "hour"
+      }
+    ]
+  }
+}

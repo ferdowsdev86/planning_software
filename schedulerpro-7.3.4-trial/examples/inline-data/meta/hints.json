@@ -1,0 +1,7 @@
+{
+  "[data-ref=codeButton]": {
+    "title": "Inspect code",
+    "content": "Click to see how to use inline data for Scheduler Pro",
+    "align": "t100-b100"
+  }
+}

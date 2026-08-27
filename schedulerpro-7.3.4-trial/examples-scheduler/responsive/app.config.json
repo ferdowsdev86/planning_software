@@ -1,0 +1,11 @@
+{
+  "title": "Responsive demo",
+  "description": "Shows how the scheduler can be easily made responsive using a combination of configs and styling.",
+  "source": [
+    "app.js",
+    "data/events.json",
+    "data/resources.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

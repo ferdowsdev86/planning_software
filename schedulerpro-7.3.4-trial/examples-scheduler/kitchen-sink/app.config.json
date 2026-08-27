@@ -1,0 +1,18 @@
+{
+  "title": "Kitchen Sink - All Widgets",
+  "description": "Comprehensive showcase of all the widgets included in the Bryntum package. Browse through text fields, date pickers, buttons, layouts, and more.",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/LazyCardLoader.js",
+    "lib/WidgetCatalog.js",
+    "resources/app.css",
+    "resources/Card.css"
+  ],
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Vue Component in widget and tooltip (Vue 3 + Vite)",
+  "description": "This example shows how to configure a Vue component to render in widget or tooltip",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/components/VueClock.vue",
+    "src/components/VueEventTip.vue",
+    "src/components/VueTooltip.vue",
+    "src/components/VueWidget.vue",
+    "src/lib/Developer.ts",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

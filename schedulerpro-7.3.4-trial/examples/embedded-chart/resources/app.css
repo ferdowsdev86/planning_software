@@ -1,0 +1,35 @@
+/* General grid cell style rules */
+/* Position column lines below the grid cells in the z-index stack */
+.b-scheduler-pro.b-bryntum .b-timeline-sub-grid {
+    --b-column-lines-zindex  : -1;
+    --b-grid-cell-background : transparent;
+    --b-sch-event-font-size  : 0.9em;
+}
+
+.b-sch-event-wrap {
+    max-height : 40px;
+}
+
+.b-sch-header-text {
+    .b-sch-header-row.b-lowest & {
+        font-weight : 400;
+    }
+}
+
+/* Chart styles */
+.b-line-chart {
+    position   : absolute;
+    bottom     : -6px;
+    left       : 0;
+    display    : none !important;
+    background : transparent;
+
+    .b-row-expanded & {
+        display : block !important;
+
+        /* Chart has some extra padding we have to eliminate to align the timeaxis start */
+        .b-chart-content {
+            margin-inline-start : -6px;
+        }
+    }
+}

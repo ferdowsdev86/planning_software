@@ -1,0 +1,10 @@
+{
+  "title": "Icons",
+  "description": "You can render not only event bars, but also icons representing a milestone.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Drag from grid TypeScript demo (React + Vite)",
+  "description": "This demo shows how easy it is to drag unscheduled tasks from an external grid onto the React Scheduler.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "public/data/unplanned.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/components/UnplannedGrid.tsx",
+    "src/containers/Content.tsx",
+    "src/containers/ContentConfig.ts",
+    "src/lib/Drag.ts",
+    "src/lib/Task.ts",
+    "src/lib/TaskStore.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

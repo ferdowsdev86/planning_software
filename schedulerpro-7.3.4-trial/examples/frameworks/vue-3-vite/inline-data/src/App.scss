@@ -1,0 +1,36 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+.b-vehicle-condition-column-cell {
+    font-size : 0.8em;
+}
+
+.b-vehicle-condition-column-cell i::before {
+    margin-inline-end : .5em;
+}
+
+.average {
+  color : var(--b-color-orange);
+}
+
+.good {
+  color : var(--b-color-green);
+}
+
+.better {
+  color : var(--b-color-blue);
+}
+
+.best {
+  color : var(--b-color-yellow);
+}

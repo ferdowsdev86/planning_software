@@ -1,0 +1,9 @@
+{
+  "title": "Pro Timeline demo",
+  "description": "Scheduler Pro with Timeline widget",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "[data-ref=\"1K\"]": {
+    "title": "1000 events",
+    "content": "This scheduler initially displays 200 resources with 5 events each. Use the buttons to pick a larger dataset"
+  },
+  "[data-ref=customButton]": {
+    "title": "Custom settings",
+    "content": "Pick amount of resources & events, and which features (dependencies, time ranges etc.) to use yourself",
+    "align": "t0-b40"
+  }
+}

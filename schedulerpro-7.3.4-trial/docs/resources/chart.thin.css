@@ -1,0 +1,151 @@
+@charset "UTF-8";
+/* ../Chart/lib/Chart/widget/Chart.css */
+:root,
+:host {
+  --b-chart-controls-z-index: 1;
+}
+.b-chart-content {
+  position: absolute;
+  width: 100%;
+  top: 0;
+  bottom: 0;
+}
+.b-chart-show-controls {
+  padding-top: 1em;
+}
+.b-chart-controls {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  gap: 0;
+  z-index: var(--b-chart-controls-z-index);
+}
+.b-chart {
+  transition: background var(--b-default-transition-duration);
+  background: var(--b-neutral-100);
+}
+
+/* ../Chart/lib/Chart/widget/ChartDesigner.css */
+:root,
+:host {
+  --b-chart-designer-labels-list-padding-block: 1em;
+}
+.b-grid-chart-designer-content {
+  padding: 0;
+}
+.b-grid-chart-designer-content .b-chart[data-ref=preview] {
+  background: var(--b-primary-100);
+  border-radius: var(--b-widget-border-radius);
+}
+.b-chart-designer-settings {
+  flex: 0 0 22em;
+  overflow: clip;
+  transition: flex-basis 0.3s;
+}
+.b-chart-designer-settings .b-list {
+  background: transparent;
+}
+.b-chart-designer-settings .b-tab-panel-item {
+  padding: 1em .5em .5em .5em;
+  --b-panel-header-padding: 0;
+}
+.b-chart-designer-settings .b-chart-layout-tab {
+  padding-top: 0;
+}
+.b-chart-designer-settings .b-chart-appearance-tab {
+  padding-block: 0;
+}
+.b-chart-designer-settings .b-chart-appearance-tab .b-panel-header {
+  background: transparent;
+}
+.b-chart-designer-settings [data-ref=labelsSeriesList] {
+  padding-block: var(--b-chart-designer-labels-list-padding-block);
+}
+.b-chart-designer-settings [data-ref=seriesList] {
+  gap: 1em;
+  padding-block: 1em;
+  --b-list-item-multi-select-hover-background: transparent;
+  --b-list-item-padding: 0;
+}
+.b-chart-designer-settings [data-ref=labelsSeriesList],
+.b-chart-designer-settings [data-ref=seriesList] {
+  padding-inline: 1em;
+  border: 1px solid var(--b-text-field-outlined-border-color);
+  border-radius: var(--b-widget-border-radius);
+}
+.b-chart-designer-minimal .b-chart-designer-settings {
+  flex-basis: 0;
+}
+.b-chart-type-list {
+  display: grid;
+  grid-template-columns: 4.5em 4.5em 4.5em;
+  width: 100%;
+  column-gap: 1em;
+  overflow: visible;
+  --b-list-item-selected-background: var(--b-primary-97);
+  --b-list-item-focus-background: var(--b-primary-97);
+  --b-list-item-multi-selected-focus-background: var(--b-primary-97);
+}
+.b-chart-type-list .b-list-item-group-header {
+  font-weight: 500;
+  grid-column: 1 / -1;
+}
+.b-chart-type-list .b-list-item:not(.b-list-item-group-header) {
+  padding: 0;
+  border: 1px solid var(--b-text-field-outlined-border-color);
+  border-radius: var(--b-widget-border-radius);
+}
+.b-chart-type-list .b-list-item:not(.b-list-item-group-header).b-selected {
+  outline: 1px solid var(--b-widget-focus-outline-color);
+  outline-offset: 2px;
+}
+.b-chart-type-thumbnail {
+  width: 4em;
+  height: 3em;
+}
+.b-chart-appearance-tab {
+  gap: 0;
+}
+.b-chart-appearance-tab .b-multi-section .b-panel {
+  --b-panel-header-font-weight: 400;
+}
+.b-chart-appearance-tab .b-panel {
+  flex-shrink: 0;
+  --b-panel-header-font-size: 1em;
+  --b-panel-with-header-padding: 0;
+  --b-panel-header-padding: 1em 0;
+}
+.b-slider-with-field.b-hbox {
+  margin-top: 1px;
+  flex-wrap: wrap;
+}
+.b-slider-with-field.b-hbox > .b-label {
+  min-width: 100%;
+}
+.b-slider-with-field.b-hbox .b-slider {
+  flex: 1;
+}
+.b-slider-with-field.b-hbox .b-number-field {
+  gap: 0;
+  width: 6em;
+}
+.b-slider-with-field.b-hbox .b-number-field .b-label {
+  display: none;
+}
+
+/* ../Chart/lib/Chart/widget/FontPicker.css */
+.b-font-picker [data-ref=family] {
+  flex: 1 1 60%;
+}
+.b-font-picker [data-ref=size] {
+  flex: 1 0 30%;
+}
+.b-font-picker.b-hbox {
+  flex-wrap: wrap;
+}
+.b-font-picker,
+.b-font-picker > .b-container {
+  gap: 0.6em;
+}
+
+/* build/temp-entry-Chart.css */

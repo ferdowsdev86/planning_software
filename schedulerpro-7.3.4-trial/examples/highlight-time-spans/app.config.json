@@ -1,0 +1,12 @@
+{
+  "title": "Highlighting time spans",
+  "description": "Help end users understand the scheduling rules by visualizing the event scheduling boundaries",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/DriverResource.js",
+    "lib/EventWithBoundaries.js",
+    "resources/app.css"
+  ]
+}

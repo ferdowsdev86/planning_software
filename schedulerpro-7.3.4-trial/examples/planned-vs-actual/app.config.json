@@ -1,0 +1,10 @@
+{
+  "title": "Planned vs Actual demo",
+  "description": "Toggle between showing planned dates and actual dates",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

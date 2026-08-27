@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Uk.js';
+import '../../../lib/SchedulerPro/localization/Uk.js';
+import './shared.locale.Uk.js';
+
+const locale = {
+
+    localeName : 'Uk',
+    localeDesc : 'Українська',
+    localeCode : 'uk-UA',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Дії',
+        Active              : 'Активний',
+        Allocation          : 'Розподіл',
+        Calendar            : 'Календар',
+        City                : 'Місто',
+        Condition           : 'Умова',
+        Consultant          : 'Консультант',
+        Contractor          : 'Підрядник',
+        Doctor              : 'Лікар',
+        Driver              : 'Водій',
+        Expedition          : 'Експедиція',
+        'First name'        : "Ім'я",
+        Inspector           : 'Інспектор',
+        Lag                 : 'Затримка',
+        Manager             : 'Менеджер',
+        Name                : 'Назва',
+        Projects            : 'Проекти',
+        Property            : 'Власність',
+        Rating              : 'Рейтинг',
+        Resource            : 'Ресурс',
+        Role                : 'Роль',
+        Score               : 'Рахунок',
+        Shift               : 'Зміна',
+        'Speaker rating'    : 'Рейтинг доповідача',
+        Staff               : 'Персонал',
+        Station             : 'Станція',
+        Surname             : 'Прізвище',
+        Tasks               : 'Завдання',
+        Technicians         : 'Техніки',
+        Type                : 'Тип',
+        'Vehicle Condition' : 'Стан транспортного засобу',
+        'Work hours'        : 'Робочі години',
+        Worker              : 'Працівник'
+    },
+
+    Button : {
+        '10K events'                  : '10 тис. подій',
+        '1K events'                   : '1 тис. подій',
+        '5K events'                   : '5 тис. подій',
+        'Add exception'               : 'Додати виняток',
+        'Add invalid calendar'        : 'Додати недійсний календар',
+        'Add invalid dependency'      : 'Додати недійсну залежність',
+        'Add order'                   : 'Додати замовлення',
+        'Add task'                    : 'Додати завдання',
+        'Add week'                    : 'Додати тиждень',
+        Apr                           : 'Квіт',
+        Aug                           : 'Серп',
+        August                        : 'Серпень',
+        'Auto-schedule'               : 'Автоматичний розклад',
+        'Bar settings'                : 'Налаштування панелі',
+        Cancel                        : 'Скасувати',
+        'Change working time'         : 'Змінити робочий час',
+        'City - Resource'             : 'Місто - Ресурс',
+        Custom                        : 'Користувацький',
+        Dark                          : 'Темний',
+        Dec                           : 'Груд',
+        Default                       : 'За замовчуванням',
+        'Default layouts'             : 'Макети за замовчуванням',
+        Delete                        : 'Видалити',
+        Dependencies                  : 'Залежності',
+        'Drag & resize settings'      : 'Налаштування перетягування та зміни розміру',
+        Edit                          : 'Редагувати',
+        'Edit calendar'               : 'Редагувати календар',
+        'Enable mouse interaction'    : 'Увімкнути взаємодію з мишею',
+        Feb                           : 'Лют',
+        'Filter out non-working time' : 'Відфільтрувати неробочий час',
+        'Hide scheduled'              : 'Приховати заплановане',
+        'Highlight 9-10am + 2-4pm'    : 'Виділити 9-10 ранку + 2-4 вечора',
+        'Highlight while dragging'    : 'Виділити під час перетягування',
+        'Horizontal mode'             : 'Горизонтальний режим',
+        Jan                           : 'Січ',
+        Jul                           : 'Лип',
+        Jun                           : 'Черв',
+        'Layout function'             : 'Функція макета',
+        Light                         : 'Світлий',
+        Login                         : 'Увійти',
+        Logout                        : 'Вийти',
+        Mar                           : 'Бер',
+        March                         : 'Березень',
+        May                           : 'Трав',
+        'New event'                   : 'Нова подія',
+        'Next day'                    : 'Наступний день',
+        Nov                           : 'Лист',
+        Oct                           : 'Жовт',
+        Overlap                       : 'Перекриття',
+        Pack                          : 'Упакувати',
+        'Previous day'                : 'Попередній день',
+        Reset                         : 'Скинути',
+        'Reset data'                  : 'Скинути дані',
+        'Resource - City'             : 'Ресурс - Місто',
+        'Resource ranges'             : 'Діапазони ресурсів',
+        Save                          : 'Зберегти',
+        Sep                           : 'Верес',
+        'Show setup time'             : 'Показати час налаштування',
+        Stack                         : 'Стек',
+        Sync                          : 'Синхронізувати',
+        Today                         : 'Сьогодні',
+        'Vertical mode'               : 'Вертикальний режим',
+        'Zoom in'                     : 'Збільшити',
+        'Zoom out'                    : 'Зменшити'
+    },
+
+    Checkbox : {
+        Cultural                : 'Культурний',
+        'Draw around parents'   : 'Малювати навколо батьків',
+        'Enable bar tooltip'    : 'Увімкнути підказку для панелі',
+        Music                   : 'Музика',
+        'Show bar texts'        : 'Показати тексти на панелі',
+        'Show max allocation'   : 'Показати максимальний розподіл',
+        'Show non working time' : 'Показати неробочий час',
+        Sports                  : 'Спорт',
+        Technology              : 'Технології'
+    },
+
+    Slider : {
+        'Max capacity' : 'Максимальна місткість',
+        'Row height'   : 'Висота рядка'
+    },
+
+    Label : {
+        Days                        : 'Дні',
+        'Group by'                  : 'Групувати за',
+        Months                      : 'Місяці',
+        Settings                    : 'Налаштування',
+        'Viewing a repeating event' : 'Перегляд повторюваної події'
+    },
+
+    Combo : {
+        'Current timezone' : 'Поточний часовий пояс',
+        'Group events by'  : 'Групувати події за',
+        Parent             : 'Батьківський',
+        Resources          : 'Ресурси',
+        Show               : 'Показати'
+    },
+
+    NumberField : {
+        '% complete' : '% завершено',
+        Events       : 'Події',
+        Every        : 'Кожен',
+        Resources    : 'Ресурси'
+    },
+
+    TextField : {
+        Doctor           : 'Лікар',
+        Name             : "Ім'я",
+        'Server address' : 'Адреса сервера',
+        Username         : "Ім'я користувача"
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Позначте, щоб показати лінію максимального розподілу ресурсів',
+        'Check to show resource allocation in the bars'                                                            : 'Позначте, щоб показати розподіл ресурсів на панелях',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Перевірте, щоб показати підказки при наведенні миші на стовпці',
+        'Click to group by City - Resource'                                                                        : 'Натисніть, щоб згрупувати за Містом - Ресурсом',
+        'Click to group by Resource - City'                                                                        : 'Натисніть, щоб згрупувати за Ресурсом - Містом',
+        'Collapse all groups'                                                                                      : 'Згорнути всі групи',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Вимкнути функцію групування дерева та повернутися до стандартного вигляду Ресурс - Призначення',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Введіть кількість подій на ресурс для генерації і натисніть [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Введіть кількість рядків ресурсів для генерації і натисніть [ENTER]',
+        'Expand all groups'                                                                                        : 'Розгорнути всі групи',
+        Friday                                                                                                     : "П'ятниця",
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : "Якщо два сегменти розташовані поруч, ви можете або об'єднати їх, або залишити розділеними",
+        Monday                                                                                                     : 'Понеділок',
+        Saturday                                                                                                   : 'Субота',
+        Sunday                                                                                                     : 'Неділя',
+        Thursday                                                                                                   : 'Четвер',
+        'Toggle layout'                                                                                            : 'Перемкнути макет',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Намагається вписати незаплановані події в поточно відображуваний часовий проміжок',
+        Tuesday                                                                                                    : 'Вівторок',
+        'View next day'                                                                                            : 'Переглянути наступний день',
+        'View previous day'                                                                                        : 'Переглянути попередній день',
+        'View today, to see the current time line'                                                                 : 'Переглянути сьогодні, щоб побачити поточну часову лінію',
+        Wednesday                                                                                                  : 'Середа'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : "Автоматичне об'єднання суміжних сегментів",
+        'Auto-send'                    : 'Автоматична відправка',
+        'Auto-sync'                    : 'Автосинхронізація',
+        'Compact mode'                 : 'Компактний режим',
+        'Constrain drag to row'        : 'Обмежити перетягування до рядка',
+        'Dark mode'                    : 'Темний режим',
+        'Days are working by default'  : 'Дні за замовчуванням робочі',
+        'Enable bar tooltip'           : 'Увімкнути підказку для панелі',
+        'Enable highlighting'          : 'Увімкнути підсвічування',
+        'Enable mouse interaction'     : 'Увімкнути взаємодію миші',
+        'Enable task drag drop'        : 'Увімкнути перетягування завдань',
+        'Filter out non-working time'  : 'Відфільтрувати неробочий час',
+        'Highlight 9-10am + 2-4pm'     : 'Виділити 9-10 ранку + 2-4 дня',
+        'Highlight while dragging'     : 'Виділити під час перетягування',
+        'Show non working time'        : 'Показати неробочий час',
+        'Show setup time'              : 'Показати час налаштування',
+        'Show summaries'               : 'Показати резюме',
+        'Snap to grid'                 : "Прив'язати до сітки",
+        'View Planned dates'           : 'Переглянути заплановані дати'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

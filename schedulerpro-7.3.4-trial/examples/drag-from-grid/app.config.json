@@ -1,0 +1,15 @@
+{
+  "title": "Pro Drag from grid demo",
+  "description": "Drag tasks from a list onto Scheduler to schedule them or onto other tasks connect them with dependencies ",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/Room.js",
+    "lib/Schedule.js",
+    "lib/Session.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ]
+}

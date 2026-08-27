@@ -1,0 +1,63 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+
+
+<div class="demo-app">
+    <div class = "demo-toolbar">
+      <bryntum-button
+        icon = "b-icon b-icon-search-plus"
+        text = "Zoom in"
+        (onAction) = "onZoomIn()"
+      ></bryntum-button>
+      <bryntum-button
+        icon = "b-icon b-icon-search-minus"
+        text = "Zoom out"
+        (onAction) = "onZoomOut()"
+      ></bryntum-button>
+      <div class = "spacer"></div>
+      <bryntum-slide-toggle
+        text = 'Show bar texts'
+        tooltip = 'Check to show resource allocation in the bars'
+        [checked] = true
+        cls = 'b-blue'
+        (onAction) = "onCheckboxAction($event, 'showBarText')"
+      ></bryntum-slide-toggle>
+      <bryntum-slide-toggle
+        text = 'Show max allocation'
+        tooltip = 'Check to display max resource allocation line'
+        [checked] = true
+        cls = 'b-blue'
+        (onAction) = "onCheckboxAction($event, 'showMaxEffort')"
+      ></bryntum-slide-toggle>
+      <bryntum-slide-toggle
+        text = 'Enable bar tooltip'
+        tooltip = 'Check to show tooltips when moving mouse over bars'
+        [checked] = true
+        cls = 'b-blue'
+        (onAction) = "onCheckboxAction($event, 'showBarTip')"
+      ></bryntum-slide-toggle>
+    </div>
+    <bryntum-scheduler-pro
+        #scheduler
+        [startDate] = "schedulerProProps.startDate"
+        [endDate] = "schedulerProProps.endDate"
+        [viewPreset] = "schedulerProProps.viewPreset"
+        [eventStyle] = "schedulerProProps.eventStyle"
+        [tickSize] = "schedulerProProps.tickSize"
+        [smoothZoom] = "schedulerProProps.smoothZoom"
+        [columns] = "schedulerProProps.columns"
+        [resourceImagePath] = "schedulerProProps.resourceImagePath"
+        [project] = "schedulerProProps.project"
+    ></bryntum-scheduler-pro>
+    <bryntum-splitter></bryntum-splitter>
+    <bryntum-resource-histogram
+        #histogram
+        [project] = "histogramProps.project"
+        [columns] = "histogramProps.columns"
+        [rowHeight] = "histogramProps.rowHeight"
+        [showBarTip] = "histogramProps.showBarTip"
+        [resourceImagePath] = "histogramProps.resourceImagePath"
+        [scheduleTooltipFeature] = "histogramProps.scheduleTooltipFeature"
+    ></bryntum-resource-histogram>
+</div>

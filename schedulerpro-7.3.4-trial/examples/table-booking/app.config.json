@@ -1,0 +1,17 @@
+{
+  "title": "Restaurant Reservation demo",
+  "description": "Manage table reservations at a restaurant using Scheduler Pro",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/DateStrip.js",
+    "lib/Reservation.js",
+    "lib/SettingsPanel.js",
+    "lib/Table.js",
+    "lib/TableScheduler.js",
+    "resources/app.css",
+    "resources/DateStrip.css",
+    "resources/SettingsPanel.css"
+  ]
+}

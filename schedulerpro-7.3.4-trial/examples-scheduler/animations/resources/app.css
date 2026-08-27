@@ -1,0 +1,45 @@
+.color-box {
+    width             : 1em;
+    height            : 1em;
+    flex-shrink       : 0;
+    border-radius     : 50%;
+    background        : var(--b-primary-80);
+}
+
+.b-initial-custom .b-sch-event-wrap {
+    opacity             : 0;
+    animation-name      : initial-custom;
+    animation-duration  : 1.5s;
+    animation-fill-mode : forwards;
+
+    .b-sch-event {
+        animation-name            : initial-event-custom;
+        animation-duration        : 1.5s;
+        animation-fill-mode       : forwards;
+        animation-timing-function : ease-in-out;
+    }
+}
+
+@keyframes initial-custom {
+    0% {
+        opacity : 0;
+    }
+    100% {
+        opacity : 1;
+    }
+}
+
+@keyframes initial-event-custom {
+    0% {
+        scale  : .1;
+        rotate : 0deg;
+    }
+    50% {
+        scale  : 2;
+        rotate : 360deg;
+    }
+    100% {
+        scale  : 1;
+        rotate : 360deg;
+    }
+}

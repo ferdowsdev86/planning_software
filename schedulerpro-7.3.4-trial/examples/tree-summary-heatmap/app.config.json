@@ -1,0 +1,12 @@
+{
+  "title": "Tree Summary Heatmap demo",
+  "description": "This demo shows how to summarize the number of events per date and group with a heat map",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Resource.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ]
+}

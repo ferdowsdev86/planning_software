@@ -1,0 +1,61 @@
+.b-vertical-time-axis .b-sch-header-row.b-lowest .b-sch-header-time-axis-cell {
+    justify-content : center;
+    width           : 30px;
+
+    .b-sch-header-text {
+        writing-mode : tb;
+        rotate       : 180deg;
+        padding      : 0;
+        font-size    : 0.9em;
+    }
+}
+
+.b-sch-event-wrap .b-sch-event {
+    --b-sch-event-padding-inline  : 0;
+    --b-sch-event-justify-content : center;
+    --b-sch-event-content-height  : auto;
+
+    align-items                   : flex-start;
+}
+
+.b-sch-event-content {
+    background : color-mix(in srgb, var(--b-neutral-100), transparent 60%);
+    width      : 100%;
+    padding    : 1em;
+    text-align : center;
+}
+
+.b-grid-header-container {
+    height : 7em;
+
+    .b-grid-splitter {
+        background : transparent;
+    }
+}
+
+.b-grid-splitter {
+    background : var(--b-grid-cell-border-color);
+}
+
+.b-resource-header-cell {
+    flex-direction    : column;
+    border-inline-end : none;
+
+    .b-resource-avatar {
+        margin-inline-end : 0;
+        width             : 3.5em;
+        height            : 3.5em;
+        border            : 2px solid var(--b-neutral-100);
+        box-shadow        : 0 0 5px -1px color-mix(in srgb, var(--b-neutral-0), transparent 60%);
+    }
+}
+
+.event-name {
+    text-align : center;
+}
+
+.event-time {
+    font-size : 0.8em;
+    opacity   : 0.6;
+}
+

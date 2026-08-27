@@ -1,0 +1,15 @@
+{
+  "title": "Non-continuous time axis demo",
+  "description": "Shows how you can customize the TimeAxis class, which is used to generate the date ticks in the timeline header.",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/SchedulerCompressedTimeAxis.js",
+    "lib/SchedulerCustomTimeAxis.js",
+    "lib/SchedulerCustomTimeAxis2.js",
+    "lib/SchedulerCustomTimeAxis3.js",
+    "lib/SchedulerFilterableTimeAxis.js",
+    "lib/SchedulerTertialTimeAxis.js",
+    "resources/app.css"
+  ]
+}

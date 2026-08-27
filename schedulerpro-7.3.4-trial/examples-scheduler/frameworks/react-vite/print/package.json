@@ -1,0 +1,67 @@
+{
+  "name": "print",
+  "description": "Print demo with React JSX component (React + Vite)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "./",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/transparent-users/*": "copy public/users/",
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-react": "7.3.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.25.0",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "@vitejs/plugin-react": "4.4.1",
+    "eslint": "9.26.0",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "eslint-plugin-react-refresh": "0.4.19",
+    "globals": "16.0.0",
+    "postinstall": "0.7.4",
+    "sass": "1.78.0",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.30.1",
+    "vite": "6.3.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "type": "module",
+  "eslintConfig-disabled": {
+    "root": true
+  }
+}

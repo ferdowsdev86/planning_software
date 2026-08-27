@@ -1,0 +1,15 @@
+{
+  "title": "Non-working days demo (React + Vite)",
+  "description": "The demo shows how to customize Scheduler's weekends and non-working days",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

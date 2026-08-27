@@ -1,0 +1,957 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "type"     : "CNC Machine",
+        "name"     : "CNC Machine 1",
+        "favorite" : true
+      },
+      {
+        "id"   : 2,
+        "type" : "Injection Molding Machine",
+        "name" : "Injection Molding Machine 2"
+      },
+      {
+        "id"   : 3,
+        "type" : "Laser Cutting Machine",
+        "name" : "Laser Cutting Machine 3"
+      },
+      {
+        "id"   : 4,
+        "type" : "Robot Welding System",
+        "name" : "Welding Robot 4"
+      },
+      {
+        "id"   : 5,
+        "type" : "Industrial 3D Printer",
+        "name" : "3D Printer 5"
+      },
+      {
+        "id"   : 6,
+        "type" : "Assembly Line Robot",
+        "name" : "Assembly Robot 6"
+      },
+      {
+        "id"   : 7,
+        "type" : "Conveyor System",
+        "name" : "Conveyor System 7"
+      },
+      {
+        "id"   : 8,
+        "type" : "Drilling Machine",
+        "name" : "Drilling Machine 8"
+      },
+      {
+        "id"   : 9,
+        "type" : "Packaging Machine",
+        "name" : "Packaging Machine 9"
+      },
+      {
+        "id"   : 10,
+        "type" : "Milling Machine",
+        "name" : "Milling Machine 10"
+      },
+      {
+        "id"   : 11,
+        "type" : "Industrial Press",
+        "name" : "Press Machine 11"
+      },
+      {
+        "id"   : 12,
+        "type" : "Automated Inspection System",
+        "name" : "Inspection System 12"
+      },
+      {
+        "id"   : 13,
+        "type" : "Extrusion Machine",
+        "name" : "Extrusion Machine 13"
+      },
+      {
+        "id"   : 14,
+        "type" : "Hydraulic Press",
+        "name" : "Hydraulic Press 14"
+      },
+      {
+        "id"   : 15,
+        "type" : "Punching Machine",
+        "name" : "Punching Machine 15"
+      },
+      {
+        "id"   : 16,
+        "type" : "CNC Lathe",
+        "name" : "CNC Lathe 16"
+      },
+      {
+        "id"   : 17,
+        "type" : "Laser Cutter",
+        "name" : "Laser Cutter 17"
+      },
+      {
+        "id"   : 18,
+        "type" : "3D Printer",
+        "name" : "3D Printer 18"
+      },
+      {
+        "id"   : 19,
+        "type" : "Welding Robot",
+        "name" : "Welding Robot 19"
+      },
+      {
+        "id"   : 20,
+        "type" : "Grinder",
+        "name" : "Grinder 20"
+      },
+      {
+        "id"   : 21,
+        "type" : "Water Jet Cutter",
+        "name" : "Water Jet Cutter 21"
+      },
+      {
+        "id"   : 22,
+        "type" : "CNC Router",
+        "name" : "CNC Router 22"
+      },
+      {
+        "id"   : 23,
+        "type" : "Injection Molding Machine",
+        "name" : "Molding Machine 23"
+      },
+      {
+        "id"   : 24,
+        "type" : "Plasma Cutter",
+        "name" : "Plasma Cutter 24"
+      },
+      {
+        "id"   : 25,
+        "type" : "Heat Treating Oven",
+        "name" : "Heat Treating Oven 25"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "name"       : "CNC Machining Task",
+        "startDate"  : "2024-06-04",
+        "duration"   : 3,
+        "endDate"    : "2024-06-07",
+        "eventColor" : "blue",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 2,
+        "name"       : "Injection Molding Run",
+        "startDate"  : "2024-06-08",
+        "duration"   : 2,
+        "endDate"    : "2024-06-10",
+        "eventColor" : "green",
+        "resourceId" : 2
+      },
+      {
+        "id"         : 3,
+        "name"       : "Laser Cutting Operation",
+        "startDate"  : "2024-06-12",
+        "duration"   : 3,
+        "endDate"    : "2024-06-15",
+        "eventColor" : "red",
+        "resourceId" : 3
+      },
+      {
+        "id"         : 4,
+        "name"       : "Robotic Welding Session",
+        "startDate"  : "2024-06-16",
+        "duration"   : 2,
+        "endDate"    : "2024-06-18",
+        "eventColor" : "yellow",
+        "resourceId" : 4
+      },
+      {
+        "id"         : 5,
+        "name"       : "3D Printing Job",
+        "startDate"  : "2024-06-19",
+        "duration"   : 4,
+        "endDate"    : "2024-06-23",
+        "eventColor" : "purple",
+        "resourceId" : 5
+      },
+      {
+        "id"         : 6,
+        "name"       : "Assembly Line Operation",
+        "startDate"  : "2024-06-24",
+        "duration"   : 3,
+        "endDate"    : "2024-06-27",
+        "eventColor" : "orange",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 7,
+        "name"       : "Conveyor System Check",
+        "startDate"  : "2024-06-28",
+        "duration"   : 2,
+        "endDate"    : "2024-06-30",
+        "eventColor" : "cyan",
+        "resourceId" : 7
+      },
+      {
+        "id"         : 8,
+        "name"       : "Drilling Operation",
+        "startDate"  : "2024-07-01",
+        "duration"   : 3,
+        "endDate"    : "2024-07-04",
+        "eventColor" : "magenta",
+        "resourceId" : 8
+      },
+      {
+        "id"         : 9,
+        "name"       : "Packaging Run",
+        "startDate"  : "2024-07-05",
+        "duration"   : 2,
+        "endDate"    : "2024-07-07",
+        "eventColor" : "blue",
+        "resourceId" : 9
+      },
+      {
+        "id"         : 10,
+        "name"       : "Milling Process",
+        "startDate"  : "2024-07-08",
+        "duration"   : 4,
+        "endDate"    : "2024-07-12",
+        "eventColor" : "green",
+        "resourceId" : 10
+      },
+      {
+        "id"         : 11,
+        "name"       : "Press Operation",
+        "startDate"  : "2024-07-13",
+        "duration"   : 3,
+        "endDate"    : "2024-07-16",
+        "eventColor" : "red",
+        "resourceId" : 11
+      },
+      {
+        "id"         : 12,
+        "name"       : "Inspection Cycle",
+        "startDate"  : "2024-07-17",
+        "duration"   : 2,
+        "endDate"    : "2024-07-19",
+        "eventColor" : "yellow",
+        "resourceId" : 12
+      },
+      {
+        "id"         : 13,
+        "name"       : "Extrusion Operation",
+        "startDate"  : "2024-07-20",
+        "duration"   : 2,
+        "endDate"    : "2024-07-22",
+        "eventColor" : "purple",
+        "resourceId" : 13
+      },
+      {
+        "id"         : 14,
+        "name"       : "Hydraulic Press Cycle",
+        "startDate"  : "2024-07-23",
+        "duration"   : 3,
+        "endDate"    : "2024-07-26",
+        "eventColor" : "orange",
+        "resourceId" : 14
+      },
+      {
+        "id"         : 15,
+        "name"       : "Punching Task",
+        "startDate"  : "2024-07-27",
+        "duration"   : 2,
+        "endDate"    : "2024-07-29",
+        "eventColor" : "cyan",
+        "resourceId" : 15
+      },
+      {
+        "id"         : 16,
+        "name"       : "CNC Calibration",
+        "startDate"  : "2024-07-01",
+        "duration"   : 1,
+        "endDate"    : "2024-07-02",
+        "eventColor" : "blue",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 17,
+        "name"       : "Injection Molding Setup",
+        "startDate"  : "2024-07-03",
+        "duration"   : 2,
+        "endDate"    : "2024-07-05",
+        "eventColor" : "green",
+        "resourceId" : 2
+      },
+      {
+        "id"         : 18,
+        "name"       : "Laser Maintenance",
+        "startDate"  : "2024-07-06",
+        "duration"   : 1,
+        "endDate"    : "2024-07-07",
+        "eventColor" : "red",
+        "resourceId" : 3
+      },
+      {
+        "id"         : 19,
+        "name"       : "Welding System Calibration",
+        "startDate"  : "2024-07-08",
+        "duration"   : 2,
+        "endDate"    : "2024-07-10",
+        "eventColor" : "yellow",
+        "resourceId" : 4
+      },
+      {
+        "id"         : 20,
+        "name"       : "3D Printer Tuning",
+        "startDate"  : "2024-07-11",
+        "duration"   : 3,
+        "endDate"    : "2024-07-14",
+        "eventColor" : "purple",
+        "resourceId" : 5
+      },
+      {
+        "id"         : 21,
+        "name"       : "Assembly Robot Programming",
+        "startDate"  : "2024-07-15",
+        "duration"   : 2,
+        "endDate"    : "2024-07-17",
+        "eventColor" : "orange",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 22,
+        "name"       : "Conveyor System Upgrade",
+        "startDate"  : "2024-07-18",
+        "duration"   : 4,
+        "endDate"    : "2024-07-22",
+        "eventColor" : "cyan",
+        "resourceId" : 7
+      },
+      {
+        "id"         : 23,
+        "name"       : "Drilling Precision Test",
+        "startDate"  : "2024-07-23",
+        "duration"   : 2,
+        "endDate"    : "2024-07-25",
+        "eventColor" : "magenta",
+        "resourceId" : 8
+      },
+      {
+        "id"         : 24,
+        "name"       : "Packaging Line Inspection",
+        "startDate"  : "2024-07-26",
+        "duration"   : 1,
+        "endDate"    : "2024-07-27",
+        "eventColor" : "blue",
+        "resourceId" : 9
+      },
+      {
+        "id"         : 25,
+        "name"       : "Milling Machine Overhaul",
+        "startDate"  : "2024-07-28",
+        "duration"   : 3,
+        "endDate"    : "2024-07-31",
+        "eventColor" : "green",
+        "resourceId" : 10
+      },
+      {
+        "id"         : 26,
+        "name"       : "Press Calibration",
+        "startDate"  : "2024-08-01",
+        "duration"   : 2,
+        "endDate"    : "2024-08-03",
+        "eventColor" : "red",
+        "resourceId" : 11
+      },
+      {
+        "id"         : 27,
+        "name"       : "Inspection System Testing",
+        "startDate"  : "2024-08-04",
+        "duration"   : 1,
+        "endDate"    : "2024-08-05",
+        "eventColor" : "yellow",
+        "resourceId" : 12
+      },
+      {
+        "id"         : 28,
+        "name"       : "Extrusion Machine Cleaning",
+        "startDate"  : "2024-08-06",
+        "duration"   : 2,
+        "endDate"    : "2024-08-08",
+        "eventColor" : "purple",
+        "resourceId" : 13
+      },
+      {
+        "id"         : 29,
+        "name"       : "Hydraulic Press Lubrication",
+        "startDate"  : "2024-08-09",
+        "duration"   : 1,
+        "endDate"    : "2024-08-10",
+        "eventColor" : "orange",
+        "resourceId" : 14
+      },
+      {
+        "id"         : 30,
+        "name"       : "Punching Machine Setup",
+        "startDate"  : "2024-08-11",
+        "duration"   : 2,
+        "endDate"    : "2024-08-13",
+        "eventColor" : "cyan",
+        "resourceId" : 15
+      },
+      {
+        "id"         : 31,
+        "name"       : "CNC Part Production",
+        "startDate"  : "2024-08-14",
+        "duration"   : 3,
+        "endDate"    : "2024-08-17",
+        "eventColor" : "blue",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 32,
+        "name"       : "Injection Molding Optimization",
+        "startDate"  : "2024-08-18",
+        "duration"   : 2,
+        "endDate"    : "2024-08-20",
+        "eventColor" : "green",
+        "resourceId" : 2
+      },
+      {
+        "id"         : 33,
+        "name"       : "Laser Cutting Batch",
+        "startDate"  : "2024-08-21",
+        "duration"   : 3,
+        "endDate"    : "2024-08-24",
+        "eventColor" : "red",
+        "resourceId" : 3
+      },
+      {
+        "id"         : 34,
+        "name"       : "Robotic Welding Assembly",
+        "startDate"  : "2024-08-25",
+        "duration"   : 4,
+        "endDate"    : "2024-08-29",
+        "eventColor" : "yellow",
+        "resourceId" : 4
+      },
+      {
+        "id"         : 35,
+        "name"       : "3D Printing Prototype",
+        "startDate"  : "2024-08-30",
+        "duration"   : 2,
+        "endDate"    : "2024-09-01",
+        "eventColor" : "purple",
+        "resourceId" : 5
+      },
+      {
+        "id"         : 36,
+        "name"       : "Assembly Line Adjustment",
+        "startDate"  : "2024-09-02",
+        "duration"   : 3,
+        "endDate"    : "2024-09-05",
+        "eventColor" : "orange",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 37,
+        "name"       : "Conveyor System Inspection",
+        "startDate"  : "2024-09-06",
+        "duration"   : 2,
+        "endDate"    : "2024-09-08",
+        "eventColor" : "cyan",
+        "resourceId" : 7
+      },
+      {
+        "id"         : 38,
+        "name"       : "Drilling Batch Production",
+        "startDate"  : "2024-09-09",
+        "duration"   : 3,
+        "endDate"    : "2024-09-12",
+        "eventColor" : "magenta",
+        "resourceId" : 8
+      },
+      {
+        "id"         : 39,
+        "name"       : "Packaging Line Maintenance",
+        "startDate"  : "2024-09-13",
+        "duration"   : 1,
+        "endDate"    : "2024-09-14",
+        "eventColor" : "blue",
+        "resourceId" : 9
+      },
+      {
+        "id"         : 40,
+        "name"       : "Milling Machine Calibration",
+        "startDate"  : "2024-09-15",
+        "duration"   : 2,
+        "endDate"    : "2024-09-17",
+        "eventColor" : "green",
+        "resourceId" : 10
+      },
+      {
+        "id"         : 41,
+        "name"       : "Press Machine Tuning",
+        "startDate"  : "2024-09-18",
+        "duration"   : 3,
+        "endDate"    : "2024-09-21",
+        "eventColor" : "red",
+        "resourceId" : 11
+      },
+      {
+        "id"         : 42,
+        "name"       : "Automated Inspection Cycle",
+        "startDate"  : "2024-09-22",
+        "duration"   : 2,
+        "endDate"    : "2024-09-24",
+        "eventColor" : "yellow",
+        "resourceId" : 12
+      },
+      {
+        "id"         : 43,
+        "name"       : "Extrusion Process",
+        "startDate"  : "2024-09-25",
+        "duration"   : 3,
+        "endDate"    : "2024-09-28",
+        "eventColor" : "purple",
+        "resourceId" : 13
+      },
+      {
+        "id"         : 44,
+        "name"       : "Hydraulic Press Check",
+        "startDate"  : "2024-09-29",
+        "duration"   : 2,
+        "endDate"    : "2024-10-01",
+        "eventColor" : "orange",
+        "resourceId" : 14
+      },
+      {
+        "id"         : 45,
+        "name"       : "Punching Task",
+        "startDate"  : "2024-07-02",
+        "duration"   : 3,
+        "endDate"    : "2024-07-05",
+        "eventColor" : "cyan",
+        "resourceId" : 15
+      },
+      {
+        "id"         : 46,
+        "name"       : "CNC Programming",
+        "startDate"  : "2024-07-06",
+        "duration"   : 2,
+        "endDate"    : "2024-07-08",
+        "eventColor" : "blue",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 47,
+        "name"       : "Injection Molding Quality Check",
+        "startDate"  : "2024-07-09",
+        "duration"   : 1,
+        "endDate"    : "2024-07-10",
+        "eventColor" : "green",
+        "resourceId" : 2
+      },
+      {
+        "id"         : 48,
+        "name"       : "Laser Cutting Maintenance",
+        "startDate"  : "2024-07-11",
+        "duration"   : 2,
+        "endDate"    : "2024-07-13",
+        "eventColor" : "red",
+        "resourceId" : 3
+      },
+      {
+        "id"         : 49,
+        "name"       : "Welding System Test",
+        "startDate"  : "2024-07-14",
+        "duration"   : 3,
+        "endDate"    : "2024-07-17",
+        "eventColor" : "yellow",
+        "resourceId" : 16
+      },
+      {
+        "id"         : 50,
+        "name"       : "3D Printer Calibration",
+        "startDate"  : "2024-07-18",
+        "duration"   : 1,
+        "endDate"    : "2024-07-19",
+        "eventColor" : "purple",
+        "resourceId" : 17
+      },
+      {
+        "id"         : 51,
+        "name"       : "Assembly Robot Tuning",
+        "startDate"  : "2024-07-20",
+        "duration"   : 2,
+        "endDate"    : "2024-07-22",
+        "eventColor" : "orange",
+        "resourceId" : 18
+      },
+      {
+        "id"         : 52,
+        "name"       : "Conveyor System Maintenance",
+        "startDate"  : "2024-07-23",
+        "duration"   : 1,
+        "endDate"    : "2024-07-24",
+        "eventColor" : "cyan",
+        "resourceId" : 19
+      },
+      {
+        "id"         : 53,
+        "name"       : "Drilling Machine Overhaul",
+        "startDate"  : "2024-07-25",
+        "duration"   : 3,
+        "endDate"    : "2024-07-28",
+        "eventColor" : "magenta",
+        "resourceId" : 20
+      },
+      {
+        "id"         : 54,
+        "name"       : "Packaging Line Setup",
+        "startDate"  : "2024-07-29",
+        "duration"   : 2,
+        "endDate"    : "2024-07-31",
+        "eventColor" : "blue",
+        "resourceId" : 21
+      },
+      {
+        "id"         : 55,
+        "name"       : "Milling Machine Setup",
+        "startDate"  : "2024-07-01",
+        "duration"   : 2,
+        "endDate"    : "2024-07-03",
+        "eventColor" : "green",
+        "resourceId" : 22
+      },
+      {
+        "id"         : 56,
+        "name"       : "Press Machine Maintenance",
+        "startDate"  : "2024-07-04",
+        "duration"   : 1,
+        "endDate"    : "2024-07-05",
+        "eventColor" : "red",
+        "resourceId" : 23
+      },
+      {
+        "id"         : 57,
+        "name"       : "Automated Inspection Tuning",
+        "startDate"  : "2024-07-06",
+        "duration"   : 3,
+        "endDate"    : "2024-07-09",
+        "eventColor" : "yellow",
+        "resourceId" : 24
+      },
+      {
+        "id"         : 58,
+        "name"       : "Extrusion System Calibration",
+        "startDate"  : "2024-08-10",
+        "duration"   : 2,
+        "endDate"    : "2024-08-12",
+        "eventColor" : "purple",
+        "resourceId" : 13
+      },
+      {
+        "id"         : 59,
+        "name"       : "Hydraulic Press Tuning",
+        "startDate"  : "2024-08-13",
+        "duration"   : 3,
+        "endDate"    : "2024-08-16",
+        "eventColor" : "orange",
+        "resourceId" : 14
+      },
+      {
+        "id"         : 60,
+        "name"       : "Punching Machine Calibration",
+        "startDate"  : "2024-08-17",
+        "duration"   : 2,
+        "endDate"    : "2024-08-19",
+        "eventColor" : "cyan",
+        "resourceId" : 15
+      },
+      {
+        "id"         : 61,
+        "name"       : "CNC Machine Quality Check",
+        "startDate"  : "2024-08-20",
+        "duration"   : 3,
+        "endDate"    : "2024-08-23",
+        "eventColor" : "blue",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 62,
+        "name"       : "Injection Molding Run",
+        "startDate"  : "2024-08-24",
+        "duration"   : 2,
+        "endDate"    : "2024-08-26",
+        "eventColor" : "green",
+        "resourceId" : 2
+      },
+      {
+        "id"         : 63,
+        "name"       : "Laser Cutting Task",
+        "startDate"  : "2024-08-27",
+        "duration"   : 3,
+        "endDate"    : "2024-08-30",
+        "eventColor" : "red",
+        "resourceId" : 3
+      },
+      {
+        "id"         : 64,
+        "name"       : "Robotic Welding Task",
+        "startDate"  : "2024-08-01",
+        "duration"   : 2,
+        "endDate"    : "2024-08-03",
+        "eventColor" : "yellow",
+        "resourceId" : 4
+      },
+      {
+        "id"         : 65,
+        "name"       : "3D Printer Maintenance",
+        "startDate"  : "2024-08-04",
+        "duration"   : 1,
+        "endDate"    : "2024-08-05",
+        "eventColor" : "purple",
+        "resourceId" : 5
+      },
+      {
+        "id"         : 66,
+        "name"       : "Assembly Line Testing",
+        "startDate"  : "2024-08-06",
+        "duration"   : 2,
+        "endDate"    : "2024-08-08",
+        "eventColor" : "orange",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 67,
+        "name"       : "Conveyor System Operation",
+        "startDate"  : "2024-08-09",
+        "duration"   : 3,
+        "endDate"    : "2024-08-12",
+        "eventColor" : "cyan",
+        "resourceId" : 7
+      },
+      {
+        "id"         : 68,
+        "name"       : "Drilling Machine Setup",
+        "startDate"  : "2024-08-13",
+        "duration"   : 2,
+        "endDate"    : "2024-08-15",
+        "eventColor" : "magenta",
+        "resourceId" : 8
+      },
+      {
+        "id"         : 69,
+        "name"       : "Packaging Line Calibration",
+        "startDate"  : "2024-08-16",
+        "duration"   : 1,
+        "endDate"    : "2024-08-17",
+        "eventColor" : "blue",
+        "resourceId" : 9
+      },
+      {
+        "id"         : 70,
+        "name"       : "Milling Machine Tuning",
+        "startDate"  : "2024-08-18",
+        "duration"   : 2,
+        "endDate"    : "2024-08-20",
+        "eventColor" : "green",
+        "resourceId" : 10
+      },
+      {
+        "id"         : 71,
+        "name"       : "Press Machine Check",
+        "startDate"  : "2024-08-21",
+        "duration"   : 3,
+        "endDate"    : "2024-08-24",
+        "eventColor" : "red",
+        "resourceId" : 11
+      },
+      {
+        "id"         : 72,
+        "name"       : "Automated Inspection Operation",
+        "startDate"  : "2024-08-25",
+        "duration"   : 2,
+        "endDate"    : "2024-08-27",
+        "eventColor" : "yellow",
+        "resourceId" : 12
+      },
+      {
+        "id"         : 73,
+        "name"       : "Extrusion Machine Setup",
+        "startDate"  : "2024-08-28",
+        "duration"   : 2,
+        "endDate"    : "2024-08-30",
+        "eventColor" : "purple",
+        "resourceId" : 13
+      },
+      {
+        "id"         : 74,
+        "name"       : "Hydraulic Press Operation ",
+        "startDate"  : "2024-08-31",
+        "duration"   : 2,
+        "endDate"    : "2025-01-02",
+        "eventColor" : "orange",
+        "resourceId" : 14
+      },
+      {
+        "id"         : 75,
+        "name"       : "Punching Machine Run",
+        "startDate"  : "2025-01-03",
+        "duration"   : 2,
+        "endDate"    : "2025-01-05",
+        "eventColor" : "cyan",
+        "resourceId" : 15
+      },
+      {
+        "id"         : 76,
+        "name"       : "CNC Lathe Maintenance",
+        "startDate"  : "2025-01-06",
+        "duration"   : 1,
+        "endDate"    : "2025-01-07",
+        "eventColor" : "purple",
+        "resourceId" : 16
+      },
+      {
+        "id"         : 77,
+        "name"       : "Laser Cutter Setup",
+        "startDate"  : "2025-01-08",
+        "duration"   : 2,
+        "endDate"    : "2025-01-10",
+        "eventColor" : "orange",
+        "resourceId" : 17
+      },
+      {
+        "id"         : 78,
+        "name"       : "3D Printer Calibration",
+        "startDate"  : "2025-01-11",
+        "duration"   : 3,
+        "endDate"    : "2025-01-14",
+        "eventColor" : "cyan",
+        "resourceId" : 18
+      },
+      {
+        "id"         : 79,
+        "name"       : "Welding Robot Test",
+        "startDate"  : "2025-01-15",
+        "duration"   : 2,
+        "endDate"    : "2025-01-17",
+        "eventColor" : "magenta",
+        "resourceId" : 19
+      },
+      {
+        "id"         : 80,
+        "name"       : "Grinder Operation",
+        "startDate"  : "2025-01-18",
+        "duration"   : 1,
+        "endDate"    : "2025-01-19",
+        "eventColor" : "blue",
+        "resourceId" : 20
+      },
+      {
+        "id"         : 81,
+        "name"       : "Water Jet Cutter Maintenance",
+        "startDate"  : "2025-01-20",
+        "duration"   : 2,
+        "endDate"    : "2025-01-22",
+        "eventColor" : "green",
+        "resourceId" : 21
+      },
+      {
+        "id"         : 82,
+        "name"       : "CNC Router Setup",
+        "startDate"  : "2025-01-23",
+        "duration"   : 3,
+        "endDate"    : "2025-01-26",
+        "eventColor" : "red",
+        "resourceId" : 22
+      },
+      {
+        "id"         : 83,
+        "name"       : "Injection Molding Operation",
+        "startDate"  : "2025-01-27",
+        "duration"   : 2,
+        "endDate"    : "2025-01-29",
+        "eventColor" : "yellow",
+        "resourceId" : 23
+      },
+      {
+        "id"         : 84,
+        "name"       : "Plasma Cutter Calibration",
+        "startDate"  : "2025-01-30",
+        "duration"   : 2,
+        "endDate"    : "2025-02-01",
+        "eventColor" : "purple",
+        "resourceId" : 24
+      },
+      {
+        "id"         : 85,
+        "name"       : "Heat Treating Oven Test",
+        "startDate"  : "2025-02-02",
+        "duration"   : 2,
+        "endDate"    : "2025-02-04",
+        "eventColor" : "orange",
+        "resourceId" : 25
+      },
+      {
+        "id"         : 86,
+        "name"       : "CNC Lathe Operation",
+        "startDate"  : "2025-02-05",
+        "duration"   : 2,
+        "endDate"    : "2025-02-07",
+        "eventColor" : "cyan",
+        "resourceId" : 16
+      },
+      {
+        "id"         : 87,
+        "name"       : "Laser Cutter Calibration",
+        "startDate"  : "2025-02-08",
+        "duration"   : 1,
+        "endDate"    : "2025-02-09",
+        "eventColor" : "magenta",
+        "resourceId" : 17
+      },
+      {
+        "id"         : 88,
+        "name"       : "3D Printer Operation",
+        "startDate"  : "2025-02-10",
+        "duration"   : 2,
+        "endDate"    : "2025-02-12",
+        "eventColor" : "blue",
+        "resourceId" : 18
+      },
+      {
+        "id"         : 89,
+        "name"       : "Welding Robot Calibration",
+        "startDate"  : "2025-02-13",
+        "duration"   : 3,
+        "endDate"    : "2025-02-16",
+        "eventColor" : "green",
+        "resourceId" : 19
+      },
+      {
+        "id"         : 90,
+        "name"       : "Grinder Maintenance",
+        "startDate"  : "2025-02-17",
+        "duration"   : 2,
+        "endDate"    : "2025-02-19",
+        "eventColor" : "red",
+        "resourceId" : 20
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : "lunch",
+        "startDate" : "2017-02-07 12:00",
+        "endDate"   : "2017-02-07 13:00",
+        "name"      : "Lunch"
+      }
+    ]
+  }
+}

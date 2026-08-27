@@ -1,0 +1,26 @@
+.b-timeline-histogram {
+    rect.b-series-work.too-much-work {
+        /* display work bar red if it's > maxWork */
+        fill : red;
+    }
+}
+
+.b-button {
+    &.work-button {
+        .fa {
+            color : #4caf50;
+        }
+    }
+
+    &.travelTime-button {
+        .fa {
+            color : #1565c0;
+        }
+    }
+
+    &.maxWork-button {
+        .fa {
+            color : red;
+        }
+    }
+}

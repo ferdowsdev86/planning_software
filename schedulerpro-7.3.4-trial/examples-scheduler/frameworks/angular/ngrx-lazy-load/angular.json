@@ -1,0 +1,152 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "newProjectRoot": "projects",
+  "projects": {
+    "ngrx-lazy-load": {
+      "projectType": "application",
+      "schematics": {
+        "@schematics/angular:component": {
+          "style": "scss",
+          "standalone": false
+        },
+        "@schematics/angular:directive": {
+          "standalone": false
+        },
+        "@schematics/angular:pipe": {
+          "standalone": false
+        }
+      },
+      "root": "",
+      "sourceRoot": "src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:application",
+          "options": {
+            "outputPath": {
+              "base": "dist/ngrx-lazy-load",
+              "browser": ""
+            },
+            "index": "src/index.html",
+            "browser": "src/main.ts",
+            "polyfills": [
+              "zone.js"
+            ],
+            "tsConfig": "tsconfig.app.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              "src/assets",
+              {
+                "glob": "favicon.png",
+                "input": "node_modules/@bryntum/demo-resources/images",
+                "output": "assets"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@bryntum/demo-resources/images/transparent-users",
+                "output": "assets/users"
+              },
+              {
+                "glob": "**/*",
+                "input": "./node_modules/@bryntum/demo-resources/fonts",
+                "output": "./assets/fonts"
+              },
+              {
+                "glob": "**/*",
+                "input": "php",
+                "output": "php"
+              },
+              {
+                "glob": "*.css",
+                "input": "node_modules/@bryntum/schedulerpro",
+                "output": "assets/themes"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@bryntum/schedulerpro/fontawesome",
+                "output": "assets/themes/fontawesome"
+              }
+            ],
+            "styles": [
+              "src/styles.scss"
+            ],
+            "scripts": []
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "10mb",
+                  "maximumError": "10mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "10mb",
+                  "maximumError": "10mb"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "assets": [
+                "src/assets",
+                {
+                  "glob": "favicon.png",
+                  "input": "node_modules/@bryntum/demo-resources/images",
+                  "output": "assets"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "node_modules/@bryntum/demo-resources/images/transparent-users",
+                  "output": "assets/users"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "./node_modules/@bryntum/demo-resources/fonts",
+                  "output": "./assets/fonts"
+                },
+                {
+                  "glob": "*.css",
+                  "input": "node_modules/@bryntum/schedulerpro",
+                  "output": "assets/themes"
+                },
+                {
+                  "glob": "**/*",
+                  "input": "node_modules/@bryntum/schedulerpro/fontawesome",
+                  "output": "assets/themes/fontawesome"
+                }
+              ]
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular-devkit/build-angular:dev-server",
+          "options": {
+            "proxyConfig": "proxy.conf.json"
+          },
+          "configurations": {
+            "production": {
+              "buildTarget": "ngrx-lazy-load:build:production"
+            },
+            "development": {
+              "buildTarget": "ngrx-lazy-load:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
+        },
+        "extract-i18n": {
+          "builder": "@angular-devkit/build-angular:extract-i18n"
+        }
+      }
+    }
+  },
+  "cli": {
+    "analytics": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Time Selection demo",
+  "description": "Shows how to select time ranges in the time axis header",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/data.js",
+    "resources/app.css"
+  ]
+}

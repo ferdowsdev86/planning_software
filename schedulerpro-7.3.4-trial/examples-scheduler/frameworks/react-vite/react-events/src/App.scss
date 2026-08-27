@@ -1,0 +1,135 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+.b-react-portal-container {
+    width : 100%;
+}
+
+.b-sch-event {
+    border-radius : 0.25em;
+
+    .fa {
+        margin-top    : auto;
+        margin-bottom : auto;
+    }
+}
+
+.small-text {
+    font-size : 0.7em;
+}
+
+.yes-button,
+.no-button {
+    flex    : 1;
+    border  : none;
+    outline : none;
+}
+
+// DemoEvent component
+.b-sch-event {
+    opacity : 1 !important;
+}
+
+.b-sch-event .b-sch-event-content {
+    flex      : 1;
+    height    : 100%;
+    font-size : 14px;
+}
+
+.b-sch-event:not(.b-milestone) .b-sch-event-content {
+    margin-inline-start : 0.1em;
+}
+
+.b-jsx-container {
+    display         : flex;
+    flex            : 1;
+    justify-content : space-between;
+    align-items     : stretch;
+    width           : 100%;
+    height          : 100%;
+
+    .article {
+        display         : flex;
+        flex-direction  : column;
+        justify-content : center;
+        flex            : 1;
+    }
+
+    .progress {
+        margin-inline-start : 0.5em;
+        margin-inline-end   : 0.2em;
+        padding             : 0.5em;
+        aspect-ratio        : 1/1;
+    }
+
+    .title {
+        font-weight : bold;
+
+        span {
+            font-weight : normal;
+            font-size   : 80%;
+        }
+    }
+
+    .dates {
+        font-size : 80%;
+    }
+}
+
+.b-sch-vertical .b-sch-event .b-sch-event-content {
+    margin : 0;
+}
+
+.b-sch-event-narrow {
+    .b-jsx-container .progress {
+        margin-inline-end : 0;
+    }
+
+    .b-jsx-container {
+        .article {
+            flex-direction  : row;
+            justify-content : flex-start;
+            align-items     : center;
+
+            div {
+                padding-bottom : 1em;
+            }
+        }
+
+        .progress {
+            padding : 2%;
+        }
+    }
+}
+
+// selected event colors
+.b-sch-event.b-sch-event-selected {
+    .CircularProgressbar-path {
+        stroke : white !important; // important is needed to override the element style
+    }
+
+    .CircularProgressbar-text {
+        fill : white !important; // important is needed to override the element style
+    }
+
+    .CircularProgressbar-trail {
+        stroke : #aaaaaa;
+    }
+}
+
+// Prevent double icon while resizing.
+.b-sch-event-wrap-resizing .b-event-text-wrap {
+    i.fa {
+        display : none;
+    }
+}

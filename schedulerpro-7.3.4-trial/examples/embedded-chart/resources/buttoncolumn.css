@@ -1,0 +1,23 @@
+/* Style contents in the button column */
+.b-grid-cell.b-button-cell {
+    align-content                : flex-start;
+    flex-wrap                    : wrap;
+
+    --b-grid-cell-padding-inline : .5em;
+    --b-grid-cell-gap            : 0;
+    --b-button-height            : 1.9em;
+
+    /* Collapse / expand icon */
+
+    .fa-chevron-down {
+        rotate     : 0;
+        transition : rotate 0.3s;
+    }
+    > .b-button {
+        margin-top : 1.5em;
+    }
+}
+
+.b-row-expanded .fa-chevron-down {
+    rotate : 180deg;
+}

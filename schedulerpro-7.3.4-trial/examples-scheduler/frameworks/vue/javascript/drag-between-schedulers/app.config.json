@@ -1,0 +1,14 @@
+{
+  "title": "Drag between schedulers demo (Vue 2)",
+  "description": "Shows how to implement dragging events between two Vue Scheduler instances.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

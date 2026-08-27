@@ -1,0 +1,47 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+.b-tree-leaf-cell,
+.b-tree-parent-cell {
+    color : #787878;
+
+    .b-tree-icon {
+        padding-inline-end : 2em;
+
+        &::before {
+            color     : #90bfde;
+            font-size : 1.5em;
+        }
+    }
+}
+
+.b-sch-event {
+    border-radius : 6px;
+    margin        : 0.5em;
+}
+
+.movie {
+    .name {
+        font-weight    : bold;
+        padding-bottom : 0.2em;
+    }
+
+    .info {
+        font-size : 0.9em;
+        display   : flex;
+
+        i {
+            padding : 0 0.3em;
+        }
+    }
+}

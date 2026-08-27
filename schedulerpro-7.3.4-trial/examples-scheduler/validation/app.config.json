@@ -1,0 +1,12 @@
+{
+  "title": "Validation demo",
+  "description": "Validation can be done when dragging, creating or resizing tasks. You can also provide an error message shown to your users when the state of a task is invalid.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Employee.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ]
+}

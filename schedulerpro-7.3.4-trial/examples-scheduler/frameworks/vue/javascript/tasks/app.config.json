@@ -1,0 +1,15 @@
+{
+  "title": "Custom tree Scheduler demo (Vue 2)",
+  "description": "Shows how to organize the resources in the Vue Scheduler into a tree combined with per-row coloring of tasks.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

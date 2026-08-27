@@ -1,0 +1,10 @@
+{
+  "title": "Pro Percent done demo",
+  "description": "Scheduler Pro using the percentBar feature to visualize percentDone",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

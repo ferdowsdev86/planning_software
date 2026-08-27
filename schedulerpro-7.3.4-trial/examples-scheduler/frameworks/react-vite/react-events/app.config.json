@@ -1,0 +1,19 @@
+{
+  "title": "Using React JSX component as event renderer (React + Vite)",
+  "description": "This example demonstrates how to use React components as event renderers.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/component/AppEvent.tsx",
+    "src/lib/AppEventModel.ts",
+    "src/main.tsx",
+    "src/vite-env.d.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "basic-thin",
+  "description": "Basic thin setup (Vue 3 + Vite)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "scripts": {
+    "dev": "vite",
+    "build": "run-p type-check \"build-only {@}\" --",
+    "preview": "vite preview",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --build --force",
+    "postinstall": "postinstall",
+    "start": "vite"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/demo-resources/images/transparent-users": "copy public/users",
+    "node_modules/@bryntum/core-thin/fontawesome/**": "copy public/themes/fontawesome/",
+    "node_modules/@bryntum/core-thin/*.css*": "copy public/themes/"
+  },
+  "dependencies": {
+    "@bryntum/core-thin": "npm:@bryntum/core-thin-trial@7.3.4",
+    "@bryntum/core-vue-3-thin": "7.3.4",
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/engine-thin": "npm:@bryntum/engine-thin-trial@7.3.4",
+    "@bryntum/grid-thin": "npm:@bryntum/grid-thin-trial@7.3.4",
+    "@bryntum/grid-vue-3-thin": "7.3.4",
+    "@bryntum/scheduler-thin": "npm:@bryntum/scheduler-thin-trial@7.3.4",
+    "@bryntum/scheduler-vue-3-thin": "7.3.4",
+    "@bryntum/schedulerpro-thin": "npm:@bryntum/schedulerpro-thin-trial@7.3.4",
+    "@bryntum/schedulerpro-vue-3-thin": "7.3.4",
+    "vue": "3.4.30"
+  },
+  "devDependencies": {
+    "@tsconfig/node20": "20.1.4",
+    "@types/node": "20.14.5",
+    "@vitejs/plugin-vue": "5.0.5",
+    "@vue/tsconfig": "0.5.1",
+    "npm-run-all2": "6.2.0",
+    "postinstall": "0.7.4",
+    "sass": "1.78.0",
+    "typescript": "5.5.4",
+    "vite": "5.4.21",
+    "vue-tsc": "2.0.22"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "type": "module"
+}

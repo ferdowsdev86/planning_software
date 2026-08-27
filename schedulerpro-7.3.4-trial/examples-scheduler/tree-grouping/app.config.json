@@ -1,0 +1,10 @@
+{
+  "title": "Tree grouping demo",
+  "description": "Uses the TreeGroup feature to transform the resource tree's structure",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

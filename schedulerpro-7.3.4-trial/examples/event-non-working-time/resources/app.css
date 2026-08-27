@@ -1,0 +1,30 @@
+.b-scheduler-pro {
+    --b-sch-event-font-size     : 16px;
+    --b-avatar-border-radius    : 6px;
+    --b-sch-event-border-radius : 6px;
+}
+
+.b-resource-info {
+    font-size : 16px;
+}
+
+.b-sch-event {
+    --b-sch-event-color : #fff;
+}
+
+.cyan {
+    --b-sch-event-background : #7ad0f4;
+}
+
+.green {
+    --b-sch-event-background : #7dc9b2;
+}
+
+.purple {
+    --b-sch-event-background : #7b5baa;
+}
+
+.apricot {
+    --b-sch-event-background : #ee8977;
+}
+

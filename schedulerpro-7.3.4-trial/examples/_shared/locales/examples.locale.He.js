@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/He.js';
+import '../../../lib/SchedulerPro/localization/He.js';
+import './shared.locale.He.js';
+
+const locale = {
+
+    localeName : 'He',
+    localeDesc : 'עִברִית',
+    localeCode : 'he',
+    localeRtl  : true,
+
+    Column : {
+        Actions             : 'פעולות',
+        Active              : 'פעיל',
+        Allocation          : 'הקצאה',
+        Calendar            : 'לוּחַ שָׁנָה',
+        City                : 'עיר',
+        Condition           : 'תנאי',
+        Consultant          : 'יועץ',
+        Contractor          : 'קבלן',
+        Doctor              : 'רופא',
+        Driver              : 'נהג',
+        Expedition          : 'משלחת',
+        'First name'        : 'שם פרטי',
+        Inspector           : 'מפקח',
+        Lag                 : 'פיגור',
+        Manager             : 'מנהל',
+        Name                : 'שם',
+        Projects            : 'פרויקטים',
+        Property            : 'נכס',
+        Rating              : 'דירוג',
+        Resource            : 'משאב',
+        Role                : 'תפקיד',
+        Score               : 'ציון',
+        Shift               : 'משמרת',
+        'Speaker rating'    : 'דירוג דובר',
+        Staff               : 'צוות',
+        Station             : 'תַחֲנָה',
+        Surname             : 'שם משפחה',
+        Tasks               : 'משימות',
+        Technicians         : 'טכנאים',
+        Type                : 'סוג',
+        'Vehicle Condition' : 'מצב רכב',
+        'Work hours'        : 'שעות עבודה',
+        Worker              : 'עובד'
+    },
+
+    Button : {
+        '10K events'                  : '10K אירועים',
+        '1K events'                   : '1K אירועים',
+        '5K events'                   : '5K אירועים',
+        'Add exception'               : 'הוסף חריגה',
+        'Add invalid calendar'        : 'הוסף לוח שנה לא חוקי',
+        'Add invalid dependency'      : 'הוסף תלות לא חוקית',
+        'Add order'                   : 'הוסף הזמנה',
+        'Add task'                    : 'הוסף משימה',
+        'Add week'                    : 'הוסף שבוע',
+        Apr                           : 'אפר',
+        Aug                           : 'אוג',
+        August                        : 'אוגוסט',
+        'Auto-schedule'               : 'תזמון אוטומטי',
+        'Bar settings'                : 'הגדרות סרגל',
+        Cancel                        : 'ביטול',
+        'Change working time'         : 'שנה זמן עבודה',
+        'City - Resource'             : 'עיר - משאב',
+        Custom                        : 'מותאם אישית',
+        Dark                          : 'כהה',
+        Dec                           : 'דצמ',
+        Default                       : 'ברירת מחדל',
+        'Default layouts'             : 'פריסות ברירת מחדל',
+        Delete                        : 'מחק',
+        Dependencies                  : 'תלויות',
+        'Drag & resize settings'      : 'הגדרות גרירה ושינוי גודל',
+        Edit                          : 'ערוך',
+        'Edit calendar'               : 'ערוך לוח שנה',
+        'Enable mouse interaction'    : 'אפשר אינטראקציה עם עכבר',
+        Feb                           : 'פבר',
+        'Filter out non-working time' : 'סנן זמן לא עבודה',
+        'Hide scheduled'              : 'הסתר מתוזמן',
+        'Highlight 9-10am + 2-4pm'    : 'הדגש 9-10 בבוקר + 2-4 אחה',
+        'Highlight while dragging'    : 'הדגש בזמן גרירה',
+        'Horizontal mode'             : 'מצב אופקי',
+        Jan                           : 'ינו',
+        Jul                           : 'יול',
+        Jun                           : 'יונ',
+        'Layout function'             : 'פונקציית פריסה',
+        Light                         : 'בהיר',
+        Login                         : 'התחבר',
+        Logout                        : 'התנתק',
+        Mar                           : 'מרץ',
+        March                         : 'מרץ',
+        May                           : 'מאי',
+        'New event'                   : 'אירוע חדש',
+        'Next day'                    : 'יום הבא',
+        Nov                           : 'נוב',
+        Oct                           : 'אוק',
+        Overlap                       : 'חפיפה',
+        Pack                          : 'ארוז',
+        'Previous day'                : 'יום קודם',
+        Reset                         : 'איפוס',
+        'Reset data'                  : 'אפס נתונים',
+        'Resource - City'             : 'משאב - עיר',
+        'Resource ranges'             : 'טווחי משאבים',
+        Save                          : 'שמור',
+        Sep                           : 'ספט',
+        'Show setup time'             : 'הצג זמן הכנה',
+        Stack                         : 'ערום',
+        Sync                          : 'סנכרן',
+        Today                         : 'היום',
+        'Vertical mode'               : 'מצב אנכי',
+        'Zoom in'                     : 'התקרב',
+        'Zoom out'                    : 'התרחק'
+    },
+
+    Checkbox : {
+        Cultural                : 'תרבותי',
+        'Draw around parents'   : 'צייר סביב הורים',
+        'Enable bar tooltip'    : 'הפעל תיאור כלים של סרגל',
+        Music                   : 'מוזיקה',
+        'Show bar texts'        : 'הצג טקסטים בסרגל',
+        'Show max allocation'   : 'הצג הקצאה מקסימלית',
+        'Show non working time' : 'הצג זמן לא עבודה',
+        Sports                  : 'ספורט',
+        Technology              : 'טכנולוגיה'
+    },
+
+    Slider : {
+        'Max capacity' : 'קיבולת מקסימלית',
+        'Row height'   : 'גובה שורה'
+    },
+
+    Label : {
+        Days                        : 'ימים',
+        'Group by'                  : 'קבץ לפי',
+        Months                      : 'חודשים',
+        Settings                    : 'הגדרות',
+        'Viewing a repeating event' : 'צפייה באירוע חוזר'
+    },
+
+    Combo : {
+        'Current timezone' : 'אזור זמן נוכחי',
+        'Group events by'  : 'קבץ אירועים לפי',
+        Parent             : 'הורה',
+        Resources          : 'משאבים',
+        Show               : 'הצג'
+    },
+
+    NumberField : {
+        '% complete' : '% הושלם',
+        Events       : 'אירועים',
+        Every        : 'כל',
+        Resources    : 'משאבים'
+    },
+
+    TextField : {
+        Doctor           : 'רופא',
+        Name             : 'שם',
+        'Server address' : 'כתובת שרת',
+        Username         : 'שם משתמש'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'סמן כדי להציג קו הקצאת משאבים מקסימלי',
+        'Check to show resource allocation in the bars'                                                            : 'סמן כדי להציג הקצאת משאבים בסרגלים',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'סמן כדי להציג תיאורי כלים כאשר מעבירים את העכבר מעל הברים',
+        'Click to group by City - Resource'                                                                        : 'לחץ כדי לקבץ לפי עיר - משאב',
+        'Click to group by Resource - City'                                                                        : 'לחץ כדי לקבץ לפי משאב - עיר',
+        'Collapse all groups'                                                                                      : 'כווץ את כל הקבוצות',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'השבת את תכונת קבוצת העץ וחזור למראה ברירת המחדל של משאב - הקצאה',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'הזן מספר אירועים לכל משאב ליצירה ולחץ [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'הזן מספר שורות משאבים ליצירה ולחץ [ENTER]',
+        'Expand all groups'                                                                                        : 'הרחב את כל הקבוצות',
+        Friday                                                                                                     : 'יום שישי',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'אם שני מקטעים ממוקמים זה ליד זה, ניתן למזג אותם או להשאירם מופרדים',
+        Monday                                                                                                     : 'יום שני',
+        Saturday                                                                                                   : 'שבת',
+        Sunday                                                                                                     : 'יום ראשון',
+        Thursday                                                                                                   : 'יום חמישי',
+        'Toggle layout'                                                                                            : 'החלף פריסה',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'מנסה להתאים את האירועים הלא מתוכננים למסגרת הזמן המוצגת כעת',
+        Tuesday                                                                                                    : 'יום שלישי',
+        'View next day'                                                                                            : 'צפה ביום הבא',
+        'View previous day'                                                                                        : 'צפה ביום הקודם',
+        'View today, to see the current time line'                                                                 : 'צפה היום, כדי לראות את קו הזמן הנוכחי',
+        Wednesday                                                                                                  : 'יום רביעי'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'מיזוג אוטומטי של מקטעים סמוכים',
+        'Auto-send'                    : 'שליחה אוטומטית',
+        'Auto-sync'                    : 'סנכרון אוטומטי',
+        'Compact mode'                 : 'מצב קומפקטי',
+        'Constrain drag to row'        : 'הגבל גרירה לשורה',
+        'Dark mode'                    : 'מצב כהה',
+        'Days are working by default'  : 'ימים עובדים כברירת מחדל',
+        'Enable bar tooltip'           : 'אפשר תיאור כלים של סרגל',
+        'Enable highlighting'          : 'אפשר הדגשה',
+        'Enable mouse interaction'     : 'אפשר אינטראקציה עם עכבר',
+        'Enable task drag drop'        : 'אפשר גרירת משימות',
+        'Filter out non-working time'  : 'סנן זמן שאינו עבודה',
+        'Highlight 9-10am + 2-4pm'     : 'הדגש 9-10 בבוקר + 2-4 אחר הצהריים',
+        'Highlight while dragging'     : 'הדגש בזמן גרירה',
+        'Show non working time'        : 'הצג זמן שאינו עבודה',
+        'Show setup time'              : 'הצג זמן הכנה',
+        'Show summaries'               : 'הצג סיכומים',
+        'Snap to grid'                 : 'הצמד לרשת',
+        'View Planned dates'           : 'הצג תאריכים מתוכננים'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

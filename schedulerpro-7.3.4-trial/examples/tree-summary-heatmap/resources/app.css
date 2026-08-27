@@ -1,0 +1,158 @@
+body > #container {
+    .b-top-toolbar {
+        border-bottom : none;
+        background    : transparent;
+    }
+
+    /* Need high specificity to beat shared app styling */
+    > .b-grid-base.b-outer:not(.b-nothing) {
+        border     : none;
+        background : transparent;
+        box-shadow : none;
+
+        > .b-panel-body-wrap > .b-grid-panel-body {
+            border        : 1px solid var(--b-neutral-80);
+            border-radius : .5em;
+        }
+    }
+}
+
+.b-tree-parent-row .b-time-axis-cell {
+    align-items : flex-start;
+}
+
+.b-tree-summary-cell {
+    padding : .5em;
+}
+
+.b-icon-tree-leaf {
+    display : none;
+}
+
+.b-grid-headers-locked,
+.b-grid-sub-grid-locked {
+    .b-grid-header,
+    .b-grid-cell:not(.b-tree-cell) {
+        padding-inline : 1.2em;
+    }
+}
+
+.b-horizontal-time-axis .b-sch-header-row-0 {
+    flex : 1 0 3em;
+
+    .b-sch-header-time-axis-cell {
+        font-size     : 1.2em;
+        padding-block : 1em;
+    }
+}
+
+.b-sch-event > .b-sch-event-content {
+    display         : flex;
+    flex-direction  : column;
+    flex            : 1;
+    height          : 100%;
+    justify-content : center;
+    align-items     : flex-start;
+    gap             : .5em;
+}
+
+.b-tree-icon, .b-icon-tree-leaf, .b-icon-tree-folder, .b-icon-tree-folder-open, .b-icon-tree-expand, .b-icon-tree-collapse {
+    color : inherit;
+}
+
+.b-column-lines-canvas,
+.b-sch-non-working-time {
+    z-index : 1;
+}
+
+.b-tree-cell-inner .fa {
+    font-size : .8em;
+
+    color     : var(--b-resource-event-color);
+}
+
+.flag {
+    height        : 1.3em;
+    margin-inline : 0 .5em;
+}
+
+.b-summary-value {
+    display         : flex;
+    flex            : 1; /* Expands to take full width */
+    align-self      : stretch; /* Ensures it stretches vertically */
+    justify-content : center;
+    align-items     : center;
+    transition      : background-color .4s;
+    border-radius   : .3em;
+
+    .b-notransition & {
+        transition : none;
+    }
+
+    &:hover {
+        filter : brightness(1.3);
+    }
+}
+
+.b-event-dates {
+    font-weight : 500;
+    flex-shrink : 0;
+}
+
+.b-event-badge {
+    position         : absolute;
+    top              : .4em;
+    inset-inline-end : 0;
+    padding          : .1em .8em;
+    font-size        : .7em;
+    color            : #fff;
+    border-radius    : 1em;
+    overflow         : clip;
+
+    background-color : var(--b-color-deep-orange)
+}
+
+fieldset.b-field-set-content.b-inline {
+    padding-block : 0;
+    background    : transparent;
+}
+
+.b-toolbar .b-header-title {
+    font-size   : 1em;
+    font-weight : 500;
+}
+
+.b-sch-event {
+    container-name : event;
+    container-type : size;
+}
+
+.b-event-name {
+    overflow      : clip;
+    text-overflow : ellipsis;
+
+    color         : color-mix(in srgb, var(--b-primary), var(--b-opposite) 30%);
+}
+
+.b-time-ranges-header-canvas .b-sch-time-range {
+    height : 28px;
+}
+
+@container event (height < 45px) {
+    .b-sch-event {
+        .b-sch-event-content {
+            gap             : 0;
+            padding-top     : 0;
+            justify-content : center;
+        }
+
+        .b-event-badge,
+        .b-event-dates {
+            display : none;
+        }
+    }
+}
+
+.b-fieldset-header {
+    color : inherit;
+}

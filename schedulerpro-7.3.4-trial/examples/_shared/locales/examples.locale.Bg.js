@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Bg.js';
+import '../../../lib/SchedulerPro/localization/Bg.js';
+import './shared.locale.Bg.js';
+
+const locale = {
+
+    localeName : 'Bg',
+    localeDesc : 'Български',
+    localeCode : 'bg',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Действия',
+        Active              : 'Активен',
+        Allocation          : 'Разпределение',
+        Calendar            : 'Календар',
+        City                : 'Град',
+        Condition           : 'Състояние',
+        Consultant          : 'Консултант',
+        Contractor          : 'Изпълнител',
+        Doctor              : 'Доктор',
+        Driver              : 'Шофьор',
+        Expedition          : 'Експедиция',
+        'First name'        : 'Име',
+        Inspector           : 'Инспектор',
+        Lag                 : 'Забавяне',
+        Manager             : 'Мениджър',
+        Name                : 'Име',
+        Projects            : 'Проекти',
+        Property            : 'Собственост',
+        Rating              : 'Оценка',
+        Resource            : 'Ресурс',
+        Role                : 'Роля',
+        Score               : 'Резултат',
+        Shift               : 'Смяна',
+        'Speaker rating'    : 'Оценка на говорителя',
+        Staff               : 'Персонал',
+        Station             : 'Станция',
+        Surname             : 'Фамилия',
+        Tasks               : 'Задачи',
+        Technicians         : 'Техници',
+        Type                : 'Тип',
+        'Vehicle Condition' : 'Състояние на превозното средство',
+        'Work hours'        : 'Работни часове',
+        Worker              : 'Работник'
+    },
+
+    Button : {
+        '10K events'                  : '10K събития',
+        '1K events'                   : '1K събития',
+        '5K events'                   : '5K събития',
+        'Add exception'               : 'Добави изключение',
+        'Add invalid calendar'        : 'Добави невалиден календар',
+        'Add invalid dependency'      : 'Добави невалидна зависимост',
+        'Add order'                   : 'Добави поръчка',
+        'Add task'                    : 'Добавяне на задача',
+        'Add week'                    : 'Добави седмица',
+        Apr                           : 'Апр',
+        Aug                           : 'Авг',
+        August                        : 'Август',
+        'Auto-schedule'               : 'Автоматично планиране',
+        'Bar settings'                : 'Настройки на лентата',
+        Cancel                        : 'Отказ',
+        'Change working time'         : 'Промяна на работното време',
+        'City - Resource'             : 'Град - Ресурс',
+        Custom                        : 'Персонализирано',
+        Dark                          : 'Тъмно',
+        Dec                           : 'Дек',
+        Default                       : 'По подразбиране',
+        'Default layouts'             : 'Стандартни оформления',
+        Delete                        : 'Изтрий',
+        Dependencies                  : 'Зависимости',
+        'Drag & resize settings'      : 'Настройки за плъзгане и преоразмеряване',
+        Edit                          : 'Редактиране',
+        'Edit calendar'               : 'Редактиране на календар',
+        'Enable mouse interaction'    : 'Разреши взаимодействие с мишката',
+        Feb                           : 'Фев',
+        'Filter out non-working time' : 'Филтриране на неработно време',
+        'Hide scheduled'              : 'Скрий планираното',
+        'Highlight 9-10am + 2-4pm'    : 'Подчертаване 9-10ч + 14-16ч',
+        'Highlight while dragging'    : 'Подчертаване при влачене',
+        'Horizontal mode'             : 'Хоризонтален режим',
+        Jan                           : 'Ян',
+        Jul                           : 'Юли',
+        Jun                           : 'Юни',
+        'Layout function'             : 'Функция на оформление',
+        Light                         : 'Светло',
+        Login                         : 'Вход',
+        Logout                        : 'Изход',
+        Mar                           : 'Март',
+        March                         : 'Март',
+        May                           : 'Май',
+        'New event'                   : 'Ново събитие',
+        'Next day'                    : 'Следващ ден',
+        Nov                           : 'Ноем',
+        Oct                           : 'Окт',
+        Overlap                       : 'Покритие',
+        Pack                          : 'Опаковай',
+        'Previous day'                : 'Предишен ден',
+        Reset                         : 'Нулиране',
+        'Reset data'                  : 'Нулирай данните',
+        'Resource - City'             : 'Ресурс - Град',
+        'Resource ranges'             : 'Диапазони на ресурси',
+        Save                          : 'Запази',
+        Sep                           : 'Сеп',
+        'Show setup time'             : 'Покажи време за настройка',
+        Stack                         : 'Стек',
+        Sync                          : 'Синхронизиране',
+        Today                         : 'Днес',
+        'Vertical mode'               : 'Вертикален режим',
+        'Zoom in'                     : 'Увеличи',
+        'Zoom out'                    : 'Намали'
+    },
+
+    Checkbox : {
+        Cultural                : 'Културен',
+        'Draw around parents'   : 'Начертай около родителите',
+        'Enable bar tooltip'    : 'Активирай подсказка на лентата',
+        Music                   : 'Музика',
+        'Show bar texts'        : 'Показване на текстове на лентата',
+        'Show max allocation'   : 'Показване на максимално разпределение',
+        'Show non working time' : 'Показване на неработно време',
+        Sports                  : 'Спорт',
+        Technology              : 'Технология'
+    },
+
+    Slider : {
+        'Max capacity' : 'Максимален капацитет',
+        'Row height'   : 'Височина на реда'
+    },
+
+    Label : {
+        Days                        : 'Дни',
+        'Group by'                  : 'Групирай по',
+        Months                      : 'Месеци',
+        Settings                    : 'Настройки',
+        'Viewing a repeating event' : 'Преглед на повтарящо се събитие'
+    },
+
+    Combo : {
+        'Current timezone' : 'Текуща часова зона',
+        'Group events by'  : 'Групирай събития по',
+        Parent             : 'Родител',
+        Resources          : 'Ресурси',
+        Show               : 'Покажи'
+    },
+
+    NumberField : {
+        '% complete' : '% завършено',
+        Events       : 'Събития',
+        Every        : 'Всеки',
+        Resources    : 'Ресурси'
+    },
+
+    TextField : {
+        Doctor           : 'Лекар',
+        Name             : 'Име',
+        'Server address' : 'Адрес на сървъра',
+        Username         : 'Потребителско име'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Проверете, за да покажете линията на максимално разпределение на ресурсите',
+        'Check to show resource allocation in the bars'                                                            : 'Проверете, за да покажете разпределението на ресурсите в лентите',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Проверете, за да покажете подсказки при преместване на мишката върху лентите',
+        'Click to group by City - Resource'                                                                        : 'Щракнете, за да групирате по Град - Ресурс',
+        'Click to group by Resource - City'                                                                        : 'Щракнете, за да групирате по Ресурс - Град',
+        'Collapse all groups'                                                                                      : 'Свийте всички групи',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Деактивирайте функцията за групиране на дървото и се върнете към стандартния изглед Ресурс - Задача',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Въведете брой събития на ресурс за генериране и натиснете [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Въведете брой редове на ресурси за генериране и натиснете [ENTER]',
+        'Expand all groups'                                                                                        : 'Разширете всички групи',
+        Friday                                                                                                     : 'Петък',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Ако два сегмента са поставени един до друг, можете да ги обедините или да ги оставите разделени',
+        Monday                                                                                                     : 'Понеделник',
+        Saturday                                                                                                   : 'Събота',
+        Sunday                                                                                                     : 'Неделя',
+        Thursday                                                                                                   : 'Четвъртък',
+        'Toggle layout'                                                                                            : 'Превключете оформлението',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Опитва се да вмести непланираните събития в текущо показания времеви интервал',
+        Tuesday                                                                                                    : 'Вторник',
+        'View next day'                                                                                            : 'Преглед на следващия ден',
+        'View previous day'                                                                                        : 'Преглед на предишния ден',
+        'View today, to see the current time line'                                                                 : 'Преглед на днешния ден, за да видите текущата времева линия',
+        Wednesday                                                                                                  : 'Сряда'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Автоматично обединяване на съседни сегменти',
+        'Auto-send'                    : 'Автоматично изпращане',
+        'Auto-sync'                    : 'Автоматична синхронизация',
+        'Compact mode'                 : 'Компактен режим',
+        'Constrain drag to row'        : 'Ограничаване на плъзгането до реда',
+        'Dark mode'                    : 'Тъмен режим',
+        'Days are working by default'  : 'Дните са работни по подразбиране',
+        'Enable bar tooltip'           : 'Активиране на подсказка за лентата',
+        'Enable highlighting'          : 'Активиране на подчертаването',
+        'Enable mouse interaction'     : 'Активиране на взаимодействие с мишката',
+        'Enable task drag drop'        : 'Активиране на плъзгане и пускане на задачи',
+        'Filter out non-working time'  : 'Филтриране на неработно време',
+        'Highlight 9-10am + 2-4pm'     : 'Подчертаване 9-10ч + 14-16ч',
+        'Highlight while dragging'     : 'Подчертаване при влачене',
+        'Show non working time'        : 'Показване на неработно време',
+        'Show setup time'              : 'Показване на време за настройка',
+        'Show summaries'               : 'Показване на резюмета',
+        'Snap to grid'                 : 'Привързване към мрежата',
+        'View Planned dates'           : 'Преглед на планираните дати'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

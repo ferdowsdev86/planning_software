@@ -1,0 +1,156 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+body #content.demo-app {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1;
+}
+
+.b-sch-event-wrap .b-sch-event {
+    &:not(.b-milestone) .b-sch-event-content {
+        flex-direction  : column;
+        justify-content : space-evenly;
+        align-items     : flex-start;
+        gap             : 0;
+
+        div.orderinfo {
+            line-height : .8em;
+            font-size   : .8em;
+        }
+    }
+
+    .desc {
+        flex          : 1;
+        text-align    : center;
+        text-overflow : ellipsis;
+        overflow      : hidden;
+    }
+}
+
+.b-resource-info-cell .b-resource-info .b-resource-meta {
+    flex-direction : column;
+    margin-top     : 0.6em;
+    font-size      : 0.8em;
+    align-items    : flex-start;
+
+    color          : var(--b-neutral-60);
+}
+
+.b-status {
+    display     : flex;
+    align-items : center;
+    margin-top  : 0.3em;
+
+    &.b-icon {
+        display : flex;
+
+        &::before {
+            color             : #e53f2c;
+            margin-inline-end : 0.4em;
+        }
+    }
+}
+
+.b-running:before {
+    display           : inline-block;
+    content           : ' ';
+    width             : 0.8em;
+    height            : 0.8em;
+    background        : #27ca37;
+    border-radius     : 100%;
+    margin-inline-end : 0.4em;
+    position          : relative;
+}
+
+#main {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+
+    .b-top-toolbar {
+        height : 70px;
+    }
+}
+
+.b-unassigned-class.b-drag-proxy {
+
+    .b-sch-event {
+        background   : green;
+        border-color : darkgreen;
+        box-shadow   : 0 1px 1px 0 rgba(0, 0, 0, .25);
+        margin       : 5px 0;
+    }
+
+    &.b-drag-invalid {
+        .b-sch-event {
+            background   : red;
+            border-color : darkred;
+        }
+    }
+}
+
+.order-cell {
+    flex-direction  : column;
+    align-items     : flex-start;
+    justify-content : center;
+
+    .customer {
+        font-weight : 300;
+    }
+}
+
+.order1.b-sch-event:not(.b-milestone) {
+    background-color : #3183fe;
+}
+
+.order2.b-sch-event:not(.b-milestone) {
+    background-color : #27ca37;
+}
+
+.b-percent-bar-outer {
+    border-radius : 4px;
+    overflow      : hidden;
+}
+
+[data-ref=dateLabel] {
+    justify-content : center;
+    font-weight     : bold;
+}
+
+.b-button .fa-caret-left,
+.b-button .fa-caret-right {
+    font-size : 1.4em;
+}
+
+.b-mask-incompatible-rows .b-grid-row:not(.compatible) .b-grid-cell {
+    transition : opacity 0.5s, blur 0.5s;
+    filter     : blur(3px);
+    opacity    : 0.4;
+}
+
+/* Bit more accented lines */
+svg.b-sch-dependencies-canvas {
+    .b-sch-dependency {
+        stroke       : #2667c8;
+        stroke-width : 2;
+    }
+
+    marker path {
+        fill : #2667c8;
+    }
+}
+
+.b-tooltip h4 {
+    margin-top : 0;
+}

@@ -1,0 +1,12 @@
+{
+  ".b-grid-header-container": {
+    "title": "Semi-persistent database",
+    "content": "This demo uses a PHP backend that saves changes into the current user session. You can add, modify and delete records. When the session dies, however, the changes are lost.",
+    "align": "t50-b50"
+  },
+  ".b-scheduler": {
+    "title": "Network requests",
+    "content": "Open the Developer tools (F12) to monitor the network requests being created while scrolling",
+    "align": "b50-b50"
+  }
+}

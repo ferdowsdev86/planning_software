@@ -1,0 +1,15 @@
+{
+  "[data-index='3'] .b-timeline-histogram-cell": {
+    "title": "Histogram charts",
+    "content": "Record histograms are displayed in columns to the right",
+    "align": "l0-r0"
+  },
+  ".hide-buttons .b-button": {
+    "title": "Hide series",
+    "content": "Click the buttons to hide certain series"
+  },
+  ".b-group-bar .b-chip:last-child": {
+    "title": "Group the view",
+    "content": "Drag-drop a column header here to group the tree structure"
+  }
+}

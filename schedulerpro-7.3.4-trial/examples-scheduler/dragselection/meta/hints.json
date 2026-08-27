@@ -1,0 +1,11 @@
+{
+  "[data-index='1'] .b-sch-time-axis-cell": {
+    "title": "Drag selection",
+    "content": "Click and drag to select events (press CTRL/CMD to extend a selection)"
+  },
+  ".b-checkbox input": {
+    "title": "Unified drag",
+    "content": "Check to drag events as a block to one resource/tick cell",
+    "align": "t-b"
+  }
+}

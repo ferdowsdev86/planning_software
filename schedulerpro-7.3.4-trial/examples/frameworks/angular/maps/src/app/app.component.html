@@ -1,0 +1,57 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<bryntum-scheduler-pro-project-model
+    #project
+    [autoLoad]="projectProps.autoLoad!"
+    [loadUrl]="projectProps.loadUrl!"
+    [resourceStore]="projectProps.resourceStore!"
+    [eventStore]="projectProps.eventStore!"
+    [validateResponse]="projectProps.validateResponse!">
+</bryntum-scheduler-pro-project-model>
+
+<div class="demo-app">
+  <div id="content" class="b-side-by-side">
+      <bryntum-scheduler-pro
+          #schedulerPro
+          [flex]="8"
+          [project]="project"
+          [startDate]="schedulerProProps.startDate!"
+          [endDate]="schedulerProProps.endDate!"
+          [taskEditFeature]="schedulerProProps.taskEditFeature!"
+          [eventBufferFeature]="schedulerProProps.eventBufferFeature!"
+          [stripeFeature]="schedulerProProps.stripeFeature!"
+          [allowOverlap]="schedulerProProps.allowOverlap!"
+          [smoothZoom]="schedulerProProps.smoothZoom!"
+          [rowHeight]="schedulerProProps.rowHeight!"
+          [barMargin]="schedulerProProps.barMargin!"
+          [collapsible]="schedulerProProps.collapsible!"
+          [collapsed]="schedulerProProps.collapsed!"
+          [header]="schedulerProProps.header!"
+          [eventColor]="schedulerProProps.eventColor!"
+          [eventStyle]="schedulerProProps.eventStyle!"
+          [columns]="schedulerProProps.columns!"
+          [viewPreset]="schedulerProProps.viewPreset!"
+          [resourceImagePath]="schedulerProProps.resourceImagePath!"
+          [tbar]="tbar!"
+          [eventRenderer]="schedulerProProps.eventRenderer!"
+      >
+      </bryntum-scheduler-pro>
+      <bryntum-splitter #mapSplitter [showButtons]="true"></bryntum-splitter>
+  </div>
+  <bryntum-splitter #unplannedSplitter [showButtons]="'end'" *ngIf="grid"></bryntum-splitter>
+  <bryntum-grid
+      #grid
+      [rowHeight]                  = "gridProps.rowHeight!"
+      [disableGridRowModelWarning] = "gridProps.disableGridRowModelWarning!"
+      [collapsible]                = "gridProps.collapsible!"
+      [header]                     = "gridProps.header!"
+      [minHeight]                  = "gridProps.minHeight!"
+      [selectionMode]              = "gridProps.selectionMode!"
+      [stripeFeature]              = "gridProps.stripeFeature!"
+      [sortFeature]                = "gridProps.sortFeature!"
+      [columns]                    = "gridProps.columns!"
+      [collapsed]                  = "gridProps.collapsed!"
+      [flex]                       = "gridProps.flex!"
+  ></bryntum-grid>
+</div>

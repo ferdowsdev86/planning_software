@@ -1,0 +1,6 @@
+{
+  ".b-color-red": {
+    "title": "Drag me",
+    "content": "Resource availability blocks are shown while you interact with the tasks (can also be done anytime programmatically)"
+  }
+}

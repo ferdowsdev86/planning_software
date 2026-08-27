@@ -1,0 +1,22 @@
+{
+  "title": "Columns demo (Angular)",
+  "description": "Displays columns of different types on left and right sides of the schedule.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/lib/RoomThemeColumn.ts",
+    "src/app/lib/RoomThemeCombo.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

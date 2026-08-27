@@ -1,0 +1,19 @@
+.b-sch-resource-time-range {
+
+    &:hover {
+        border-radius  : 5px;
+        outline        : 2px solid #3183fe;
+        outline-offset : -2px;
+    }
+
+    &.custom {
+        background : repeating-linear-gradient(
+            45deg,
+            rgba(255, 255, 255, .2),
+            rgba(255, 255, 255, .2) 10px,
+            rgba(190, 190, 190, .2) 10px,
+            rgba(190, 190, 190, .2) 20px
+        ) rgba(255, 255, 255, 0);
+        color      : #888;
+    }
+}

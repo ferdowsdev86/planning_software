@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Hi.js';
+import '../../../lib/SchedulerPro/localization/Hi.js';
+import './shared.locale.Hi.js';
+
+const locale = {
+
+    localeName : 'Hi',
+    localeDesc : 'हिन्दी',
+    localeCode : 'hi',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'क्रियाएँ',
+        Active              : 'सक्रिय',
+        Allocation          : 'आवंटन',
+        Calendar            : 'कैलेंडर',
+        City                : 'शहर',
+        Condition           : 'स्थिति',
+        Consultant          : 'सलाहकार',
+        Contractor          : 'ठेकेदार',
+        Doctor              : 'डॉक्टर',
+        Driver              : 'ड्राइवर',
+        Expedition          : 'अभियान',
+        'First name'        : 'पहला नाम',
+        Inspector           : 'निरीक्षक',
+        Lag                 : 'विलंब',
+        Manager             : 'प्रबंधक',
+        Name                : 'नाम',
+        Projects            : 'परियोजनाएँ',
+        Property            : 'संपत्ति',
+        Rating              : 'रेटिंग',
+        Resource            : 'संसाधन',
+        Role                : 'भूमिका',
+        Score               : 'स्कोर',
+        Shift               : 'शिफ्ट',
+        'Speaker rating'    : 'वक्ता रेटिंग',
+        Staff               : 'कर्मचारी',
+        Station             : 'स्टेशन',
+        Surname             : 'उपनाम',
+        Tasks               : 'कार्य',
+        Technicians         : 'तकनीशियन',
+        Type                : 'प्रकार',
+        'Vehicle Condition' : 'वाहन की स्थिति',
+        'Work hours'        : 'कार्य घंटे',
+        Worker              : 'कर्मचारी'
+    },
+
+    Button : {
+        '10K events'                  : '10K इवेंट्स',
+        '1K events'                   : '1K इवेंट्स',
+        '5K events'                   : '5K इवेंट्स',
+        'Add exception'               : 'अपवाद जोड़ें',
+        'Add invalid calendar'        : 'अमान्य कैलेंडर जोड़ें',
+        'Add invalid dependency'      : 'अमान्य निर्भरता जोड़ें',
+        'Add order'                   : 'आदेश जोड़ें',
+        'Add task'                    : 'कार्य जोड़ें',
+        'Add week'                    : 'सप्ताह जोड़ें',
+        Apr                           : 'अप्रैल',
+        Aug                           : 'अगस्त',
+        August                        : 'अगस्त',
+        'Auto-schedule'               : 'स्वचालित अनुसूची',
+        'Bar settings'                : 'बार सेटिंग्स',
+        Cancel                        : 'रद्द करें',
+        'Change working time'         : 'कार्य समय बदलें',
+        'City - Resource'             : 'शहर - संसाधन',
+        Custom                        : 'कस्टम',
+        Dark                          : 'डार्क',
+        Dec                           : 'दिसंबर',
+        Default                       : 'डिफ़ॉल्ट',
+        'Default layouts'             : 'डिफ़ॉल्ट लेआउट',
+        Delete                        : 'हटाएं',
+        Dependencies                  : 'निर्भरता',
+        'Drag & resize settings'      : 'ड्रैग और रिसाइज़ सेटिंग्स',
+        Edit                          : 'संपादित करें',
+        'Edit calendar'               : 'कैलेंडर संपादित करें',
+        'Enable mouse interaction'    : 'माउस इंटरैक्शन सक्षम करें',
+        Feb                           : 'फरवरी',
+        'Filter out non-working time' : 'गैर-कार्य समय को फ़िल्टर करें',
+        'Hide scheduled'              : 'अनुसूचित छुपाएं',
+        'Highlight 9-10am + 2-4pm'    : '9-10am + 2-4pm को हाइलाइट करें',
+        'Highlight while dragging'    : 'खींचते समय हाइलाइट करें',
+        'Horizontal mode'             : 'क्षैतिज मोड',
+        Jan                           : 'जनवरी',
+        Jul                           : 'जुलाई',
+        Jun                           : 'जून',
+        'Layout function'             : 'लेआउट फ़ंक्शन',
+        Light                         : 'लाइट',
+        Login                         : 'लॉगिन',
+        Logout                        : 'लॉगआउट',
+        Mar                           : 'मार्च',
+        March                         : 'मार्च',
+        May                           : 'मई',
+        'New event'                   : 'नया इवेंट',
+        'Next day'                    : 'अगला दिन',
+        Nov                           : 'नवंबर',
+        Oct                           : 'अक्टूबर',
+        Overlap                       : 'ओवरलैप',
+        Pack                          : 'पैक',
+        'Previous day'                : 'पिछला दिन',
+        Reset                         : 'रीसेट',
+        'Reset data'                  : 'डेटा रीसेट करें',
+        'Resource - City'             : 'संसाधन - शहर',
+        'Resource ranges'             : 'संसाधन श्रेणियाँ',
+        Save                          : 'सहेजें',
+        Sep                           : 'सितंबर',
+        'Show setup time'             : 'सेटअप समय दिखाएं',
+        Stack                         : 'स्टैक',
+        Sync                          : 'सिंक',
+        Today                         : 'आज',
+        'Vertical mode'               : 'ऊर्ध्वाधर मोड',
+        'Zoom in'                     : 'ज़ूम इन',
+        'Zoom out'                    : 'ज़ूम आउट'
+    },
+
+    Checkbox : {
+        Cultural                : 'सांस्कृतिक',
+        'Draw around parents'   : 'माता-पिता के चारों ओर खींचें',
+        'Enable bar tooltip'    : 'बार टूलटिप सक्षम करें',
+        Music                   : 'संगीत',
+        'Show bar texts'        : 'बार टेक्स्ट दिखाएं',
+        'Show max allocation'   : 'अधिकतम आवंटन दिखाएं',
+        'Show non working time' : 'गैर कार्य समय दिखाएं',
+        Sports                  : 'खेल',
+        Technology              : 'प्रौद्योगिकी'
+    },
+
+    Slider : {
+        'Max capacity' : 'अधिकतम क्षमता',
+        'Row height'   : 'पंक्ति ऊँचाई'
+    },
+
+    Label : {
+        Days                        : 'दिन',
+        'Group by'                  : 'समूह द्वारा',
+        Months                      : 'महीने',
+        Settings                    : 'सेटिंग्स',
+        'Viewing a repeating event' : 'एक आवर्ती घटना देख रहे हैं'
+    },
+
+    Combo : {
+        'Current timezone' : 'वर्तमान समय क्षेत्र',
+        'Group events by'  : 'घटनाओं को समूहित करें',
+        Parent             : 'मूल',
+        Resources          : 'संसाधन',
+        Show               : 'दिखाएँ'
+    },
+
+    NumberField : {
+        '% complete' : '% पूर्ण',
+        Events       : 'इवेंट्स',
+        Every        : 'प्रत्येक',
+        Resources    : 'संसाधन'
+    },
+
+    TextField : {
+        Doctor           : 'डॉक्टर',
+        Name             : 'नाम',
+        'Server address' : 'सर्वर पता',
+        Username         : 'उपयोगकर्ता नाम'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'अधिकतम संसाधन आवंटन रेखा दिखाने के लिए जाँच करें',
+        'Check to show resource allocation in the bars'                                                            : 'बार में संसाधन आवंटन दिखाने के लिए जाँच करें',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'बार्स पर माउस ले जाने पर टूलटिप्स दिखाने के लिए जाँच करें',
+        'Click to group by City - Resource'                                                                        : 'शहर - संसाधन के अनुसार समूह बनाने के लिए क्लिक करें',
+        'Click to group by Resource - City'                                                                        : 'संसाधन - शहर के अनुसार समूह बनाने के लिए क्लिक करें',
+        'Collapse all groups'                                                                                      : 'सभी समूहों को संक्षिप्त करें',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'ट्री समूह सुविधा को अक्षम करें और डिफ़ॉल्ट संसाधन - असाइनमेंट दृश्य पर वापस जाएं',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'प्रति संसाधन उत्पन्न करने के लिए इवेंट्स की संख्या दर्ज करें और [ENTER] दबाएं',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'उत्पन्न करने के लिए संसाधन पंक्तियों की संख्या दर्ज करें और [ENTER] दबाएं',
+        'Expand all groups'                                                                                        : 'सभी समूहों का विस्तार करें',
+        Friday                                                                                                     : 'शुक्रवार',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'यदि दो खंड एक-दूसरे के बगल में रखे गए हैं, तो आप उन्हें मर्ज कर सकते हैं या अलग रख सकते हैं',
+        Monday                                                                                                     : 'सोमवार',
+        Saturday                                                                                                   : 'शनिवार',
+        Sunday                                                                                                     : 'रविवार',
+        Thursday                                                                                                   : 'गुरुवार',
+        'Toggle layout'                                                                                            : 'लेआउट टॉगल करें',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'वर्तमान में प्रदर्शित समय सीमा में अनियोजित घटनाओं को फिट करने का प्रयास करता है',
+        Tuesday                                                                                                    : 'मंगलवार',
+        'View next day'                                                                                            : 'अगले दिन देखें',
+        'View previous day'                                                                                        : 'पिछला दिन देखें',
+        'View today, to see the current time line'                                                                 : 'आज देखें, वर्तमान समय रेखा देखने के लिए',
+        Wednesday                                                                                                  : 'बुधवार'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'सन्निहित खंडों को स्वचालित रूप से मर्ज करें',
+        'Auto-send'                    : 'स्वतः-भेजें',
+        'Auto-sync'                    : 'स्वचालित सिंक',
+        'Compact mode'                 : 'संक्षिप्त मोड',
+        'Constrain drag to row'        : 'पंक्ति तक खींचने को सीमित करें',
+        'Dark mode'                    : 'डार्क मोड',
+        'Days are working by default'  : 'दिन डिफ़ॉल्ट रूप से कार्य कर रहे हैं',
+        'Enable bar tooltip'           : 'बार टूलटिप सक्षम करें',
+        'Enable highlighting'          : 'हाइलाइटिंग सक्षम करें',
+        'Enable mouse interaction'     : 'माउस इंटरैक्शन सक्षम करें',
+        'Enable task drag drop'        : 'कार्य खींचें और छोड़ें सक्षम करें',
+        'Filter out non-working time'  : 'गैर-कार्य समय को फ़िल्टर करें',
+        'Highlight 9-10am + 2-4pm'     : '9-10 बजे + 2-4 बजे को हाइलाइट करें',
+        'Highlight while dragging'     : 'खींचते समय हाइलाइट करें',
+        'Show non working time'        : 'गैर-कार्य समय दिखाएं',
+        'Show setup time'              : 'सेटअप समय दिखाएं',
+        'Show summaries'               : 'सारांश दिखाएं',
+        'Snap to grid'                 : 'ग्रिड पर स्नैप करें',
+        'View Planned dates'           : 'योजना की गई तिथियाँ देखें'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

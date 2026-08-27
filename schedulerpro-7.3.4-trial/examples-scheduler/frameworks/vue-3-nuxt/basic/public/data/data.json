@@ -1,0 +1,110 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Mike"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Linda"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Don"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Karen"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Doug"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Peter"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Sam"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Melissa"
+      },
+      {
+        "id"   : "r9",
+        "name" : "John"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Ellen"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId" : "r1",
+        "startDate"  : "2024-01-01T05:00:00.000Z",
+        "endDate"    : "2024-01-01T07:00:00.000Z",
+        "name"       : "Click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r2",
+        "startDate"  : "2024-01-01T07:00:00.000Z",
+        "endDate"    : "2024-01-01T08:30:00.000Z",
+        "name"       : "Drag me",
+        "iconCls"    : "fa fa-arrows-alt"
+      },
+      {
+        "resourceId" : "r3",
+        "startDate"  : "2024-01-01T09:00:00.000Z",
+        "endDate"    : "2024-01-01T11:00:00.000Z",
+        "name"       : "Double click me",
+        "eventColor" : "purple",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r4",
+        "startDate"  : "2024-01-01T03:00:00.000Z",
+        "endDate"    : "2024-01-01T06:00:00.000Z",
+        "name"       : "Right click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r5",
+        "startDate"  : "2024-01-01T10:00:00.000Z",
+        "endDate"    : "2024-01-01T12:00:00.000Z",
+        "name"       : "Resize me",
+        "iconCls"    : "fa fa-arrows-alt-h"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2024-01-01T11:00:00.000Z",
+        "endDate"    : "2024-01-01T14:00:00.000Z",
+        "name"       : "Important meeting",
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2024-01-01T01:00:00.000Z",
+        "endDate"    : "2024-01-01T03:00:00.000Z",
+        "name"       : "Sports event",
+        "iconCls"    : "fa fa-basketball-ball"
+      },
+      {
+        "resourceId" : "r7",
+        "startDate"  : "2024-01-01T04:00:00.000Z",
+        "endDate"    : "2024-01-01T06:30:00.000Z",
+        "name"       : "Dad's birthday!",
+        "iconCls"    : "fa fa-birthday-cake",
+        "style"      : "background-color : teal; color : white; font-size: 18px"
+      }
+    ]
+  }
+}

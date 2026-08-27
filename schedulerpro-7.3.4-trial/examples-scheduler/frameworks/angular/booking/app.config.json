@@ -1,0 +1,26 @@
+{
+  "title": "Property booking demo (Angular)",
+  "description": "This example shows a booking application demo, using ResourceTimeRanges, the summary feature and angular components as renderers.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/event-renderer/event-renderer.component.ts",
+    "src/app/event-tooltip-renderer/event-tooltip-renderer.component.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/lib/DailyRateStore.ts",
+    "src/lib/DaySelectorFeature.ts",
+    "src/lib/PropertyModel.ts",
+    "src/lib/ReservationModel.ts",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

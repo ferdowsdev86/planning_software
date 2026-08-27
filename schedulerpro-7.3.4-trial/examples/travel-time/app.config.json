@@ -1,0 +1,11 @@
+{
+  "title": "Travel time demo",
+  "description": "This demo shows how to visualize travel time before/after an event",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

@@ -1,0 +1,40 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<bryntum-scheduler-pro-project-model
+    #project
+    [autoLoad]="projectProps.autoLoad!"
+    [loadUrl]="projectProps.loadUrl!"
+    [validateResponse]="projectProps.validateResponse!">
+</bryntum-scheduler-pro-project-model>
+
+<bryntum-scheduler-pro
+   #schedulerPro
+   [project]="project"
+   [minHeight]="schedulerProProps.minHeight!"
+   [flex]="schedulerProProps.flex!"
+   [startDate]="schedulerProProps.startDate!"
+   [endDate]="schedulerProProps.endDate!"
+   [viewPreset]="schedulerProProps.viewPreset!"
+   [eventStyle]="schedulerProProps.eventStyle!"
+   [tickSize]="schedulerProProps.tickSize!"
+   [resourceImagePath]="schedulerProProps.resourceImagePath!"
+   [smoothZoom]="schedulerProProps.smoothZoom!"
+   [columns]="schedulerProProps.columns!"
+   [tbar]="schedulerProProps.tbar!">
+</bryntum-scheduler-pro>
+
+<bryntum-splitter></bryntum-splitter>
+
+<bryntum-resource-utilization
+   #resourceUtilization
+   [project]="project"
+   [hideHeaders]="resourceUtilizationProps.hideHeaders!"
+   [rowHeight]="resourceUtilizationProps.rowHeight!"
+   [minHeight]="resourceUtilizationProps.minHeight!"
+   [flex]="resourceUtilizationProps.flex!"
+   [showBarTip]="resourceUtilizationProps.showBarTip!"
+   [treeGroupFeature]="resourceUtilizationProps.treeGroupFeature!"
+   [columns]="resourceUtilizationProps.columns!"
+   [tbar]="resourceUtilizationProps.tbar!">
+</bryntum-resource-utilization>

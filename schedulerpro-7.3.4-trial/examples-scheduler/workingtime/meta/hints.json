@@ -1,0 +1,11 @@
+{
+  "[data-event-id='8']": {
+    "title": "Stretched events",
+    "content": "This event starts at 8 and ends at 17, but appears to fill the entire day."
+  },
+  "[data-ref=\"workingTimeBtn\"]": {
+    "title": "Configuration",
+    "content": "Use this panel to select a view preset and configure working time",
+    "align": "l-r"
+  }
+}

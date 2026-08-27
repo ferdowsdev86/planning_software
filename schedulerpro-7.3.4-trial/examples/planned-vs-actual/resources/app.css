@@ -1,0 +1,72 @@
+.b-grid-cell i {
+    display           : inline-flex;
+    align-items       : center;
+    justify-content   : center;
+    border-radius     : 50%;
+    width             : 2.5em;
+    height            : 2.5em;
+    margin-inline-end : .5em;
+
+    color             : var(--b-neutral-100);
+    background-color  : var(--b-neutral-40);
+}
+
+.b-sch-event-tooltip.b-tooltip {
+    max-width                   : none;
+
+    --b-tooltip-content-display : grid;
+
+    .b-panel-content {
+        grid-template-columns : 15em auto;
+        gap                   : 2em;
+    }
+
+    .field {
+        display        : flex;
+        flex-direction : column;
+        font-weight    : 500;
+
+        label {
+            margin-bottom : 0.5em;
+            color         : #888;
+        }
+    }
+}
+
+.b-sch-resource-time-range {
+    padding                             : 15px 0;
+    transition                          : opacity 0.3s !important;
+    opacity                             : 0;
+
+    --b-resource-time-range-background  : transparent;
+    --b-resource-time-range-align-items : center;
+
+    &.shown {
+        opacity : 1;
+    }
+
+    &.actual-color {
+        --b-primary : var(--b-color-blue);
+    }
+
+    &.planned-color {
+        --b-primary : var(--b-color-light-gray);
+    }
+
+    > div {
+        border-radius : 0.25em;
+
+        color         : var(--b-neutral-100);
+        background    : var(--b-primary);
+    }
+
+    .b-sch-event-content {
+        margin      : 0 0.5em 0 0.75em;
+        overflow    : clip;
+        white-space : nowrap;
+    }
+}
+
+.b-has-label.b-label-before .b-label {
+    flex : 0 0 7.5em !important;
+}

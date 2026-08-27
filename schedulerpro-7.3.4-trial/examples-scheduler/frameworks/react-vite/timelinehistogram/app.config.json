@@ -1,0 +1,16 @@
+{
+  "title": "Timeline histogram demo (React + Vite)",
+  "description": "Shows a timeline histogram",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/index.html",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "[data-index='2'] [data-column] button": {
+    "title": "Click to edit calendar",
+    "content": "Click to edit the resource working time"
+  }
+}

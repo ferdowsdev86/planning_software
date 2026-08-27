@@ -1,0 +1,9 @@
+{
+  "title": "Custom theme demo",
+  "description": "This demo has a custom theme, to showcase how you can create your own. Check the resources/ folder to see how it is done.",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/custom.css"
+  ]
+}

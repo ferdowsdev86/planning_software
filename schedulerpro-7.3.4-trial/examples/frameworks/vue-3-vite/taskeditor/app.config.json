@@ -1,0 +1,17 @@
+{
+  "title": "Pro TaskEditor demo",
+  "description": "Scheduler Pro with task editor customizations",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/AppConfig.ts",
+    "src/main.js",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

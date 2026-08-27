@@ -1,0 +1,14 @@
+{
+  "title": "Timeline widget demo (React)",
+  "description": "A demo showing the Scheduler Pro component with Timeline widget inside a simple React app.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

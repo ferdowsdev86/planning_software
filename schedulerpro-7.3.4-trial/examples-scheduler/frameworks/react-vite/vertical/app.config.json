@@ -1,0 +1,16 @@
+{
+  "title": "Vertical mode demo (React + Vite)",
+  "description": "This demo shows the React Scheduler in vertical mode with resource along the horizontal axis.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/component/ResourceHeaderRenderer.tsx",
+    "src/component/VerticalScheduler.tsx",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

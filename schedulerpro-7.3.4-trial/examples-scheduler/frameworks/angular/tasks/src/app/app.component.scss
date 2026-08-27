@@ -1,0 +1,163 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+/* EMPLOYEE */
+
+.b-tree-parent-row {
+    --b-grid-row-border-color: var(--b-neutral-60);
+}
+
+/* Employee row, fill it and put it in front of column lines */
+.b-time-axis-sub-grid .b-tree-parent-row {
+    background-color: #f9f9f9 !important; /* Override complex selector used for selected row styling in timeline view */
+    z-index: 4;
+}
+
+/* Parent cells contains employee info, use flex layout within */
+.b-tree-parent-cell .b-tree-cell-value {
+    align-items: center;
+
+    /* Employee info : name & title, shown in vertical column */
+    .info {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+
+        flex: 1;
+
+        .name {
+            font-weight: 400;
+        }
+
+        .title {
+            color: #888;
+            font-size: 0.8em;
+        }
+    }
+
+    /* Add client button, shown per employee */
+    .add {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+
+        background-color: transparent;
+        color: #888;
+
+        border-radius: 50%;
+        width: 1em;
+        height: 1em;
+        margin-inline-end: 1em;
+
+        cursor: pointer;
+
+        transition: all 0.3s;
+
+        &:hover {
+            background-color: #888;
+            color: #fff;
+            width: 2em;
+            height: 2em;
+            margin-inline-end: 0.5em;
+            transition: all 0.3s;
+        }
+    }
+
+    /* Employee image, shown as circle */
+    .profile-img {
+        border-radius: 50%;
+        width: 3em;
+        height: 3em;
+
+        background: var(--b-primary-90);
+    }
+}
+
+/* Events on employee rows, shown as "--- Event ---" */
+.b-sch-event-wrap.b-sch-event-parent {
+    height: 0 !important;
+    border-width: 2px;
+    border-style: solid;
+    margin-top: 23px;
+    border-radius: 4px;
+
+    border-color: var(--b-primary);
+
+    --b-sch-event-color: var(--b-neutral-0);
+    --b-sch-event-font-weight: 500;
+    --b-sch-event-content-width: auto;
+
+    .b-sch-event {
+        justify-content: center;
+        overflow: visible;
+    }
+
+    .b-sch-event-content {
+        background-color: var(--b-grid-cell-background);
+        padding: 0.5em 1em;
+        overflow: visible;
+    }
+}
+
+/* CLIENTS */
+
+/* Circle with clients assigned color */
+.client-color {
+    width: 0.9em;
+    height: 0.9em;
+    border-radius: 50%;
+    margin-inline-start: 0.3em;
+    margin-inline-end: 1em;
+    position: relative;
+
+    background: var(--b-primary);
+}
+
+/* Client cell, override padding added by tree to mimic look of groups instead */
+.b-tree-leaf-cell .b-tree-cell-inner {
+    padding-inline-start: 0.5em !important;
+}
+
+/* Client events */
+.b-sch-event {
+    --b-sch-event-gap: 0;
+
+    span {
+        font-weight: 300;
+    }
+}
+
+/* NON-WORKING TIME - Make weekends have a very bright slightly red background */
+.b-grid-sub-grid {
+    --b-non-working-time-background: rgba(250, 240, 240, 0.5);
+}
+
+/* EVENT EDITOR */
+.color-item {
+    width: 0.9em;
+    height: 0.9em;
+    border-radius: 50%;
+    margin-inline-end: 0.5em;
+    position: relative;
+    top: 0.2em;
+
+    background: var(--b-primary);
+}
+
+/* CLIENT EDITOR */
+.client-editor {
+    .b-popup-content {
+        padding: 1em;
+    }
+}

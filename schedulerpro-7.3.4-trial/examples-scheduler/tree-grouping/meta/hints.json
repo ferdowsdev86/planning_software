@@ -1,0 +1,10 @@
+{
+  ".b-tree-parent-cell": {
+    "title": "Generated parent",
+    "content": "The parents are generated based on the capacity field, in steps of 50"
+  },
+  ".b-button-group": {
+    "title": "Change grouping",
+    "content": "Click to generate a new tree structure"
+  }
+}

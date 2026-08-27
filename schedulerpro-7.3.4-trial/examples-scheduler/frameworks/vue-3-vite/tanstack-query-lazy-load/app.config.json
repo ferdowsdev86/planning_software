@@ -1,0 +1,18 @@
+{
+  "title": "Lazy loading with TanStack Query (Vue 3 + Vite)",
+  "description": "Resources and events are lazily loaded on demand via TanStack Query, so the scheduler scrolls smoothly through large datasets on both axes.",
+  "source": [
+    "index.html",
+    "package.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/lib/AppResourceModel.ts",
+    "src/main.ts",
+    "src/queryClient.ts",
+    "src/services/schedulerApi.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

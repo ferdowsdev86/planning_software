@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Kk.js';
+import '../../../lib/SchedulerPro/localization/Kk.js';
+import './shared.locale.Kk.js';
+
+const locale = {
+
+    localeName : 'Kk',
+    localeDesc : 'Қазақ тілі (KZ)',
+    localeCode : 'kk-KZ',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Әрекеттер',
+        Active              : 'Белсенді',
+        Allocation          : 'Бөлу',
+        Calendar            : 'Күнтізбе',
+        City                : 'Қала',
+        Condition           : 'Шарт',
+        Consultant          : 'Консультант',
+        Contractor          : 'Мердігер',
+        Doctor              : 'Дәрігер',
+        Driver              : 'Жүргізуші',
+        Expedition          : 'Экспедиция',
+        'First name'        : 'Аты',
+        Inspector           : 'Инспектор',
+        Lag                 : 'Кешігу',
+        Manager             : 'Менеджер',
+        Name                : 'Аты',
+        Projects            : 'Жобалар',
+        Property            : 'Мүлік',
+        Rating              : 'Бағалау',
+        Resource            : 'Ресурс',
+        Role                : 'Рөл',
+        Score               : 'Ұпай',
+        Shift               : 'Ауысым',
+        'Speaker rating'    : 'Спикер рейтингі',
+        Staff               : 'Қызметкерлер',
+        Station             : 'Станция',
+        Surname             : 'Тегі',
+        Tasks               : 'Тапсырмалар',
+        Technicians         : 'Техниктер',
+        Type                : 'Түрі',
+        'Vehicle Condition' : 'Көлік жағдайы',
+        'Work hours'        : 'Жұмыс сағаттары',
+        Worker              : 'Жұмысшы'
+    },
+
+    Button : {
+        '10K events'                  : '10K оқиғалар',
+        '1K events'                   : '1K оқиғалар',
+        '5K events'                   : '5K оқиғалар',
+        'Add exception'               : 'Ерекшелікті қосу',
+        'Add invalid calendar'        : 'Жарамсыз күнтізбені қосу',
+        'Add invalid dependency'      : 'Жарамсыз тәуелділікті қосу',
+        'Add order'                   : 'Тапсырысты қосу',
+        'Add task'                    : 'Тапсырма қосу',
+        'Add week'                    : 'Аптаны қосу',
+        Apr                           : 'Сәу',
+        Aug                           : 'Там',
+        August                        : 'Тамыз',
+        'Auto-schedule'               : 'Авто-расписание',
+        'Bar settings'                : 'Жолақ параметрлері',
+        Cancel                        : 'Бас тарту',
+        'Change working time'         : 'Жұмыс уақытын өзгерту',
+        'City - Resource'             : 'Қала - Ресурс',
+        Custom                        : 'Баптау',
+        Dark                          : 'Қараңғы',
+        Dec                           : 'Жел',
+        Default                       : 'Әдепкі',
+        'Default layouts'             : 'Әдепкі орналасулар',
+        Delete                        : 'Жою',
+        Dependencies                  : 'Тәуелділіктер',
+        'Drag & resize settings'      : 'Тарту және өлшемін өзгерту параметрлері',
+        Edit                          : 'Өңдеу',
+        'Edit calendar'               : 'Күнтізбені өңдеу',
+        'Enable mouse interaction'    : 'Тінтуірмен өзара әрекеттесуді қосу',
+        Feb                           : 'Ақп',
+        'Filter out non-working time' : 'Жұмыс істемейтін уақытты сүзу',
+        'Hide scheduled'              : 'Жоспарланғанды жасыру',
+        'Highlight 9-10am + 2-4pm'    : '9-10 таңертең + 2-4 түстен кейін бөлектеу',
+        'Highlight while dragging'    : 'Сүйреу кезінде бөлектеу',
+        'Horizontal mode'             : 'Көлденең режим',
+        Jan                           : 'Қаң',
+        Jul                           : 'Шіл',
+        Jun                           : 'Мау',
+        'Layout function'             : 'Орналасу функциясы',
+        Light                         : 'Жарық',
+        Login                         : 'Кіру',
+        Logout                        : 'Шығу',
+        Mar                           : 'Нау',
+        March                         : 'Наурыз',
+        May                           : 'Мам',
+        'New event'                   : 'Жаңа оқиға',
+        'Next day'                    : 'Келесі күн',
+        Nov                           : 'Қар',
+        Oct                           : 'Қаз',
+        Overlap                       : 'Қабаттасу',
+        Pack                          : 'Қаптау',
+        'Previous day'                : 'Алдыңғы күн',
+        Reset                         : 'Қалпына келтіру',
+        'Reset data'                  : 'Деректерді қалпына келтіру',
+        'Resource - City'             : 'Ресурс - Қала',
+        'Resource ranges'             : 'Ресурс ауқымдары',
+        Save                          : 'Сақтау',
+        Sep                           : 'Қыр',
+        'Show setup time'             : 'Орнату уақытын көрсету',
+        Stack                         : 'Қатарлау',
+        Sync                          : 'Синхрондау',
+        Today                         : 'Бүгін',
+        'Vertical mode'               : 'Тік режим',
+        'Zoom in'                     : 'Үлкейту',
+        'Zoom out'                    : 'Кішірейту'
+    },
+
+    Checkbox : {
+        Cultural                : 'Мәдениет',
+        'Draw around parents'   : 'Ата-аналардың айналасында сызу',
+        'Enable bar tooltip'    : 'Жолақ кеңесін қосу',
+        Music                   : 'Музыка',
+        'Show bar texts'        : 'Жолақ мәтіндерін көрсету',
+        'Show max allocation'   : 'Максималды бөлу көрсетіңіз',
+        'Show non working time' : 'Жұмыс істемейтін уақытты көрсету',
+        Sports                  : 'Спорт',
+        Technology              : 'Технология'
+    },
+
+    Slider : {
+        'Max capacity' : 'Максималды сыйымдылық',
+        'Row height'   : 'Қатар биіктігі'
+    },
+
+    Label : {
+        Days                        : 'Күндер',
+        'Group by'                  : 'Топтау',
+        Months                      : 'Айлар',
+        Settings                    : 'Параметрлер',
+        'Viewing a repeating event' : 'Қайталаушы оқиғаны қарау'
+    },
+
+    Combo : {
+        'Current timezone' : 'Ағымдағы уақыт белдеуі',
+        'Group events by'  : 'Оқиғаларды топтау',
+        Parent             : 'Ата-ана',
+        Resources          : 'Ресурстар',
+        Show               : 'Көрсету'
+    },
+
+    NumberField : {
+        '% complete' : '% аяқталды',
+        Events       : 'Оқиғалар',
+        Every        : 'Әрбір',
+        Resources    : 'Ресурстар'
+    },
+
+    TextField : {
+        Doctor           : 'Дәрігер',
+        Name             : 'Аты',
+        'Server address' : 'Сервер мекенжайы',
+        Username         : 'Пайдаланушы аты'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Максималды ресурс бөлу сызығын көрсету үшін белгілеңіз',
+        'Check to show resource allocation in the bars'                                                            : 'Жолақтарда ресурс бөлуді көрсету үшін белгілеңіз',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Тышқанды жолақтардың үстіне жылжытқанда кеңестерді көрсету үшін белгілеңіз',
+        'Click to group by City - Resource'                                                                        : 'Қала - Ресурс бойынша топтастыру үшін басыңыз',
+        'Click to group by Resource - City'                                                                        : 'Ресурс - Қала бойынша топтастыру үшін басыңыз',
+        'Collapse all groups'                                                                                      : 'Барлық топтарды жасыру',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Ағаш топтау мүмкіндігін өшіріп, әдепкі Ресурс - Тапсырма көрінісіне оралу',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Әр ресурс үшін жасалатын оқиғалар санын енгізіп, [ENTER] басыңыз',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Жасалатын ресурс жолдарының санын енгізіп, [ENTER] басыңыз',
+        'Expand all groups'                                                                                        : 'Барлық топтарды кеңейту',
+        Friday                                                                                                     : 'Жұма',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Егер екі сегмент бір-біріне жақын орналасса, оларды біріктіруге немесе бөлек ұстауға болады',
+        Monday                                                                                                     : 'Дүйсенбі',
+        Saturday                                                                                                   : 'Сенбі',
+        Sunday                                                                                                     : 'Жексенбі',
+        Thursday                                                                                                   : 'Бейсенбі',
+        'Toggle layout'                                                                                            : 'Орналасуды ауыстыру',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Жоспарланбаған оқиғаларды ағымдағы көрсетілген уақыт аралығына сыйғызуға тырысады',
+        Tuesday                                                                                                    : 'Сейсенбі',
+        'View next day'                                                                                            : 'Келесі күнді көру',
+        'View previous day'                                                                                        : 'Алдыңғы күнді көру',
+        'View today, to see the current time line'                                                                 : 'Бүгінгі күнді көру, ағымдағы уақыт сызығын көру үшін',
+        Wednesday                                                                                                  : 'Сәрсенбі'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Жақын сегменттерді автоматты түрде біріктіру',
+        'Auto-send'                    : 'Автоматты жіберу',
+        'Auto-sync'                    : 'Авто-синхрондау',
+        'Compact mode'                 : 'Қысқартылған режим',
+        'Constrain drag to row'        : 'Тартуды қатарға шектеу',
+        'Dark mode'                    : 'Қараңғы режим',
+        'Days are working by default'  : 'Күндер әдепкі бойынша жұмыс істейді',
+        'Enable bar tooltip'           : 'Жолақ кеңесін қосу',
+        'Enable highlighting'          : 'Бөлектеуді қосу',
+        'Enable mouse interaction'     : 'Тінтуір әрекетін қосу',
+        'Enable task drag drop'        : 'Тапсырманы сүйреп тастауға рұқсат беру',
+        'Filter out non-working time'  : 'Жұмыс істемейтін уақытты сүзу',
+        'Highlight 9-10am + 2-4pm'     : '9-10 таңғы + 2-4 түстен кейінгі уақытты ерекшелеу',
+        'Highlight while dragging'     : 'Сүйреу кезінде ерекшелеу',
+        'Show non working time'        : 'Жұмыс істемейтін уақытты көрсету',
+        'Show setup time'              : 'Орнату уақытын көрсету',
+        'Show summaries'               : 'Қысқаша мәліметтерді көрсету',
+        'Snap to grid'                 : 'Торға бекіту',
+        'View Planned dates'           : 'Жоспарланған күндерді көру'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

@@ -1,0 +1,24 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<!-- These are not store instances, rather configuration objects -->
+<bryntum-scheduler-pro-project-model
+    #project
+    [resourceStore]="projectProps.resourceStore!"
+    [eventStore]="projectProps.eventStore!"
+    [assignmentStore]="projectProps.assignmentStore!">
+</bryntum-scheduler-pro-project-model>
+
+<bryntum-scheduler-pro
+    #schedulerPro
+    [project]="project!"
+    [resourceImagePath]="schedulerProProps.resourceImagePath!"
+    [startDate]="schedulerProProps.startDate!"
+    [endDate]="schedulerProProps.endDate!"
+    [viewPreset]="schedulerProProps.viewPreset!"
+    [rowHeight]="schedulerProProps.rowHeight!"
+    [barMargin]="schedulerProProps.barMargin!"
+    [smoothZoom]="schedulerProProps.smoothZoom!"
+    [columns]="schedulerProProps.columns!"
+    [nestedEventsFeature]="schedulerProProps.nestedEventsFeature!">
+</bryntum-scheduler-pro>

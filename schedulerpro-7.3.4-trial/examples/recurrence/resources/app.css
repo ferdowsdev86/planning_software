@@ -1,0 +1,10 @@
+.b-scheduler-pro.b-bryntum {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+
+    .b-resource-initials {
+        background : #aaa3e3;
+        color      : #fff;
+    }
+}
+
+

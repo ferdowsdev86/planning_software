@@ -1,0 +1,231 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Mike"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Linda"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Don"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Karen"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Doug"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Peter"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Sam"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Melissa"
+      },
+      {
+        "id"   : "r9",
+        "name" : "John"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Ellen"
+      },
+      {
+        "id"   : "r11",
+        "name" : "Sarah"
+      },
+      {
+        "id"   : "r12",
+        "name" : "Tom"
+      },
+      {
+        "id"   : "r13",
+        "name" : "Emma"
+      },
+      {
+        "id"   : "r14",
+        "name" : "David"
+      },
+      {
+        "id"   : "r15",
+        "name" : "Lisa"
+      },
+      {
+        "id"   : "r16",
+        "name" : "Chris"
+      },
+      {
+        "id"   : "r17",
+        "name" : "Anna"
+      },
+      {
+        "id"   : "r18",
+        "name" : "Mark"
+      },
+      {
+        "id"   : "r19",
+        "name" : "Julia"
+      },
+      {
+        "id"   : "r20",
+        "name" : "Paul"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId" : "r1",
+        "startDate"  : "2024-01-01T07:00",
+        "endDate"    : "2024-01-01T09:00",
+        "name"       : "Click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r2",
+        "startDate"  : "2024-01-01T09:00",
+        "endDate"    : "2024-01-01T10:30",
+        "name"       : "Drag me",
+        "iconCls"    : "fa fa-arrows-alt"
+      },
+      {
+        "resourceId" : "r3",
+        "startDate"  : "2024-01-01T11:00",
+        "endDate"    : "2024-01-01T13:00",
+        "name"       : "Double click me",
+        "eventColor" : "purple",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r4",
+        "startDate"  : "2024-01-01T13:00",
+        "endDate"    : "2024-01-01T15:00",
+        "name"       : "Right click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r5",
+        "startDate"  : "2024-01-01T12:00",
+        "endDate"    : "2024-01-01T14:00",
+        "name"       : "Resize me",
+        "iconCls"    : "fa fa-arrows-alt-h"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2024-01-01T13:00",
+        "endDate"    : "2024-01-01T16:00",
+        "name"       : "Important meeting",
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2024-01-01T17:00",
+        "endDate"    : "2024-01-01T19:00",
+        "name"       : "Sports event",
+        "iconCls"    : "fa fa-basketball-ball"
+      },
+      {
+        "resourceId" : "r7",
+        "startDate"  : "2024-01-01T14:00",
+        "endDate"    : "2024-01-01T16:30",
+        "name"       : "Dad's birthday!",
+        "iconCls"    : "fa fa-birthday-cake",
+        "style"      : "background-color: teal; font-size: 18px; color: #fff",
+        "eventStyle" : "none"
+      },
+      {
+        "resourceId" : "r11",
+        "startDate"  : "2024-01-01T06:30",
+        "endDate"    : "2024-01-01T08:00",
+        "name"       : "Morning workout",
+        "iconCls"    : "fa fa-dumbbell",
+        "eventColor" : "green"
+      },
+      {
+        "resourceId" : "r12",
+        "startDate"  : "2024-01-01T08:00",
+        "endDate"    : "2024-01-01T10:00",
+        "name"       : "Team meeting",
+        "iconCls"    : "fa fa-users",
+        "eventColor" : "blue"
+      },
+      {
+        "resourceId" : "r13",
+        "startDate"  : "2024-01-01T10:30",
+        "endDate"    : "2024-01-01T12:00",
+        "name"       : "Client presentation",
+        "iconCls"    : "fa fa-presentation",
+        "eventColor" : "orange"
+      },
+      {
+        "resourceId" : "r14",
+        "startDate"  : "2024-01-01T12:30",
+        "endDate"    : "2024-01-01T14:00",
+        "name"       : "Lunch break",
+        "iconCls"    : "fa fa-utensils",
+        "eventColor" : "yellow"
+      },
+      {
+        "resourceId" : "r15",
+        "startDate"  : "2024-01-01T14:30",
+        "endDate"    : "2024-01-01T16:00",
+        "name"       : "Project review",
+        "iconCls"    : "fa fa-clipboard-check",
+        "eventColor" : "indigo"
+      },
+      {
+        "resourceId" : "r16",
+        "startDate"  : "2024-01-01T15:00",
+        "endDate"    : "2024-01-01T17:00",
+        "name"       : "Training session",
+        "iconCls"    : "fa fa-graduation-cap",
+        "eventColor" : "teal"
+      },
+      {
+        "resourceId" : "r17",
+        "startDate"  : "2024-01-01T16:30",
+        "endDate"    : "2024-01-01T18:00",
+        "name"       : "Code review",
+        "iconCls"    : "fa fa-code",
+        "eventColor" : "purple"
+      },
+      {
+        "resourceId" : "r18",
+        "startDate"  : "2024-01-01T17:00",
+        "endDate"    : "2024-01-01T18:30",
+        "name"       : "Standup meeting",
+        "iconCls"    : "fa fa-comments",
+        "eventColor" : "cyan"
+      },
+      {
+        "resourceId" : "r19",
+        "startDate"  : "2024-01-01T18:00",
+        "endDate"    : "2024-01-01T19:30",
+        "name"       : "Documentation",
+        "iconCls"    : "fa fa-file-alt",
+        "eventColor" : "pink"
+      },
+      {
+        "resourceId" : "r20",
+        "startDate"  : "2024-01-01T19:00",
+        "endDate"    : "2024-01-01T20:00",
+        "name"       : "End of day wrap-up",
+        "iconCls"    : "fa fa-check-circle",
+        "eventColor" : "gray"
+      }
+    ]
+  }
+}

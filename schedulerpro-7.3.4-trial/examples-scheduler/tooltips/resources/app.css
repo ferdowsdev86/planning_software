@@ -1,0 +1,65 @@
+.b-tab-panel {
+    flex : 1;
+}
+
+.resource-image {
+    width             : 1.5em;
+    aspect-ratio      : 1 / 1;
+    border-radius     : 100%;
+    margin-inline-end : .5em;
+    background-color  : var(--b-color-lighter-gray);
+}
+
+.b-sch-event-tooltip {
+    min-width : 190px;
+
+    .b-tool:first-of-type {
+        margin-inline-start : 2em;
+    }
+}
+
+.b-sch-event-tooltip.b-rich-tooltip {
+    --b-tooltip-flex-direction : row;
+
+    dl, dt, dd {
+        padding : 0;
+        margin  : 0;
+    }
+
+    dl {
+        flex : 1;
+    }
+
+    .image {
+        height : 10em;
+    }
+
+    dd {
+        display        : flex;
+        flex-direction : row;
+        align-items    : center;
+        margin-top     : 0.3em;
+    }
+
+    dt {
+        font-weight : bold;
+    }
+
+    dt:not(:first-child) {
+        margin-top : 1em;
+    }
+}
+
+.b-warn-icon {
+    margin-inline-start : auto;
+}
+
+.b-event-text-wrap,
+.b-sch-event-content {
+    flex : 1;
+}
+
+.b-event-text-wrap {
+    display : inline-flex;
+}
+

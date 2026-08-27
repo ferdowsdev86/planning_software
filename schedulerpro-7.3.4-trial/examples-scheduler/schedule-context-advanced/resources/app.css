@@ -1,0 +1,8 @@
+.context-widget-at-top .context-button {
+    max-height : 40px;
+}
+
+.b-sch-resource-time-range.b-resource-unavailable {
+    background      : linear-gradient(-45deg, var(--b-neutral-95) 46%, var(--b-neutral-80) 49%, var(--b-neutral-80) 51%, var(--b-neutral-95) 55%);
+    background-size : 6px 6px !important;
+}

@@ -1,0 +1,16 @@
+app-root {
+    flex           : 1;
+    display        : flex;
+    flex-direction : column;
+    height         : 100vh;
+}
+
+app-scheduler, app-home {
+    flex : 1;
+}
+
+app-home {
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+}

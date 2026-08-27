@@ -1,0 +1,11 @@
+{
+  ".b-slide-toggle": {
+    "title": "Toggle planned & actual dates",
+    "content": "Switch between showing planned dates or actual dates from the EventModel data"
+  },
+
+  ".b-sch-event-content": {
+    "title": "Modify dates",
+    "content": "Each event has planned and actual dates that you can view and modify by editing the task."
+  }
+}

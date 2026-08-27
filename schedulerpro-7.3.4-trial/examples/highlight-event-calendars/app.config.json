@@ -1,0 +1,12 @@
+{
+  "title": "Highlighting Event Calendars",
+  "description": "Help end users understand the scheduling logic by visualizing event calendars",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/ConfigPanel.js",
+    "lib/TaskWithCalendar.js",
+    "resources/app.css"
+  ]
+}

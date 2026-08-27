@@ -1,0 +1,26 @@
+{
+  ".b-resource-utilization .b-timeline-sub-grid": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t"
+    },
+    "title": "Resource\u00a0utilization\u00a0view",
+    "content": "A partner Timeline widget which shows resource allocations for the project."
+  },
+  ".group-buttons .b-button": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t0"
+    },
+    "title": "View\u00a0grouping",
+    "content": "Click these buttons to toggle the view grouping."
+  },
+  ".b-resource-utilization .b-grid-row[data-id='generated_r1_'] .tree-resource-event": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t"
+    },
+    "title": "Resource with 300% maximum allocation",
+    "content": "This resource represents a team of 3 persons and has `maxUnits = 300%` maximum capacity. This is reflected in its allocation status."
+  }
+}

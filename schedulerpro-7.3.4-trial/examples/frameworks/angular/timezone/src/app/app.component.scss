@@ -1,0 +1,26 @@
+/* FontAwesome is not built-in, but used for icons */
+@import "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@import "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@import "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @import "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@import "@bryntum/demo-resources/scss/example-webpack.scss";
+
+.b-sch-timeranges-canvas {
+  .b-sch-timerange:not(.b-sch-current-time) {
+    background          : none;
+    border-inline-start : 1px dashed grey;
+    border-inline-end   : 1px dashed grey;
+    font-weight         : bold;
+    color               : black;
+  }
+
+  .b-sch-timerange.day-shift {
+    background-color : #0095ff0d;
+  }
+}

@@ -1,0 +1,43 @@
+.b-sch-event-wrap.b-nested-events-parent[data-level="0"] {
+    > .b-sch-event > .b-sch-event-content {
+        font-weight : 700;
+    }
+}
+
+.b-sch-event-wrap.b-nested-events-parent[data-level="1"] {
+    > .b-sch-event {
+        /* !important to not have to override hover & selection styles too */
+        background-color : transparent !important;
+
+        > .b-nested-events-container {
+            background-color : transparent;
+            border           : 1px dashed #999;
+            transition       : border .2s;
+        }
+
+        &:hover {
+            > .b-nested-events-container {
+                border-color     : #555;
+                background-color : #00000011;
+            }
+        }
+    }
+
+}
+
+.b-sch-event-wrap {
+    --b-sch-event-justify-content : center;
+
+    .b-nested-events-container {
+        border-radius : 10px;
+        overflow      : hidden;
+    }
+}
+
+.b-sch-event {
+    border-radius : 9px !important;
+}
+
+.b-sch-event-content {
+    white-space : normal;
+}

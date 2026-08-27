@@ -1,0 +1,10 @@
+{
+  "title": "Infinite scroll and CrudManager",
+  "description": "Shows a SchedulerPro with both infinite timeline scroll and infinite resource scroll, managed by the CrudManager. The backend is made in PHP.",
+  "source": [
+    "app.js",
+    "index.html",
+    "php/data/resources.json"
+  ],
+  "disableCodePen": true
+}

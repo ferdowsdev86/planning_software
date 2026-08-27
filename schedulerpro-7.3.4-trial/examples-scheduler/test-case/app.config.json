@@ -1,0 +1,10 @@
+{
+  "title": "Extract a test case",
+  "description": "This example shows how to extract a starting point for a test case which can be useful for reproducing an issue when reporting it on Bryntum's support forum",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

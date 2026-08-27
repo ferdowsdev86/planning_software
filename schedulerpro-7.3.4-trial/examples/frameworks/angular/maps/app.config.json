@@ -1,0 +1,27 @@
+{
+  "title": "Map Integration (Angular)",
+  "description": "This example shows how to integrate the Scheduler with a Mapbox GL JS API in Angular.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/assets/data/data.json",
+    "src/assets/vendor/mapbox-gl.js",
+    "src/index.html",
+    "src/lib/Address.ts",
+    "src/lib/AddressSearchField.ts",
+    "src/lib/Drag.ts",
+    "src/lib/MapPanel.ts",
+    "src/lib/Task.ts",
+    "src/lib/Types.ts",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

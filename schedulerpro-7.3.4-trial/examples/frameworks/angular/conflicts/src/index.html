@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta name="description" content="Shows the conflict resolution popup in action"/>
+	<meta charset="utf-8" />
+	<title>Bryntum Scheduler Pro - Conflicts demo (Angular)</title>
+	<base href="." />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link rel="icon" type="image/x-icon" href="assets/favicon.png" />
+	<link rel="stylesheet" data-bryntum-theme/>
+</head>
+
+<body>
+	<app-root></app-root>
+	<script>
+		// This script is for internal Bryntum examples browser functionality. Should be removed
+		if (window.location.pathname.includes('/examples/') && !/examples\/.*\/dist/.test(window.location.pathname)) {
+			window.location.href = 'dist/' + window.location.search;
+		}
+		else {
+			document.querySelector('link[data-bryntum-theme=""]').href = "assets/themes/material3-light.css";
+		}
+	</script>
+</body>
+
+</html>

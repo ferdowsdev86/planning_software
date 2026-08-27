@@ -1,0 +1,21 @@
+{
+  "title": "Filtering demo (Angular)",
+  "description": "This demo shows you how easy it is to filter & highlight events and resources to quickly find what matters to you.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/app.types.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

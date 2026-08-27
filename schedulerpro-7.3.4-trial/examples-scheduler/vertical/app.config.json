@@ -1,0 +1,10 @@
+{
+  "title": "Vertical mode demo",
+  "description": "Shows a basic scheduler using vertical mode",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

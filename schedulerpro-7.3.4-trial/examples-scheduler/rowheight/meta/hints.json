@@ -1,0 +1,18 @@
+{
+  ".b-grid-row[data-index='0'] .b-sch-time-axis-cell": {
+    "title": "Row height",
+    "content": "Events fill available row height. Drag slider to adjust",
+    "align": {
+      "align": "t0-b0",
+      "anchorPosition": { "x": 10 }
+    }
+  },
+  "[data-event-id='11']": {
+    "title": "Bar margin",
+    "content": "Bar margin is subtracted from row height when determining event height. Drag slider to adjust"
+  },
+  ".b-grid-row[data-index='5']": {
+    "title": "<i class='fa fa-up-down'></i>Drag to resize",
+    "content": "Using the RowResize feature, you can resize row height easily"
+  }
+}

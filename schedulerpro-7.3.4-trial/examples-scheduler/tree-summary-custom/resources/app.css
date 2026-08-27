@@ -1,0 +1,132 @@
+.b-grid-row.b-tree-parent-row {
+    &.b-tree-expanded {
+        box-shadow : rgba(0, 0, 0, 0.08) 0 2px 4px 0;
+    }
+
+    .b-tree-cell {
+        font-weight : 400;
+    }
+}
+
+.b-daily-hours {
+    background : var(--b-neutral-95);
+    color      : var(--b-text-3);
+}
+
+.b-sch-event:not(.b-milestone) {
+    border-radius : .5em;
+
+    div.b-wrap {
+        display : flex;
+        width   : 100%;
+    }
+
+    i.fa {
+        margin-inline : auto 0;
+    }
+}
+
+.b-tree-parent-row .b-time-axis-cell {
+    align-items : flex-start;
+}
+
+.b-tree-summary-cell {
+    position    : relative;
+    font-size   : .9em;
+    font-weight : 400;
+}
+
+.b-icon-tree-leaf {
+    display : none;
+}
+
+.b-horizontal-time-axis .b-sch-header-row {
+    flex : 1 0 2.5em;
+
+    &.b-lowest .b-sch-header-text {
+        text-align     : center;
+        text-transform : uppercase;
+        font-weight    : 400;
+        font-size      : .85em;
+    }
+}
+
+.b-sch-event .b-sch-event-content {
+    display         : flex;
+    flex            : 1;
+    flex-direction  : column;
+    align-items     : flex-start;
+    justify-content : center;
+    font-size       : .9em;
+    gap             : 0;
+
+    .b-event-duration {
+        inset-inline-end : 0;
+        font-size        : .9em;
+        font-weight      : 400;
+    }
+}
+
+.b-tree-icon, .b-icon-tree-leaf, .b-icon-tree-folder, .b-icon-tree-folder-open, .b-icon-tree-expand, .b-icon-tree-collapse {
+    color : inherit;
+}
+
+.b-read-only > .b-grid-cell {
+    color : inherit;
+}
+
+.b-sch-day-header-cell-6,
+.b-sch-day-header-cell-0 {
+    opacity : 0.5;
+}
+
+.b-daily-hours {
+    border-radius       : 1em;
+    padding             : 0.3em 1em;
+    margin-inline-start : 1em;
+    font-weight         : 400;
+    order               : 1;
+    margin-inline       : auto 1em;
+    font-size           : .75em;
+}
+
+.b-grid-row:not(.b-tree-parent-row) {
+    .b-tree-cell-value {
+        justify-content : flex-end;
+    }
+}
+
+.b-tree-expander {
+    order : 10;
+}
+
+.b-sch-horizontal .b-sch-event-wrap.b-sch-style-rounded:not(.b-milestone) .b-sch-event-content {
+    margin : .6em;
+}
+
+.b-over-allocated {
+    font-weight : 600;
+    color       : #e53f2c;
+}
+
+.b-day-highlight {
+    .b-grid-header &,
+    .b-timeline-sub-grid & {
+        background-color : #3183fe12;
+    }
+
+    .b-grid-header & {
+        border-top : 2px solid #3183feaa;
+    }
+}
+
+.b-grid-header .b-sch-time-range {
+    overflow : visible;
+
+    label {
+        top      : -2.5em;
+        position : relative;
+        overflow : visible;
+        color    : #3183feaa;
+    }
+}

@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/SvSE.js';
+import '../../../lib/SchedulerPro/localization/SvSE.js';
+import './shared.locale.SvSE.js';
+
+const locale = {
+
+    localeName : 'SvSE',
+    localeDesc : 'Svenska',
+    localeCode : 'sv-SE',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Åtgärder',
+        Active              : 'Aktiv',
+        Allocation          : 'Tilldelning',
+        Calendar            : 'Kalender',
+        City                : 'Stad',
+        Condition           : 'Tillstånd',
+        Consultant          : 'Konsult',
+        Contractor          : 'Entreprenör',
+        Doctor              : 'Doktor',
+        Driver              : 'Förare',
+        Expedition          : 'Expedition',
+        'First name'        : 'Förnamn',
+        Inspector           : 'Inspektör',
+        Lag                 : 'Fördröjning',
+        Manager             : 'Chef',
+        Name                : 'Namn',
+        Projects            : 'Projekt',
+        Property            : 'Egendom',
+        Rating              : 'Betyg',
+        Resource            : 'Resurs',
+        Role                : 'Roll',
+        Score               : 'Poäng',
+        Shift               : 'Skift',
+        'Speaker rating'    : 'Talarrankning',
+        Staff               : 'Personal',
+        Station             : 'Station',
+        Surname             : 'Efternamn',
+        Tasks               : 'Uppgifter',
+        Technicians         : 'Tekniker',
+        Type                : 'Typ',
+        'Vehicle Condition' : 'Fordonsstatus',
+        'Work hours'        : 'Arbetstimmar',
+        Worker              : 'Arbetare'
+    },
+
+    Button : {
+        '10K events'                  : '10K händelser',
+        '1K events'                   : '1K händelser',
+        '5K events'                   : '5K händelser',
+        'Add exception'               : 'Lägg till undantag',
+        'Add invalid calendar'        : 'Lägg till ogiltig kalender',
+        'Add invalid dependency'      : 'Lägg till ogiltigt beroende',
+        'Add order'                   : 'Lägg till beställning',
+        'Add task'                    : 'Lägg till uppgift',
+        'Add week'                    : 'Lägg till vecka',
+        Apr                           : 'Apr',
+        Aug                           : 'Aug',
+        August                        : 'Augusti',
+        'Auto-schedule'               : 'Auto-schema',
+        'Bar settings'                : 'Staplinställningar',
+        Cancel                        : 'Avbryt',
+        'Change working time'         : 'Ändra arbetstid',
+        'City - Resource'             : 'Stad - Resurs',
+        Custom                        : 'Anpassad',
+        Dark                          : 'Mörk',
+        Dec                           : 'Dec',
+        Default                       : 'Standard',
+        'Default layouts'             : 'Standardlayouter',
+        Delete                        : 'Radera',
+        Dependencies                  : 'Beroenden',
+        'Drag & resize settings'      : 'Dra & ändra storleksinställningar',
+        Edit                          : 'Redigera',
+        'Edit calendar'               : 'Redigera kalender',
+        'Enable mouse interaction'    : 'Aktivera musinteraktion',
+        Feb                           : 'Feb',
+        'Filter out non-working time' : 'Filtrera bort icke-arbetstid',
+        'Hide scheduled'              : 'Dölj schemalagt',
+        'Highlight 9-10am + 2-4pm'    : 'Markera 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Markera vid dragning',
+        'Horizontal mode'             : 'Horisontellt läge',
+        Jan                           : 'Jan',
+        Jul                           : 'Jul',
+        Jun                           : 'Jun',
+        'Layout function'             : 'Layoutfunktion',
+        Light                         : 'Ljus',
+        Login                         : 'Logga in',
+        Logout                        : 'Logga ut',
+        Mar                           : 'Mar',
+        March                         : 'Mars',
+        May                           : 'Maj',
+        'New event'                   : 'Ny händelse',
+        'Next day'                    : 'Nästa dag',
+        Nov                           : 'Nov',
+        Oct                           : 'Okt',
+        Overlap                       : 'Överlapp',
+        Pack                          : 'Packa',
+        'Previous day'                : 'Föregående dag',
+        Reset                         : 'Återställ',
+        'Reset data'                  : 'Återställ data',
+        'Resource - City'             : 'Resurs - Stad',
+        'Resource ranges'             : 'Resursintervall',
+        Save                          : 'Spara',
+        Sep                           : 'Sep',
+        'Show setup time'             : 'Visa inställningstid',
+        Stack                         : 'Stapla',
+        Sync                          : 'Synkronisera',
+        Today                         : 'Idag',
+        'Vertical mode'               : 'Vertikalt läge',
+        'Zoom in'                     : 'Zooma in',
+        'Zoom out'                    : 'Zooma ut'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kulturell',
+        'Draw around parents'   : 'Rita runt föräldrar',
+        'Enable bar tooltip'    : 'Aktivera stapelverktygstips',
+        Music                   : 'Musik',
+        'Show bar texts'        : 'Visa stapeltexter',
+        'Show max allocation'   : 'Visa maxallokering',
+        'Show non working time' : 'Visa icke arbetstid',
+        Sports                  : 'Sport',
+        Technology              : 'Teknologi'
+    },
+
+    Slider : {
+        'Max capacity' : 'Maxkapacitet',
+        'Row height'   : 'Rad höjd'
+    },
+
+    Label : {
+        Days                        : 'Dagar',
+        'Group by'                  : 'Gruppera efter',
+        Months                      : 'Månader',
+        Settings                    : 'Inställningar',
+        'Viewing a repeating event' : 'Visar en återkommande händelse'
+    },
+
+    Combo : {
+        'Current timezone' : 'Aktuell tidszon',
+        'Group events by'  : 'Gruppera händelser efter',
+        Parent             : 'Förälder',
+        Resources          : 'Resurser',
+        Show               : 'Visa'
+    },
+
+    NumberField : {
+        '% complete' : '% klart',
+        Events       : 'Händelser',
+        Every        : 'Varje',
+        Resources    : 'Resurser'
+    },
+
+    TextField : {
+        Doctor           : 'Läkare',
+        Name             : 'Namn',
+        'Server address' : 'Serveradress',
+        Username         : 'Användarnamn'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Markera för att visa max resursallokeringslinje',
+        'Check to show resource allocation in the bars'                                                            : 'Markera för att visa resursallokering i staplarna',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Markera för att visa verktygstips när du flyttar musen över staplarna',
+        'Click to group by City - Resource'                                                                        : 'Klicka för att gruppera efter Stad - Resurs',
+        'Click to group by Resource - City'                                                                        : 'Klicka för att gruppera efter Resurs - Stad',
+        'Collapse all groups'                                                                                      : 'Fäll ihop alla grupper',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Inaktivera trädgrupperingsfunktionen och återgå till standardutseendet Resurs - Tilldelning',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Ange antal händelser per resurs att generera och tryck [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Ange antal resursrader att generera och tryck [ENTER]',
+        'Expand all groups'                                                                                        : 'Expandera alla grupper',
+        Friday                                                                                                     : 'Fredag',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Om två segment placeras bredvid varandra kan du antingen slå ihop dem eller hålla dem åtskilda',
+        Monday                                                                                                     : 'Måndag',
+        Saturday                                                                                                   : 'Lördag',
+        Sunday                                                                                                     : 'Söndag',
+        Thursday                                                                                                   : 'Torsdag',
+        'Toggle layout'                                                                                            : 'Växla layout',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Försöker passa in de oplanerade händelserna i den för närvarande visade tidsramen',
+        Tuesday                                                                                                    : 'Tisdag',
+        'View next day'                                                                                            : 'Visa nästa dag',
+        'View previous day'                                                                                        : 'Visa föregående dag',
+        'View today, to see the current time line'                                                                 : 'Visa idag, för att se den aktuella tidslinjen',
+        Wednesday                                                                                                  : 'Onsdag'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Automatisk sammanslagning av angränsande segment',
+        'Auto-send'                    : 'Autosänd',
+        'Auto-sync'                    : 'Automatisk synkronisering',
+        'Compact mode'                 : 'Kompakt läge',
+        'Constrain drag to row'        : 'Begränsa dragning till rad',
+        'Dark mode'                    : 'Mörkt läge',
+        'Days are working by default'  : 'Dagar är arbetsdagar som standard',
+        'Enable bar tooltip'           : 'Aktivera verktygstips för stapel',
+        'Enable highlighting'          : 'Aktivera markering',
+        'Enable mouse interaction'     : 'Aktivera musinteraktion',
+        'Enable task drag drop'        : 'Aktivera uppgiftsdrag och släpp',
+        'Filter out non-working time'  : 'Filtrera bort icke-arbetstid',
+        'Highlight 9-10am + 2-4pm'     : 'Markera 9-10 på morgonen + 2-4 på eftermiddagen',
+        'Highlight while dragging'     : 'Markera vid dragning',
+        'Show non working time'        : 'Visa icke-arbetstid',
+        'Show setup time'              : 'Visa inställningstid',
+        'Show summaries'               : 'Visa sammanfattningar',
+        'Snap to grid'                 : 'Fäst vid rutnät',
+        'View Planned dates'           : 'Visa planerade datum'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

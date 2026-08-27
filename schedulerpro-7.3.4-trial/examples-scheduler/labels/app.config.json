@@ -1,0 +1,10 @@
+{
+  "title": "Labels demo",
+  "description": "This demo uses the Labels feature to display labels above/below events. Labels can display field data or use a custom renderer.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

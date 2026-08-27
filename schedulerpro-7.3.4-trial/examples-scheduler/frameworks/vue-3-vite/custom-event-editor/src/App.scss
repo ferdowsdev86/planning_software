@@ -1,0 +1,70 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+#app {
+    display        : flex;
+    flex           : 1;
+    flex-direction : column;
+}
+
+.v-application {
+    background : transparent;
+}
+
+.v-application--wrap {
+    height : 100vh;
+}
+
+// Remove conflicting Vuetify rule (would hide dependencies).
+svg:not(:root).b-sch-dependencies-canvas {
+    overflow : initial;
+}
+
+.b-grid-cell[data-column="name"] {
+    font-size   : 1.1em;
+    font-weight : bold;
+}
+
+.b-sch-event-wrap.b-style-none {
+    --b-sch-event-border-radius       : .5em;
+    --b-sch-event-background          : var(--b-primary-95);
+    --b-sch-event-hover-background    : var(--b-primary-93);
+    --b-sch-event-selected-background : var(--b-primary-91);
+    --b-sch-event-color               : var(--b-neutral-20);
+    --b-sch-event-box-shadow          : var(--b-elevation-1);
+    --b-sch-event-font-size           : 15px;
+
+    .b-sch-event-content {
+        align-items : center;
+    }
+
+    &.away {
+        --b-primary : var(--b-color-orange);
+    }
+
+    /* "Shrink" the events inside the wrap */
+    .b-sch-event {
+        margin : .5em;
+        width  : calc(100% - 1em);
+    }
+
+    i {
+        font-size : 1.4em;
+    }
+}
+
+.time,
+.arena {
+    font-size : .8em;
+    color     : var(--b-neutral-60);
+}

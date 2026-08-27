@@ -1,0 +1,25 @@
+{
+  "title": "Using React components in tooltips",
+  "description": "This example demonstrates how to use React components in tooltips and other widgets.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/components/DemoButton.tsx",
+    "src/components/DemoEventTip.scss",
+    "src/components/DemoEventTip.tsx",
+    "src/components/DemoSelectedLabel.tsx",
+    "src/components/DemoToolbar.tsx",
+    "src/components/DemoTooltip.tsx",
+    "src/components/DemoWidget.tsx",
+    "src/components/DemoYesNoEditor.tsx",
+    "src/main.tsx",
+    "src/vite-env.d.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

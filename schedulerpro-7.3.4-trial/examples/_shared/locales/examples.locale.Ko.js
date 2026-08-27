@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Ko.js';
+import '../../../lib/SchedulerPro/localization/Ko.js';
+import './shared.locale.Ko.js';
+
+const locale = {
+
+    localeName : 'Ko',
+    localeDesc : '한국어',
+    localeCode : 'ko',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : '작업',
+        Active              : '활성',
+        Allocation          : '할당',
+        Calendar            : '캘린더',
+        City                : '도시',
+        Condition           : '조건',
+        Consultant          : '컨설턴트',
+        Contractor          : '계약자',
+        Doctor              : '의사',
+        Driver              : '운전자',
+        Expedition          : '탐험',
+        'First name'        : '이름',
+        Inspector           : '검사관',
+        Lag                 : '지연',
+        Manager             : '관리자',
+        Name                : '이름',
+        Projects            : '프로젝트',
+        Property            : '속성',
+        Rating              : '평가',
+        Resource            : '자원',
+        Role                : '역할',
+        Score               : '점수',
+        Shift               : '교대',
+        'Speaker rating'    : '연사 평가',
+        Staff               : '직원',
+        Station             : '스테이션',
+        Surname             : '성',
+        Tasks               : '작업',
+        Technicians         : '기술자',
+        Type                : '유형',
+        'Vehicle Condition' : '차량 상태',
+        'Work hours'        : '근무 시간',
+        Worker              : '근로자'
+    },
+
+    Button : {
+        '10K events'                  : '10K 이벤트',
+        '1K events'                   : '1K 이벤트',
+        '5K events'                   : '5K 이벤트',
+        'Add exception'               : '예외 추가',
+        'Add invalid calendar'        : '잘못된 캘린더 추가',
+        'Add invalid dependency'      : '잘못된 종속성 추가',
+        'Add order'                   : '주문 추가',
+        'Add task'                    : '작업 추가',
+        'Add week'                    : '주 추가',
+        Apr                           : '4월',
+        Aug                           : '8월',
+        August                        : '8월',
+        'Auto-schedule'               : '자동 일정',
+        'Bar settings'                : '바 설정',
+        Cancel                        : '취소',
+        'Change working time'         : '작업 시간 변경',
+        'City - Resource'             : '도시 - 자원',
+        Custom                        : '사용자 정의',
+        Dark                          : '어두운',
+        Dec                           : '12월',
+        Default                       : '기본',
+        'Default layouts'             : '기본 레이아웃',
+        Delete                        : '삭제',
+        Dependencies                  : '종속성',
+        'Drag & resize settings'      : '드래그 및 크기 조정 설정',
+        Edit                          : '편집',
+        'Edit calendar'               : '캘린더 편집',
+        'Enable mouse interaction'    : '마우스 상호작용 활성화',
+        Feb                           : '2월',
+        'Filter out non-working time' : '비작업 시간 필터링',
+        'Hide scheduled'              : '일정 숨기기',
+        'Highlight 9-10am + 2-4pm'    : '오전 9-10시 + 오후 2-4시 강조',
+        'Highlight while dragging'    : '드래그 중 강조',
+        'Horizontal mode'             : '수평 모드',
+        Jan                           : '1월',
+        Jul                           : '7월',
+        Jun                           : '6월',
+        'Layout function'             : '레이아웃 기능',
+        Light                         : '밝은',
+        Login                         : '로그인',
+        Logout                        : '로그아웃',
+        Mar                           : '3월',
+        March                         : '3월',
+        May                           : '5월',
+        'New event'                   : '새 이벤트',
+        'Next day'                    : '다음 날',
+        Nov                           : '11월',
+        Oct                           : '10월',
+        Overlap                       : '겹침',
+        Pack                          : '패키지',
+        'Previous day'                : '이전 날',
+        Reset                         : '재설정',
+        'Reset data'                  : '데이터 재설정',
+        'Resource - City'             : '자원 - 도시',
+        'Resource ranges'             : '자원 범위',
+        Save                          : '저장',
+        Sep                           : '9월',
+        'Show setup time'             : '설정 시간 표시',
+        Stack                         : '스택',
+        Sync                          : '동기화',
+        Today                         : '오늘',
+        'Vertical mode'               : '수직 모드',
+        'Zoom in'                     : '확대',
+        'Zoom out'                    : '축소'
+    },
+
+    Checkbox : {
+        Cultural                : '문화',
+        'Draw around parents'   : '부모 주위에 그리기',
+        'Enable bar tooltip'    : '막대 도구 설명 활성화',
+        Music                   : '음악',
+        'Show bar texts'        : '바 텍스트 표시',
+        'Show max allocation'   : '최대 할당 표시',
+        'Show non working time' : '비작업 시간 표시',
+        Sports                  : '스포츠',
+        Technology              : '기술'
+    },
+
+    Slider : {
+        'Max capacity' : '최대 용량',
+        'Row height'   : '행 높이'
+    },
+
+    Label : {
+        Days                        : '일',
+        'Group by'                  : '그룹별',
+        Months                      : '개월',
+        Settings                    : '설정',
+        'Viewing a repeating event' : '반복 이벤트 보기'
+    },
+
+    Combo : {
+        'Current timezone' : '현재 시간대',
+        'Group events by'  : '이벤트 그룹화 기준',
+        Parent             : '부모',
+        Resources          : '자원',
+        Show               : '표시'
+    },
+
+    NumberField : {
+        '% complete' : '% 완료',
+        Events       : '이벤트',
+        Every        : '매',
+        Resources    : '자원'
+    },
+
+    TextField : {
+        Doctor           : '의사',
+        Name             : '이름',
+        'Server address' : '서버 주소',
+        Username         : '사용자 이름'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : '최대 자원 할당선을 표시하려면 선택하십시오',
+        'Check to show resource allocation in the bars'                                                            : '바에서 자원 할당을 표시하려면 선택하십시오',
+        'Check to show tooltips when moving mouse over bars'                                                       : '마우스를 막대 위로 이동할 때 툴팁을 표시하려면 확인하십시오',
+        'Click to group by City - Resource'                                                                        : '도시별 그룹화하려면 클릭 - 리소스',
+        'Click to group by Resource - City'                                                                        : '리소스별 그룹화하려면 클릭 - 도시',
+        'Collapse all groups'                                                                                      : '모든 그룹 축소',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : '트리 그룹 기능을 비활성화하고 기본 리소스 - 할당 보기로 돌아가기',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : '생성할 자원당 이벤트 수를 입력하고 [ENTER]를 누르세요',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : '생성할 자원 행 수를 입력하고 [ENTER]를 누르세요',
+        'Expand all groups'                                                                                        : '모든 그룹 확장',
+        Friday                                                                                                     : '금요일',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : '두 세그먼트가 서로 인접해 있는 경우, 병합하거나 분리된 상태로 유지할 수 있습니다',
+        Monday                                                                                                     : '월요일',
+        Saturday                                                                                                   : '토요일',
+        Sunday                                                                                                     : '일요일',
+        Thursday                                                                                                   : '목요일',
+        'Toggle layout'                                                                                            : '레이아웃 전환',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : '현재 표시된 시간 프레임에 계획되지 않은 이벤트를 맞추려고 시도합니다',
+        Tuesday                                                                                                    : '화요일',
+        'View next day'                                                                                            : '다음 날 보기',
+        'View previous day'                                                                                        : '이전 날 보기',
+        'View today, to see the current time line'                                                                 : '오늘 보기, 현재 시간 라인을 보려면',
+        Wednesday                                                                                                  : '수요일'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : '인접 세그먼트 자동 병합',
+        'Auto-send'                    : '자동 전송',
+        'Auto-sync'                    : '자동 동기화',
+        'Compact mode'                 : '압축 모드',
+        'Constrain drag to row'        : '행으로 드래그 제한',
+        'Dark mode'                    : '다크 모드',
+        'Days are working by default'  : '기본적으로 근무일입니다',
+        'Enable bar tooltip'           : '막대 도구 설명 활성화',
+        'Enable highlighting'          : '강조 표시 활성화',
+        'Enable mouse interaction'     : '마우스 상호작용 활성화',
+        'Enable task drag drop'        : '작업 드래그 드롭 활성화',
+        'Filter out non-working time'  : '비작업 시간 필터링',
+        'Highlight 9-10am + 2-4pm'     : '오전 9-10시 + 오후 2-4시 강조',
+        'Highlight while dragging'     : '드래그 중 강조',
+        'Show non working time'        : '비작업 시간 표시',
+        'Show setup time'              : '설정 시간 표시',
+        'Show summaries'               : '요약 표시',
+        'Snap to grid'                 : '그리드에 맞추기',
+        'View Planned dates'           : '계획된 날짜 보기'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

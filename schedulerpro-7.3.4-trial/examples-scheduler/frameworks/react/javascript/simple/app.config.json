@@ -1,0 +1,17 @@
+{
+  "title": "Simple demo (React)",
+  "description": "This demo contains a very simple React Scheduler implementation example.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/components/DemoButton.js",
+    "src/components/DemoEditor.js",
+    "src/components/Scheduler.js",
+    "src/components/Selected.js",
+    "src/index.js"
+  ]
+}

@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Gl.js';
+import '../../../lib/SchedulerPro/localization/Gl.js';
+import './shared.locale.Gl.js';
+
+const locale = {
+
+    localeName : 'Gl',
+    localeDesc : 'Galego',
+    localeCode : 'gl-ES',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Accións',
+        Active              : 'Activo',
+        Allocation          : 'Asignación',
+        Calendar            : 'Calendario',
+        City                : 'Cidade',
+        Condition           : 'Condición',
+        Consultant          : 'Consultor',
+        Contractor          : 'Contratista',
+        Doctor              : 'Doutor',
+        Driver              : 'Condutor',
+        Expedition          : 'Expedición',
+        'First name'        : 'Nome',
+        Inspector           : 'Inspector',
+        Lag                 : 'Retraso',
+        Manager             : 'Xestor',
+        Name                : 'Nome',
+        Projects            : 'Proxectos',
+        Property            : 'Propiedade',
+        Rating              : 'Valoración',
+        Resource            : 'Recurso',
+        Role                : 'Rol',
+        Score               : 'Puntuación',
+        Shift               : 'Quenda',
+        'Speaker rating'    : 'Valoración do orador',
+        Staff               : 'Persoal',
+        Station             : 'Estación',
+        Surname             : 'Apelido',
+        Tasks               : 'Tarefas',
+        Technicians         : 'Técnicos',
+        Type                : 'Tipo',
+        'Vehicle Condition' : 'Estado do vehículo',
+        'Work hours'        : 'Horas de traballo',
+        Worker              : 'Traballador'
+    },
+
+    Button : {
+        '10K events'                  : '10K eventos',
+        '1K events'                   : '1K eventos',
+        '5K events'                   : '5K eventos',
+        'Add exception'               : 'Engadir excepción',
+        'Add invalid calendar'        : 'Engadir calendario non válido',
+        'Add invalid dependency'      : 'Engadir dependencia non válida',
+        'Add order'                   : 'Engadir orde',
+        'Add task'                    : 'Engadir tarefa',
+        'Add week'                    : 'Engadir semana',
+        Apr                           : 'Abr',
+        Aug                           : 'Ago',
+        August                        : 'Agosto',
+        'Auto-schedule'               : 'Auto-programar',
+        'Bar settings'                : 'Configuración da barra',
+        Cancel                        : 'Cancelar',
+        'Change working time'         : 'Cambiar o horario laboral',
+        'City - Resource'             : 'Cidade - Recurso',
+        Custom                        : 'Personalizado',
+        Dark                          : 'Escuro',
+        Dec                           : 'Dec',
+        Default                       : 'Predeterminado',
+        'Default layouts'             : 'Deseños predeterminados',
+        Delete                        : 'Eliminar',
+        Dependencies                  : 'Dependencias',
+        'Drag & resize settings'      : 'Configuración de arrastre e redimensionamento',
+        Edit                          : 'Editar',
+        'Edit calendar'               : 'Editar calendario',
+        'Enable mouse interaction'    : 'Activar interacción co rato',
+        Feb                           : 'Feb',
+        'Filter out non-working time' : 'Filtrar o tempo non laboral',
+        'Hide scheduled'              : 'Ocultar programado',
+        'Highlight 9-10am + 2-4pm'    : 'Resaltar 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Resaltar mentres se arrastra',
+        'Horizontal mode'             : 'Modo horizontal',
+        Jan                           : 'Xan',
+        Jul                           : 'Xul',
+        Jun                           : 'Xuñ',
+        'Layout function'             : 'Función de deseño',
+        Light                         : 'Claro',
+        Login                         : 'Iniciar sesión',
+        Logout                        : 'Pechar sesión',
+        Mar                           : 'Mar',
+        March                         : 'Marzo',
+        May                           : 'Mai',
+        'New event'                   : 'Novo evento',
+        'Next day'                    : 'Día seguinte',
+        Nov                           : 'Nov',
+        Oct                           : 'Out',
+        Overlap                       : 'Superposición',
+        Pack                          : 'Empaquetar',
+        'Previous day'                : 'Día anterior',
+        Reset                         : 'Restablecer',
+        'Reset data'                  : 'Restablecer datos',
+        'Resource - City'             : 'Recurso - Cidade',
+        'Resource ranges'             : 'Rangos de recursos',
+        Save                          : 'Gardar',
+        Sep                           : 'Set',
+        'Show setup time'             : 'Mostrar tempo de configuración',
+        Stack                         : 'Apilar',
+        Sync                          : 'Sincronizar',
+        Today                         : 'Hoxe',
+        'Vertical mode'               : 'Modo vertical',
+        'Zoom in'                     : 'Achegar',
+        'Zoom out'                    : 'Afastar'
+    },
+
+    Checkbox : {
+        Cultural                : 'Cultural',
+        'Draw around parents'   : 'Debuxar ao redor dos pais',
+        'Enable bar tooltip'    : 'Activar a información sobre ferramentas da barra',
+        Music                   : 'Música',
+        'Show bar texts'        : 'Mostrar textos da barra',
+        'Show max allocation'   : 'Mostrar asignación máxima',
+        'Show non working time' : 'Mostrar tempo non laboral',
+        Sports                  : 'Deportes',
+        Technology              : 'Tecnoloxía'
+    },
+
+    Slider : {
+        'Max capacity' : 'Capacidade máxima',
+        'Row height'   : 'Altura da fila'
+    },
+
+    Label : {
+        Days                        : 'Días',
+        'Group by'                  : 'Agrupar por',
+        Months                      : 'Meses',
+        Settings                    : 'Configuracións',
+        'Viewing a repeating event' : 'Visualizando un evento repetitivo'
+    },
+
+    Combo : {
+        'Current timezone' : 'Zona horaria actual',
+        'Group events by'  : 'Agrupar eventos por',
+        Parent             : 'Pai',
+        Resources          : 'Recursos',
+        Show               : 'Mostrar'
+    },
+
+    NumberField : {
+        '% complete' : '% completado',
+        Events       : 'Eventos',
+        Every        : 'Cada',
+        Resources    : 'Recursos'
+    },
+
+    TextField : {
+        Doctor           : 'Médico',
+        Name             : 'Nome',
+        'Server address' : 'Enderezo do servidor',
+        Username         : 'Nome de usuario'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Marcar para mostrar a liña de asignación máxima de recursos',
+        'Check to show resource allocation in the bars'                                                            : 'Marcar para mostrar a asignación de recursos nas barras',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Comprobar para mostrar información emerxente ao mover o rato sobre as barras',
+        'Click to group by City - Resource'                                                                        : 'Fai clic para agrupar por Cidade - Recurso',
+        'Click to group by Resource - City'                                                                        : 'Fai clic para agrupar por Recurso - Cidade',
+        'Collapse all groups'                                                                                      : 'Colapsar todos os grupos',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Desactivar a función de agrupamento en árbore e volver ao aspecto predeterminado de Recurso - Asignación',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Introduce o número de eventos por recurso a xerar e preme [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Introduce o número de filas de recursos a xerar e preme [ENTER]',
+        'Expand all groups'                                                                                        : 'Expandir todos os grupos',
+        Friday                                                                                                     : 'Venres',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Se dous segmentos están colocados un xunto ao outro, podes unilos ou mantelos separados',
+        Monday                                                                                                     : 'Luns',
+        Saturday                                                                                                   : 'Sábado',
+        Sunday                                                                                                     : 'Domingo',
+        Thursday                                                                                                   : 'Xoves',
+        'Toggle layout'                                                                                            : 'Alternar deseño',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Intenta encaixar os eventos non planificados no marco temporal actualmente mostrado',
+        Tuesday                                                                                                    : 'Martes',
+        'View next day'                                                                                            : 'Ver o día seguinte',
+        'View previous day'                                                                                        : 'Ver o día anterior',
+        'View today, to see the current time line'                                                                 : 'Ver hoxe, para ver a liña de tempo actual',
+        Wednesday                                                                                                  : 'Mércores'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Fusión automática de segmentos adxacentes',
+        'Auto-send'                    : 'Envio automático',
+        'Auto-sync'                    : 'Auto-sincronización',
+        'Compact mode'                 : 'Modo compacto',
+        'Constrain drag to row'        : 'Restringir arrastre á fila',
+        'Dark mode'                    : 'Modo escuro',
+        'Days are working by default'  : 'Os días traballan por defecto',
+        'Enable bar tooltip'           : 'Activar a barra de información',
+        'Enable highlighting'          : 'Activar resaltado',
+        'Enable mouse interaction'     : 'Activar interacción co rato',
+        'Enable task drag drop'        : 'Activar arrastre e solta de tarefas',
+        'Filter out non-working time'  : 'Filtrar o tempo non laboral',
+        'Highlight 9-10am + 2-4pm'     : 'Resaltar 9-10am + 2-4pm',
+        'Highlight while dragging'     : 'Resaltar ao arrastrar',
+        'Show non working time'        : 'Mostrar tempo non laboral',
+        'Show setup time'              : 'Mostrar tempo de configuración',
+        'Show summaries'               : 'Mostrar resumos',
+        'Snap to grid'                 : 'Axustar á grella',
+        'View Planned dates'           : 'Ver datas planificadas'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

@@ -1,0 +1,10 @@
+{
+  ".b-scheduler-pro [data-event-id=\"13\"]": {
+    "title": "Scheduler event",
+    "content": "This event is shown also in timeline"
+  },
+  ".b-timeline [data-event-id=\"13\"]": {
+    "title": "Timeline event",
+    "content": "To show events here, open editor and put a check on \"Show in timeline\""
+  }
+}

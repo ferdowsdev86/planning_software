@@ -1,0 +1,161 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "a",
+        "name" : "Rob"
+      },
+      {
+        "id"   : "b",
+        "name" : "Mike"
+      },
+      {
+        "id"   : "c",
+        "name" : "Kate"
+      },
+      {
+        "id"    : "team",
+        "name"  : "Team Tasks",
+        "image" : false
+      },
+      {
+        "id"   : "e",
+        "name" : "Dave"
+      },
+      {
+        "id"   : "f",
+        "name" : "Arnold"
+      },
+      {
+        "id"   : "g",
+        "name" : "Lee"
+      },
+      {
+        "id"   : "h",
+        "name" : "Jong"
+      },
+      {
+        "id"   : "i",
+        "name" : "Celia"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"             : 1,
+        "name"           : "Annual event",
+        "eventColor"     : "red",
+        "startDate"      : "2018-01-16",
+        "endDate"        : "2018-01-20",
+        "recurrenceRule" : "FREQ=YEARLY"
+      },
+      {
+        "id"             : 2,
+        "eventColor"     : "green",
+        "name"           : "Monthly task",
+        "startDate"      : "2018-01-01",
+        "endDate"        : "2018-01-04",
+        "recurrenceRule" : "FREQ=MONTHLY"
+      },
+      {
+        "id"             : 3,
+        "name"           : "Weekly event",
+        "eventColor"     : "blue",
+        "startDate"      : "2018-01-07 00:00",
+        "duration"       : 5,
+        "recurrenceRule" : "FREQ=WEEKLY"
+      },
+      {
+        "id"             : 4,
+        "name"           : "Daily standup",
+        "cls"            : "thinevent hidelabel",
+        "eventColor"     : "orange",
+        "startDate"      : "2018-01-03 13:00",
+        "duration"       : 2,
+        "durationUnit"   : "hour",
+        "recurrenceRule" : "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR"
+      },
+      {
+        "id"             : 5,
+        "name"           : "Every other week",
+        "startDate"      : "2018-01-01",
+        "duration"       : 3,
+        "recurrenceRule" : "FREQ=WEEKLY;INTERVAL=2"
+      },
+      {
+        "id"             : 6,
+        "name"           : "Appointment #2",
+        "startDate"      : "2018-01-28",
+        "endDate"        : "2018-02-21",
+        "recurrenceRule" : "FREQ=MONTHLY;INTERVAL=2;BYDAY=SU,SA;BYSETPOS=-1"
+      },
+      {
+        "id"             : 7,
+        "name"           : "3 days/week, max 5 times ",
+        "startDate"      : "2018-01-01",
+        "endDate"        : "2018-01-04",
+        "recurrenceRule" : "FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,TU,WE;COUNT=5"
+      },
+      {
+        "id"             : 8,
+        "name"           : "Every 5th day",
+        "cls"            : "thinevent hideicon",
+        "startDate"      : "2018-01-01 09:00",
+        "duration"       : 4,
+        "durationUnit"   : "hour",
+        "recurrenceRule" : "FREQ=DAILY;INTERVAL=5;UNTIL=20180531T000000"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "eventId"    : 1,
+        "resourceId" : "a"
+      },
+      {
+        "id"         : 2,
+        "eventId"    : 2,
+        "resourceId" : "b"
+      },
+      {
+        "id"         : 3,
+        "eventId"    : 3,
+        "resourceId" : "c"
+      },
+      {
+        "id"         : 4,
+        "eventId"    : 4,
+        "resourceId" : "team"
+      },
+      {
+        "id"         : 5,
+        "eventId"    : 5,
+        "resourceId" : "e"
+      },
+      {
+        "id"         : 6,
+        "eventId"    : 6,
+        "resourceId" : "f"
+      },
+      {
+        "id"         : 7,
+        "eventId"    : 7,
+        "resourceId" : "g"
+      },
+      {
+        "id"         : 8,
+        "eventId"    : 8,
+        "resourceId" : "h"
+      },
+      {
+        "id"         : 9,
+        "eventId"    : 2,
+        "resourceId" : "i"
+      }
+    ]
+  }
+}

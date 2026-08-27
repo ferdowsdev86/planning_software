@@ -1,0 +1,10 @@
+{
+  "title": "Locking rows demo",
+  "description": "This example demonstrates how to freeze rows at the top of the Scheduler using the LockRows feature",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

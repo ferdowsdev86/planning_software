@@ -1,0 +1,15 @@
+.b-sch-event {
+    .time {
+        font-size   : .9em;
+        white-space : nowrap;
+    }
+
+    .name {
+        width       : 100%;
+        font-weight : 600;
+    }
+}
+
+.b-grid > .b-toolbar > .b-content-element > .b-button.b-text {
+    width : 7em;
+}

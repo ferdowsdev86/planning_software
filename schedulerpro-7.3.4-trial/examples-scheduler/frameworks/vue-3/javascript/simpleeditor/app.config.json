@@ -1,0 +1,14 @@
+{
+  "title": "Simple event editor demo (Vue 3)",
+  "description": "Double click event bars to edit name easily",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

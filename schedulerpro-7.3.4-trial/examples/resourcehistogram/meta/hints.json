@@ -1,0 +1,18 @@
+{
+  ".b-resource-histogram .b-timeline-sub-grid": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t"
+    },
+    "title": "Resource\u00a0allocation\u00a0histogram",
+    "content": "A partner Timeline widget which shows resource allocations for the project."
+  },
+  ".b-grid-row[data-id='r1'] [data-column='scalePoints']": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t"
+    },
+    "title": "Resource with 300% maximum allocation",
+    "content": "This resource represent a team of 3 persons and has `maxUnits = 300%` maximum capacity. This is reflected in it's scale widget and allocation status."
+  }
+}

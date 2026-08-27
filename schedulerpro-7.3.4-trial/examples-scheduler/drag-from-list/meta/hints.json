@@ -1,0 +1,6 @@
+{
+  "[data-ref=equipment] .b-list-item": {
+    "title": "Drag equipment to tasks",
+    "content": "Drag items onto a scheduled task to assign equipment."
+  }
+}

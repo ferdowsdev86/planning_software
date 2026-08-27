@@ -1,0 +1,61 @@
+{
+  "name": "eventeditor-combos",
+  "description": "Event Editor with Cascading Combos (React + Vite)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "./",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "start": "vite",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/transparent-users/*": "copy public/users/",
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-react": "7.3.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "@vitejs/plugin-react": "4.3.4",
+    "postinstall": "0.7.4",
+    "sass": "1.78.0",
+    "typescript": "5.7.2",
+    "vite": "6.3.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "eslintConfig-disabled": {
+    "extends": [
+      "react-app"
+    ]
+  }
+}

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta name="description" content="A custom event editor implemented with Bootstrap"/>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<title>Bryntum Scheduler - Custom Event Editor demo</title>
+	<script src="../_shared/browser/helper.js"></script>
+	<link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+	<link rel="stylesheet" href="../../resources/fontawesome/css/fontawesome.css">
+	<link rel="stylesheet" href="../../resources/fontawesome/css/solid.css">
+	<link rel="stylesheet" href="../../build/schedulerpro.css">
+	<!-- To facilitate theme switching, our demos programmatically include a theme in helper.js above. -->
+	<!-- If you want to include a single theme in your app, including the line below would be easier -->
+	<!--<link rel="stylesheet" href="../../build/svalbard-light.css" data-bryntum-theme>-->
+	<link rel="stylesheet" href="../_shared/shared.css">
+	<link rel="stylesheet" href="resources/app.css">
+</head>
+
+<body>
+<div id="container"></div>
+<div class="modal fade" id="customEditor" tabindex="-1" aria-labelledby="customEditorLabel" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title" id="customEditorLabel">Edit game</h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+					<span aria-hidden="true">&times;</span>
+				</button>
+			</div>
+			<div class="modal-body">
+				<form>
+					<div class="form-group">
+						<label for="home">Home team</label>
+						<input class="form-control" readOnly="readOnly" id="home">
+					</div>
+					<div class="form-group">
+						<label for="away">Away team</label>
+						<select class="custom-select" id="away">
+							<option value="brynas">Brynas</option>
+							<option value="djurgarden">Djurgarden</option>
+							<option value="farjestad">Farjestad</option>
+							<option value="frolunda">Frolunda</option>
+							<option value="hv71">HV71</option>
+							<option value="leksand">Leksand</option>
+							<option value="linkoping">Linkoping</option>
+							<option value="lulea">Lulea</option>
+							<option value="malmo">Malmo</option>
+							<option value="orebro">Orebro</option>
+							<option value="oskarshamn">Oskarshamn</option>
+							<option value="rogle">Rogle</option>
+							<option value="skelleftea">Skelleftea</option>
+							<option value="vaxjo">Vaxjo</option>
+						</select>
+					</div>
+					<div class="form-group">
+						<label for="startDate">Date</label>
+						<input type="date" class="form-control" id="startDate">
+					</div>
+					<div class="form-group">
+						<label for="startTime">Time</label>
+						<input type="time" class="form-control" id="startTime">
+					</div>
+				</form>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-dismiss="modal" id="cancel">Cancel</button>
+				<button type="button" class="btn btn-primary" data-dismiss="modal" id="save">Save changes</button>
+			</div>
+		</div>
+	</div>
+</div>
+<script src="vendor/jquery-3.5.1.slim.min.js"></script>
+<script src="vendor/popper.min.js"></script>
+<script src="vendor/bootstrap/js/bootstrap.min.js"></script>
+	<script src="../_shared/locales/examples.locales.umd.js"></script>
+<script data-default-locale="En" type="module" src="app.module.js"></script>
+</body>
+
+</html>

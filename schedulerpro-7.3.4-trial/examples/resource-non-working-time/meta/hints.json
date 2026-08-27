@@ -1,0 +1,10 @@
+{
+  "[data-index='0'] [data-column='calendar']": {
+    "title": "Uses 'Day shift' calendar",
+    "content": "Visualised by the gray ranges in the schedule"
+  },
+  "[data-index='4'] [data-column='calendar']": {
+    "title": "Uses 'Late shift' calendar",
+    "content": "Double click to pick another calendar"
+  }
+}

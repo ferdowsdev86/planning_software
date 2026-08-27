@@ -1,0 +1,10 @@
+{
+  "title": "Custom event layout demo",
+  "description": "Grouping events inside the resource row",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

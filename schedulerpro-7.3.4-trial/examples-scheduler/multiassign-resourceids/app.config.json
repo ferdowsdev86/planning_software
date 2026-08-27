@@ -1,0 +1,8 @@
+{
+  "title": "Multi assignment using resourceIds field demo",
+  "description": "Shows a basic scheduler using resourceIds field to support multi assignment",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

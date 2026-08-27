@@ -1,0 +1,10 @@
+{
+  ".b-grid-footer .b-time-axis-tick": {
+    "title": "Summaries",
+    "content": "Displayed at the bottom, hover to show tooltip with labels"
+  },
+  ".b-sch-event": {
+    "title": "Drag event",
+    "content": "And summaries will be recalculated"
+  }
+}

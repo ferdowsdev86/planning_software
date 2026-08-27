@@ -1,0 +1,122 @@
+:root {
+    --fade : linear-gradient(#ffffffdd, #ffffff90)
+}
+
+.b-scheduler {
+    --b-time-range-line-primary : var(--b-color-magenta);
+
+    .b-bryntum {
+        --b-time-range-header-background : #4534DD;
+        --b-time-range-background        : #4534DD0F;
+    }
+
+    .b-sch-event {
+        display               : grid;
+        grid-template-columns : 1fr;
+        align-items           : stretch;
+        border-radius         : 10px;
+        background-image      : var(--fade) !important;
+
+        .b-sch-event-content {
+            display             : flex;
+            flex-direction      : column;
+            justify-content     : center;
+            align-items         : flex-start;
+            margin-inline-start : 1.5em !important;
+        }
+
+        .name {
+            font-size : 1.2em;
+            color     : #111 !important;
+
+            i.fa {
+                margin-inline-end : 0.5em;
+                color             : #111 !important;
+            }
+        }
+
+        .desc {
+            margin-top  : .25em;
+            white-space : normal;
+            font-size   : 0.9em;
+            color       : #333 !important;
+        }
+
+        &.b-sch-event-selected {
+            background-image : linear-gradient(#ffffffbb, #ffffff80) !important;
+            opacity          : 1;
+        }
+    }
+
+    .b-resource-avatar {
+        background-image : var(--fade) !important;
+        border           : 1px solid;
+        color            : #000;
+        width            : 3em;
+        height           : 3em;
+
+        &.b-sch-pink {
+            border-color : #d30155;
+        }
+
+        &.b-sch-violet {
+            border-color : #7f01d3;
+        }
+
+        &.b-sch-indigo {
+            border-color : #1601d3;
+        }
+    }
+
+    .b-grid-header-container {
+        border-bottom : none;
+    }
+
+    .b-sch-resource-time-range {
+        cursor      : pointer;
+        transition  : background 0.3s;
+
+        --b-primary : var(--b-color-red);
+
+        &:hover {
+            --b-resource-time-range-background : var(--b-primary-95);
+        }
+    }
+
+}
+
+@keyframes spinner {
+    0% {
+        transform : rotate(
+            0deg
+        );
+    }
+    100% {
+        transform : rotate(
+            1turn
+        );
+    }
+}
+
+.fa-spinner {
+    animation : spinner 2s linear infinite;
+}
+
+.fa-check-circle {
+    color : green;
+}
+
+.fa-times-circle {
+    color : red;
+}
+
+.fa-user-edit {
+    color : orange;
+}
+
+.b-widget[data-ref="crudStatus"] {
+    .fa {
+        margin-inline-start : .5em;
+    }
+}
+

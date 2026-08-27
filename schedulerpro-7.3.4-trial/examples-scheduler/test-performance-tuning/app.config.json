@@ -1,0 +1,10 @@
+{
+  "title": "Performance tuning demo",
+  "description": "Demo showing various settings relating to performance",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

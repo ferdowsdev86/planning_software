@@ -1,0 +1,59 @@
+{
+  "name": "test-recurring",
+  "description": "Test for recurring event rendering (Vue 3 + Vite)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "./",
+  "scripts": {
+    "dev": "vite",
+    "build": "run-p type-check \"build-only {@}\" --",
+    "preview": "vite preview",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --build --force",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "start": "vite",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/transparent-users/*": "copy public/users/",
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-vue-3": "7.3.4",
+    "vue": "3.5.13"
+  },
+  "devDependencies": {
+    "@rushstack/eslint-patch": "1.11.0",
+    "@tsconfig/node20": "20.1.4",
+    "@types/node": "22.13.10",
+    "@vitejs/plugin-vue": "5.2.1",
+    "@vue/eslint-config-typescript": "14.5.0",
+    "@vue/tsconfig": "0.7.0",
+    "eslint": "9.26.0",
+    "eslint-plugin-vue": "10.0.0",
+    "npm-run-all2": "7.0.2",
+    "postinstall": "0.7.4",
+    "sass": "1.85.1",
+    "typescript": "5.8.2",
+    "vite": "6.2.1",
+    "vue-tsc": "2.2.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ]
+}

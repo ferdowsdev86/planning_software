@@ -1,0 +1,20 @@
+{
+  "title": "Travel time demo (Angular)",
+  "description": "This demo shows how to visualize travel time before/after an event",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

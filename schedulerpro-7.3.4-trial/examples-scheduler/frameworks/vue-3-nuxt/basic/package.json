@@ -1,0 +1,48 @@
+{
+  "name": "basic",
+  "description": "Basic Setup (Vue 3 + Nuxt)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare && postinstall",
+    "start": "nuxt dev"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-vue-3": "7.3.4",
+    "nuxt": "4.3.1",
+    "vue": "3.5.30",
+    "vue-router": "5.0.3"
+  },
+  "devDependencies": {
+    "@babel/core": "7.12.16",
+    "@babel/eslint-parser": "7.12.16",
+    "@vue/cli-plugin-babel": "5.0.0",
+    "@vue/cli-plugin-eslint": "5.0.0",
+    "@vue/cli-service": "5.0.8",
+    "eslint": "7.32.0",
+    "eslint-plugin-vue": "8.0.3",
+    "postinstall": "0.7.4",
+    "sass": "1.78.0",
+    "vite": "5.4.21"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "type": "module"
+}

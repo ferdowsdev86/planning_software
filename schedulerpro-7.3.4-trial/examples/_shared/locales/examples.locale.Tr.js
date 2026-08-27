@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Tr.js';
+import '../../../lib/SchedulerPro/localization/Tr.js';
+import './shared.locale.Tr.js';
+
+const locale = {
+
+    localeName : 'Tr',
+    localeDesc : 'Türkçe',
+    localeCode : 'tr',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Eylemler',
+        Active              : 'Aktif',
+        Allocation          : 'Tahsis',
+        Calendar            : 'Takvim',
+        City                : 'Şehir',
+        Condition           : 'Durum',
+        Consultant          : 'Danışman',
+        Contractor          : 'Yüklenici',
+        Doctor              : 'Doktor',
+        Driver              : 'Sürücü',
+        Expedition          : 'Sefer',
+        'First name'        : 'Ad',
+        Inspector           : 'Müfettiş',
+        Lag                 : 'Gecikme',
+        Manager             : 'Yönetici',
+        Name                : 'İsim',
+        Projects            : 'Projeler',
+        Property            : 'Mülk',
+        Rating              : 'Değerlendirme',
+        Resource            : 'Kaynak',
+        Role                : 'Rol',
+        Score               : 'Puan',
+        Shift               : 'Vardiya',
+        'Speaker rating'    : 'Konuşmacı derecelendirmesi',
+        Staff               : 'Personel',
+        Station             : 'İstasyon',
+        Surname             : 'Soyad',
+        Tasks               : 'Görevler',
+        Technicians         : 'Teknisyenler',
+        Type                : 'Tür',
+        'Vehicle Condition' : 'Araç Durumu',
+        'Work hours'        : 'Çalışma saatleri',
+        Worker              : 'İşçi'
+    },
+
+    Button : {
+        '10K events'                  : '10K etkinlik',
+        '1K events'                   : '1K etkinlik',
+        '5K events'                   : '5K etkinlik',
+        'Add exception'               : 'İstisna ekle',
+        'Add invalid calendar'        : 'Geçersiz takvim ekle',
+        'Add invalid dependency'      : 'Geçersiz bağımlılık ekle',
+        'Add order'                   : 'Sipariş ekle',
+        'Add task'                    : 'Görev ekle',
+        'Add week'                    : 'Hafta ekle',
+        Apr                           : 'Nis',
+        Aug                           : 'Ağu',
+        August                        : 'Ağustos',
+        'Auto-schedule'               : 'Otomatik zamanlama',
+        'Bar settings'                : 'Çubuk ayarları',
+        Cancel                        : 'İptal',
+        'Change working time'         : 'Çalışma saatini değiştir',
+        'City - Resource'             : 'Şehir - Kaynak',
+        Custom                        : 'Özel',
+        Dark                          : 'Koyu',
+        Dec                           : 'Ara',
+        Default                       : 'Varsayılan',
+        'Default layouts'             : 'Varsayılan düzenler',
+        Delete                        : 'Sil',
+        Dependencies                  : 'Bağımlılıklar',
+        'Drag & resize settings'      : 'Sürükle ve yeniden boyutlandır ayarları',
+        Edit                          : 'Düzenle',
+        'Edit calendar'               : 'Takvimi düzenle',
+        'Enable mouse interaction'    : 'Fare etkileşimini etkinleştir',
+        Feb                           : 'Şub',
+        'Filter out non-working time' : 'Çalışma dışı zamanı filtrele',
+        'Hide scheduled'              : 'Zamanlanmış olanı gizle',
+        'Highlight 9-10am + 2-4pm'    : '9-10am + 2-4pm vurgula',
+        'Highlight while dragging'    : 'Sürüklerken vurgula',
+        'Horizontal mode'             : 'Yatay mod',
+        Jan                           : 'Oca',
+        Jul                           : 'Tem',
+        Jun                           : 'Haz',
+        'Layout function'             : 'Düzen fonksiyonu',
+        Light                         : 'Açık',
+        Login                         : 'Giriş yap',
+        Logout                        : 'Çıkış yap',
+        Mar                           : 'Mar',
+        March                         : 'Mart',
+        May                           : 'May',
+        'New event'                   : 'Yeni etkinlik',
+        'Next day'                    : 'Sonraki gün',
+        Nov                           : 'Kas',
+        Oct                           : 'Eki',
+        Overlap                       : 'Çakışma',
+        Pack                          : 'Paket',
+        'Previous day'                : 'Önceki gün',
+        Reset                         : 'Sıfırla',
+        'Reset data'                  : 'Verileri sıfırla',
+        'Resource - City'             : 'Kaynak - Şehir',
+        'Resource ranges'             : 'Kaynak aralıkları',
+        Save                          : 'Kaydet',
+        Sep                           : 'Eyl',
+        'Show setup time'             : 'Kurulum zamanını göster',
+        Stack                         : 'Yığın',
+        Sync                          : 'Senkronize',
+        Today                         : 'Bugün',
+        'Vertical mode'               : 'Dikey mod',
+        'Zoom in'                     : 'Yakınlaştır',
+        'Zoom out'                    : 'Uzaklaştır'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kültürel',
+        'Draw around parents'   : 'Ebeveynlerin etrafını çiz',
+        'Enable bar tooltip'    : 'Çubuk araç ipucunu etkinleştir',
+        Music                   : 'Müzik',
+        'Show bar texts'        : 'Çubuk metinlerini göster',
+        'Show max allocation'   : 'Maksimum tahsisi göster',
+        'Show non working time' : 'Çalışma dışı zamanı göster',
+        Sports                  : 'Spor',
+        Technology              : 'Teknoloji'
+    },
+
+    Slider : {
+        'Max capacity' : 'Maksimum kapasite',
+        'Row height'   : 'Satır yüksekliği'
+    },
+
+    Label : {
+        Days                        : 'Günler',
+        'Group by'                  : 'Grupla',
+        Months                      : 'Aylar',
+        Settings                    : 'Ayarlar',
+        'Viewing a repeating event' : 'Tekrarlayan bir etkinliği görüntüleme'
+    },
+
+    Combo : {
+        'Current timezone' : 'Geçerli saat dilimi',
+        'Group events by'  : 'Etkinlikleri grupla',
+        Parent             : 'Üst',
+        Resources          : 'Kaynaklar',
+        Show               : 'Göster'
+    },
+
+    NumberField : {
+        '% complete' : '% tamamlandı',
+        Events       : 'Etkinlikler',
+        Every        : 'Her',
+        Resources    : 'Kaynaklar'
+    },
+
+    TextField : {
+        Doctor           : 'Doktor',
+        Name             : 'Ad',
+        'Server address' : 'Sunucu adresi',
+        Username         : 'Kullanıcı adı'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Maksimum kaynak tahsisi çizgisini göstermek için işaretleyin',
+        'Check to show resource allocation in the bars'                                                            : 'Çubuklarda kaynak tahsisini göstermek için işaretleyin',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Fareyi çubukların üzerine hareket ettirirken araç ipuçlarını göstermek için işaretleyin',
+        'Click to group by City - Resource'                                                                        : 'Şehre göre gruplamak için tıklayın - Kaynak',
+        'Click to group by Resource - City'                                                                        : 'Kaynağa göre gruplamak için tıklayın - Şehir',
+        'Collapse all groups'                                                                                      : 'Tüm grupları daralt',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Ağaç grubu özelliğini devre dışı bırak ve varsayılan Kaynak - Atama görünümüne geri dön',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : "Oluşturulacak kaynak başına etkinlik sayısını girin ve [ENTER]'a basın",
+        'Enter number of resource rows to generate and press [ENTER]'                                              : "Oluşturulacak kaynak satır sayısını girin ve [ENTER]'a basın",
+        'Expand all groups'                                                                                        : 'Tüm grupları genişlet',
+        Friday                                                                                                     : 'Cuma',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'İki segment yan yana yerleştirilirse, bunları birleştirebilir veya ayrı tutabilirsiniz',
+        Monday                                                                                                     : 'Pazartesi',
+        Saturday                                                                                                   : 'Cumartesi',
+        Sunday                                                                                                     : 'Pazar',
+        Thursday                                                                                                   : 'Perşembe',
+        'Toggle layout'                                                                                            : 'Düzeni değiştir',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Planlanmamış etkinlikleri şu anda görüntülenen zaman dilimine sığdırmaya çalışır',
+        Tuesday                                                                                                    : 'Salı',
+        'View next day'                                                                                            : 'Sonraki günü görüntüle',
+        'View previous day'                                                                                        : 'Önceki günü görüntüle',
+        'View today, to see the current time line'                                                                 : 'Bugünü görüntüle, mevcut zaman çizgisini görmek için',
+        Wednesday                                                                                                  : 'Çarşamba'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Bitişik segmentleri otomatik birleştir',
+        'Auto-send'                    : 'Otomatik gönder',
+        'Auto-sync'                    : 'Otomatik senkronizasyon',
+        'Compact mode'                 : 'Kompakt mod',
+        'Constrain drag to row'        : 'Sürüklemeyi satırla sınırla',
+        'Dark mode'                    : 'Karanlık mod',
+        'Days are working by default'  : 'Günler varsayılan olarak çalışıyor',
+        'Enable bar tooltip'           : 'Çubuk ipucu etkinleştir',
+        'Enable highlighting'          : 'Vurgulamayı etkinleştir',
+        'Enable mouse interaction'     : 'Fare etkileşimini etkinleştir',
+        'Enable task drag drop'        : "Görev sürükle bırak'ı etkinleştir",
+        'Filter out non-working time'  : 'Çalışma dışı zamanı filtrele',
+        'Highlight 9-10am + 2-4pm'     : '9-10am + 2-4pm vurgula',
+        'Highlight while dragging'     : 'Sürüklerken vurgula',
+        'Show non working time'        : 'Çalışma dışı zamanı göster',
+        'Show setup time'              : 'Kurulum zamanını göster',
+        'Show summaries'               : 'Özetleri göster',
+        'Snap to grid'                 : 'Izgaraya hizala',
+        'View Planned dates'           : 'Planlanan tarihleri görüntüle'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

@@ -1,0 +1,61 @@
+{
+  "name": "basic",
+  "description": "Basic setup with Remix (Typescript)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "scripts": {
+    "build": "remix vite:build",
+    "dev": "remix vite:dev",
+    "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
+    "start": "remix vite:dev",
+    "serve": "remix-serve ./build/server/index.js",
+    "typecheck": "tsc",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-react": "7.3.4",
+    "@remix-run/node": "2.9.1",
+    "@remix-run/react": "2.9.1",
+    "@remix-run/serve": "2.9.1",
+    "isbot": "4.1.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "remix-utils": "7.6.0"
+  },
+  "devDependencies": {
+    "@remix-run/dev": "2.9.1",
+    "@types/react": "18.2.20",
+    "@types/react-dom": "18.2.7",
+    "@typescript-eslint/eslint-plugin": "8.24.1",
+    "@typescript-eslint/parser": "8.24.1",
+    "eslint": "9.26.0",
+    "eslint-import-resolver-typescript": "3.6.1",
+    "eslint-plugin-import": "2.28.1",
+    "eslint-plugin-jsx-a11y": "6.7.1",
+    "eslint-plugin-react": "7.33.2",
+    "eslint-plugin-react-hooks": "4.6.0",
+    "fs-extra": "11.2.0",
+    "postinstall": "0.7.4",
+    "sass": "1.78.0",
+    "typescript": "5.1.6",
+    "vite": "5.1.0",
+    "vite-tsconfig-paths": "4.2.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "sideEffects": false,
+  "type": "module"
+}

@@ -1,0 +1,7 @@
+{
+  ".b-sch-event-narrow": {
+    "align": "l0-r0",
+    "title": null,
+    "content": "Events with a width less than a configurable value have rotated text"
+  }
+}

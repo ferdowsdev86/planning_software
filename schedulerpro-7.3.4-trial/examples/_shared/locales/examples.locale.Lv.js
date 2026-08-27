@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Lv.js';
+import '../../../lib/SchedulerPro/localization/Lv.js';
+import './shared.locale.Lv.js';
+
+const locale = {
+
+    localeName : 'Lv',
+    localeDesc : 'Latviešu',
+    localeCode : 'lv-LV',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Darbības',
+        Active              : 'Aktīvs',
+        Allocation          : 'Piešķiršana',
+        Calendar            : 'Kalendārs',
+        City                : 'Pilsēta',
+        Condition           : 'Nosacījums',
+        Consultant          : 'Konsultants',
+        Contractor          : 'Līgumpartneris',
+        Doctor              : 'Ārsts',
+        Driver              : 'Vadītājs',
+        Expedition          : 'Ekspedīcija',
+        'First name'        : 'Vārds',
+        Inspector           : 'Inspektors',
+        Lag                 : 'Aizkave',
+        Manager             : 'Pārvaldnieks',
+        Name                : 'Nosaukums',
+        Projects            : 'Projekti',
+        Property            : 'Īpašums',
+        Rating              : 'Vērtējums',
+        Resource            : 'Resurss',
+        Role                : 'Loma',
+        Score               : 'Rezultāts',
+        Shift               : 'Maiņa',
+        'Speaker rating'    : 'Runātāja vērtējums',
+        Staff               : 'Personāls',
+        Station             : 'Stacija',
+        Surname             : 'Uzvārds',
+        Tasks               : 'Uzdevumi',
+        Technicians         : 'Tehniķi',
+        Type                : 'Tips',
+        'Vehicle Condition' : 'Transportlīdzekļa stāvoklis',
+        'Work hours'        : 'Darba stundas',
+        Worker              : 'Darbinieks'
+    },
+
+    Button : {
+        '10K events'                  : '10K notikumi',
+        '1K events'                   : '1K notikumi',
+        '5K events'                   : '5K notikumi',
+        'Add exception'               : 'Pievienot izņēmumu',
+        'Add invalid calendar'        : 'Pievienot nederīgu kalendāru',
+        'Add invalid dependency'      : 'Pievienot nederīgu atkarību',
+        'Add order'                   : 'Pievienot pasūtījumu',
+        'Add task'                    : 'Pievienot uzdevumu',
+        'Add week'                    : 'Pievienot nedēļu',
+        Apr                           : 'Apr',
+        Aug                           : 'Aug',
+        August                        : 'Augusts',
+        'Auto-schedule'               : 'Automātiska plānošana',
+        'Bar settings'                : 'Joslu iestatījumi',
+        Cancel                        : 'Atcelt',
+        'Change working time'         : 'Mainīt darba laiku',
+        'City - Resource'             : 'Pilsēta - Resurss',
+        Custom                        : 'Pielāgots',
+        Dark                          : 'Tumšs',
+        Dec                           : 'Dec',
+        Default                       : 'Noklusējums',
+        'Default layouts'             : 'Noklusējuma izkārtojumi',
+        Delete                        : 'Dzēst',
+        Dependencies                  : 'Atkarības',
+        'Drag & resize settings'      : 'Vilkšanas un izmēru maiņas iestatījumi',
+        Edit                          : 'Rediģēt',
+        'Edit calendar'               : 'Rediģēt kalendāru',
+        'Enable mouse interaction'    : 'Iespējot peles mijiedarbību',
+        Feb                           : 'Feb',
+        'Filter out non-working time' : 'Filtrēt ārpus darba laika',
+        'Hide scheduled'              : 'Slēpt plānoto',
+        'Highlight 9-10am + 2-4pm'    : 'Izcelt 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Izcelt velkot',
+        'Horizontal mode'             : 'Horizontālais režīms',
+        Jan                           : 'Jan',
+        Jul                           : 'Jul',
+        Jun                           : 'Jun',
+        'Layout function'             : 'Izkārtojuma funkcija',
+        Light                         : 'Gaišs',
+        Login                         : 'Pieteikties',
+        Logout                        : 'Izrakstīties',
+        Mar                           : 'Mar',
+        March                         : 'Marts',
+        May                           : 'May',
+        'New event'                   : 'Jauns notikums',
+        'Next day'                    : 'Nākamā diena',
+        Nov                           : 'Nov',
+        Oct                           : 'Oct',
+        Overlap                       : 'Pārklāšanās',
+        Pack                          : 'Iepakot',
+        'Previous day'                : 'Iepriekšējā diena',
+        Reset                         : 'Atiestatīt',
+        'Reset data'                  : 'Atiestatīt datus',
+        'Resource - City'             : 'Resurss - Pilsēta',
+        'Resource ranges'             : 'Resursu diapazoni',
+        Save                          : 'Saglabāt',
+        Sep                           : 'Sep',
+        'Show setup time'             : 'Rādīt iestatīšanas laiku',
+        Stack                         : 'Kaudze',
+        Sync                          : 'Sinhronizēt',
+        Today                         : 'Šodien',
+        'Vertical mode'               : 'Vertikālais režīms',
+        'Zoom in'                     : 'Pietuvināt',
+        'Zoom out'                    : 'Attālināt'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kultūras',
+        'Draw around parents'   : 'Zīmēt ap vecākiem',
+        'Enable bar tooltip'    : 'Iespējot joslas rīka padomu',
+        Music                   : 'Mūzika',
+        'Show bar texts'        : 'Rādīt joslu tekstus',
+        'Show max allocation'   : 'Rādīt maksimālo piešķīrumu',
+        'Show non working time' : 'Rādīt ne darba laiku',
+        Sports                  : 'Sports',
+        Technology              : 'Tehnoloģija'
+    },
+
+    Slider : {
+        'Max capacity' : 'Maksimālā ietilpība',
+        'Row height'   : 'Rindas augstums'
+    },
+
+    Label : {
+        Days                        : 'Dienas',
+        'Group by'                  : 'Grupēt pēc',
+        Months                      : 'Mēneši',
+        Settings                    : 'Iestatījumi',
+        'Viewing a repeating event' : 'Skatīt atkārtotu notikumu'
+    },
+
+    Combo : {
+        'Current timezone' : 'Pašreizējā laika josla',
+        'Group events by'  : 'Grupēt notikumus pēc',
+        Parent             : 'Vecāks',
+        Resources          : 'Resursi',
+        Show               : 'Rādīt'
+    },
+
+    NumberField : {
+        '% complete' : '% pabeigts',
+        Events       : 'Notikumi',
+        Every        : 'Katrs',
+        Resources    : 'Resursi'
+    },
+
+    TextField : {
+        Doctor           : 'Ārsts',
+        Name             : 'Nosaukums',
+        'Server address' : 'Servera adrese',
+        Username         : 'Lietotājvārds'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Atzīmējiet, lai parādītu maksimālās resursu piešķīruma līniju',
+        'Check to show resource allocation in the bars'                                                            : 'Atzīmējiet, lai parādītu resursu piešķīrumu joslās',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Pārbaudiet, lai parādītu rīka padomus, pārvietojot peli virs joslām',
+        'Click to group by City - Resource'                                                                        : 'Klikšķiniet, lai grupētu pēc Pilsēta - Resurss',
+        'Click to group by Resource - City'                                                                        : 'Klikšķiniet, lai grupētu pēc Resurss - Pilsēta',
+        'Collapse all groups'                                                                                      : 'Sakļaut visas grupas',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Atspējot koka grupēšanas funkciju un atgriezties pie noklusējuma Resurss - Uzdevums izskata',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Ievadiet notikumu skaitu uz resursu, lai ģenerētu, un nospiediet [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Ievadiet resursu rindu skaitu, lai ģenerētu, un nospiediet [ENTER]',
+        'Expand all groups'                                                                                        : 'Izvērst visas grupas',
+        Friday                                                                                                     : 'Piektdiena',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Ja divi segmenti ir novietoti blakus, jūs varat tos apvienot vai atstāt atsevišķi',
+        Monday                                                                                                     : 'Pirmdiena',
+        Saturday                                                                                                   : 'Sestdiena',
+        Sunday                                                                                                     : 'Svētdiena',
+        Thursday                                                                                                   : 'Ceturtdiena',
+        'Toggle layout'                                                                                            : 'Pārslēgt izkārtojumu',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Mēģina iekļaut neplānotos notikumus pašlaik parādītajā laika posmā',
+        Tuesday                                                                                                    : 'Otrdiena',
+        'View next day'                                                                                            : 'Skatīt nākamo dienu',
+        'View previous day'                                                                                        : 'Skatīt iepriekšējo dienu',
+        'View today, to see the current time line'                                                                 : 'Skatīt šodienu, lai redzētu pašreizējo laika līniju',
+        Wednesday                                                                                                  : 'Trešdiena'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Automātiski apvienot blakus esošos segmentus',
+        'Auto-send'                    : 'Automātiska sūtīšana',
+        'Auto-sync'                    : 'Automātiskā sinhronizācija',
+        'Compact mode'                 : 'Kompaktais režīms',
+        'Constrain drag to row'        : 'Ierobežot vilkšanu uz rindu',
+        'Dark mode'                    : 'Tumšais režīms',
+        'Days are working by default'  : 'Dienas pēc noklusējuma ir darba dienas',
+        'Enable bar tooltip'           : 'Iespējot joslas rīka padomu',
+        'Enable highlighting'          : 'Iespējot izcelšanu',
+        'Enable mouse interaction'     : 'Iespējot peles mijiedarbību',
+        'Enable task drag drop'        : 'Iespējot uzdevumu vilkšanu un nomešanu',
+        'Filter out non-working time'  : 'Filtrēt ārpus darba laika',
+        'Highlight 9-10am + 2-4pm'     : 'Izcelt 9-10am + 2-4pm',
+        'Highlight while dragging'     : 'Izcelt vilkšanas laikā',
+        'Show non working time'        : 'Rādīt ārpus darba laiku',
+        'Show setup time'              : 'Rādīt iestatīšanas laiku',
+        'Show summaries'               : 'Rādīt kopsavilkumus',
+        'Snap to grid'                 : 'Pieskaņot režģim',
+        'View Planned dates'           : 'Skatīt plānotos datumus'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

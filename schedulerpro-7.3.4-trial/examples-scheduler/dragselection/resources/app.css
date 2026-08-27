@@ -1,0 +1,24 @@
+.b-drag-select-rect {
+    background : color-mix(in srgb, var(--b-primary), transparent 90%);
+    border     : 1px solid var(--b-primary-70);
+}
+
+[data-ref=selectionSummary] {
+    strong {
+        font-weight : 500;
+    }
+
+    strong, i {
+        margin-inline : 1em .4em;
+    }
+
+    i {
+        color : #0276f8;
+    }
+
+    span {
+        padding-inline-start : .2em;
+        min-width            : 5em;
+    }
+}
+

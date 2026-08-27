@@ -1,0 +1,41 @@
+{
+  "resources" : [
+    { "id" : 1, "name" : "Rob" },
+    { "id" : 2, "name" : "Mike" },
+    { "id" : 3, "name" : "Kate" },
+    { "id" : 4, "name" : "Lisa" },
+    { "id" : 5, "name" : "Dave" },
+    { "id" : 6, "name" : "Arnold" },
+    { "id" : 7, "name" : "Lee" },
+    { "id" : 8, "name" : "Jong" }
+  ],
+  "eventsOdd" : [
+    { "startDate" : 2, "resourceId" : 4,  "duration" : 7, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime" },
+    { "startDate" : 1, "resourceId" : 1,  "duration" : 4, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink" },
+    { "startDate" : 0, "resourceId" : 3,  "duration" : 5, "durationUnit" : "hour", "name" : "Measure", "eventColor" : "indigo" },
+    { "startDate" : 8, "resourceId" : 2,  "duration" : 5, "durationUnit" : "hour", "name" : "Estimate", "eventColor" : "blue" },
+    { "startDate" : 11, "resourceId" : 5,  "duration" : 4, "durationUnit" : "hour", "name" : "Calculate" },
+    { "startDate" : 9, "resourceId" : 6,  "duration" : 6, "durationUnit" : "hour", "name" : "Simulate" },
+    { "startDate" : 12, "resourceId" : 8,  "duration" : 3, "durationUnit" : "hour", "name" : "Order" },
+    { "startDate" : 17, "resourceId" : 7, "duration" : 7, "durationUnit" : "hour", "name" : "Engage" },
+    { "startDate" : 16, "resourceId" : 8,  "duration" : 3, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime" },
+    { "startDate" : 20, "resourceId" : 8,  "duration" : 3, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink" }
+  ],
+  "eventsEven" : [
+    { "startDate" : 5, "resourceId" : 1,  "duration" : 3, "durationUnit" : "hour", "name" : "Measure", "eventColor" : "indigo" },
+    { "startDate" : 0, "resourceId" : 4,  "duration" : 6, "durationUnit" : "hour", "name" : "Estimate", "eventColor" : "blue" },
+    { "startDate" : 3, "resourceId" : 5,  "duration" : 4, "durationUnit" : "hour", "name" : "Calculate" },
+    { "startDate" : 8, "resourceId" : 2,  "duration" : 4, "durationUnit" : "hour", "name" : "Simulate" },
+    { "startDate" : 12, "resourceId" : 6,  "duration" : 5, "durationUnit" : "hour", "name" : "Order" },
+    { "startDate" : 10, "resourceId" : 7,  "duration" : 3, "durationUnit" : "hour", "name" : "Engage" },
+    { "startDate" : 13, "resourceId" : 3,  "duration" : 3, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime" },
+    { "startDate" : 16, "resourceId" : 1, "duration" : 5, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink" },
+    { "startDate" : 17, "resourceId" : 8,  "duration" : 3, "durationUnit" : "hour", "name" : "Measure", "eventColor" : "indigo" },
+    { "startDate" : 21, "resourceId" : 8,  "duration" : 3, "durationUnit" : "hour", "name" : "Estimate", "eventColor" : "blue" }
+  ],
+  "timeRanges" : [
+    { "id" : 1, "startDate" : "2020-00-01 00:00", "endDate" : "2020-00-01 08:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Night shift (UTC: 0-8)", "cls" : "night-shift" },
+    { "id" : 2, "startDate" : "2020-00-01 08:00", "endDate" : "2020-00-01 16:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Day shift (UTC: 8-16)", "cls" : "day-shift" },
+    { "id" : 3, "startDate" : "2020-00-01 16:00", "endDate" : "2020-00-02 00:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Evening shift (UTC: 16-24)", "cls" : "evening-shift" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "title": "Custom build using WebPack",
+  "description": "This very basic demo shows how to use SchedulerBase and webpack to do a custom build from our sources",
+  "source": [
+    "package.json",
+    "src/data/data.json",
+    "src/index.html",
+    "src/index.js",
+    "src/index.scss",
+    "webpack.config.js"
+  ]
+}

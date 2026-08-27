@@ -1,0 +1,7 @@
+{
+  ".b-sch-event": {
+    "title": "Custom rendering",
+    "content": "Custom interactive elements are rendered into the event bars",
+    "align": "l-r"
+  }
+}

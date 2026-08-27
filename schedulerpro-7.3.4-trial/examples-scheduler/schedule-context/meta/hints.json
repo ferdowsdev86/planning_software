@@ -1,0 +1,8 @@
+{
+  ".b-time-axis-sub-grid .b-grid-row[aria-rowindex=\"6\"]": {
+    "title": "Hover context",
+    "content": "A Widget with injected context is shown while hovering ticks",
+    "align": "t-b",
+    "style": "margin-inline-start:-35px"
+  }
+}

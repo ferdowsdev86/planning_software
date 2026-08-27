@@ -1,0 +1,7 @@
+{
+  "title": ".NET demo",
+  "description": "Shows scheduler with .NET backend",
+  "package": "BryntumSchedulerCrudDemo/app/package.json",
+  "skipBuild": true,
+  "skipCache": true
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "id"      : 1,
+    "name"    : "Video camera",
+    "iconCls" : "fa fa-video"
+  },
+  {
+    "id"      : 2,
+    "name"    : "Microphone",
+    "iconCls" : "fa fa-microphone"
+  },
+  {
+    "id"      : 3,
+    "name"    : "Toolbox",
+    "iconCls" : "fa fa-toolbox"
+  },
+  {
+    "id"      : 4,
+    "name"    : "Van",
+    "iconCls" : "fa fa-shuttle-van"
+  },
+  {
+    "id"      : 5,
+    "name"    : "Secret device",
+    "iconCls" : "fa fa-question"
+  },
+  {
+    "id"      : 6,
+    "name"    : "Binoculars",
+    "iconCls" : "fa fa-binoculars"
+  },
+  {
+    "id"      : 7,
+    "name"    : "Helicopter",
+    "iconCls" : "fa fa-helicopter"
+  },
+  {
+    "id"      : 8,
+    "name"    : "Hammer",
+    "iconCls" : "fa fa-hammer"
+  },
+  {
+    "id"      : 9,
+    "name"    : "First aid kit",
+    "iconCls" : "fa fa-first-aid"
+  }
+]

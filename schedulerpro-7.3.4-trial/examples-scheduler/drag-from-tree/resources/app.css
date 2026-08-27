@@ -1,0 +1,28 @@
+/* Highlight the target resource */
+.b-scheduler.b-dragging-event .b-timeline-sub-grid .b-grid-row.target-resource {
+    --b-grid-cell-background : color-mix(in oklab, var(--b-color-green), transparent 90%);
+}
+
+.b-sch-event-wrap {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+}
+
+#main {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+}
+
+.b-unassigned-class.b-drag-proxy.b-drag-invalid {
+    --b-primary : var(--b-color-red);
+}
+
+.b-sch-tooltip-start-date,
+.b-sch-tooltip-end-date {
+    margin-top : 0.2em;
+}
+
+.b-grid-header,
+.b-unplanned-tree-grid-header {
+    height : 57px;
+}

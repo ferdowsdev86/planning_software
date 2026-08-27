@@ -1,0 +1,20 @@
+{
+  "title": "Inline data demo (Angular View Engine)",
+  "description": "Shows how to bind inline data to the Angular Scheduler Pro component",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.data.ts",
+    "src/app/app.module.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

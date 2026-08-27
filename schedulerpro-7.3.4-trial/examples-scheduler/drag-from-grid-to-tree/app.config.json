@@ -1,0 +1,14 @@
+{
+  "title": "Drag from external grid to a tree",
+  "description": "This example shows how to drag tasks from a grid onto a tree schedule.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Custom event editor (Vue 3 + Vite)",
+  "description": "This demo contains an example of the Vue Scheduler with a custom Vue + Vuetify event editor popup replacing the default one",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/components/DateTime.vue",
+    "src/components/EventEditor.vue",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

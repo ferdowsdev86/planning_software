@@ -1,0 +1,15 @@
+{
+  "title": "Pro non-working time demo (React + Vite)",
+  "description": "Shows a Scheduler Pro setup with a working hours calendar and time axis filtering",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

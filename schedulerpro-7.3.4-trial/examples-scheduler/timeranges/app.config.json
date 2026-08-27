@@ -1,0 +1,10 @@
+{
+  "title": "TimeRanges demo",
+  "description": "Shows how to use the TimeRanges feature to add vertical lines and zones to the schedule",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

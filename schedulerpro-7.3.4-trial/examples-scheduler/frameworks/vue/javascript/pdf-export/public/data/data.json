@@ -1,0 +1,747 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"        : 2,
+        "name"      : "Paint",
+        "bg"        : "#01BAEF",
+        "textColor" : "#fff",
+        "icon"      : "paint-brush"
+      },
+      {
+        "id"        : 3,
+        "name"      : "Cut 1",
+        "bg"        : "#01BAEF",
+        "textColor" : "#fff",
+        "icon"      : "cut"
+      },
+      {
+        "id"        : 4,
+        "name"      : "Cut 2",
+        "bg"        : "#01BAEF",
+        "textColor" : "#fff",
+        "icon"      : "cut"
+      },
+      {
+        "id"        : 5,
+        "name"      : "Inspection",
+        "bg"        : "#01BAEF",
+        "textColor" : "#fff",
+        "icon"      : "search"
+      },
+      {
+        "id"        : 6,
+        "name"      : "Drill 1",
+        "bg"        : "#58c0c7",
+        "textColor" : "#fff",
+        "icon"      : "cog"
+      },
+      {
+        "id"        : 7,
+        "name"      : "Drill 2",
+        "bg"        : "#58c0c7",
+        "textColor" : "#fff",
+        "icon"      : "cog"
+      },
+      {
+        "id"        : 8,
+        "name"      : "Lubrication",
+        "textColor" : "#000",
+        "icon"      : "tint"
+      },
+      {
+        "id"        : 9,
+        "name"      : "Assembly 1",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 10,
+        "name"      : "Assembly 2",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 11,
+        "name"      : "Assembly 3",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 12,
+        "name"      : "Assembly 4",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 13,
+        "name"      : "Assembly 5",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 14,
+        "name"      : "Assembly 6",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "puzzle-piece"
+      },
+      {
+        "id"        : 15,
+        "name"      : "Robot Inspection",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "eye"
+      },
+      {
+        "id"        : 16,
+        "name"      : "Manual Inspection",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "eye"
+      },
+      {
+        "id"        : 17,
+        "name"      : "Pack 1",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "archive"
+      },
+      {
+        "id"        : 18,
+        "name"      : "Pack 2",
+        "bg"        : "#20BF55",
+        "textColor" : "#fff",
+        "icon"      : "archive"
+      },
+      {
+        "id"        : 19,
+        "name"      : "Welding 1",
+        "bg"        : "#FF5733",
+        "textColor" : "#fff",
+        "icon"      : "fire"
+      },
+      {
+        "id"        : 20,
+        "name"      : "Welding 2",
+        "bg"        : "#FF5733",
+        "textColor" : "#fff",
+        "icon"      : "fire"
+      },
+      {
+        "id"        : 21,
+        "name"      : "Polishing",
+        "bg"        : "#C70039",
+        "textColor" : "#fff",
+        "icon"      : "magic"
+      },
+      {
+        "id"        : 22,
+        "name"      : "Quality Control",
+        "bg"        : "#900C3F",
+        "textColor" : "#fff",
+        "icon"      : "check-square"
+      },
+      {
+        "id"        : 23,
+        "name"      : "Packaging",
+        "bg"        : "#581845",
+        "textColor" : "#fff",
+        "icon"      : "box"
+      },
+      {
+        "id"        : 24,
+        "name"      : "Shipping",
+        "bg"        : "#FFC300",
+        "textColor" : "#000",
+        "icon"      : "truck"
+      },
+      {
+        "id"        : 25,
+        "name"      : "Maintenance",
+        "bg"        : "#DAF7A6",
+        "textColor" : "#000",
+        "icon"      : "wrench"
+      },
+      {
+        "id"        : 26,
+        "name"      : "Electrical",
+        "bg"        : "#FFC300",
+        "textColor" : "#000",
+        "icon"      : "bolt"
+      },
+      {
+        "id"        : 27,
+        "name"      : "Plumbing",
+        "bg"        : "#3498DB",
+        "textColor" : "#fff",
+        "icon"      : "tint"
+      },
+      {
+        "id"        : 28,
+        "name"      : "Carpentry",
+        "bg"        : "#A04000",
+        "textColor" : "#fff",
+        "icon"      : "hammer"
+      },
+      {
+        "id"        : 29,
+        "name"      : "Design",
+        "bg"        : "#8E44AD",
+        "textColor" : "#fff",
+        "icon"      : "pencil-alt"
+      },
+      {
+        "id"        : 30,
+        "name"      : "Programming",
+        "bg"        : "#2E86C1",
+        "textColor" : "#fff",
+        "icon"      : "code"
+      },
+      {
+        "id"        : 31,
+        "name"      : "Testing",
+        "bg"        : "#138D75",
+        "textColor" : "#fff",
+        "icon"      : "vial"
+      },
+      {
+        "id"        : 32,
+        "name"      : "Documentation",
+        "bg"        : "#D35400",
+        "textColor" : "#fff",
+        "icon"      : "file-alt"
+      },
+      {
+        "id"        : 33,
+        "name"      : "Training",
+        "bg"        : "#7D3C98",
+        "textColor" : "#fff",
+        "icon"      : "graduation-cap"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : "e10",
+        "resourceId" : 2,
+        "name"       : "ABC101",
+        "cls"        : "forge",
+        "startDate"  : "2017-12-01T01:00:00.000",
+        "endDate"    : "2017-12-01T08:00:00.000"
+      },
+      {
+        "id"         : "e101",
+        "resourceId" : 1,
+        "name"       : "ABC102",
+        "startDate"  : "2017-12-02T15:00:00.000",
+        "endDate"    : "2017-12-02T21:00:00.000"
+      },
+      {
+        "id"         : "e11",
+        "resourceId" : 2,
+        "name"       : "ABC103",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000"
+      },
+      {
+        "id"         : "e21",
+        "resourceId" : 3,
+        "name"       : "CCD321",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000"
+      },
+      {
+        "id"         : "e211",
+        "resourceId" : 18,
+        "name"       : "CCD322",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T06:00:00.000"
+      },
+      {
+        "id"         : "e22",
+        "resourceId" : 4,
+        "name"       : "CCD325",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000",
+        "cls"        : "Special"
+      },
+      {
+        "id"         : "e22222",
+        "resourceId" : 5,
+        "name"       : "CCD329",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T09:00:00.000"
+      },
+      {
+        "id"         : "e23",
+        "resourceId" : 16,
+        "name"       : "CCD321x",
+        "startDate"  : "2017-12-02T08:00:00.000",
+        "endDate"    : "2017-12-02T15:00:00.000",
+        "cls"        : "VerySpecial"
+      },
+      {
+        "id"         : "2",
+        "startDate"  : "2017-12-01T02:00:00.000",
+        "endDate"    : "2017-12-01T07:00:00.000",
+        "name"       : "GFK359",
+        "resourceId" : 6
+      },
+      {
+        "id"         : "3",
+        "startDate"  : "2017-12-01T08:00:00.000",
+        "endDate"    : "2017-12-01T13:00:00.000",
+        "name"       : "HGH767",
+        "resourceId" : 6
+      },
+      {
+        "id"         : "4",
+        "startDate"  : "2017-12-01T14:00:00.000",
+        "endDate"    : "2017-12-01T19:00:00.000",
+        "name"       : "LOP22",
+        "resourceId" : 6
+      },
+      {
+        "id"         : "5",
+        "startDate"  : "2017-12-01T10:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000",
+        "name"       : "NPO879",
+        "resourceId" : 7
+      },
+      {
+        "id"         : "6",
+        "startDate"  : "2017-12-01T13:00:00.000",
+        "endDate"    : "2017-12-01T15:00:00.000",
+        "name"       : "VBM234",
+        "resourceId" : 7
+      },
+      {
+        "id"         : "7",
+        "startDate"  : "2017-12-01T16:00:00.000",
+        "endDate"    : "2017-12-01T18:00:00.000",
+        "name"       : "ASR231",
+        "resourceId" : 7
+      },
+      {
+        "id"         : "8",
+        "startDate"  : "2017-12-01T19:00:00.000",
+        "endDate"    : "2017-12-01T23:00:00.000",
+        "cls"        : "lubrication",
+        "name"       : "TTY221",
+        "resourceId" : 8
+      },
+      {
+        "id"         : "9",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T04:00:00.000",
+        "name"       : "FIU879",
+        "resourceId" : 10
+      },
+      {
+        "id"         : "10",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T04:00:00.000",
+        "name"       : "POI321",
+        "resourceId" : 11
+      },
+      {
+        "id"         : "11",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T04:00:00.000",
+        "name"       : "SDF342",
+        "resourceId" : 12
+      },
+      {
+        "id"         : "12",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T04:00:00.000",
+        "name"       : "VCX222",
+        "resourceId" : 9
+      },
+      {
+        "id"         : "13",
+        "startDate"  : "2017-12-02T02:00:00.000",
+        "endDate"    : "2017-12-02T04:00:00.000",
+        "name"       : "AWQ432",
+        "resourceId" : 17
+      },
+      {
+        "id"         : "14",
+        "startDate"  : "2017-12-02T05:00:00.000",
+        "endDate"    : "2017-12-02T07:00:00.000",
+        "name"       : "TYR325",
+        "resourceId" : 12
+      },
+      {
+        "id"         : "15",
+        "startDate"  : "2017-12-02T07:00:00.000",
+        "endDate"    : "2017-12-02T09:00:00.000",
+        "name"       : "OIU876",
+        "resourceId" : 13
+      },
+      {
+        "id"         : "16",
+        "startDate"  : "2017-12-02T09:00:00.000",
+        "endDate"    : "2017-12-02T14:00:00.000",
+        "name"       : "PPA464",
+        "resourceId" : 14
+      },
+      {
+        "id"         : "17",
+        "startDate"  : "2017-12-02T09:00:00.000",
+        "endDate"    : "2017-12-02T14:00:00.000",
+        "name"       : "PPI343",
+        "resourceId" : 15
+      },
+      {
+        "id"         : "e101a",
+        "resourceId" : 19,
+        "name"       : "WLD101",
+        "startDate"  : "2017-12-01T08:00:00.000",
+        "endDate"    : "2017-12-01T11:00:00.000"
+      },
+      {
+        "id"         : "e102",
+        "resourceId" : 19,
+        "name"       : "WLD102",
+        "startDate"  : "2017-12-01T13:00:00.000",
+        "endDate"    : "2017-12-01T16:00:00.000"
+      },
+      {
+        "id"         : "e103",
+        "resourceId" : 20,
+        "name"       : "WLD201",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000"
+      },
+      {
+        "id"         : "e104",
+        "resourceId" : 20,
+        "name"       : "WLD202",
+        "startDate"  : "2017-12-01T14:00:00.000",
+        "endDate"    : "2017-12-01T17:00:00.000"
+      },
+      {
+        "id"         : "e105",
+        "resourceId" : 21,
+        "name"       : "POL101",
+        "startDate"  : "2017-12-01T10:00:00.000",
+        "endDate"    : "2017-12-01T13:00:00.000"
+      },
+      {
+        "id"         : "e106",
+        "resourceId" : 22,
+        "name"       : "QC101",
+        "startDate"  : "2017-12-01T14:00:00.000",
+        "endDate"    : "2017-12-01T15:00:00.000"
+      },
+      {
+        "id"         : "e107",
+        "resourceId" : 22,
+        "name"       : "QC102",
+        "startDate"  : "2017-12-01T16:00:00.000",
+        "endDate"    : "2017-12-01T17:00:00.000"
+      },
+      {
+        "id"         : "e108",
+        "resourceId" : 23,
+        "name"       : "PKG101",
+        "startDate"  : "2017-12-01T18:00:00.000",
+        "endDate"    : "2017-12-01T20:00:00.000"
+      },
+      {
+        "id"         : "e109",
+        "resourceId" : 24,
+        "name"       : "SHP101",
+        "startDate"  : "2017-12-02T08:00:00.000",
+        "endDate"    : "2017-12-02T14:00:00.000"
+      },
+      {
+        "id"         : "e110",
+        "resourceId" : 25,
+        "name"       : "MNT101",
+        "startDate"  : "2017-12-01T07:00:00.000",
+        "endDate"    : "2017-12-01T11:00:00.000"
+      },
+      {
+        "id"         : "e111",
+        "resourceId" : 25,
+        "name"       : "MNT102",
+        "startDate"  : "2017-12-02T07:00:00.000",
+        "endDate"    : "2017-12-02T11:00:00.000"
+      },
+      {
+        "id"         : "e112",
+        "resourceId" : 26,
+        "name"       : "ELC101",
+        "startDate"  : "2017-12-01T10:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000"
+      },
+      {
+        "id"         : "e113",
+        "resourceId" : 27,
+        "name"       : "PLM101",
+        "startDate"  : "2017-12-01T13:00:00.000",
+        "endDate"    : "2017-12-01T15:00:00.000"
+      },
+      {
+        "id"         : "e114",
+        "resourceId" : 28,
+        "name"       : "CRP101",
+        "startDate"  : "2017-12-01T16:00:00.000",
+        "endDate"    : "2017-12-01T18:00:00.000"
+      },
+      {
+        "id"         : "e115",
+        "resourceId" : 29,
+        "name"       : "DSG101",
+        "startDate"  : "2017-12-01T09:00:00.000",
+        "endDate"    : "2017-12-01T12:00:00.000"
+      },
+      {
+        "id"         : "e116",
+        "resourceId" : 29,
+        "name"       : "DSG102",
+        "startDate"  : "2017-12-01T13:00:00.000",
+        "endDate"    : "2017-12-01T16:00:00.000"
+      },
+      {
+        "id"         : "e117",
+        "resourceId" : 30,
+        "name"       : "PRG101",
+        "startDate"  : "2017-12-01T10:00:00.000",
+        "endDate"    : "2017-12-01T14:00:00.000"
+      },
+      {
+        "id"         : "e118",
+        "resourceId" : 30,
+        "name"       : "PRG102",
+        "startDate"  : "2017-12-01T15:00:00.000",
+        "endDate"    : "2017-12-01T18:00:00.000"
+      },
+      {
+        "id"         : "e119",
+        "resourceId" : 31,
+        "name"       : "TST101",
+        "startDate"  : "2017-12-02T07:00:00.000",
+        "endDate"    : "2017-12-02T11:00:00.000"
+      },
+      {
+        "id"         : "e120",
+        "resourceId" : 32,
+        "name"       : "DOC101",
+        "startDate"  : "2017-12-02T12:00:00.000",
+        "endDate"    : "2017-12-02T15:00:00.000"
+      },
+      {
+        "id"         : "e121",
+        "resourceId" : 33,
+        "name"       : "TRN101",
+        "startDate"  : "2017-12-02T16:00:00.000",
+        "endDate"    : "2017-12-02T18:00:00.000"
+      },
+      {
+        "id"         : "e122",
+        "resourceId" : 33,
+        "name"       : "TRN102",
+        "startDate"  : "2017-12-02T19:00:00.000",
+        "endDate"    : "2017-12-02T21:00:00.000"
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "from" : "e10",
+        "to"   : "e11"
+      },
+      {
+        "id"   : 2,
+        "from" : "e10",
+        "to"   : "e21"
+      },
+      {
+        "id"   : 3,
+        "from" : "e10",
+        "to"   : "e22"
+      },
+      {
+        "id"   : 4,
+        "from" : "e10",
+        "to"   : "e22222"
+      },
+      {
+        "id"            : 5,
+        "from"          : 2,
+        "to"            : 3,
+        "bidirectional" : true
+      },
+      {
+        "id"            : 6,
+        "from"          : 3,
+        "to"            : 4,
+        "bidirectional" : true
+      },
+      {
+        "id"            : 7,
+        "from"          : 5,
+        "to"            : 6,
+        "bidirectional" : true
+      },
+      {
+        "id"            : 8,
+        "from"          : 6,
+        "to"            : 7,
+        "bidirectional" : true
+      },
+      {
+        "id"   : 9,
+        "from" : 7,
+        "to"   : 8,
+        "cls"  : "special-dependency"
+      },
+      {
+        "id"   : 10,
+        "from" : 8,
+        "to"   : 9
+      },
+      {
+        "id"   : 11,
+        "from" : 8,
+        "to"   : 10
+      },
+      {
+        "id"   : 12,
+        "from" : 8,
+        "to"   : 11
+      },
+      {
+        "id"   : 13,
+        "from" : 8,
+        "to"   : 12
+      },
+      {
+        "id"       : 14,
+        "from"     : 2,
+        "to"       : "e10",
+        "fromSide" : "top",
+        "toSide"   : "bottom",
+        "cls"      : "extra-special-dependency"
+      },
+      {
+        "id"   : 15,
+        "from" : "e101",
+        "to"   : "e102"
+      },
+      {
+        "id"   : 16,
+        "from" : "e103",
+        "to"   : "e104"
+      },
+      {
+        "id"   : 17,
+        "from" : "e101",
+        "to"   : "e105"
+      },
+      {
+        "id"   : 18,
+        "from" : "e105",
+        "to"   : "e106"
+      },
+      {
+        "id"   : 19,
+        "from" : "e106",
+        "to"   : "e107"
+      },
+      {
+        "id"   : 20,
+        "from" : "e107",
+        "to"   : "e108"
+      },
+      {
+        "id"            : 21,
+        "from"          : "e110",
+        "to"            : "e111",
+        "bidirectional" : true
+      },
+      {
+        "id"   : 22,
+        "from" : "e112",
+        "to"   : "e113"
+      },
+      {
+        "id"   : 23,
+        "from" : "e113",
+        "to"   : "e114"
+      },
+      {
+        "id"   : 24,
+        "from" : "e115",
+        "to"   : "e116"
+      },
+      {
+        "id"   : 25,
+        "from" : "e117",
+        "to"   : "e118"
+      },
+      {
+        "id"   : 26,
+        "from" : "e118",
+        "to"   : "e119"
+      },
+      {
+        "id"   : 27,
+        "from" : "e119",
+        "to"   : "e120"
+      },
+      {
+        "id"   : 28,
+        "from" : "e120",
+        "to"   : "e121"
+      },
+      {
+        "id"            : 29,
+        "from"          : "e121",
+        "to"            : "e122",
+        "bidirectional" : true
+      },
+      {
+        "id"       : 30,
+        "from"     : "e104",
+        "to"       : "e108",
+        "fromSide" : "right",
+        "toSide"   : "left",
+        "cls"      : "special-dependency"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "startDate" : "2017-12-01T01:00:00.000",
+        "cls"       : "fa fa-diamond",
+        "name"      : "Inspection"
+      },
+      {
+        "id"        : 2,
+        "startDate" : "2017-12-01T19:00:00.000",
+        "name"      : "Service machines"
+      },
+      {
+        "id"        : 3,
+        "startDate" : "2017-12-02T02:00:00.000",
+        "name"      : "Night shift"
+      }
+    ]
+  }
+}

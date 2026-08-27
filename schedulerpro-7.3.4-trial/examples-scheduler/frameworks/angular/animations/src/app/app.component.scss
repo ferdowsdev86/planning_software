@@ -1,0 +1,77 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+bryntum-scheduler {
+    flex : 1;
+}
+
+.b-sch-event:not(.b-milestone) {
+    border-radius : 2px;
+}
+
+.color-box {
+    width             : 1em;
+    height            : 1em;
+    margin-inline-end : .5em;
+    border-radius     : 2px;
+}
+
+.b-sch-time-range, .b-sch-non-working-time {
+    color      : #999;
+    font-size  : 1.1em;
+    background : repeating-linear-gradient(-55deg,
+        rgba(200, 200, 200, 0.3),
+        rgba(200, 200, 200, 0.3) 10px,
+        rgba(240, 240, 240, 0.3) 5px,
+        rgba(240, 240, 240, 0.3) 20px);
+}
+
+.b-milestone .b-sch-event label {
+    margin-inline-start : 2.2em;
+}
+
+.b-initial-custom .b-sch-event-wrap {
+    opacity             : 0;
+    animation-name      : initial-custom;
+    animation-duration  : 1.5s;
+    animation-fill-mode : forwards;
+
+    .b-sch-event {
+        animation-name            : initial-event-custom;
+        animation-duration        : 1.5s;
+        animation-fill-mode       : forwards;
+        animation-timing-function : ease-in-out;
+    }
+}
+
+@keyframes initial-custom {
+    0% {
+        opacity : 0;
+    }
+    100% {
+        opacity : 1;
+    }
+}
+
+@keyframes initial-event-custom {
+    0% {
+        transform : scale(.1) rotate(0deg)
+    }
+    50% {
+        transform : scale(2) rotate(360deg);
+    }
+    100% {
+        transform : scale(1) rotate(360deg);
+    }
+}
+

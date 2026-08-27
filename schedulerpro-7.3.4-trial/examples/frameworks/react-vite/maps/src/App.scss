@@ -1,0 +1,157 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+@import "https://api.mapbox.com/mapbox-gl-js/v1.12.0/mapbox-gl.css";
+
+.demo-app {
+    display        : flex;
+    flex-direction : column;
+}
+
+#content {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+
+    .b-resource-header {
+        height : 100%;
+    }
+
+    > .b-panel .b-toolbar {
+        height                 : 5em;
+        border-bottom          : 1px solid var(--b-grid-header-border-color);
+
+        --b-toolbar-background : var(--b-grid-header-background);
+
+        .widget-title {
+            display     : flex;
+            align-items : center;
+            font-size   : 1.2em;
+        }
+    }
+}
+
+/* Tweak the bordered style to use darker shades */
+.b-sch-event-wrap {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+
+    .b-sch-event-content {
+        flex-direction  : column;
+        justify-content : center;
+        align-items     : flex-start;
+    }
+
+    &.b-style-bordered {
+        --b-sch-event-background          : var(--b-primary-50);
+        --b-sch-event-hover-background    : var(--b-primary-45);
+        --b-sch-event-selected-background : var(--b-primary-40);
+    }
+}
+
+.b-sch-event-content {
+    display         : flex;
+    height          : 100%;
+    flex-direction  : column;
+    justify-content : space-evenly;
+}
+
+.event-name {
+    font-size : 1.3em;
+}
+
+.resource,
+.location {
+    display     : block;
+    margin-top  : 0.3em;
+    font-weight : normal;
+
+    i {
+        text-align        : center;
+        margin-inline-end : 0.4em;
+    }
+}
+
+/* Mapbox CSS adaptions */
+
+/* Tooltip is misaligned when anchored to bottom (which Mapbox calls 'top') */
+.mapboxgl-popup.mapboxgl-popup-anchor-top {
+    margin-top : -1.2em;
+}
+
+.mapboxgl-popup-content {
+    padding        : 1em;
+    box-shadow     : 0 1px 3px rgba(0, 0, 0, .5);
+    pointer-events : none;
+}
+
+.mapboxgl-popup-close-button {
+    display : none;
+}
+
+.mapboxgl-popup .event-name {
+    display     : block;
+    margin      : 0 0 1.5em 0;
+    font-size   : 1.4em;
+    font-weight : bold;
+}
+
+.mapboxgl-marker {
+    cursor : pointer;
+}
+
+.mapboxgl-canvas:focus {
+    outline : none !important;
+}
+
+/* EOF Mapbox CSS adaptions */
+
+.address-results .b-list-item i {
+    font-size : 1.5em;
+    margin    : 0 0.7em 0 0.2em;
+}
+
+.address-container {
+    display        : flex;
+    flex-direction : column;
+}
+
+.address-name {
+    flex          : 1;
+    margin-bottom : 0.4em;
+    font-size     : 1.1em;
+}
+
+.lat-long {
+    flex      : 1;
+    color     : #bbb;
+    font-size : 0.9em;
+}
+
+.b-unplanned-grid {
+    border-top : 1px solid var(--b-splitter-color);
+
+    .unplannedReturnTrip {
+        .fa-car-side:before {
+            transform : rotateY(180deg);
+        }
+    }
+
+    .unscheduledNameCell i {
+        margin-inline-end : 0.5em;
+    }
+}
+
+.b-drag-proxy .b-sch-event-wrap {
+    position : static;
+    opacity  : 0.6;
+}

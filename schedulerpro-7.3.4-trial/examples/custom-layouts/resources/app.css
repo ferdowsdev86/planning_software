@@ -1,0 +1,4 @@
+/* Use a font-size relative to the event's height when using pack layout */
+.b-event-layout-pack .b-sch-event {
+    font-size : min(calc(var(--b-event-size) * 0.5px), 1.25em);
+}

@@ -1,0 +1,53 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div class = "demo-app">
+    <div class = "demo-toolbar">
+        <bryntum-button
+            text = "Add event"
+            icon = "fa fa-plus"
+            cls = "b-green"
+            (onClick) = "onAddEventClick()"
+        ></bryntum-button>
+        <bryntum-button
+            text = "Remove event"
+            icon = "fa fa-trash"
+            cls = "b-red"
+            (onClick) = "onRemoveEventClick()"
+            [disabled] = "selectedEventName === ''"
+        ></bryntum-button>
+        <div class = "spacer"></div>
+        <bryntum-text-field
+            placeholder = "Find tasks by name"
+            icon = "fa fa-filter"
+            [clearable] = true
+            (onInput)  = "filterEvents($event)"
+        ></bryntum-text-field>
+        <bryntum-text-field
+            placeholder = "Highlight tasks"
+            [clearable] = true
+            (onInput) = "highlightEvents($event)"
+        ></bryntum-text-field>
+    </div>
+
+    <bryntum-scheduler
+        #scheduler
+        [eventStyle] = "schedulerProps.eventStyle!"
+        [barMargin] = "schedulerProps.barMargin!"
+        [columns] = "schedulerProps.columns!"
+        [endDate] = "schedulerProps.endDate!"
+        [eventEditFeature] = "schedulerProps.eventEditFeature!"
+        [eventRenderer] = "schedulerProps.eventRenderer!"
+        [events] = "events"
+        [eventStore] = "schedulerProps.eventStore!"
+        [filterBarFeature] = "schedulerProps.filterBarFeature!"
+        [resourceImages] = "schedulerProps.resourceImages!"
+        [resources] = "resources"
+        [rowHeight] = "schedulerProps.rowHeight!"
+        [smoothZoom] = "schedulerProps.smoothZoom!"
+        [startDate] = "schedulerProps.startDate!"
+        [timeRanges] = "timeRanges"
+        [viewPreset] = "schedulerProps.viewPreset!"
+        (onEventSelectionChange) = "onEventSelectionChange()"
+        (onReleaseEvent) = "onReleaseEvent()"
+    ></bryntum-scheduler>
+</div>

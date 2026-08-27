@@ -1,0 +1,25 @@
+.b-sch-time-ranges-canvas {
+    .b-sch-time-range:not(.b-sch-current-time) {
+        background  : none;
+        font-weight : bold;
+        color       : var(--b-neutral-0);
+    }
+
+    .b-sch-time-range.day-shift {
+        background-color : color-mix(in srgb, var(--b-neutral-50), transparent 90%);
+    }
+}
+
+.b-sch-event {
+    .b-sch-event-content {
+        justify-content : center;
+        flex-direction  : column;
+        align-items     : flex-start;
+        gap             : 0;
+    }
+
+    .utc {
+        font-size : 0.8em;
+    }
+}
+

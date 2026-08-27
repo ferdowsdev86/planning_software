@@ -1,0 +1,19 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "bryntum-schedulerpro-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/bryntumScheduler/BryntumSchedulerWebPart.js",
+          "manifest": "./src/webparts/bryntumScheduler/BryntumSchedulerWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "BryntumSchedulerWebPartStrings": "lib/webparts/bryntumScheduler/loc/{locale}.js",
+    "PropertyControlStrings": "node_modules/@pnp/spfx-property-controls/lib/loc/{locale}.js"
+  }
+}

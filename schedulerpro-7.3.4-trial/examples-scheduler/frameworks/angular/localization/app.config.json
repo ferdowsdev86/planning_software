@@ -1,0 +1,32 @@
+{
+  "title": "Localization demo (Angular)",
+  "description": "This example shows how to localize the Angular Scheduler control together with i18next library in Angular",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.locales.js",
+    "src/app/app.module.ts",
+    "src/app/component/lang-select.component.ts",
+    "src/app/lib/i18next.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/locales/app.locale.En.js",
+    "src/locales/app.locale.Ru.js",
+    "src/locales/app.locale.SvSE.js",
+    "src/locales/en.error.json",
+    "src/locales/en.translation.json",
+    "src/locales/ru.error.json",
+    "src/locales/ru.translation.json",
+    "src/locales/se.error.json",
+    "src/locales/se.translation.json",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

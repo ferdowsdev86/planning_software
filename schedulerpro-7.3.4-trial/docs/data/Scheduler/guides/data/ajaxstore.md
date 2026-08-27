@@ -1,0 +1,298 @@
+# Using remote data
+
+`ResourceStore` and `EventStore` are both based on `AjaxStore`, which allows you to handle CRUD operations on the
+backend. `AjaxStore` for the most part works as a normal `Store`, but when creating it, you need to supply some
+additional configs with URLs to the server:
+
+```javascript
+const resourceStore = new ResourceStore({
+    createUrl : 'backend/create.php',
+    readUrl   : 'backend/read.php',
+    updateUrl : 'backend/update.php',
+    deleteUrl : 'backend/delete.php'
+});
+
+// or if supplying a store config to a scheduler:
+
+const scheduler = new Scheduler({
+    resourceStore : {
+        createUrl : 'backend/create.php',
+        readUrl   : 'backend/read.php',
+        updateUrl : 'backend/update.php',
+        deleteUrl : 'backend/delete.php'
+    }
+});
+```
+
+As the name suggests, the store then uses these URLs for fetch requests for the different CRUD operations.
+
+## Crud Manager
+
+The [Crud Manager](#Scheduler/data/CrudManager) exists to simplify loading and syncing of multiple related stores. In
+many cases, it is preferable to use the Crud Manager instead of configuring each store to handle their own requests. 
+Please read [the guide](#Scheduler/guides/data/crud_manager.md) for more 
+information.
+
+## Reading data
+
+Uses GET to retrieve data from the backend. Data can be read automatically following construction of a store configured
+with `{ autoLoad : true }` or manually by calling [`AjaxStore#load()`](#Core/data/AjaxStore#function-load):
+
+```javascript
+// Data will be loaded directly
+const resourceStore = new ResourceStore({
+    readUrl : 'backend/read.php',
+    autoLoad : true
+});
+
+// Or
+
+const resourceStore = new ResourceStore({
+    readUrl : 'backend/read.php'
+});
+
+// Data loaded manually
+resourceStore.load();
+```
+
+When manually calling [`AjaxStore#load()`](#Core/data/AjaxStore#function-load) you can also supply parameters in object form, which will be appended to the
+QueryString:
+
+```javascript
+resourceStore.load({ from : 1, to : 1000 }); // -> backend/read.php?from=1&to=1000
+```
+
+### Server response
+
+Data returned is either expected to be an array of record data...
+
+```json
+[
+    { "id" : 1, "name" : "Han" },
+    { "id" : 2, "name" : "Luke" }
+]
+```
+
+...or a response object with the following format:
+
+```json
+{
+    "success" : true,
+    "data"    : [
+        { "id" : 1, "name" : "Leia" },
+        { "id" : 2, "name" : "Lando" }
+    ]
+}
+```
+
+When using the latter format, it is also possible to communicate server exceptions:
+
+```json
+{
+    "success" : false,
+    "message" : "That did not work very well, sorry"
+}
+```
+
+### Async operations
+
+Loading data, as well as the other CRUD operations, are async operations. Calling [`AjaxStore#load`](#Core/data/AjaxStore#function-load) returns a Promise, which
+can be used as is or with async/await:
+
+```javascript
+// Using promise directly
+resourceStore.load().then(() => console.log('loaded'));
+
+// Using await
+await resourceStore.load();
+console.log('loaded');
+```
+
+You can also use a listener that will be triggered on load:
+
+```javascript
+const resourceStore = new ResourceStore({
+    readUrl : 'backend/read.php',
+    listeners: {
+        load() {
+            console.log('loaded');
+        }
+    }
+});
+
+// Or
+
+resourceStore.on('load', () => console.log('loaded'));
+```
+
+The same concept holds true when committing changes manually, as described below ([`AjaxStore#commit()`](#Core/data/AjaxStore#function-commit)).
+
+## Modifying data
+
+How to modify data in the store (add, insert, remove, update) is described in the guide "[Using a Store](#Scheduler/guides/data/storebasics.md)". When using an
+`AjaxStore`, no changes are sent to the backend until [`AjaxStore#commit()`](#Core/data/AjaxStore#function-commit) is called. This can either be done manually or
+automatically:
+
+```javascript
+resourceStore.commit(); // Commits any changes, using the configured urls per action
+
+// Or specify { autoCommit : true } to commit automatically after each action
+const autoStore = new Store({
+    autoCommit : true,
+    /*...*/
+});
+```
+
+If you want to cancel changes, you can do so if using manual committing by calling [`Store#revertChanges()`](#Core/data/mixin/StoreCRUD#function-revertChanges).
+
+### Added records
+
+Any added (or inserted) records will be sent as JSON using POST to `createUrl`. The format will be:
+
+```javascript
+// Add operation
+resourceStore.add([
+    { name : 'Han' },
+    { name : 'Leia' }
+]);
+```
+
+<div class="docs-tabs" data-name="Communication">
+<div>
+    <a>Request</a>
+    <a>Response</a>
+</div>
+<div>
+
+```json
+{
+  "data": [
+    {
+      "id": "_generatedModelClass_6f71edf1-9755-42b9-ab7f-a035f385fdca",
+      "name": "Han"
+    },
+    {
+      "id": "_generatedModelClass_0c7840d3-995f-4b6f-a664-d3ab05352395",
+      "name": "Leia"
+    }
+  ]
+}
+```
+
+<div class="note">
+
+The <code>id</code> field is auto generated by Bryntum Scheduler if you don't pass an ID. However, when the response is sent 
+from the Backend, you must ensure to replace these autogenerated IDs with actual IDs.
+
+</div>
+
+</div>
+<div>
+
+Server is expected to respond with the same records with any missing data filled in (such as id). The response takes the
+same format as for reading data.
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Han"
+    },
+    {
+      "id": 2,
+      "name": "Leia"
+    }
+  ]
+}
+```
+</div>
+</div>
+
+### Updated records
+
+Works much the same way as when adding records, but posts to `updateUrl`:
+
+```javascript
+// Modifying some records and committing changes
+resourceStore.getAt(0).name = 'Kylo';
+resourceStore.getAt(1).name = 'Rey';
+resourceStore.commit();
+```
+
+<div class="docs-tabs" data-name="Communication">
+<div>
+    <a>Request</a>
+    <a>Response</a>
+</div>
+<div>
+
+```json
+{
+  "data": [
+    { "name": "Kylo", "id": 1 },
+    { "name": "Rey", "id": 2 }
+  ]
+}
+```
+
+</div>
+<div>
+
+Only the changed fields are posted. Server is expected to respond with same format as for adding records.
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Kylo"
+    },
+    {
+      "id": 2,
+      "name": "Rey"
+    }
+  ]
+}
+```
+</div>
+</div>
+
+### Removed records
+
+Has the simplest requirements of the different operations. Posts ids of removed records to `deleteUrl`:
+
+```javascript
+// Removing some records and committing
+resourceStore.getById(1).remove();
+resourceStore.getById(2).remove();
+resourceStore.commmit();
+```
+
+<div class="docs-tabs" data-name="Communication">
+<div>
+    <a>Request</a>
+    <a>Response</a>
+</div>
+<div>
+
+```json
+{ "ids": [1, 2] }
+```
+
+</div>
+<div>
+
+Expects a response in this format:
+
+```json
+{
+    "success" : true
+}
+```
+</div>
+</div>
+
+
+
+<p class="last-modified">Last modified on 2026-07-22 10:51:33</p>

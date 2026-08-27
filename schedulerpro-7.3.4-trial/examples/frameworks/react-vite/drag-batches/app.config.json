@@ -1,0 +1,21 @@
+{
+  "title": "Scheduling orders (React + Vite)",
+  "description": "This is an advanced demo showing creation of orders from a template. When you drag an order onto the schedule, its template tasks are added",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/Drag.ts",
+    "src/lib/Machine.ts",
+    "src/lib/Order.ts",
+    "src/lib/OrderForm.ts",
+    "src/lib/Task.ts",
+    "src/lib/Template.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

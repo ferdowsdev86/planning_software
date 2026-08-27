@@ -1,0 +1,12 @@
+{
+  "title": "Pro TaskEditor demo",
+  "description": "Scheduler Pro with task editor customizations",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/ProEvent.js",
+    "lib/Resource.js",
+    "resources/app.css"
+  ]
+}

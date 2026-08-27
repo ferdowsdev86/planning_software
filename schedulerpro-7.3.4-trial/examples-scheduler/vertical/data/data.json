@@ -1,0 +1,321 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Angelo",
+        "city" : "Miami",
+        "role" : "Sales"
+      },
+      {
+        "id"         : "r2",
+        "name"       : "Celia",
+        "eventColor" : "red",
+        "city"       : "Miami",
+        "role"       : "Sales"
+      },
+      {
+        "id"         : "r3",
+        "name"       : "Dan",
+        "eventColor" : "blue",
+        "city"       : "Miami",
+        "role"       : "Sales"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Gloria",
+        "city" : "Austin",
+        "role" : "R&D"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Kate",
+        "city" : "Austin",
+        "role" : "R&D"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Lee",
+        "city" : "Austin",
+        "role" : "R&D"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Madison",
+        "city" : "Austin",
+        "role" : "Sales"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Malik",
+        "city" : "Berlin",
+        "role" : "Marketing"
+      },
+      {
+        "id"   : "r9",
+        "name" : "Mark",
+        "city" : "Berlin",
+        "role" : "Marketing"
+      },
+      {
+        "id"         : "r10",
+        "name"       : "Mike",
+        "city"       : "Berlin",
+        "role"       : "Sales",
+        "eventColor" : "deep-orange"
+      },
+      {
+        "id"   : "r11",
+        "name" : "Rob",
+        "city" : "Berlin",
+        "role" : "Marketing"
+      },
+      {
+        "id"   : "r12",
+        "name" : "Steve",
+        "city" : "Copenhagen",
+        "role" : "Marketing"
+      },
+      {
+        "id"   : "r13",
+        "name" : "Mike",
+        "city" : "Copenhagen",
+        "role" : "Marketing"
+      },
+      {
+        "id"   : "r14",
+        "name" : "Steve",
+        "city" : "Copenhagen",
+        "role" : "Marketing"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "startDate"  : "2019-01-01T09:00:00",
+        "endDate"    : "2019-01-01T12:00:00",
+        "iconCls"    : "fa fa-calendar",
+        "name"       : "Meeting"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r1",
+        "startDate"  : "2019-01-01T13:00:00",
+        "endDate"    : "2019-01-01T16:00:00",
+        "name"       : "Presentation",
+        "iconCls"    : "fa fa-video",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "r1",
+        "startDate"  : "2019-01-01T16:00:00",
+        "endDate"    : "2019-01-01T20:00:00",
+        "iconCls"    : "fa fa-beer",
+        "name"       : "Bierhaus"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r2",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T17:00:00",
+        "iconCls"    : "fa fa-umbrella-beach",
+        "name"       : "Working remote"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r2",
+        "startDate"  : "2019-01-01T13:00:00",
+        "endDate"    : "2019-01-01T14:30:00",
+        "name"       : "Phone meeting",
+        "iconCls"    : "fa fa-phone",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r10",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T18:00:00",
+        "iconCls"    : "fa fa-umbrella-beach",
+        "name"       : "Working remote",
+        "eventColor" : "red"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T09:00:00",
+        "iconCls"    : "fa fa-phone",
+        "name"       : "Support call"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T09:00:00",
+        "endDate"    : "2019-01-01T10:00:00",
+        "iconCls"    : "fa fa-desktop",
+        "name"       : "Screen share"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T12:00:00",
+        "endDate"    : "2019-01-01T14:00:00",
+        "iconCls"    : "fa fa-graduation-cap",
+        "name"       : "Training"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T14:30:00",
+        "endDate"    : "2019-01-01T15:30:00",
+        "iconCls"    : "fa fa-phone",
+        "name"       : "Support call"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : "r4",
+        "startDate"  : "2019-01-01T08:30:00",
+        "endDate"    : "2019-01-01T11:00:00",
+        "iconCls"    : "fa fa-calendar",
+        "name"       : "Meeting"
+      },
+      {
+        "id"         : 12,
+        "resourceId" : "r5",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T17:00:00",
+        "iconCls"    : "fa fa-calendar",
+        "name"       : "Conference"
+      },
+      {
+        "id"         : 13,
+        "resourceId" : "r5",
+        "startDate"  : "2019-01-01T11:00:00",
+        "endDate"    : "2019-01-01T12:00:00",
+        "name"       : "Support call",
+        "iconCls"    : "fa fa-phone",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 14,
+        "resourceId" : "r7",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T12:00:00",
+        "iconCls"    : "fa fa-gavel",
+        "name"       : "Regulations"
+      },
+      {
+        "id"         : 15,
+        "resourceId" : "r7",
+        "startDate"  : "2019-01-01T13:00:00",
+        "endDate"    : "2019-01-01T15:00:00",
+        "iconCls"    : "fa fa-video",
+        "name"       : "Presentation",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 16,
+        "resourceId" : "r8",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T17:00:00",
+        "iconCls"    : "fa fa-calendar",
+        "name"       : "Conference"
+      },
+      {
+        "id"         : 17,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T10:00:00",
+        "name"       : "Keynote",
+        "iconCls"    : "fa fa-video",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 18,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T10:00:00",
+        "endDate"    : "2019-01-01T12:00:00",
+        "iconCls"    : "fa fa-users",
+        "name"       : "Session 1"
+      },
+      {
+        "id"         : 19,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T13:00:00",
+        "endDate"    : "2019-01-01T15:00:00",
+        "iconCls"    : "fa fa-users",
+        "name"       : "Session 2"
+      },
+      {
+        "id"         : 20,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T15:00:00",
+        "endDate"    : "2019-01-01T17:00:00",
+        "iconCls"    : "fa fa-users",
+        "name"       : "Session 3"
+      },
+      {
+        "id"         : 22,
+        "resourceId" : "r11",
+        "startDate"  : "2019-01-01T09:00:00",
+        "endDate"    : "2019-01-01T16:00:00",
+        "name"       : "Meeting stakeholders",
+        "iconCls"    : "fa fa-money-bill",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 23,
+        "resourceId" : "r12",
+        "startDate"  : "2019-01-01T08:00:00",
+        "endDate"    : "2019-01-01T17:00:00",
+        "iconCls"    : "fa fa-microphone",
+        "name"       : "Conference"
+      },
+      {
+        "id"         : 24,
+        "resourceId" : "r2",
+        "startDate"  : "2019-01-01T09:00:00",
+        "iconCls"    : "",
+        "duration"   : 0,
+        "name"       : "Project Deadline"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "startDate"    : "2019-01-01T12:00:00",
+        "duration"     : 1,
+        "durationUnit" : "h",
+        "name"         : "Lunch"
+      }
+    ]
+  },
+  "resourceTimeRanges" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "resourceId"   : "r3",
+        "startDate"    : "2019-01-01T07:00:00",
+        "duration"     : 9,
+        "durationUnit" : "h",
+        "name"         : "Support duty"
+      },
+      {
+        "id"             : 2,
+        "resourceId"     : "r6",
+        "startDate"      : "2019-01-01T06:00:00",
+        "duration"       : 12,
+        "durationUnit"   : "h",
+        "name"           : "Day off",
+        "timeRangeColor" : "red"
+      }
+    ]
+  }
+}

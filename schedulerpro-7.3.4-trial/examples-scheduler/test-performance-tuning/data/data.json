@@ -1,0 +1,285 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "backlog",
+        "name" : "Backlog"
+      },
+      {
+        "id"   : "r1",
+        "name" : "Team Sam",
+        "city" : "London"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Team Dave",
+        "city" : "New York"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Team Omar",
+        "city" : "Amsterdam"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Team Makena",
+        "city" : "Stockholm"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Team Maya",
+        "city" : "Amsterdam"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Team Kai",
+        "city" : "Stockholm"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Team Nora",
+        "city" : "New York"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Team John",
+        "city" : "London"
+      },
+      {
+        "id"   : "r9",
+        "name" : "Team Olivia",
+        "city" : "Amsterdam"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Team Noah",
+        "city" : "New York"
+      },
+      {
+        "id"   : "r11",
+        "name" : "Team Isla",
+        "city" : "Stockholm"
+      },
+      {
+        "id"   : "r12",
+        "name" : "Team Jabari",
+        "city" : "Amsterdam"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"          : "u1",
+        "startDate"   : "2023-01-30",
+        "duration"    : 5,
+        "name"        : "Analyze outcome",
+        "description" : "Accuracy of the predication based on the reworked GPT-4 output",
+        "percentDone" : 20,
+        "eventColor"  : "deep-orange",
+        "resourceId"  : "backlog"
+      },
+      {
+        "id"          : "u2",
+        "startDate"   : "2023-02-05",
+        "duration"    : 5,
+        "name"        : "Implement considerations",
+        "description" : "Guaranteeing not having to consider them again",
+        "percentDone" : 10,
+        "eventColor"  : "blue",
+        "resourceId"  : "backlog"
+      },
+      {
+        "id"          : "u3",
+        "startDate"   : "2023-02-08",
+        "duration"    : 5,
+        "name"        : "Implement solution",
+        "description" : "One solution to rule them all, deprecating previous solutions",
+        "percentDone" : 5,
+        "eventColor"  : "blue",
+        "resourceId"  : "backlog"
+      },
+      {
+        "id"          : 2,
+        "startDate"   : "2023-01-30",
+        "duration"    : 5,
+        "name"        : "Investigate feasibility",
+        "description" : "Determine if it is a risk worth taking, market readiness",
+        "percentDone" : 85,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r1"
+      },
+      {
+        "id"          : 3,
+        "startDate"   : "2023-02-03",
+        "duration"    : 6,
+        "name"        : "Plan implementation",
+        "description" : "Make a very detailed plan, to satisfy requirements",
+        "percentDone" : 70,
+        "eventColor"  : "pink",
+        "resourceId"  : "r1"
+      },
+      {
+        "id"          : 4,
+        "startDate"   : "2023-02-08",
+        "duration"    : 5,
+        "name"        : "Consider implications",
+        "description" : "Take all known factors into consideration, critical or not",
+        "percentDone" : 50,
+        "eventColor"  : "violet",
+        "resourceId"  : "r1"
+      },
+      {
+        "id"          : 5,
+        "startDate"   : "2023-01-31",
+        "duration"    : 7,
+        "name"        : "Plan preparations",
+        "description" : "What to prepare, when to prepare it, who is responsible",
+        "percentDone" : 80,
+        "eventColor"  : "pink",
+        "resourceId"  : "r2"
+      },
+      {
+        "id"          : 6,
+        "startDate"   : "2023-01-30",
+        "duration"    : 7,
+        "name"        : "Investigate implementability",
+        "description" : "Is it possible, considerations of risk, cost or effort aside",
+        "percentDone" : 95,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r3"
+      },
+      {
+        "id"          : 7,
+        "startDate"   : "2023-02-01",
+        "duration"    : 7,
+        "name"        : "Consider risks",
+        "description" : "A risky undertaking, leave no risk unconsidered",
+        "percentDone" : 65,
+        "eventColor"  : "violet",
+        "resourceId"  : "r4"
+      },
+      {
+        "id"          : 8,
+        "startDate"   : "2023-02-08",
+        "duration"    : 5,
+        "name"        : "Plan risk reduction",
+        "description" : "To have the least effect on the tight schedule, as outlined by management",
+        "percentDone" : 85,
+        "eventColor"  : "pink",
+        "resourceId"  : "r4"
+      },
+      {
+        "id"          : 9,
+        "startDate"   : "2023-01-30",
+        "duration"    : 4,
+        "name"        : "Investigate structure",
+        "description" : "Efficiency, responsibility, size, reports, analyse all factors",
+        "percentDone" : 70,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r5"
+      },
+      {
+        "id"          : 10,
+        "startDate"   : "2023-02-02",
+        "duration"    : 9,
+        "name"        : "Investigate analysts",
+        "description" : "Time spent on analysis seems to be dropping",
+        "percentDone" : 70,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r5"
+      },
+      {
+        "id"          : 11,
+        "startDate"   : "2023-01-31",
+        "duration"    : 7,
+        "name"        : "Consider analysing",
+        "description" : "Unknown factors needs to be known, to not lack in knowledge",
+        "percentDone" : 65,
+        "eventColor"  : "violet",
+        "resourceId"  : "r6"
+      },
+      {
+        "id"          : 12,
+        "startDate"   : "2023-02-03",
+        "duration"    : 6,
+        "name"        : "Plan considerations",
+        "description" : "When and how to consider what, well documented",
+        "percentDone" : 90,
+        "eventColor"  : "pink",
+        "resourceId"  : "r7"
+      },
+      {
+        "id"          : 13,
+        "startDate"   : "2023-01-30",
+        "duration"    : 11,
+        "name"        : "Implement plan",
+        "description" : "☑ Consider, ☑ Analyse, ☑ Investigate",
+        "percentDone" : 10,
+        "eventColor"  : "blue",
+        "resourceId"  : "r8"
+      },
+      {
+        "id"          : 14,
+        "startDate"   : "2023-01-30",
+        "duration"    : 5,
+        "name"        : "Investigate risks",
+        "description" : "Before analysing, investigate thoroughly",
+        "percentDone" : 85,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r9"
+      },
+      {
+        "id"          : 15,
+        "startDate"   : "2023-02-03",
+        "duration"    : 8,
+        "name"        : "Analyze risks",
+        "description" : "Will the investigated risks affect the considerations",
+        "percentDone" : 30,
+        "eventColor"  : "deep-orange",
+        "resourceId"  : "r9"
+      },
+      {
+        "id"          : 16,
+        "startDate"   : "2023-01-31",
+        "duration"    : 6,
+        "name"        : "Investigate organization",
+        "description" : "Teams, management, projects",
+        "percentDone" : 85,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r10"
+      },
+      {
+        "id"          : 17,
+        "startDate"   : "2023-02-05",
+        "duration"    : 7,
+        "name"        : "Investigate documentation",
+        "description" : "Does it cover all risks, considerations and investigations",
+        "percentDone" : 50,
+        "eventColor"  : "indigo",
+        "resourceId"  : "r11"
+      },
+      {
+        "id"          : 18,
+        "startDate"   : "2023-01-30",
+        "duration"    : 5,
+        "name"        : "Implement documentation",
+        "description" : "After proper research and investigation, write some docs",
+        "percentDone" : 100,
+        "eventColor"  : "blue",
+        "resourceId"  : "r11"
+      },
+      {
+        "id"          : 19,
+        "startDate"   : "2023-02-06",
+        "duration"    : 7,
+        "name"        : "Plan retirement",
+        "description" : "Analysts burned out, investigators retiring",
+        "percentDone" : 55,
+        "eventColor"  : "pink",
+        "resourceId"  : "r12"
+      }
+    ]
+  }
+}

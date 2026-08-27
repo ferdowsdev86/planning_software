@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/FrFr.js';
+import '../../../lib/SchedulerPro/localization/FrFr.js';
+import './shared.locale.FrFr.js';
+
+const locale = {
+
+    localeName : 'FrFr',
+    localeDesc : 'Français (France)',
+    localeCode : 'fr-FR',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Actions',
+        Active              : 'Actif',
+        Allocation          : 'Affectation',
+        Calendar            : 'Calendrier',
+        City                : 'Ville',
+        Condition           : 'Condition',
+        Consultant          : 'Consultant',
+        Contractor          : 'Entrepreneur',
+        Doctor              : 'Docteur',
+        Driver              : 'Conducteur',
+        Expedition          : 'Expédition',
+        'First name'        : 'Prénom',
+        Inspector           : 'Inspecteur',
+        Lag                 : 'Retard',
+        Manager             : 'Gestionnaire',
+        Name                : 'Nom',
+        Projects            : 'Projets',
+        Property            : 'Propriété',
+        Rating              : 'Évaluation',
+        Resource            : 'Ressource',
+        Role                : 'Rôle',
+        Score               : 'Score',
+        Shift               : 'Quart',
+        'Speaker rating'    : "Évaluation de l'orateur",
+        Staff               : 'Personnel',
+        Station             : 'Station',
+        Surname             : 'Nom de famille',
+        Tasks               : 'Tâches',
+        Technicians         : 'Techniciens',
+        Type                : 'Type',
+        'Vehicle Condition' : 'État du véhicule',
+        'Work hours'        : 'Heures de travail',
+        Worker              : 'Travailleur'
+    },
+
+    Button : {
+        '10K events'                  : '10K événements',
+        '1K events'                   : '1K événements',
+        '5K events'                   : '5K événements',
+        'Add exception'               : 'Ajouter une exception',
+        'Add invalid calendar'        : 'Ajouter un calendrier invalide',
+        'Add invalid dependency'      : 'Ajouter une dépendance invalide',
+        'Add order'                   : 'Ajouter une commande',
+        'Add task'                    : 'Ajouter une tâche',
+        'Add week'                    : 'Ajouter une semaine',
+        Apr                           : 'Avr',
+        Aug                           : 'Août',
+        August                        : 'Août',
+        'Auto-schedule'               : 'Planification automatique',
+        'Bar settings'                : 'Paramètres de la barre',
+        Cancel                        : 'Annuler',
+        'Change working time'         : 'Changer le temps de travail',
+        'City - Resource'             : 'Ville - Ressource',
+        Custom                        : 'Personnalisé',
+        Dark                          : 'Sombre',
+        Dec                           : 'Déc',
+        Default                       : 'Par défaut',
+        'Default layouts'             : 'Mises en page par défaut',
+        Delete                        : 'Supprimer',
+        Dependencies                  : 'Dépendances',
+        'Drag & resize settings'      : 'Paramètres de glisser-déposer et redimensionnement',
+        Edit                          : 'Modifier',
+        'Edit calendar'               : 'Modifier le calendrier',
+        'Enable mouse interaction'    : "Activer l'interaction avec la souris",
+        Feb                           : 'Fév',
+        'Filter out non-working time' : 'Filtrer le temps non travaillé',
+        'Hide scheduled'              : 'Masquer planifié',
+        'Highlight 9-10am + 2-4pm'    : 'Mettre en surbrillance 9-10h + 14-16h',
+        'Highlight while dragging'    : 'Mettre en surbrillance lors du glissement',
+        'Horizontal mode'             : 'Mode horizontal',
+        Jan                           : 'Janv',
+        Jul                           : 'Juil',
+        Jun                           : 'Juin',
+        'Layout function'             : 'Fonction de mise en page',
+        Light                         : 'Clair',
+        Login                         : 'Connexion',
+        Logout                        : 'Déconnexion',
+        Mar                           : 'Mars',
+        March                         : 'Mars',
+        May                           : 'Mai',
+        'New event'                   : 'Nouvel événement',
+        'Next day'                    : 'Jour suivant',
+        Nov                           : 'Nov',
+        Oct                           : 'Oct',
+        Overlap                       : 'Chevauchement',
+        Pack                          : 'Paquet',
+        'Previous day'                : 'Jour précédent',
+        Reset                         : 'Réinitialiser',
+        'Reset data'                  : 'Réinitialiser les données',
+        'Resource - City'             : 'Ressource - Ville',
+        'Resource ranges'             : 'Plages de ressources',
+        Save                          : 'Enregistrer',
+        Sep                           : 'Sept',
+        'Show setup time'             : 'Afficher le temps de configuration',
+        Stack                         : 'Empiler',
+        Sync                          : 'Synchroniser',
+        Today                         : "Aujourd'hui",
+        'Vertical mode'               : 'Mode vertical',
+        'Zoom in'                     : 'Zoomer',
+        'Zoom out'                    : 'Dézoomer'
+    },
+
+    Checkbox : {
+        Cultural                : 'Culturel',
+        'Draw around parents'   : 'Dessiner autour des parents',
+        'Enable bar tooltip'    : "Activer l'infobulle de la barre",
+        Music                   : 'Musique',
+        'Show bar texts'        : 'Afficher les textes de la barre',
+        'Show max allocation'   : "Afficher l'allocation maximale",
+        'Show non working time' : 'Afficher le temps non travaillé',
+        Sports                  : 'Sports',
+        Technology              : 'Technologie'
+    },
+
+    Slider : {
+        'Max capacity' : 'Capacité maximale',
+        'Row height'   : 'Hauteur de ligne'
+    },
+
+    Label : {
+        Days                        : 'Jours',
+        'Group by'                  : 'Grouper par',
+        Months                      : 'Mois',
+        Settings                    : 'Paramètres',
+        'Viewing a repeating event' : "Visualisation d'un événement récurrent"
+    },
+
+    Combo : {
+        'Current timezone' : 'Fuseau horaire actuel',
+        'Group events by'  : 'Grouper les événements par',
+        Parent             : 'Parent',
+        Resources          : 'Ressources',
+        Show               : 'Afficher'
+    },
+
+    NumberField : {
+        '% complete' : '% terminé',
+        Events       : 'Événements',
+        Every        : 'Chaque',
+        Resources    : 'Ressources'
+    },
+
+    TextField : {
+        Doctor           : 'Médecin',
+        Name             : 'Nom',
+        'Server address' : 'Adresse du serveur',
+        Username         : "Nom d'utilisateur"
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : "Cochez pour afficher la ligne d'allocation maximale des ressources",
+        'Check to show resource allocation in the bars'                                                            : "Cochez pour afficher l'allocation des ressources dans les barres",
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Cochez pour afficher les info-bulles lorsque vous déplacez la souris sur les barres',
+        'Click to group by City - Resource'                                                                        : 'Cliquez pour regrouper par Ville - Ressource',
+        'Click to group by Resource - City'                                                                        : 'Cliquez pour regrouper par Ressource - Ville',
+        'Collapse all groups'                                                                                      : 'Réduire tous les groupes',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : "Désactiver la fonction de regroupement par arbre et revenir à l'affichage par défaut Ressource - Affectation",
+        'Enter number of events per resource to generate and press [ENTER]'                                        : "Entrez le nombre d'événements par ressource à générer et appuyez sur [ENTRÉE]",
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Entrez le nombre de lignes de ressources à générer et appuyez sur [ENTRÉE]',
+        'Expand all groups'                                                                                        : 'Développer tous les groupes',
+        Friday                                                                                                     : 'Vendredi',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : "Si deux segments sont placés l'un à côté de l'autre, vous pouvez soit les fusionner, soit les garder séparés",
+        Monday                                                                                                     : 'Lundi',
+        Saturday                                                                                                   : 'Samedi',
+        Sunday                                                                                                     : 'Dimanche',
+        Thursday                                                                                                   : 'Jeudi',
+        'Toggle layout'                                                                                            : 'Basculer la disposition',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : "Essaye d'adapter les événements non planifiés dans la période actuellement affichée",
+        Tuesday                                                                                                    : 'Mardi',
+        'View next day'                                                                                            : 'Voir le jour suivant',
+        'View previous day'                                                                                        : 'Voir le jour précédent',
+        'View today, to see the current time line'                                                                 : "Voir aujourd'hui, pour voir la ligne de temps actuelle",
+        Wednesday                                                                                                  : 'Mercredi'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Fusion automatique des segments adjacents',
+        'Auto-send'                    : 'Envoi automatique',
+        'Auto-sync'                    : 'Synchronisation automatique',
+        'Compact mode'                 : 'Mode compact',
+        'Constrain drag to row'        : 'Contraindre le glissement à la ligne',
+        'Dark mode'                    : 'Mode sombre',
+        'Days are working by default'  : 'Les jours sont travaillés par défaut',
+        'Enable bar tooltip'           : "Activer l'infobulle de la barre",
+        'Enable highlighting'          : 'Activer la mise en surbrillance',
+        'Enable mouse interaction'     : "Activer l'interaction avec la souris",
+        'Enable task drag drop'        : 'Activer le glisser-déposer des tâches',
+        'Filter out non-working time'  : 'Filtrer le temps non travaillé',
+        'Highlight 9-10am + 2-4pm'     : 'Mettre en surbrillance 9-10h + 14-16h',
+        'Highlight while dragging'     : 'Mettre en surbrillance lors du glissement',
+        'Show non working time'        : 'Afficher le temps non travaillé',
+        'Show setup time'              : 'Afficher le temps de configuration',
+        'Show summaries'               : 'Afficher les résumés',
+        'Snap to grid'                 : 'Aligner sur la grille',
+        'View Planned dates'           : 'Voir les dates prévues'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

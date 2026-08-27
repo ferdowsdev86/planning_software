@@ -1,0 +1,10 @@
+{
+  "[data-ref=unplanned] .b-grid-header": {
+    "align": {
+      "align": "t-b",
+      "offset": [0, 180]
+    },
+    "title": "Unplanned tasks",
+    "content": "Drag these tasks onto the tree schedule to assign to a resource. <br><br><b>Note:</b> This demo uses the <a href='https://bryntum.com/products/grid'>Bryntum Grid</a> component which is licensed separately."
+  }
+}

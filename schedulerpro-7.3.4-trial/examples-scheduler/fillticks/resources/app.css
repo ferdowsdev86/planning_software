@@ -1,0 +1,23 @@
+.b-scheduler {
+    .b-sch-event-wrap {
+        --b-sch-event-font-weight : 500;
+
+        .b-sch-event-content {
+            flex-direction  : column;
+            align-items     : flex-start;
+            justify-content : center;
+            gap             : 0;
+        }
+    }
+
+    .b-sch-event-content :first-child {
+        font-size   : .8em;
+        font-weight : 300;
+    }
+
+    .b-style-dashed .b-sch-event-content {
+        align-items    : center;
+        flex-direction : row;
+        gap            : 0.5em;
+    }
+}

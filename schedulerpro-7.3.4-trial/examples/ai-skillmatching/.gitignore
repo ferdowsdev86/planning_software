@@ -1,0 +1,11 @@
+# Symlinks created by grunt symlinks task
+app.js
+data/data.json
+lib/Drag.js
+lib/MainSchedule.js
+lib/Skill.js
+lib/Task.js
+lib/Technician.js
+lib/UnplannedGrid.js
+meta/container.html
+resources/app.css

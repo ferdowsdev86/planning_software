@@ -1,0 +1,19 @@
+{
+  "title": "Property booking demo (React + Vite)",
+  "description": "This example shows a demo booking application, using ResourceTimeRanges and the summary feature",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/DailyRateStore.ts",
+    "src/lib/DaySelectorFeature.ts",
+    "src/lib/PropertyModel.ts",
+    "src/lib/ReservationModel.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

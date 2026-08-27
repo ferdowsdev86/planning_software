@@ -1,0 +1,33 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/core-thin/fontawesome/css/fontawesome.css";
+@use "@bryntum/core-thin/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/core-thin/core.css";
+@use "@bryntum/grid-thin/grid.css";
+@use "@bryntum/scheduler-thin/scheduler.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/core-thin/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+/**
+ * Application global styles
+ */
+ body {
+    font-family : Roboto, sans-serif;
+    font-size   : 14px;
+    height      : 100%;
+    padding     : 0;
+    margin      : 0;
+}
+
+app-root {
+    flex           : 1;
+    display        : flex;
+    flex-direction : column;
+    height         : 100vh;
+}
+

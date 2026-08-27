@@ -1,0 +1,248 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : 100,
+        "name"       : "Global Initiatives",
+        "expanded"   : true,
+        "readOnly"   : true,
+        "eventColor" : "blue",
+        "iconCls"    : "fa fa-map",
+        "progress"   : 40,
+        "children"   : [
+          {
+            "id"       : 1,
+            "name"     : "APAC Project 1",
+            "progress" : 30
+          },
+          {
+            "id"       : 2,
+            "name"     : "EMEA Rollout",
+            "progress" : 50
+          },
+          {
+            "id"       : 3,
+            "name"     : "NA Market Expansion",
+            "progress" : 80
+          },
+          {
+            "id"       : 4,
+            "name"     : "LATAM Initiative",
+            "progress" : 20
+          },
+          {
+            "id"       : 5,
+            "name"     : "APAC Project 2",
+            "progress" : 50
+          }
+        ]
+      },
+      {
+        "id"         : 200,
+        "name"       : "Regional Projects",
+        "expanded"   : true,
+        "readOnly"   : true,
+        "eventColor" : "red",
+        "iconCls"    : "fa fa-globe",
+        "progress"   : 40,
+        "children"   : [
+          {
+            "id"       : 6,
+            "name"     : "EU Compliance Update",
+            "progress" : 30
+          },
+          {
+            "id"       : 7,
+            "name"     : "US Digital Transformation",
+            "progress" : 20
+          },
+          {
+            "id"       : 8,
+            "name"     : "Global HR Integration",
+            "progress" : 60
+          },
+          {
+            "id"       : 9,
+            "name"     : "APAC Customer Outreach",
+            "progress" : 30
+          },
+          {
+            "id"       : 10,
+            "name"     : "Africa New Ventures",
+            "progress" : 40
+          },
+          {
+            "id"       : 11,
+            "name"     : "Middle East Strategy",
+            "progress" : 70
+          }
+        ]
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"               : 1,
+        "resourceId"       : 1,
+        "name"             : "Initial Planning Meeting",
+        "startDate"        : "2025-01-01",
+        "endDate"          : "2025-01-04",
+        "demandedCapacity" : 0.1
+      },
+      {
+        "id"               : 2,
+        "resourceId"       : 1,
+        "name"             : "Requirement Gathering",
+        "startDate"        : "2025-01-05",
+        "endDate"          : "2025-01-09",
+        "demandedCapacity" : 0.2
+      },
+      {
+        "id"               : 3,
+        "resourceId"       : 2,
+        "name"             : "Kick-off Workshop",
+        "startDate"        : "2025-01-10",
+        "endDate"          : "2025-01-15",
+        "demandedCapacity" : 0.3
+      },
+      {
+        "id"               : 4,
+        "resourceId"       : 2,
+        "name"             : "Deployment Phase 1",
+        "startDate"        : "2025-01-15",
+        "endDate"          : "2025-01-22",
+        "demandedCapacity" : 0.5
+      },
+      {
+        "id"               : 5,
+        "resourceId"       : 3,
+        "name"             : "Market Research",
+        "startDate"        : "2025-01-03",
+        "endDate"          : "2025-01-06",
+        "demandedCapacity" : 0.4
+      },
+      {
+        "id"               : 6,
+        "resourceId"       : 4,
+        "name"             : "Stakeholder Alignment",
+        "startDate"        : "2025-01-08",
+        "endDate"          : "2025-01-12",
+        "demandedCapacity" : 0.2
+      },
+      {
+        "id"               : 7,
+        "resourceId"       : 5,
+        "name"             : "Feature Development",
+        "startDate"        : "2025-01-11",
+        "endDate"          : "2025-01-20",
+        "demandedCapacity" : 0.6
+      },
+      {
+        "id"               : 8,
+        "resourceId"       : 6,
+        "name"             : "Compliance Audit",
+        "startDate"        : "2025-01-14",
+        "endDate"          : "2025-01-18",
+        "demandedCapacity" : 0.4
+      },
+      {
+        "id"               : 9,
+        "resourceId"       : 7,
+        "name"             : "Tech Stack Update",
+        "startDate"        : "2025-01-19",
+        "endDate"          : "2025-01-25",
+        "demandedCapacity" : 0.7
+      },
+      {
+        "id"               : 10,
+        "resourceId"       : 8,
+        "name"             : "HR Systems Integration",
+        "startDate"        : "2025-01-22",
+        "endDate"          : "2025-01-26",
+        "demandedCapacity" : 0.5
+      },
+      {
+        "id"               : 11,
+        "resourceId"       : 9,
+        "name"             : "Client Training Sessions",
+        "startDate"        : "2025-01-25",
+        "endDate"          : "2025-02-02",
+        "demandedCapacity" : 0.3
+      },
+      {
+        "id"               : 12,
+        "resourceId"       : 10,
+        "name"             : "Venture Launch",
+        "startDate"        : "2025-02-01",
+        "endDate"          : "2025-02-05",
+        "demandedCapacity" : 0.8
+      },
+      {
+        "id"               : 13,
+        "resourceId"       : 11,
+        "name"             : "Strategic Planning Session",
+        "startDate"        : "2025-02-06",
+        "endDate"          : "2025-02-10",
+        "demandedCapacity" : 0.4
+      },
+      {
+        "id"               : 14,
+        "resourceId"       : 6,
+        "name"             : "Initial Planning Meeting",
+        "startDate"        : "2025-01-01",
+        "endDate"          : "2025-01-04",
+        "demandedCapacity" : 0.1
+      },
+      {
+        "id"               : 15,
+        "resourceId"       : 6,
+        "name"             : "Requirement Gathering",
+        "startDate"        : "2025-01-05",
+        "endDate"          : "2025-01-09",
+        "demandedCapacity" : 0.2
+      },
+      {
+        "id"               : 16,
+        "resourceId"       : 7,
+        "name"             : "Kick-off Workshop",
+        "startDate"        : "2025-01-10",
+        "endDate"          : "2025-01-15",
+        "demandedCapacity" : 0.3
+      },
+      {
+        "id"               : 17,
+        "resourceId"       : 9,
+        "name"             : "Market Research",
+        "startDate"        : "2025-01-03",
+        "endDate"          : "2025-01-06",
+        "demandedCapacity" : 0.4
+      },
+      {
+        "id"               : 18,
+        "resourceId"       : 10,
+        "name"             : "Stakeholder Alignment",
+        "startDate"        : "2025-01-08",
+        "endDate"          : "2025-01-12",
+        "demandedCapacity" : 0.2
+      },
+      {
+        "id"               : 19,
+        "resourceId"       : 8,
+        "name"             : "HR Systems Integration",
+        "startDate"        : "2025-01-05",
+        "endDate"          : "2025-01-09",
+        "demandedCapacity" : 0.2
+      },
+      {
+        "id"               : 20,
+        "resourceId"       : 11,
+        "name"             : "Planning Meeting",
+        "startDate"        : "2025-01-08",
+        "endDate"          : "2025-01-12",
+        "demandedCapacity" : 0.2
+      }
+    ]
+  }
+}

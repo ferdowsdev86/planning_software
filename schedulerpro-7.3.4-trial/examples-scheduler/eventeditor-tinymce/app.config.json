@@ -1,0 +1,12 @@
+{
+  "title": "TinyMCE Editor in Event Editor",
+  "description": "This example shows how to use TinyMCE as a field in the event editor popup.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/TinyMceField.js",
+    "resources/app.css",
+    "resources/TinyMceField.css"
+  ]
+}

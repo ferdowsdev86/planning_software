@@ -1,0 +1,710 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"      : 1,
+        "name"    : "Mount Everest",
+        "height"  : 8848,
+        "country" : "Nepal",
+        "flag"    : "🇳🇵"
+      },
+      {
+        "id"      : 2,
+        "name"    : "K2",
+        "height"  : 8611,
+        "country" : "Pakistan",
+        "flag"    : "🇵🇰"
+      },
+      {
+        "id"      : 3,
+        "name"    : "Kangchenjunga",
+        "height"  : 8586,
+        "country" : "Nepal",
+        "flag"    : "🇳🇵"
+      },
+      {
+        "id"      : 4,
+        "name"    : "Mont Blanc",
+        "height"  : 4810,
+        "country" : "France",
+        "flag"    : "🇫🇷"
+      },
+      {
+        "id"      : 5,
+        "name"    : "Matterhorn",
+        "height"  : 4478,
+        "country" : "Switzerland",
+        "flag"    : "🇨🇭"
+      },
+      {
+        "id"      : 6,
+        "name"    : "Denali",
+        "height"  : 6190,
+        "country" : "USA",
+        "flag"    : "🇺🇸"
+      },
+      {
+        "id"      : 7,
+        "name"    : "Aconcagua",
+        "height"  : 6962,
+        "country" : "Argentina",
+        "flag"    : "🇦🇷"
+      },
+      {
+        "id"      : 8,
+        "name"    : "Mount Kosciuszko",
+        "height"  : 2228,
+        "country" : "Australia",
+        "flag"    : "🇦🇺"
+      },
+      {
+        "id"      : 9,
+        "name"    : "Kebenekaise",
+        "height"  : 2097,
+        "country" : "Sweden",
+        "flag"    : "🇸🇪"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Preparations",
+        "children" : [
+          {
+            "id"          : 11,
+            "name"        : "Fill oxygen",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 12,
+            "name"        : "Dry meat",
+            "startDate"   : "2023-07-31",
+            "duration"    : 3,
+            "percentDone" : 60
+          },
+          {
+            "id"          : 13,
+            "name"        : "Buy ropes",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 14,
+            "name"        : "Inspect ropes",
+            "startDate"   : "2023-08-01",
+            "duration"    : 1,
+            "percentDone" : 20
+          }
+        ]
+      },
+      {
+        "id"       : 2,
+        "name"     : "On-site setup",
+        "children" : [
+          {
+            "id"          : 21,
+            "name"        : "Raise tents",
+            "startDate"   : "2023-08-03",
+            "duration"    : 1,
+            "percentDone" : 95
+          },
+          {
+            "id"          : 22,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-03",
+            "duration"    : 2,
+            "percentDone" : 40
+          }
+        ]
+      },
+      {
+        "id"       : 3,
+        "name"     : "Climb",
+        "children" : [
+          {
+            "id"          : 31,
+            "name"        : "Reach base camp",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 32,
+            "name"        : "Reach camp 1",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 70
+          },
+          {
+            "id"          : 33,
+            "name"        : "Reach top",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 5
+          }
+        ]
+      },
+      {
+        "id"       : 4,
+        "name"     : "Preparations",
+        "children" : [
+          {
+            "id"          : 41,
+            "name"        : "Buy supplies",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 42,
+            "name"        : "Plan ascent",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 60
+          },
+          {
+            "id"          : 43,
+            "name"        : "First aid course",
+            "startDate"   : "2023-07-31",
+            "duration"    : 2,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 44,
+            "name"        : "Review maps",
+            "startDate"   : "2023-08-01",
+            "duration"    : 1,
+            "percentDone" : 20
+          }
+        ]
+      },
+      {
+        "id"       : 5,
+        "name"     : "On-site setup",
+        "children" : [
+          {
+            "id"          : 51,
+            "name"        : "Establish base camp",
+            "startDate"   : "2023-08-03",
+            "duration"    : 2,
+            "percentDone" : 100
+          },
+          {
+            "id"          : 52,
+            "name"        : "Unpack supplies",
+            "startDate"   : "2023-08-03",
+            "duration"    : 2,
+            "percentDone" : 70
+          }
+        ]
+      },
+      {
+        "id"       : 6,
+        "name"     : "Climb",
+        "children" : [
+          {
+            "id"          : 61,
+            "name"        : "Reach camp",
+            "startDate"   : "2023-08-07",
+            "duration"    : 2,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 62,
+            "name"        : "Reach top",
+            "startDate"   : "2023-08-07",
+            "duration"    : 2,
+            "percentDone" : 30
+          }
+        ]
+      },
+      {
+        "id"       : 7,
+        "name"     : "Sponsors",
+        "children" : [
+          {
+            "id"          : 71,
+            "name"        : "Meeting",
+            "startDate"   : "2023-08-06",
+            "duration"    : 1,
+            "percentDone" : 10
+          },
+          {
+            "id"          : 72,
+            "name"        : "Dinner",
+            "startDate"   : "2023-08-06",
+            "duration"    : 1,
+            "percentDone" : 0
+          }
+        ]
+      },
+      {
+        "id"       : 8,
+        "name"     : "Preparations",
+        "children" : [
+          {
+            "id"          : 81,
+            "name"        : "Buy supplies",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 82,
+            "name"        : "Plan ascent",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 100
+          },
+          {
+            "id"          : 83,
+            "name"        : "First aid course",
+            "startDate"   : "2023-07-31",
+            "duration"    : 2.5,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 84,
+            "name"        : "Review maps",
+            "startDate"   : "2023-08-01",
+            "duration"    : 1,
+            "percentDone" : 100
+          }
+        ]
+      },
+      {
+        "id"       : 9,
+        "name"     : "On-site setup",
+        "children" : [
+          {
+            "id"          : 91,
+            "name"        : "Raise tents",
+            "startDate"   : "2023-08-03",
+            "duration"    : 1,
+            "percentDone" : 95
+          },
+          {
+            "id"          : 92,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-03",
+            "duration"    : 2,
+            "percentDone" : 100
+          }
+        ]
+      },
+      {
+        "id"       : 10,
+        "name"     : "Climb",
+        "children" : [
+          {
+            "id"          : 101,
+            "name"        : "Reach base camp",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 102,
+            "name"        : "Reach camp 1",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 30
+          },
+          {
+            "id"          : 103,
+            "name"        : "Reach top",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 0
+          }
+        ]
+      },
+      {
+        "id"       : 110,
+        "name"     : "Planning",
+        "children" : [
+          {
+            "id"          : 111,
+            "name"        : "Find sponsors",
+            "startDate"   : "2023-08-01",
+            "duration"    : 5,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 112,
+            "name"        : "Secure funds",
+            "startDate"   : "2023-08-01",
+            "duration"    : 5,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 113,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-01",
+            "duration"    : 2,
+            "percentDone" : 100
+          }
+        ]
+      },
+      {
+        "id"       : 120,
+        "name"     : "Planning",
+        "children" : [
+          {
+            "id"          : 121,
+            "name"        : "Find sponsors",
+            "startDate"   : "2023-08-02",
+            "duration"    : 4,
+            "percentDone" : 40
+          },
+          {
+            "id"          : 122,
+            "name"        : "Secure funds",
+            "startDate"   : "2023-08-02",
+            "duration"    : 4,
+            "percentDone" : 20
+          },
+          {
+            "id"          : 123,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-02",
+            "duration"    : 2,
+            "percentDone" : 10
+          }
+        ]
+      },
+      {
+        "id"       : 130,
+        "name"     : "Preparations",
+        "children" : [
+          {
+            "id"          : 131,
+            "name"        : "Fill oxygen",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 132,
+            "name"        : "Prepare meals",
+            "startDate"   : "2023-07-31",
+            "duration"    : 2,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 133,
+            "name"        : "Buy ropes",
+            "startDate"   : "2023-07-31",
+            "duration"    : 1,
+            "percentDone" : 100
+          },
+          {
+            "id"          : 134,
+            "name"        : "Inspect ropes",
+            "startDate"   : "2023-08-01",
+            "duration"    : 1,
+            "percentDone" : 50
+          }
+        ]
+      },
+      {
+        "id"       : 140,
+        "name"     : "On-site setup",
+        "children" : [
+          {
+            "id"          : 141,
+            "name"        : "Raise tents",
+            "startDate"   : "2023-08-03",
+            "duration"    : 1,
+            "percentDone" : 95
+          },
+          {
+            "id"          : 142,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-03",
+            "duration"    : 2,
+            "percentDone" : 40
+          }
+        ]
+      },
+      {
+        "id"       : 150,
+        "name"     : "Climb",
+        "children" : [
+          {
+            "id"          : 151,
+            "name"        : "Reach base camp",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 152,
+            "name"        : "Reach top",
+            "startDate"   : "2023-08-07",
+            "duration"    : 1,
+            "percentDone" : 5
+          }
+        ]
+      },
+      {
+        "id"       : 160,
+        "name"     : "Planning",
+        "children" : [
+          {
+            "id"          : 161,
+            "name"        : "Find sponsors",
+            "startDate"   : "2023-08-02",
+            "duration"    : 4,
+            "percentDone" : 100
+          },
+          {
+            "id"          : 162,
+            "name"        : "Secure funds",
+            "startDate"   : "2023-08-02",
+            "duration"    : 4,
+            "percentDone" : 20
+          },
+          {
+            "id"          : 163,
+            "name"        : "Contract guide",
+            "startDate"   : "2023-08-02",
+            "duration"    : 2,
+            "percentDone" : 90
+          }
+        ]
+      },
+      {
+        "id"       : 170,
+        "name"     : "Preparations",
+        "children" : [
+          {
+            "id"          : 171,
+            "name"        : "Prepare meal",
+            "startDate"   : "2023-08-01",
+            "duration"    : 1,
+            "percentDone" : 100
+          }
+        ]
+      },
+      {
+        "id"       : 180,
+        "name"     : "Climb",
+        "children" : [
+          {
+            "id"          : 181,
+            "name"        : "Climb to top",
+            "startDate"   : "2023-08-02",
+            "duration"    : 1,
+            "percentDone" : 100
+          }
+        ]
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      { "id" : 1, "event" : 1, "resource" : 1 },
+      { "id" : 11, "event" : 11, "resource" : 1 },
+      { "id" : 12, "event" : 12, "resource" : 1 },
+      { "id" : 13, "event" : 13, "resource" : 1 },
+      { "id" : 14, "event" : 14, "resource" : 1 },
+      { "id" : 2, "event" : 2, "resource" : 1 },
+      { "id" : 21, "event" : 21, "resource" : 1 },
+      { "id" : 22, "event" : 22, "resource" : 1 },
+      { "id" : 3, "event" : 3, "resource" : 1 },
+      { "id" : 31, "event" : 31, "resource" : 1 },
+      { "id" : 32, "event" : 32, "resource" : 1 },
+      { "id" : 33, "event" : 33, "resource" : 1 },
+      { "id" : 4, "event" : 4, "resource" : 2 },
+      { "id" : 41, "event" : 41, "resource" : 2 },
+      { "id" : 42, "event" : 42, "resource" : 2 },
+      { "id" : 43, "event" : 43, "resource" : 2 },
+      { "id" : 44, "event" : 44, "resource" : 2 },
+      { "id" : 5, "event" : 5, "resource" : 2 },
+      { "id" : 51, "event" : 51, "resource" : 2 },
+      { "id" : 52, "event" : 52, "resource" : 2 },
+      { "id" : 6, "event" : 6, "resource" : 2 },
+      { "id" : 61, "event" : 61, "resource" : 2 },
+      { "id" : 62, "event" : 62, "resource" : 2 },
+      { "id" : 63, "event" : 63, "resource" : 2 },
+      { "id" : 7, "event" : 7, "resource" : 2 },
+      { "id" : 71, "event" : 71, "resource" : 2 },
+      { "id" : 72, "event" : 72, "resource" : 2 },
+      { "id" : 8, "event" : 8, "resource" : 3 },
+      { "id" : 81, "event" : 81, "resource" : 3 },
+      { "id" : 82, "event" : 82, "resource" : 3 },
+      { "id" : 83, "event" : 83, "resource" : 3 },
+      { "id" : 84, "event" : 84, "resource" : 3 },
+      { "id" : 9, "event" : 9, "resource" : 3 },
+      { "id" : 91, "event" : 91, "resource" : 3 },
+      { "id" : 92, "event" : 92, "resource" : 3 },
+      { "id" : 10, "event" : 10, "resource" : 3 },
+      { "id" : 101, "event" : 101, "resource" : 3 },
+      { "id" : 102, "event" : 102, "resource" : 3 },
+      { "id" : 103, "event" : 103, "resource" : 3 },
+      { "id" : 110, "event" : 110, "resource" : 4 },
+      { "id" : 111, "event" : 111, "resource" : 4 },
+      { "id" : 112, "event" : 112, "resource" : 4 },
+      { "id" : 113, "event" : 113, "resource" : 4 },
+      { "id" : 120, "event" : 120, "resource" : 5 },
+      { "id" : 121, "event" : 121, "resource" : 5 },
+      { "id" : 122, "event" : 122, "resource" : 5 },
+      { "id" : 123, "event" : 123, "resource" : 5 },
+      { "id" : 130, "event" : 130, "resource" : 7 },
+      { "id" : 131, "event" : 131, "resource" : 7 },
+      { "id" : 132, "event" : 132, "resource" : 7 },
+      { "id" : 133, "event" : 133, "resource" : 7 },
+      { "id" : 134, "event" : 134, "resource" : 7 },
+      { "id" : 140, "event" : 140, "resource" : 7 },
+      { "id" : 141, "event" : 141, "resource" : 7 },
+      { "id" : 142, "event" : 142, "resource" : 7 },
+      { "id" : 150, "event" : 150, "resource" : 7 },
+      { "id" : 151, "event" : 151, "resource" : 7 },
+      { "id" : 152, "event" : 152, "resource" : 7 },
+      { "id" : 160, "event" : 160, "resource" : 8 },
+      { "id" : 161, "event" : 161, "resource" : 8 },
+      { "id" : 162, "event" : 162, "resource" : 8 },
+      { "id" : 163, "event" : 163, "resource" : 8 },
+      { "id" : 170, "event" : 170, "resource" : 9 },
+      { "id" : 171, "event" : 171, "resource" : 9 },
+      { "id" : 180, "event" : 180, "resource" : 9 },
+      { "id" : 181, "event" : 181, "resource" : 9 }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "from" : 13,
+        "to"   : 14,
+        "lag"  : 1
+      },
+      {
+        "id"   : 2,
+        "from" : 1,
+        "to"   : 2,
+        "lag"  : 1
+      },
+      {
+        "id"   : 3,
+        "from" : 2,
+        "to"   : 3,
+        "lag"  : 1
+      },
+      {
+        "id"   : 4,
+        "from" : 31,
+        "to"   : 32,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 5,
+        "from" : 32,
+        "to"   : 33,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 6,
+        "from" : 4,
+        "to"   : 5,
+        "lag"  : 1
+      },
+      {
+        "id"   : 7,
+        "from" : 5,
+        "to"   : 6,
+        "lag"  : 3
+      },
+      {
+        "id"   : 8,
+        "from" : 61,
+        "to"   : 62,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 9,
+        "from" : 8,
+        "to"   : 9,
+        "lag"  : 1
+      },
+      {
+        "id"   : 10,
+        "from" : 9,
+        "to"   : 10,
+        "lag"  : 1
+      },
+      {
+        "id"   : 11,
+        "from" : 101,
+        "to"   : 102,
+        "lag"  : 0.25
+      },
+      {
+        "id"   : 12,
+        "from" : 102,
+        "to"   : 103,
+        "lag"  : 0.25
+      },
+      {
+        "id"   : 13,
+        "from" : 110,
+        "to"   : 120,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 14,
+        "from" : 130,
+        "to"   : 140,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 15,
+        "from" : 140,
+        "to"   : 150,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 16,
+        "from" : 151,
+        "to"   : 152,
+        "lag"  : 0.5
+      },
+      {
+        "id"   : 17,
+        "from" : 170,
+        "to"   : 180,
+        "lag"  : 0.25
+      }
+    ]
+  },
+  "resourceTimeRanges" : {
+    "rows" : [
+      {
+        "id"             : 1,
+        "resourceId"     : 6,
+        "name"           : "Closed because of avalanches",
+        "timeRangeColor" : "red",
+        "startDate"      : "2023-07-31",
+        "duration"       : 12
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"             : 1,
+        "name"           : "Optimal start",
+        "timeRangeColor" : "orange",
+        "startDate"      : "2023-08-07",
+        "duration"       : 0
+      }
+    ]
+  }
+}

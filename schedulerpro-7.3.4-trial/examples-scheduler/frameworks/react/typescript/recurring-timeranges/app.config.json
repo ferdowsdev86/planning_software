@@ -1,0 +1,16 @@
+{
+  "title": "Recurring timeranges demo in TypeScript (React)",
+  "description": "Shows how to use the TimeRanges feature with the recurring time spans to add repeating vertical lines and zones to the schedule",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.ts",
+    "src/index.tsx",
+    "src/lib/MyTimeRange.ts",
+    "tsconfig.json"
+  ]
+}

@@ -1,0 +1,44 @@
+.b-scheduler-pro {
+    --b-sch-event-box-shadow     : var(--b-elevation-1);
+    --b-sch-event-font-weight    : 700;
+    --b-sch-event-padding-inline : 0;
+}
+
+.b-sch-event-content {
+    /* Demo makes inner content sticky rather than outermost */
+    position       : static !important;
+    width          : 100% !important;
+    overflow       : visible !important;
+    flex-direction : column;
+    align-items    : stretch;
+    gap            : 0;
+}
+
+.event-header,
+.event-body {
+    display     : flex;
+    flex        : 1;
+    padding     : 0 0.5em;
+    align-items : center;
+}
+
+.event-header {
+    font-weight : 500;
+
+    background  : color-mix(in srgb, var(--b-neutral-100), transparent 20%);
+    color       : var(--b-neutral-20);
+}
+
+.event-body {
+    font-weight : 400;
+
+    background  : color-mix(in srgb, var(--b-neutral-100), transparent 5%);
+    color       : var(--b-neutral-40);
+}
+
+.event-sticky-content {
+    display            : flex;
+    position           : sticky;
+    inset-inline-start : 0.75em;
+    gap                : 0.5em;
+}

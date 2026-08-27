@@ -1,0 +1,14 @@
+{
+  "title": "Simple demo (Vue 3)",
+  "description": "Shows a simple Vue Scheduler component integration with Vue 3",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

@@ -1,0 +1,808 @@
+@charset "UTF-8";
+/* ../Gantt/lib/Gantt/column/AddNewColumn.css */
+.b-new-column-combo {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  --b-text-field-input-height: 100%;
+}
+.b-new-column-combo .b-field-inner {
+  background: transparent;
+  border: none;
+}
+.b-new-column-combo .b-field-inner::before {
+  content: none;
+}
+
+/* ../Gantt/lib/Gantt/column/ResourceAssignmentColumn.css */
+.b-resource-assignment-cell {
+  padding-block: 0.4em;
+  --b-avatar-background: var(--b-resource-assignment-column-avatar-background, var(--b-primary-90));
+}
+.b-resource-avatar-container {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+.b-resource-avatar-container .b-resource-avatar {
+  margin-inline-end: 2px;
+  height: 100%;
+  width: auto;
+}
+.b-resource-avatar-container .b-resource-avatar.b-drag-original {
+  opacity: .5;
+}
+.b-resource-avatar-container:empty {
+  height: 2.2em;
+}
+.b-draggable-resource-avatars .b-resource-avatar-container > .b-resource-avatar {
+  cursor: pointer;
+}
+.b-overflow-img {
+  overflow: hidden;
+  position: relative;
+}
+.b-overflow-img .b-resource-avatar {
+  filter: brightness(60%);
+  margin-inline-end: 0;
+}
+.b-overflow-img .b-overflow-count {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  pointer-events: none;
+}
+
+/* ../Gantt/lib/Gantt/feature/Baselines.css */
+:root,
+:host {
+  --b-baseline-wrap-size: 0.6;
+  --b-baseline-border-width: null;
+  --b-baseline-border-color: null;
+  --b-baseline-margin-top: 1px;
+  --b-baseline-transition-duration: 0.2s;
+  --b-baseline-flex: 0.5;
+  --b-baseline-border-radius: 2px;
+  --b-baseline-background: var(--b-neutral-90);
+}
+.b-baseline-wrap {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  transition: none;
+  translate: 0 calc(1px * (1 - var(--b-baseline-wrap-size)) * var(--b-event-size));
+  height: calc(1px * var(--b-baseline-wrap-size) * var(--b-event-size));
+}
+.b-task-baseline {
+  position: relative;
+  transition-property:
+    flex,
+    border,
+    font-size;
+  pointer-events: all;
+  flex: var(--b-baseline-flex);
+  border: var(--b-baseline-border-width) solid var(--b-baseline-border-color);
+  border-radius: var(--b-baseline-border-radius);
+  transition-duration: var(--b-baseline-transition-duration);
+  background: var(--b-baseline-background);
+  margin-top: var(--b-baseline-margin-top);
+}
+.b-animating .b-task-baseline {
+  transition-property:
+    flex,
+    border-width,
+    font-size,
+    width,
+    inset-inline-start;
+}
+.b-task-baseline:not(.b-milestone-wrap) {
+  min-width: var(--b-gantt-task-min-width);
+}
+.b-baselines .b-gantt-task-wrap.b-has-baselines {
+  height: calc(1px * (1 - var(--b-baseline-wrap-size)) * var(--b-event-size));
+}
+.b-baselines .b-gantt-task-wrap.b-has-baselines.b-milestone-wrap {
+  --b-milestone-size: calc(var(--b-event-size) * 0.6px);
+  transition: flex var(--b-baseline-transition-duration), font-size var(--b-baseline-transition-duration);
+}
+.b-task-baseline-milestone {
+  border: none;
+}
+.b-task-baseline-milestone::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  content: " ";
+  height: calc(0.707107 * var(--b-event-size) * 0.3 * 1px);
+  width: calc(0.707107 * var(--b-event-size) * 0.3 * 1px);
+  transform-origin: 50% 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background-image: inherit;
+  background-color: inherit;
+}
+
+/* ../Gantt/lib/Gantt/feature/CriticalPaths.css */
+:root,
+:host {
+  --b-critical-path-primary: var(--b-color-red);
+  --b-critical-path-parent-primary: var(--b-color-red);
+  --b-critical-path-stroke: color-mix(in srgb, var(--b-color-red), var(--b-mix) 50%);
+}
+.b-gantt-base.b-gantt-critical-paths marker#arrowEndCritical {
+  fill: var(--b-critical-path-stroke);
+}
+.b-gantt-base.b-gantt-critical-paths marker#arrowEndCritical path {
+  fill: var(--b-critical-path-stroke);
+  stroke: var(--b-critical-path-stroke);
+}
+.b-gantt-base.b-gantt-critical-paths .b-gantt-task-wrap.b-critical {
+  --b-primary: var(--b-critical-path-primary);
+}
+.b-gantt-base.b-gantt-critical-paths .b-gantt-task-parent.b-critical {
+  --b-primary: var(--b-critical-path-parent-primary);
+}
+.b-gantt-base.b-gantt-critical-paths svg.b-sch-dependencies-canvas .b-sch-dependency.b-critical:not(.b-click-area) {
+  --b-dependency-color: var(--b-critical-path-stroke);
+  --b-dependency-stroke-width: 2px;
+  marker-start: url(#arrowEndCritical);
+}
+
+/* ../Gantt/lib/Gantt/feature/Dependencies.css */
+.b-gantt-base svg.b-sch-dependencies-canvas .b-sch-dependency:not(.b-click-area) {
+  marker-end: none;
+  marker-start: var(--b-dependency-marker);
+}
+.b-gantt-base svg.b-sch-dependencies-canvas .b-sch-dependency:not(.b-click-area).b-sch-dependency-markerless,
+.b-gantt-base svg.b-sch-dependencies-canvas .b-sch-dependency:not(.b-click-area).b-sch-dependency-ends-outside {
+  marker-start: none;
+}
+
+/* ../Gantt/lib/Gantt/feature/Indicators.css */
+:root,
+:host {
+  --b-indicator-z-index: 7;
+  --b-indicator-at-bottom-size: 6px;
+  --b-indicator-at-bottom-gap: 4px;
+  --b-indicator-constraint-size: 5px;
+  --b-indicator-deadline-icon: "\f024";
+  --b-indicator-must-icon: "\f08d";
+  --b-indicator-color: var(--b-border-6);
+  --b-indicator-custom-icon-color: var(--b-indicator-color);
+  --b-indicator-hover-color: var(--b-border-4);
+  --b-indicator-deadline-color: var(--b-color-red);
+  --b-indicator-deadline-hover-color: color-mix(in srgb, var(--b-indicator-deadline-color), var(--b-opposite) 15%);
+}
+.b-indicator {
+  position: absolute;
+  pointer-events: all;
+  overflow: visible;
+  white-space: nowrap;
+  transition: color .2s, border-color .2s;
+  z-index: var(--b-indicator-z-index);
+}
+.b-indicator.b-has-icon {
+  display: grid;
+  place-items: center;
+}
+.b-indicator.b-has-icon::before {
+  top: 90%;
+}
+.b-animating .b-indicator {
+  transition: all .2s;
+}
+.b-indicator i {
+  font-size: .9em;
+  color: var(--b-indicator-custom-icon-color);
+}
+.b-indicator:hover {
+  z-index: var(--b-indicator-z-index);
+  color: var(--b-indicator-hover-color);
+  border-color: var(--b-indicator-hover-color);
+}
+.b-indicator.b-bottom {
+  margin-top: calc(1px * var(--b-event-size) + var(--b-indicator-at-bottom-gap));
+}
+.b-indicator.b-early-dates,
+.b-indicator.b-late-dates {
+  border-width: 1px;
+  border-style: solid;
+  border-top: none;
+  border-color: var(--b-indicator-color);
+  height: var(--b-indicator-at-bottom-size) !important;
+}
+:is(.b-indicator.b-early-dates, .b-indicator.b-late-dates):hover {
+  border-color: var(--b-indicator-hover-color);
+}
+:is(.b-indicator.b-constraint-type-muststarton, .b-indicator.b-constraint-type-mustfinishon, .b-indicator.b-deadline-date)::before {
+  position: relative;
+  transition: color .2s;
+  font-family: var(--b-widget-icon-font-family);
+  font-weight: var(--b-widget-icon-font-weight);
+  top: calc(var(--b-indicator-at-bottom-size) * -1.1);
+  font-size: calc(var(--b-indicator-at-bottom-size) * 2);
+}
+.b-indicator.b-deadline-date {
+  width: auto;
+  margin-inline-start: -2.5px;
+}
+.b-indicator.b-deadline-date::before {
+  content: var(--b-indicator-deadline-icon);
+  color: var(--b-indicator-deadline-color);
+}
+.b-indicator.b-deadline-date:hover {
+  --b-indicator-deadline-color: var(--b-indicator-deadline-hover-color);
+}
+.b-indicator.b-constraint-date {
+  width: var(--b-indicator-at-bottom-size);
+}
+.b-indicator.b-constraint-date::before {
+  transition: border-color .2s, background-color .2s;
+}
+.b-indicator.b-constraint-date:hover::before {
+  border-color: var(--b-indicator-hover-color);
+}
+.b-indicator.b-constraint-type-muststarton,
+.b-indicator.b-constraint-type-mustfinishon {
+  border: none;
+  width: auto;
+  margin-inline-start: calc(var(--b-indicator-at-bottom-size) * -.75);
+}
+:is(.b-indicator.b-constraint-type-muststarton, .b-indicator.b-constraint-type-mustfinishon)::before {
+  content: var(--b-indicator-must-icon);
+  color: var(--b-indicator-color);
+}
+:is(.b-indicator.b-constraint-type-muststarton, .b-indicator.b-constraint-type-mustfinishon):hover {
+  --b-indicator-color: var(--b-indicator-hover-color) ;
+}
+.b-indicator.b-constraint-type-startnoearlierthan,
+.b-indicator.b-constraint-type-startnolaterthan {
+  width: var(--b-indicator-constraint-size);
+  height: calc(var(--b-indicator-constraint-size) * 2) !important;
+  border-start-end-radius: calc(var(--b-indicator-constraint-size) * 2);
+  border-end-end-radius: calc(var(--b-indicator-constraint-size) * 2);
+  border: 1px solid var(--b-indicator-color);
+  background-color: var(--b-indicator-color);
+}
+.b-indicator.b-constraint-type-startnolaterthan {
+  background-color: transparent;
+}
+.b-indicator.b-constraint-type-startnoearlierthan:hover {
+  background-color: var(--b-indicator-hover-color);
+}
+.b-indicator.b-constraint-type-finishnoearlierthan,
+.b-indicator.b-constraint-type-finishnolaterthan {
+  margin-inline-start: calc(var(--b-indicator-constraint-size) * -1);
+  width: var(--b-indicator-constraint-size);
+  height: calc(var(--b-indicator-constraint-size) * 2) !important;
+  border-start-start-radius: calc(var(--b-indicator-constraint-size) * 2);
+  border-end-start-radius: calc(var(--b-indicator-constraint-size) * 2);
+  border: 1px solid var(--b-indicator-color);
+  background-color: var(--b-indicator-color);
+}
+.b-indicator.b-constraint-type-finishnolaterthan {
+  background-color: transparent;
+}
+.b-indicator.b-constraint-type-finishnoearlierthan:hover {
+  background-color: var(--b-indicator-hover-color);
+}
+.b-rtl .b-indicator.b-deadline-date::before {
+  rotate: 180deg;
+}
+
+/* ../Gantt/lib/Gantt/feature/ParentArea.css */
+:root,
+:host {
+  --b-parent-area-z-index: 4;
+  --b-parent-area-border-radius: 0.25em;
+  --b-parent-area-background: color-mix(in srgb, var(--b-neutral-80), transparent 70%);
+  --b-parent-area-border: null;
+}
+.b-parent-area {
+  position: absolute;
+  pointer-events: none;
+  z-index: var(--b-parent-area-z-index);
+  background: var(--b-parent-area-background);
+  border-radius: var(--b-parent-area-border-radius);
+  border: var(--b-parent-area-border);
+}
+.b-animating .b-parent-area {
+  transition:
+    inset-inline-start 0.2s,
+    top 0.2s,
+    width 0.2s;
+}
+
+/* ../Gantt/lib/Gantt/feature/ProgressLine.css */
+:host,
+:root {
+  --b-progress-line-color: var(--b-color-red);
+  --b-progress-line-z-index: 100;
+  --b-gantt-progress-line-width: 1;
+}
+.b-progress-line-canvas {
+  z-index: var(--b-progress-line-z-index);
+}
+.b-gantt-progress-line {
+  stroke: var(--b-progress-line-color);
+  stroke-width: var(--b-gantt-progress-line-width);
+}
+
+/* ../Gantt/lib/Gantt/feature/Rollups.css */
+:root,
+:host {
+  --b-rollup-milestone-z-index: 2;
+  --b-rollup-milestone-size: .5em;
+  --b-rollup-primary: var(--b-color-green);
+}
+.b-colorize {
+  --b-rollup-background: var(--b-primary-70);
+  --b-rollup-milestone-primary: var(--b-gantt-milestone-primary);
+}
+.b-task-rollup-wrap {
+  grid-area: rollup;
+  display: block;
+  align-self: stretch;
+  position: relative;
+  min-height: 3px;
+  height: 0.2em;
+  margin-top: .15em;
+}
+.b-task-rollup {
+  position: absolute;
+  height: 100%;
+  opacity: .8;
+  --b-primary: var(--b-rollup-primary);
+  background: var(--b-rollup-background);
+}
+.b-task-rollup.b-inactive {
+  --b-primary: var(--b-gantt-inactive-task-color);
+}
+.b-rollups .b-baseline-wrap {
+  top: 0.6em;
+}
+.b-rollups .b-gantt-task-parent:not(.b-milestone-wrap) .b-gantt-task {
+  min-height: 1em;
+}
+.b-task-rollup:where(.b-milestone) {
+  top: 50%;
+  transform: translateY(-50%) translateX(-50%) rotate(45deg);
+  transform-origin: 50% 50%;
+  opacity: .9;
+  z-index: var(--b-rollup-milestone-z-index);
+  width: var(--b-rollup-milestone-size);
+  height: var(--b-rollup-milestone-size);
+  --b-primary: var(--b-rollup-milestone-primary);
+}
+.b-gantt-rollups-tooltip .b-gantt-task-title:not(:first-child) {
+  margin-top: 1em;
+}
+.b-gantt-rollups-tooltip td:last-child {
+  padding-inline-start: 1em;
+}
+
+/* ../Gantt/lib/Gantt/feature/ScrollButtons.css */
+:root,
+:host {
+}
+
+/* ../Gantt/lib/Gantt/feature/TaskDrag.css */
+.b-float-root > .b-gantt-task-drag-tooltip {
+  pointer-events: none;
+}
+.b-gantt-task-drag-tooltip .b-tooltip-content > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+/* ../Gantt/lib/Gantt/feature/TaskNonWorkingTime.css */
+:root,
+:host {
+  --b-task-non-working-time-z-index: 0;
+  --b-task-non-working-time-font-size: 0.9em;
+  --b-task-non-working-time-color: var(--b-text-3);
+  --b-task-non-working-time-background: color-mix(in srgb, var(--b-neutral-95), transparent 50%);
+}
+.b-task-non-working-time {
+  display: flex;
+  position: absolute;
+  justify-content: center;
+  align-items: center;
+  pointer-events: all;
+  gap: 0.5em;
+  overflow: hidden;
+  color: var(--b-task-non-working-time-color);
+  background: var(--b-task-non-working-time-background);
+  font-size: var(--b-task-non-working-time-font-size);
+  z-index: var(--b-task-non-working-time-z-index);
+  transition: var(--b-sch-event-transition);
+}
+.b-animating .b-task-non-working-time {
+  transition: var(--b-sch-event-animating-transition);
+}
+.b-task-non-working-time.b-released {
+  display: none;
+  transition: none;
+}
+.b-gantt-task > .b-task-non-working-time {
+  top: 0;
+  height: 100%;
+  font-size: .8em;
+  color: var(--b-neutral-40);
+  pointer-events: none;
+}
+.b-gantt-task > .b-task-non-working-time i.fa {
+  margin-inline-end: 0;
+}
+
+/* ../Gantt/lib/Gantt/feature/TaskResize.css */
+.b-gantt.b-task-resize {
+  --bi-event-resize-handle-inset-inline: 0;
+  --b-event-resize-handle-other-size: 6px;
+}
+.b-gantt.b-task-resize .b-gantt-task-wrap.b-over-end-handle .b-gantt-task {
+  cursor: ew-resize;
+}
+
+/* ../Gantt/lib/Gantt/feature/TaskTooltip.css */
+:root,
+:host {
+  --b-task-tooltip-title-font-weight: 600;
+}
+.b-gantt-task-tooltip td:last-child {
+  text-align: end;
+}
+.b-gantt-task-tooltip .b-gantt-task-title {
+  font-weight: var(--b-task-tooltip-title-font-weight);
+}
+
+/* ../Gantt/lib/Gantt/feature/TimelineChart.css */
+.b-timeline-overlay-chart {
+  position: absolute;
+  pointer-events: none;
+}
+.b-timeline-overlay-chart .b-timeline-chart-axis {
+  stroke: black;
+  stroke-width: 1px;
+  opacity: 0.2;
+}
+.b-timeline-overlay-chart .b-timeline-chart-path {
+  fill: none;
+  stroke: red;
+  stroke-width: 2px;
+}
+.b-timeline-overlay-chart .b-timeline-chart-point {
+  pointer-events: all;
+  fill: red;
+  r: 3;
+  transition: r .3s;
+}
+.b-timeline-overlay-chart .b-timeline-chart-point:hover {
+  r: 5;
+}
+
+/* ../Gantt/lib/Gantt/view/GanttBase.css */
+:root,
+:host {
+  --b-gantt-task-padding-inline: .5em;
+  --b-gantt-task-border-radius: .25em;
+  --b-gantt-parent-task-max-height: 1.2em;
+  --b-gantt-task-font-weight: 400;
+  --b-gantt-task-font-size: 1em;
+  --b-gantt-task-border-width: 0px;
+  --b-gantt-task-border-style: null;
+  --b-gantt-task-z-index: 5;
+  --b-gantt-task-content-z-index: 1;
+  --b-gantt-task-transition:
+    border var(--b-default-transition-duration),
+    border-radius var(--b-default-transition-duration),
+    background-color var(--b-default-transition-duration),
+    padding var(--b-default-transition-duration),
+    opacity var(--b-default-transition-duration);
+  --b-gantt-task-animating-transition:
+    border var(--b-default-transition-duration),
+    border-radius var(--b-default-transition-duration),
+    background-color var(--b-default-transition-duration),
+    color var(--b-default-transition-duration),
+    padding var(--b-default-transition-duration),
+    opacity var(--b-default-transition-duration),
+    inset var(--b-default-transition-duration),
+    width var(--b-default-transition-duration),
+    height var(--b-default-transition-duration);
+  --b-gantt-task-box-shadow: null;
+  --b-gantt-task-min-width: 6px;
+  --b-gantt-task-primary: var(--b-color-green);
+  --b-gantt-parent-task-primary: var(--b-color-blue);
+  --b-gantt-milestone-primary: var(--b-color-blue);
+  --b-gantt-unscheduled-task-color: var(--b-neutral-80);
+  --b-gantt-inactive-cell-color: var(--b-neutral-50);
+  --b-gantt-inactive-task-color: var(--b-neutral-80);
+}
+.b-colorize {
+}
+.b-gantt-task-wrap {
+  display: grid;
+  position: absolute;
+  pointer-events: all;
+  outline: none;
+  grid-template-areas: "top    top    top   " "before body   after " "void1  rollup void2" "bottom bottom bottom";
+  grid-template-columns: 0 1fr 0;
+  grid-template-rows: min-content minmax(0, 100%) min-content min-content;
+  opacity: 1;
+  z-index: var(--b-gantt-task-z-index);
+  height: calc(var(--b-event-size) * 1px);
+  max-height: calc(var(--b-event-size) * 1px);
+  transition: var(--b-gantt-task-transition);
+  --b-primary: var(--b-gantt-task-primary);
+}
+.b-animating .b-gantt-task-wrap,
+.b-splicing-rows .b-gantt-task-wrap {
+  --b-gantt-task-transition: var(--b-gantt-task-animating-transition);
+}
+.b-gantt-task-wrap.b-gantt-task-hover:not(.b-style-none),
+.b-gantt-task-wrap:hover:not(.b-style-none) {
+  --b-sch-event-background: var(--b-sch-event-hover-background);
+}
+.b-gantt-task-wrap.b-selected:not(.b-style-none) {
+  --b-sch-event-background: var(--b-sch-event-selected-background);
+}
+.b-gantt-task-wrap.b-selected:not(.b-style-none) .b-sch-event-segment {
+  --b-sch-event-background: var(--b-sch-event-selected-background);
+}
+.b-gantt-task-wrap.b-style-none:hover {
+  --b-sch-event-background: var(--b-gantt-task-hover-background);
+}
+.b-gantt-task-wrap.b-style-none.b-selected {
+  --b-sch-event-background: var(--b-gantt-task-selected-background);
+}
+.b-gantt-task-wrap:where(.b-milestone-wrap) {
+  --b-sch-milestone-border-width: 0px;
+  --b-primary: var(--b-gantt-milestone-primary);
+  overflow: visible;
+}
+.b-gantt-task-wrap.b-unscheduled .b-gantt-task {
+  background: transparent;
+  border-color: var(--b-gantt-unscheduled-task-color);
+  color: var(--b-gantt-unscheduled-task-color);
+}
+.b-gantt-task-wrap.b-unscheduled .b-gantt-task .b-gantt-task-content {
+  padding: 0;
+}
+.b-gantt-task-wrap.b-active:focus-visible .b-gantt-task {
+  outline-offset: 3px;
+  outline: var(--b-widget-focus-outline-width) solid var(--b-widget-focus-outline-color);
+}
+.b-gantt-task-wrap.b-removing {
+  transition: opacity .3s;
+  opacity: 0;
+}
+.b-gantt-task-wrap.b-remove-remove,
+.b-gantt-task-wrap.b-toggle-remove {
+  transition: opacity var(--b-default-transition-duration), max-height var(--b-default-transition-duration);
+  opacity: 0;
+  max-height: 0;
+}
+.b-gantt-task-wrap.b-toggle-add {
+  animation: b-anim-toggle-task-add var(--b-default-transition-duration);
+}
+@keyframes b-anim-toggle-task-add {
+  0% {
+    opacity: 0;
+    max-height: 0;
+  }
+  100% {
+    opacity: 1;
+    max-height: calc(var(--b-event-size) * 1px);
+  }
+}
+.b-gantt-task {
+  display: flex;
+  position: relative;
+  grid-area: body;
+  align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: clip;
+  cursor: pointer;
+  background: var(--b-sch-event-background);
+  font-size: var(--b-gantt-task-font-size);
+  min-width: var(--b-gantt-task-min-width);
+  border-color: var(--b-sch-event-border-color);
+}
+.b-gantt-task:where(:not(.b-milestone)),
+.b-gantt-task.b-milestone .b-gantt-task-content::before {
+  border-width: var(--b-sch-event-border-width);
+  border-style: var(--b-sch-event-border-style);
+  border-radius: var(--b-sch-event-border-radius);
+  box-shadow: var(--b-gantt-task-box-shadow);
+  color: var(--b-sch-event-color);
+}
+.b-gantt-task:where(:not(.b-milestone)) .b-gantt-task-content {
+  padding-inline: var(--b-gantt-task-padding-inline);
+}
+.b-gantt-task-content {
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  z-index: var(--b-gantt-task-content-z-index);
+  font-weight: var(--b-sch-event-font-weight);
+  font-size: var(--b-sch-event-font-size);
+}
+.b-gantt-task-parent:where(:not(.b-milestone-wrap, .b-unscheduled)) {
+  align-items: center;
+  --b-primary: var(--b-gantt-parent-task-primary);
+}
+.b-gantt-task-parent:where(:not(.b-milestone-wrap, .b-unscheduled)) .b-gantt-task {
+  height: 100%;
+  clip-path: polygon(-20px 0, calc(100% + 20px) 0, calc(100% + 20px) 100%, 100% 100%, calc(100% - 8px) calc(100% - 8px), 8px calc(100% - 8px), 0 100%, -20px 100%);
+  max-height: var(--b-gantt-parent-task-max-height);
+}
+.b-gantt-task-parent.b-active:focus-visible::before {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  outline-offset: 3px;
+  outline: var(--b-widget-focus-outline-width) solid var(--b-widget-focus-outline-color);
+  border-radius: var(--b-gantt-task-border-radius);
+}
+.b-gantt-task-parent.b-active:focus-visible .b-gantt-task {
+  outline: none;
+}
+.b-grid-row.b-inactive .b-grid-cell[data-column=name],
+.b-grid-row.b-inactive .b-grid-cell[data-column=startDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=endDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=earlyStartDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=earlyEndDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=lateStartDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=lateEndDate],
+.b-grid-row.b-inactive .b-grid-cell[data-column=wbsValue],
+.b-grid-row.b-inactive .b-grid-cell[data-column=fullDuration],
+.b-grid-row.b-inactive .b-grid-cell[data-column=fullEffort],
+.b-grid-row.b-inactive .b-grid-cell[data-column=schedulingMode],
+.b-grid-row.b-inactive .b-grid-cell[data-column=constraintType],
+.b-grid-row.b-inactive .b-grid-cell[data-column=calendar],
+.b-grid-row.b-inactive .b-grid-cell[data-column=deadline],
+.b-grid-row.b-inactive .b-grid-cell[data-column=totalSlack],
+.b-grid-row.b-inactive .b-grid-cell[data-column=note],
+.b-grid-row.b-inactive .b-grid-cell[data-column=predecessors],
+.b-grid-row.b-inactive .b-grid-cell[data-column=successors] {
+  text-decoration: line-through;
+  --b-grid-cell-color: var(--b-gantt-inactive-cell-color);
+  --b-tree-parent-color: var(--b-gantt-inactive-cell-color);
+}
+.b-gantt-task-wrap.b-inactive {
+  --b-primary: var(--b-gantt-inactive-task-color);
+}
+
+/* ../Gantt/lib/Gantt/view/TaskStyles.css */
+.b-gantt-task-wrap.b-style-rounded {
+  --b-sch-event-background: var(--b-primary-85);
+}
+.b-gantt-task-wrap.b-style-tonal {
+  --b-sch-event-font-weight: 500;
+}
+
+/* ../Gantt/lib/Gantt/widget/AssignmentField.css */
+.b-assignment-chip-view {
+  flex-flow: row nowrap;
+  overscroll-behavior: contain auto;
+  --b-chip-view-chip-font-size: .9em;
+}
+
+/* ../Gantt/lib/Gantt/widget/AssignmentGrid.css */
+.b-assignment-grid {
+  --b-grid-cell-padding-inline: 0.5em;
+  --b-grid-cell-checkbox-selection-background: var(--b-grid-cell-background);
+}
+.b-assignment-grid-resource-column.b-grid-header {
+  padding-block: var(--b-grid-header-padding);
+}
+.b-assignment-grid-resource-column .b-filter-bar-field {
+  margin-bottom: 0;
+}
+.b-assignment-grid-resource-column .b-grid-header-text {
+  display: none;
+}
+.b-resource-assignment-cell .b-assignment-chip-view-wrap {
+  overflow: hidden;
+}
+
+/* ../Gantt/lib/Gantt/widget/DependencyField.css */
+:root,
+:host {
+  --b-dependency-field-list-filter-z-index: 1;
+  --b-dependency-field-list-event-border-color: var(--b-neutral-75);
+}
+.b-dependency-list-filter {
+  position: sticky;
+  top: 0;
+  z-index: var(--b-dependency-field-list-filter-z-index);
+  background-color: var(--b-list-background);
+}
+.b-predecessor-list {
+  display: flex;
+  flex-direction: column;
+}
+.b-predecessor-list > * {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: auto;
+}
+.b-predecessor-list > .b-list-item .b-predecessor-item-text {
+  flex: 1;
+}
+.b-predecessor-list > .b-list-item .b-sch-box {
+  width: 1.2em;
+  height: .9em;
+  border-radius: 2px;
+  margin-inline-start: .5em;
+  position: relative;
+  pointer-events: all;
+  border: 1px solid var(--b-dependency-field-list-event-border-color);
+}
+.b-predecessor-list > .b-list-item .b-sch-box:after {
+  content: "";
+  width: .5em;
+  height: .5em;
+  border-radius: 50%;
+  position: absolute;
+  display: none;
+  top: 50%;
+  translate: 0 -50%;
+  background-color: var(--b-dependency-field-list-dependency-terminal-color, var(--b-dependency-tooltip-terminal-color, var(--b-primary-50)));
+}
+.b-predecessor-list > .b-list-item.b-selected .b-sch-box {
+  background-color: var(--b-dependency-field-list-event-background, var(--b-dependency-tooltip-event-background, var(--b-primary-85)));
+}
+.b-predecessor-list > .b-list-item.b-selected .b-sch-box::after {
+  display: block;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-fs .b-sch-box.b-from::after {
+  inset-inline-end: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-fs .b-sch-box.b-to::after {
+  inset-inline-start: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-sf .b-sch-box.b-from::after {
+  inset-inline-start: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-sf .b-sch-box.b-to::after {
+  inset-inline-end: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-ss .b-sch-box.b-from::after {
+  inset-inline-start: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-ss .b-sch-box.b-to::after {
+  inset-inline-start: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-ff .b-sch-box.b-from::after {
+  inset-inline-end: -.25em;
+}
+.b-predecessor-list > .b-list-item.b-selected.b-ff .b-sch-box.b-to::after {
+  inset-inline-end: -.25em;
+}
+
+/* ../Gantt/lib/Gantt/widget/AssignmentPicker.css */
+.b-assignment-picker {
+  --b-panel-padding: 0;
+  --b-menu-padding: 0;
+  --b-panel-bottom-toolbar-padding: var(--b-widget-padding);
+}
+.b-assignment-picker .b-assignment-grid {
+  flex: 1 1 auto;
+}
+.b-assignment-picker .b-bottom-toolbar {
+  border-top: 1px solid var(--b-grid-cell-border-color);
+}
+.b-assignment-picker .b-bottom-toolbar .b-toolbar-content {
+  justify-content: flex-end;
+}
+.b-assignment-picker .b-bottom-toolbar .b-toolbar-content > button {
+  min-width: 8em;
+}
+
+/* build/temp-entry-Gantt.css */

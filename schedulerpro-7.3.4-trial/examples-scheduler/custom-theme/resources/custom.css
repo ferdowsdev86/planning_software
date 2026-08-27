@@ -1,0 +1,146 @@
+/**
+ * This is a custom theme for Bryntum components. It is a copy of the svalbard-light theme, with adjusted (and added)
+ * variables.
+ *
+ * Instead of copying and adjusting, another slightly more maintainable approach would be to extend the svalbard-light
+ * theme (load it on the page) and override the variables that need to be changed in a separate file (that is also
+ * loaded on the page).
+ *
+ * For info on which variables you can include in the theme, see API docs or CSS files in sources.
+ */
+
+:root:not(.b-nothing), :host(:not(.b-nothing)) {
+    /* In the demo, the primary color gets overridden by the color picker in demo settings. */
+    /* But in a normal app, this would be used as the default primary color */
+    --b-primary                                 : var(--b-color-blue);
+    --b-secondary                               : var(--b-color-orange);
+
+    /* Basically controls if this is a light or a dark theme, by being used when mixing color shades */
+    --b-mix                                     : #fff;
+    --b-opposite                                : #000;
+    --b-widget-color-scheme                     : light;
+
+    /* region Core */
+
+    /* Make this theme a bit blockier than the others */
+    --b-widget-border-radius                    : .5em;
+    --b-widget-border-radius-large              : .75em;
+
+    /* And more compact */
+    --b-widget-padding                          : .75em;
+
+    --b-widget-border-color                     : var(--b-neutral-70);
+
+    /* Below are widget specific variables */
+
+    --b-button-outlined-disabled-border-color   : var(--b-neutral-80);
+    --b-button-outlined-border-color            : var(--b-neutral-85);
+
+    --b-checkbox-hover-border-color             : var(--b-neutral-50);
+
+    --b-field-set-border-color                  : var(--b-neutral-80);
+
+    --b-list-checkbox-checked-check-color       : var(--b-neutral-100);
+
+    --b-panel-background                        : var(--b-neutral-95);
+
+    --b-popup-background                        : var(--b-panel-background);
+    --b-popup-padding                           : var(--b-widget-padding);
+
+    --b-menu-background                         : var(--b-panel-background);
+
+    --b-slide-toggle-border-color               : transparent;
+    --b-slide-toggle-thumb-background           : var(--b-neutral-100);
+    --b-slide-toggle-hovered-thumb-background   : var(--b-neutral-95);
+    --b-slide-toggle-checked-thumb-background   : var(--b-neutral-100);
+    --b-slide-toggle-disabled-background        : var(--b-neutral-85);
+    --b-slide-toggle-disabled-border-color      : transparent;
+    --b-slide-toggle-disabled-thumb-background  : var(--b-neutral-100);
+    --b-slide-toggle-height                     : 1.5em;
+    --b-slide-toggle-width                      : 2.25em;
+
+    --b-slider-track-color                      : var(--b-neutral-85);
+
+    --b-splitter-color                          : var(--b-neutral-80);
+    --b-splitter-size                           : 1px;
+    --b-splitter-hover-size                     : 5px;
+    --b-splitter-hover-color                    : var(--b-neutral-90);
+
+    --b-text-field-focus-border-width           : 2px;
+
+    --b-text-field-outlined-border-color        : var(--b-border-6);
+    --b-text-field-outlined-hover-border-color  : var(--b-border-4);
+
+    /* endregion */
+
+    /* Grid */
+    --b-grid-header-background                  : var(--b-neutral-100);
+    --b-grid-header-border-color                : var(--b-neutral-80);
+    --b-grid-header-font-weight                 : 400;
+    --b-grid-cell-font-weight                   : 300;
+    --b-row-number-column-background            : var(--b-neutral-98);
+    --b-grid-cell-checkbox-selection-background : var(--b-neutral-98);
+    --b-tree-parent-font-weight                 : 300;
+
+    /* Gantt */
+    --b-scroll-button-border-width              : 1px;
+
+    /* TaskBoard */
+    --b-task-board-column-header-font-weight    : 600;
+    --b-task-board-column-separator-border      : 1px solid var(--b-neutral-80);
+    --b-task-board-card-border                  : 1px solid var(--b-neutral-80);
+    --b-task-board-background                   : var(--b-neutral-100);
+}
+
+/* Shades of primary color have to be specified per widget, for color-mix to work as intended */
+.b-bryntum:not(.b-nothing) {
+    --bi-primary-shade                                : var(--b-primary-40);
+
+    /* region Core */
+
+    --b-button-outlined-color                         : var(--b-primary-25);
+    --b-button-outlined-hover-border-color            : var(--b-primary-80);
+
+    --b-checkbox-checked-check-color                  : var(--b-neutral-100);
+    --b-checkbox-checked-background                   : var(--bi-primary-shade);
+    --b-checkbox-checked-border-color                 : var(--b-checkbox-checked-background);
+    --b-checkbox-checked-hover-background             : var(--bi-primary-shade);
+
+    --b-list-checkbox-checked-background              : var(--b-primary);
+
+    --b-radio-checked-color                           : var(--b-neutral-100);
+    --b-radio-checked-background                      : var(--bi-primary-shade);
+    --b-radio-checked-border-color                    : var(--b-radio-checked-background);
+    --b-radio-check-gap                               : 0.25em;
+
+    --b-slide-toggle-background                       : var(--b-neutral-80);
+    --b-slide-toggle-hover-background                 : var(--b-neutral-80);
+    --b-slide-toggle-checked-hovered-thumb-background : var(--b-primary-95);
+    --b-slide-toggle-checked-border-color             : transparent;
+    --b-slide-toggle-checked-background               : var(--bi-primary-shade);
+    --b-slide-toggle-checked-hover-background         : var(--bi-primary-shade);
+
+    --b-slider-color                                  : var(--bi-primary-shade);
+
+    --b-tab-indicator-color                           : var(--bi-primary-shade);
+
+    --b-text-field-focus-border-color                 : var(--bi-primary-shade);
+    --b-text-field-filled-hover-border-color          : var(--bi-primary-shade);
+
+    --b-toast-background                              : var(--b-neutral-100);
+
+    /* endregion */
+
+    /* Grid */
+    --b-percent-column-fill-background                : var(--b-primary-60);
+    --b-grid-header-hover-background                  : var(--b-neutral-95);
+}
+
+/* Theme meta data */
+.b-theme-info {
+    --b-theme-name             : "Custom";
+    --b-theme-filename         : "custom";
+    --b-theme-button-rendition : "outlined";
+    --b-theme-label-position   : "align-before";
+    --b-theme-overlap-label    : "false";
+}

@@ -1,0 +1,6 @@
+{
+  "title": "SharePoint Workbench demo with TypeScript",
+  "description": "This demo includes a SPFx web part that uses TypeScript and React.",
+  "skipBuild": true,
+  "skipCache": true
+}

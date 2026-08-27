@@ -1,0 +1,10 @@
+{
+  "title": "Pro Conflicts demo",
+  "description": "Shows the conflict resolution popup in action",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

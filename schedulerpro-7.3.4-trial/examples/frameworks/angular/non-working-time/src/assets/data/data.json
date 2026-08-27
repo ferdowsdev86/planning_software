@@ -1,0 +1,310 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "workhours"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"                       : "workhours",
+        "name"                     : "Working hours",
+        "unspecifiedTimeIsWorking" : true,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 16:00",
+            "recurrentEndDate"   : "at 00:00",
+            "isWorking"          : false,
+            "name"               : "Non working time"
+          },
+          {
+            "startDate" : "2020-03-23T02:00",
+            "endDate"   : "2020-03-23T04:00",
+            "isWorking" : false,
+            "cls"       : "factoryShutdown",
+            "name"      : "Factory shutdown"
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "name" : "Steve"
+      },
+      {
+        "id"   : 2,
+        "name" : "Rob"
+      },
+      {
+        "id"   : 3,
+        "name" : "Mike"
+      },
+      {
+        "id"   : 4,
+        "name" : "Lisa"
+      },
+      {
+        "id"   : 5,
+        "name" : "Kate"
+      },
+      {
+        "id"   : 6,
+        "name" : "Gloria"
+      },
+      {
+        "id"   : 7,
+        "name" : "Dave"
+      },
+      {
+        "id"   : 8,
+        "name" : "Arcady"
+      },
+      {
+        "id"   : 9,
+        "name" : "Maxim"
+      },
+      {
+        "id"   : 10,
+        "name" : "Angelo"
+      },
+      {
+        "id"   : 11,
+        "name" : "Emilia"
+      },
+      {
+        "id"   : 12,
+        "name" : "Malik"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "All week project",
+        "startDate"    : "2020-03-23T08:00",
+        "duration"     : 45,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 2,
+        "name"         : "All day project #1",
+        "startDate"    : "2020-03-23T08:00",
+        "duration"     : 9,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 3,
+        "name"         : "All day project #2",
+        "startDate"    : "2020-03-24T08:00",
+        "duration"     : 9,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 4,
+        "name"         : "All day project #3",
+        "startDate"    : "2020-03-25T08:00",
+        "duration"     : 9,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 5,
+        "name"         : "All day project #4",
+        "startDate"    : "2020-03-26T08:00",
+        "duration"     : 9,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 6,
+        "name"         : "All day project #5",
+        "startDate"    : "2020-03-27T08:00",
+        "duration"     : 9,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Short project #1",
+        "startDate"    : "2020-03-23T08:00",
+        "duration"     : 4,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 8,
+        "name"         : "Bit longer project #1",
+        "startDate"    : "2020-03-23T13:00",
+        "duration"     : 8,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 9,
+        "name"         : "Short project #2",
+        "startDate"    : "2020-03-25T16:00",
+        "duration"     : 4,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 10,
+        "name"         : "Bit longer project #2",
+        "startDate"    : "2020-03-25T08:00",
+        "duration"     : 8,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 11,
+        "name"         : "Two day project",
+        "startDate"    : "2020-03-24T11:00",
+        "duration"     : 18,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"           : 12,
+        "name"         : "Three day project",
+        "startDate"    : "2020-03-23T08:00",
+        "duration"     : 27,
+        "durationUnit" : "hours"
+      },
+      {
+        "id"        : 13,
+        "name"      : "Delivery",
+        "startDate" : "2020-03-26T11:00",
+        "duration"  : 0
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 7
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 2
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 2
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 2
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 2
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 2
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 3
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 3
+      },
+      {
+        "id"       : 9,
+        "event"    : 9,
+        "resource" : 3
+      },
+      {
+        "id"       : 10,
+        "event"    : 10,
+        "resource" : 3
+      },
+      {
+        "id"       : 11,
+        "event"    : 11,
+        "resource" : 4
+      },
+      {
+        "id"       : 12,
+        "event"    : 12,
+        "resource" : 5
+      },
+      {
+        "id"       : 13,
+        "event"    : 12,
+        "resource" : 8
+      },
+      {
+        "id"       : 14,
+        "event"    : 12,
+        "resource" : 10
+      },
+      {
+        "id"       : 15,
+        "event"    : 2,
+        "resource" : 6
+      },
+      {
+        "id"       : 16,
+        "event"    : 3,
+        "resource" : 6
+      },
+      {
+        "id"       : 17,
+        "event"    : 4,
+        "resource" : 6
+      },
+      {
+        "id"       : 18,
+        "event"    : 5,
+        "resource" : 6
+      },
+      {
+        "id"       : 19,
+        "event"    : 6,
+        "resource" : 6
+      },
+      {
+        "id"       : 20,
+        "event"    : 2,
+        "resource" : 12
+      },
+      {
+        "id"       : 21,
+        "event"    : 4,
+        "resource" : 12
+      },
+      {
+        "id"       : 22,
+        "event"    : 6,
+        "resource" : 12
+      },
+      {
+        "id"       : 23,
+        "event"    : 1,
+        "resource" : 11
+      },
+      {
+        "id"       : 24,
+        "event"    : 11,
+        "resource" : 9
+      },
+      {
+        "id"       : 25,
+        "event"    : 13,
+        "resource" : 5
+      },
+      {
+        "id"       : 26,
+        "event"    : 13,
+        "resource" : 8
+      }
+    ]
+  }
+}

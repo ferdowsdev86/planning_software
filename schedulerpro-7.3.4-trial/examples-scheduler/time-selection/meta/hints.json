@@ -1,0 +1,6 @@
+{
+  ".b-sch-header-time-axis-cell[data-tick-index='3']": {
+    "title": "Click to select time",
+    "content": "Click a time axis cell to select a time span"
+  }
+}

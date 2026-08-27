@@ -1,0 +1,66 @@
+[
+  {
+    "value" : "action",
+    "text"  : "Action"
+  },
+  {
+    "value" : "adventure",
+    "text"  : "Adventure"
+  },
+  {
+    "value" : "animation",
+    "text"  : "Animation"
+  },
+  {
+    "value" : "comedy",
+    "text"  : "Comedy"
+  },
+  {
+    "value" : "crime",
+    "text"  : "Crime"
+  },
+  {
+    "value" : "drama",
+    "text"  : "Drama"
+  },
+  {
+    "value" : "fantasy",
+    "text"  : "Fantasy"
+  },
+  {
+    "value" : "history",
+    "text"  : "History"
+  },
+  {
+    "value" : "horror",
+    "text"  : "Horror"
+  },
+  {
+    "value" : "musical",
+    "text"  : "Musical"
+  },
+  {
+    "value" : "mystery",
+    "text"  : "Mystery"
+  },
+  {
+    "value" : "romance",
+    "text"  : "Romance"
+  },
+  {
+    "value" : "sci-fi",
+    "text"  : "Sci-Fi"
+  },
+  {
+    "value" : "thriller",
+    "text"  : "Thriller"
+  },
+  {
+    "value" : "war",
+    "text"  : "War"
+  },
+  {
+    "value" : "western",
+    "text"  : "Western"
+  }
+]

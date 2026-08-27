@@ -1,0 +1,10 @@
+{
+  "title": "Custom event buttons demo",
+  "description": "Shows how to render custom buttons into the event bar",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/events.js",
+    "resources/app.css"
+  ]
+}

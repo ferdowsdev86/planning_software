@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Cs.js';
+import '../../../lib/SchedulerPro/localization/Cs.js';
+import './shared.locale.Cs.js';
+
+const locale = {
+
+    localeName : 'Cs',
+    localeDesc : 'Česky',
+    localeCode : 'cs',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Akce',
+        Active              : 'Aktivní',
+        Allocation          : 'Přidělení',
+        Calendar            : 'Kalendář',
+        City                : 'Město',
+        Condition           : 'Podmínka',
+        Consultant          : 'Konzultant',
+        Contractor          : 'Dodavatel',
+        Doctor              : 'Doktor',
+        Driver              : 'Řidič',
+        Expedition          : 'Expedice',
+        'First name'        : 'Jméno',
+        Inspector           : 'Inspektor',
+        Lag                 : 'Zpoždění',
+        Manager             : 'Manažer',
+        Name                : 'Název',
+        Projects            : 'Projekty',
+        Property            : 'Vlastnost',
+        Rating              : 'Hodnocení',
+        Resource            : 'Zdroj',
+        Role                : 'Role',
+        Score               : 'Skóre',
+        Shift               : 'Směna',
+        'Speaker rating'    : 'Hodnocení řečníka',
+        Staff               : 'Personál',
+        Station             : 'Stanice',
+        Surname             : 'Příjmení',
+        Tasks               : 'Úkoly',
+        Technicians         : 'Technici',
+        Type                : 'Typ',
+        'Vehicle Condition' : 'Stav vozidla',
+        'Work hours'        : 'Pracovní hodiny',
+        Worker              : 'Pracovník'
+    },
+
+    Button : {
+        '10K events'                  : '10K událostí',
+        '1K events'                   : '1K událostí',
+        '5K events'                   : '5K událostí',
+        'Add exception'               : 'Přidat výjimku',
+        'Add invalid calendar'        : 'Přidat neplatný kalendář',
+        'Add invalid dependency'      : 'Přidat neplatnou závislost',
+        'Add order'                   : 'Přidat objednávku',
+        'Add task'                    : 'Přidat úkol',
+        'Add week'                    : 'Přidat týden',
+        Apr                           : 'Dub',
+        Aug                           : 'Srp',
+        August                        : 'Srpen',
+        'Auto-schedule'               : 'Automatické plánování',
+        'Bar settings'                : 'Nastavení lišty',
+        Cancel                        : 'Zrušit',
+        'Change working time'         : 'Změnit pracovní dobu',
+        'City - Resource'             : 'Město - Zdroj',
+        Custom                        : 'Vlastní',
+        Dark                          : 'Tmavý',
+        Dec                           : 'Pro',
+        Default                       : 'Výchozí',
+        'Default layouts'             : 'Výchozí rozvržení',
+        Delete                        : 'Smazat',
+        Dependencies                  : 'Závislosti',
+        'Drag & resize settings'      : 'Nastavení přetažení a změny velikosti',
+        Edit                          : 'Upravit',
+        'Edit calendar'               : 'Upravit kalendář',
+        'Enable mouse interaction'    : 'Povolit interakci myší',
+        Feb                           : 'Úno',
+        'Filter out non-working time' : 'Filtrovat nepracovní dobu',
+        'Hide scheduled'              : 'Skrýt naplánované',
+        'Highlight 9-10am + 2-4pm'    : 'Zvýraznit 9-10h + 14-16h',
+        'Highlight while dragging'    : 'Zvýraznit při přetahování',
+        'Horizontal mode'             : 'Horizontální režim',
+        Jan                           : 'Led',
+        Jul                           : 'Čvc',
+        Jun                           : 'Čvn',
+        'Layout function'             : 'Funkce rozvržení',
+        Light                         : 'Světlý',
+        Login                         : 'Přihlásit se',
+        Logout                        : 'Odhlásit se',
+        Mar                           : 'Bře',
+        March                         : 'Březen',
+        May                           : 'Kvě',
+        'New event'                   : 'Nová událost',
+        'Next day'                    : 'Další den',
+        Nov                           : 'Lis',
+        Oct                           : 'Říj',
+        Overlap                       : 'Překrytí',
+        Pack                          : 'Balíček',
+        'Previous day'                : 'Předchozí den',
+        Reset                         : 'Obnovit',
+        'Reset data'                  : 'Resetovat data',
+        'Resource - City'             : 'Zdroj - Město',
+        'Resource ranges'             : 'Rozsahy zdrojů',
+        Save                          : 'Uložit',
+        Sep                           : 'Zář',
+        'Show setup time'             : 'Zobrazit čas nastavení',
+        Stack                         : 'Stoh',
+        Sync                          : 'Synchronizovat',
+        Today                         : 'Dnes',
+        'Vertical mode'               : 'Vertikální režim',
+        'Zoom in'                     : 'Přiblížit',
+        'Zoom out'                    : 'Oddálit'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kulturní',
+        'Draw around parents'   : 'Kreslit kolem rodičů',
+        'Enable bar tooltip'    : 'Povolit popisek pruhu',
+        Music                   : 'Hudba',
+        'Show bar texts'        : 'Zobrazit texty lišty',
+        'Show max allocation'   : 'Zobrazit maximální alokaci',
+        'Show non working time' : 'Zobrazit nepracovní dobu',
+        Sports                  : 'Sport',
+        Technology              : 'Technologie'
+    },
+
+    Slider : {
+        'Max capacity' : 'Maximální kapacita',
+        'Row height'   : 'Výška řádku'
+    },
+
+    Label : {
+        Days                        : 'Dny',
+        'Group by'                  : 'Seskupit podle',
+        Months                      : 'Měsíce',
+        Settings                    : 'Nastavení',
+        'Viewing a repeating event' : 'Zobrazení opakující se události'
+    },
+
+    Combo : {
+        'Current timezone' : 'Aktuální časové pásmo',
+        'Group events by'  : 'Seskupit události podle',
+        Parent             : 'Rodič',
+        Resources          : 'Zdroje',
+        Show               : 'Zobrazit'
+    },
+
+    NumberField : {
+        '% complete' : '% dokončeno',
+        Events       : 'Události',
+        Every        : 'Každý',
+        Resources    : 'Zdroje'
+    },
+
+    TextField : {
+        Doctor           : 'Doktor',
+        Name             : 'Jméno',
+        'Server address' : 'Adresa serveru',
+        Username         : 'Uživatelské jméno'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Zaškrtněte pro zobrazení čáry maximální alokace zdrojů',
+        'Check to show resource allocation in the bars'                                                            : 'Zaškrtněte pro zobrazení alokace zdrojů v lištách',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Zaškrtněte pro zobrazení tooltipů při pohybu myší nad pruhy',
+        'Click to group by City - Resource'                                                                        : 'Klikněte pro seskupení podle Město - Zdroj',
+        'Click to group by Resource - City'                                                                        : 'Klikněte pro seskupení podle Zdroj - Město',
+        'Collapse all groups'                                                                                      : 'Sbalit všechny skupiny',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Zakázat funkci seskupení stromu a vrátit se k výchozímu zobrazení Zdroj - Přiřazení',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Zadejte počet událostí na zdroj k vygenerování a stiskněte [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Zadejte počet řádků zdrojů k vygenerování a stiskněte [ENTER]',
+        'Expand all groups'                                                                                        : 'Rozbalit všechny skupiny',
+        Friday                                                                                                     : 'Pátek',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Pokud jsou dva segmenty umístěny vedle sebe, můžete je buď sloučit, nebo ponechat oddělené',
+        Monday                                                                                                     : 'Pondělí',
+        Saturday                                                                                                   : 'Sobota',
+        Sunday                                                                                                     : 'Neděle',
+        Thursday                                                                                                   : 'Čtvrtek',
+        'Toggle layout'                                                                                            : 'Přepnout rozvržení',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Pokouší se přizpůsobit neplánované události do aktuálně zobrazeného časového rámce',
+        Tuesday                                                                                                    : 'Úterý',
+        'View next day'                                                                                            : 'Zobrazit další den',
+        'View previous day'                                                                                        : 'Zobrazit předchozí den',
+        'View today, to see the current time line'                                                                 : 'Zobrazit dnešek, pro zobrazení aktuální časové osy',
+        Wednesday                                                                                                  : 'Středa'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Automatické sloučení sousedních segmentů',
+        'Auto-send'                    : 'Automatické odesílání',
+        'Auto-sync'                    : 'Automatická synchronizace',
+        'Compact mode'                 : 'Kompaktní režim',
+        'Constrain drag to row'        : 'Omezit přetahování na řádek',
+        'Dark mode'                    : 'Tmavý režim',
+        'Days are working by default'  : 'Dny jsou ve výchozím nastavení pracovní',
+        'Enable bar tooltip'           : 'Povolit tooltip na liště',
+        'Enable highlighting'          : 'Povolit zvýraznění',
+        'Enable mouse interaction'     : 'Povolit interakci myší',
+        'Enable task drag drop'        : 'Povolit přetahování úkolů',
+        'Filter out non-working time'  : 'Filtrovat nepracovní čas',
+        'Highlight 9-10am + 2-4pm'     : 'Zvýraznit 9-10h + 14-16h',
+        'Highlight while dragging'     : 'Zvýraznit při přetahování',
+        'Show non working time'        : 'Zobrazit nepracovní čas',
+        'Show setup time'              : 'Zobrazit čas nastavení',
+        'Show summaries'               : 'Zobrazit souhrny',
+        'Snap to grid'                 : 'Přichytit k mřížce',
+        'View Planned dates'           : 'Zobrazit plánovaná data'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

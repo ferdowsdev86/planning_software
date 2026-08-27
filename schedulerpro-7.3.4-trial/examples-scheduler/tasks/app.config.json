@@ -1,0 +1,10 @@
+{
+  "title": "Tasks demo",
+  "description": "An application demo with lots of custom rendering",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

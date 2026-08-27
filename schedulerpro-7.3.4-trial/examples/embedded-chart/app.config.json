@@ -1,0 +1,23 @@
+{
+  "title": "Embedded Line Chart demo",
+  "description": "Shows how to use a Chart widget as an extra layer inside each row",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/ButtonColumn.js",
+    "lib/Lab.js",
+    "lib/LabColumn.js",
+    "lib/LineChart.js",
+    "lib/SchedulerWithChart.js",
+    "resources/app.css",
+    "resources/buttoncolumn.css",
+    "resources/labcolumn.css"
+  ],
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

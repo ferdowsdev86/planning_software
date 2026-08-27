@@ -1,0 +1,15 @@
+{
+  "title": "Filtering demo in TypeScript (React)",
+  "description": "This shows how to use Bryntum Scheduler and Widgets to take user input and filter or highlight the scheduler tasks in React + TypeScript.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.ts",
+    "src/index.tsx",
+    "tsconfig.json"
+  ]
+}

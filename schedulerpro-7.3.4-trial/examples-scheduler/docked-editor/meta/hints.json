@@ -1,0 +1,6 @@
+{
+  ".b-sch-event": {
+    "title": "Event editor is an overlayed sidebar",
+    "content": "Double click the event to edit it in a docked panel"
+  }
+}

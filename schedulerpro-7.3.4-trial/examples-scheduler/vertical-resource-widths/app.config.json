@@ -1,0 +1,10 @@
+{
+  "title": "Vertical mode with column widths",
+  "description": "Shows a basic scheduler using vertical mode with defined column widths",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

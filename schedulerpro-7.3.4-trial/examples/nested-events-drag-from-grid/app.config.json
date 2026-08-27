@@ -1,0 +1,13 @@
+{
+  "title": "Nested events draggable from grid",
+  "description": "A more advanced demo using nested events, letting you drag and drop events from a grid to assign to a parent event",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/NestedSchedule.js",
+    "lib/Unplanned.js",
+    "resources/app.css"
+  ]
+}

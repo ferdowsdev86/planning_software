@@ -1,0 +1,458 @@
+<!doctype html>
+<html class="default no-js">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<title>GanttTasksScheduling | engine</title>
+	<meta name="description" content="Documentation for engine">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<header>
+	<div class="tsd-page-toolbar">
+		<div class="container">
+			<div class="table-wrap">
+				<div class="table-cell" id="tsd-search" data-index="../assets/js/search.json" data-base="..">
+					<div class="field">
+						<label for="tsd-search-field" class="tsd-widget search no-caption">Search</label>
+						<input id="tsd-search-field" type="text" />
+					</div>
+					<ul class="results">
+						<li class="state loading">Preparing search index...</li>
+						<li class="state failure">The search index is not available</li>
+					</ul>
+					<a href="../index.html" class="title">engine</a>
+				</div>
+				<div class="table-cell" id="tsd-widgets">
+					<div id="tsd-filter">
+						<a href="#" class="tsd-widget options no-caption" data-toggle="options">Options</a>
+						<div class="tsd-filter-group">
+							<div class="tsd-select" id="tsd-filter-visibility">
+								<span class="tsd-select-label">All</span>
+								<ul class="tsd-select-list">
+									<li data-value="public">Public</li>
+									<li data-value="protected">Public/Protected</li>
+									<li data-value="private" class="selected">All</li>
+								</ul>
+							</div>
+							<input type="checkbox" id="tsd-filter-inherited" checked />
+							<label class="tsd-widget" for="tsd-filter-inherited">Inherited</label>
+							<input type="checkbox" id="tsd-filter-externals" checked />
+							<label class="tsd-widget" for="tsd-filter-externals">Externals</label>
+							<input type="checkbox" id="tsd-filter-only-exported" />
+							<label class="tsd-widget" for="tsd-filter-only-exported">Only exported</label>
+						</div>
+					</div>
+					<a href="#" class="tsd-widget menu no-caption" data-toggle="menu">Menu</a>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="tsd-page-title">
+		<div class="container">
+			<ul class="tsd-breadcrumb">
+				<li>
+					<a href="../globals.html">Globals</a>
+				</li>
+				<li>
+					<a href="../modules/_docs_src_gantt_tasks_scheduling_.html">&quot;docs_src/gantt_tasks_scheduling&quot;</a>
+				</li>
+				<li>
+					<a href="_docs_src_gantt_tasks_scheduling_.gantttasksscheduling.html">GanttTasksScheduling</a>
+				</li>
+			</ul>
+			<h1>Class GanttTasksScheduling</h1>
+		</div>
+	</div>
+</header>
+<div class="container container-main">
+	<div class="row">
+		<div class="col-8 col-content">
+			<section class="tsd-panel tsd-comment">
+				<div class="tsd-comment tsd-typography">
+					<div class="lead">
+						<a href="#gantt-task-scheduling" id="gantt-task-scheduling" style="color: inherit; text-decoration: none;">
+							<h1>Gantt task scheduling</h1>
+						</a>
+						<p>The Bryntum Gantt engine optimizes task scheduling by placing tasks as early as possible (ASAP) within a project
+							timeline; this is true for forward-scheduled projects only, which is the default case. For a backward-scheduled project,
+							scheduling happens as late as possible (ALAP). Unpinned tasks automatically align with the startDate of their parent
+							task or project, while the engine accounts for any dependencies and constraints to ensure accurate scheduling.
+						It also excludes any manually scheduled or inactive tasks.</p>
+						<p>This guide helps you understand these concepts in detail, ensuring there is no confusion about task scheduling.</p>
+						<a href="#scheduling" id="scheduling" style="color: inherit; text-decoration: none;">
+							<h2>Scheduling</h2>
+						</a>
+						<p>Tasks can be either <strong>automatically</strong> (default) or <strong>manually</strong> scheduled. This is defined by the
+						<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#manuallyscheduled">manuallyScheduled</a> task flag.</p>
+						<p>You can exclude any task from the scheduling process by deactivating it. To do this, set the task&#39;s
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#inactive">inactive</a> field to <code>true</code>. Inactive tasks neither push their linked tasks nor add
+						their attributes to parent tasks.</p>
+						<a href="#manually-scheduled-tasks" id="manually-scheduled-tasks" style="color: inherit; text-decoration: none;">
+							<h2>Manually scheduled tasks</h2>
+						</a>
+						<p>Tasks that are manually scheduled (<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#manuallyscheduled">manuallyScheduled</a>) are not affected by
+						the automatic rescheduling process, they are meant to be adjusted manually by a user.</p>
+						<p>It is also possible to treat started tasks as manually scheduled if their start dates are already determined and should not be auto-calculated.
+						Configure this behavior using the <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#startedtaskscheduling">startedTaskScheduling</a> field.</p>
+						<a href="#automatic-task-scheduling" id="automatic-task-scheduling" style="color: inherit; text-decoration: none;">
+							<h2>Automatic task scheduling</h2>
+						</a>
+						<p>One of the most common questions is why tasks of my app are moved to the project&#39;s start? It&#39;s because of
+						automatic task scheduling.</p>
+						<p>The Gantt scheduling engine updates the start and end dates of automatically scheduled tasks based on their
+							constraints, links and position in the task hierarchy.
+							It means that the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">startDate</a> and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">endDate</a> are revalidated and
+						may be recalculated as soon as the task is added or loaded to a project.</p>
+						<p>When auto-scheduling, the Gantt engine checks if a task has any predecessors or constraints and schedules
+						accordingly. If it has none, it will be scheduled as early as possible, which is at the project&#39;s start.</p>
+						<p>You may also want to check <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#autosetconstraints">autoSetConstraints</a>, enabling this config results in
+							auto constraints to the tasks, showing your task based on the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">startDate</a> and
+						<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">endDate</a>, if no constraints or dependencies affects it.</p>
+						<a href="#project-direction" id="project-direction" style="color: inherit; text-decoration: none;">
+							<h3>Project direction</h3>
+						</a>
+						<p>The Gantt engine supports both forward and backward scheduling, controlled by
+						the <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#direction">project direction</a> config.</p>
+						<a href="#forward-scheduled-project" id="forward-scheduled-project" style="color: inherit; text-decoration: none;">
+							<h4>Forward scheduled project</h4>
+						</a>
+						<p>In a forward-scheduled project (default), the Gantt engine schedules tasks as soon as possible (ASAP).
+							For such projects, the <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#startdate">start date</a> is mandatory and sets an implicit
+							<a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#startnoearlierthan">Start no earlier than</a> constraint (see constraint details in the below chapters)
+						inherited by all tasks. It means any task with no restrictions will fall back to that date.</p>
+						<p>The <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#enddate">end date</a> of a forward scheduled project is a calculated value equal to the latest
+						<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end date</a> of its tasks.</p>
+						<a href="#backward-scheduled-project" id="backward-scheduled-project" style="color: inherit; text-decoration: none;">
+							<h4>Backward scheduled project</h4>
+						</a>
+						<p>In a backward scheduled project, the Gantt engine schedules tasks as late as possible (ALAP).
+							In such a project, the <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#enddate">end date</a> value is mandatory and the
+							<a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#startdate">start date</a> is calculated as the earliest <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start date</a> of the
+							project tasks. The project <a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#enddate">end date</a> creates an implicit
+							<a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#finishnolaterthan">Finish no later than</a> constraint inherited by all tasks.
+						It means that any task with no restrictions will fall back to finish on that date.</p>
+						<a href="#propagating-changes-through-task-dependencies" id="propagating-changes-through-task-dependencies" style="color: inherit; text-decoration: none;">
+							<h3>Propagating changes through task dependencies</h3>
+						</a>
+						<p>When a task changes, the Gantt engine will automatically reschedule its linked tasks.
+							In forward-scheduled projects, successors react to their predecessor&#39;s changes and in backward-scheduled projects,
+						the predecessors respond to changes made in their successors.</p>
+						<p>How dependent tasks will be updated after a modification depends on the
+							<a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html#type">dependency type</a>.
+						The Gantt engine supports the following four types of dependencies:</p>
+						<ul>
+							<li>Finish-to-Start (default)</li>
+							<li>Start-to-Start</li>
+							<li>Finish-to-Finish</li>
+							<li>Start-to-Finish</li>
+						</ul>
+						<a href="#finish-to-start" id="finish-to-start" style="color: inherit; text-decoration: none;">
+							<h4>Finish-to-Start</h4>
+						</a>
+						<img src="../media/dependency-fs.png" alt="Finish-to-Start dependency" class="b-half">
+						<p>The default type of a dependency is &quot;Finish-to-Start&quot; (FS). This type of dependency restricts the dependent task
+						to not start earlier than the end date of the preceding task.</p>
+						<a href="#start-to-start" id="start-to-start" style="color: inherit; text-decoration: none;">
+							<h4>Start-to-Start</h4>
+						</a>
+						<img src="../media/dependency-ss.png" alt="Start-to-Start dependency" class="b-half">
+						<p>With this dependency type, the succeeding task is delayed not to start earlier than the start of the preceding task.</p>
+						<a href="#finish-to-finish" id="finish-to-finish" style="color: inherit; text-decoration: none;">
+							<h4>Finish-to-Finish</h4>
+						</a>
+						<img src="../media/dependency-ff.png" alt="Finish-to-Finish dependency" class="b-half">
+						<p>The succeeding task cannot finish before the completion of the preceding task.</p>
+						<a href="#start-to-finish" id="start-to-finish" style="color: inherit; text-decoration: none;">
+							<h4>Start-to-Finish</h4>
+						</a>
+						<img src="../media/dependency-sf.png" alt="Start-to-Finish dependency" class="b-half">
+						<p>The finish of the succeeding task is constrained by the start of the preceding task. The successor cannot finish
+						before the predecessor starts.</p>
+						<a href="#dependency-lead-and-lag" id="dependency-lead-and-lag" style="color: inherit; text-decoration: none;">
+							<h4>Dependency lead and lag</h4>
+						</a>
+						<p>A <a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html">dependency</a> can have a <a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html#lag">lag (or lead)</a> value which
+						can delay the succeeding task by the number of <a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html#lagunit">lag units</a> specified.</p>
+						<img src="../media/dependency-lag.png" alt="Dependency lag" class="b-half">
+						<p>Lead (or &quot;negative lag&quot;) will accelerate the succeeding task by the number of time units specified.</p>
+						<img src="../media/dependency-lead.png" alt="Dependency lead" class="b-half">
+						<p>The <a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html#lag">lag</a> value specifies the amount of <strong>working time</strong>. The
+							calendar controlling which time to use is defined by the <a href="_lib_engine_quark_model_scheduler_pro_schedulerprodependencymixin_.schedulerprodependencymixin.html#calendar">calendar</a> field. By
+						default, the successor calendar is used.</p>
+						<a href="#event-constraint-effect-on-the-scheduling" id="event-constraint-effect-on-the-scheduling" style="color: inherit; text-decoration: none;">
+							<h3>Event constraint effect on the scheduling</h3>
+						</a>
+						<p>A task constraint defines boundaries for the schedulable date range of a task, and it is taken into account
+						when the engine schedules the project tasks.</p>
+						<p>A constraint is a combination of two task properties: <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#constrainttype">constraintType</a> and
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#constraintdate">constraintDate</a>.
+							The date range specified by a constraint restricts the task start/end dates to be <strong>not earlier than</strong>,
+						<strong>not later than</strong> or <strong>equal</strong> to the provided <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#constraintdate">constraintDate</a>.</p>
+						<p>As mentioned above, a task with no restrictions is scheduled for the project start for forward projects
+							(and on the project end date for backward projects). When a user manually drags a task in a Gantt chart,
+							the Gantt enforces the position by setting a constraint on the task.
+						In a forward scheduled project, it uses:</p>
+						<ul>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#startnoearlierthan">Start no earlier than</a> (SNET) constraint when the task is moved by changing
+							its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start date</a></li>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#finishnoearlierthan">Finish no earlier than</a> (FNET) constraint when the task is moved by changing
+							its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end date</a>.</li>
+						</ul>
+						<p>For a backward scheduled project, it uses:</p>
+						<ul>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#startnolaterthan">Start no later than</a> (SNLT) constraint when the task is moved by changing its
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start date</a></li>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#finishnolaterthan">Finish no later than</a> (FNLT) constraint when the task is moved by changing its
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end date</a>.</li>
+						</ul>
+						<p>How a constraint affects a task depends on its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#constrainttype">type</a>. There are two groups of
+						constraints available:</p>
+						<ul>
+							<li>Inflexible constraints.</li>
+							<li>Semi-flexible constraints.</li>
+						</ul>
+						<a href="#inflexible-constraints" id="inflexible-constraints" style="color: inherit; text-decoration: none;">
+							<h4>Inflexible constraints</h4>
+						</a>
+						<p>There are two constraint types in this group: <a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#muststarton">Must start on</a> (MSO) and
+							<a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#mustfinishon">Must finish on</a> (MFO).
+						They force a task to start/finish exactly on the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#constraintdate">date</a> provided.</p>
+						<a href="#semi-flexible-constraints" id="semi-flexible-constraints" style="color: inherit; text-decoration: none;">
+							<h4>Semi-flexible constraints</h4>
+						</a>
+						<p>These constraints share the same priority with task dependencies. They all work together respecting the task working
+						time:</p>
+						<ul>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#startnoearlierthan">Start no earlier than</a> (SNET) - restricts the task to start on or after the
+							specified date.</li>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#finishnoearlierthan">Finish no earlier than</a> (FNET) - restricts the task to finish on or after the
+							specified date.</li>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#startnolaterthan">Start no later than</a> (SNLT) - restricts the task to start before (or on) the
+							specified date.</li>
+							<li><a href="../enums/_lib_engine_scheduling_types_.constrainttype.html#finishnolaterthan">Finish no later than</a> (FNLT) - restricts the task to finish before (or on) the
+							specified date.</li>
+						</ul>
+						<p>Effectively, the task start/end dates are calculated as aggregated values considering dependencies
+							and such constraints. The earliest start date for a task is computed as the latest of the earliest start allowed by
+						its constraint and the earliest start allowed by its dependencies.</p>
+						<p>An example, Event A has two incoming dependencies which don&#39;t allow it to start earlier than <em>01/18/2017</em> and the task
+							has a SNET constraint which forces it to start not earlier than <em>01/17/2017</em>. In this case, the resulting earliest
+							start date of the task is <em>01/18/2017</em>. If we change the constraint date to <em>01/19/2017</em> the resulting earliest start
+						date will be <em>01/19/2017</em>.</p>
+						<a href="#asapalap-constraints" id="asapalap-constraints" style="color: inherit; text-decoration: none;">
+							<h4>ASAP/ALAP constraints</h4>
+						</a>
+						<p>There are two synthetic &quot;As soon as possible&quot; and &quot;As late as possible&quot; constraints introduced to match MS Project behavior.
+							They are enabled when the project&#39;s <code>includeAsapAlapAsConstraints</code> config is <code>true</code> (default).
+							When enabled the constraints are basically tied to the task <code>direction</code>.
+						So when setting &quot;As soon as possible&quot; to a task its direction is set to <code>Forward</code> automatically and when setting &quot;As late as possible&quot; to <code>Backward</code> respectively.</p>
+						<p>So these constraints do not really restrict a task but rather specify its scheduling direction.</p>
+						<a href="#constraints-and-scheduling-direction" id="constraints-and-scheduling-direction" style="color: inherit; text-decoration: none;">
+							<h4>Constraints and scheduling direction</h4>
+						</a>
+						<p>Which boundary a &quot;no earlier than&quot; / &quot;no later than&quot; constraint represents - and whether it actively schedules the task
+							or merely limits it - depends on the task&#39;s scheduling direction (inherited from the
+						<a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#direction">project direction</a> unless set on the task):</p>
+						<ul>
+							<li>For a <strong>forward (ASAP)</strong> scheduled task, a &quot;no later than&quot; constraint (SNLT / FNLT) only defines an upper boundary the
+								task may not cross. It never pulls the task in time - scheduling is driven by the project start, dependencies and any
+							&quot;no earlier than&quot; constraint, and the &quot;no later than&quot; date just prevents the task from being scheduled past it.</li>
+							<li>For a <strong>backward (ALAP)</strong> scheduled task, the &quot;no later than&quot; constraint is what the task is scheduled against: the
+								task is placed as late as possible, so the constraint date becomes its effective scheduling target. A &quot;no earlier
+							than&quot; constraint then acts as the lower boundary instead.</li>
+						</ul>
+						<a href="#taking-into-account-the-project-hierarchy" id="taking-into-account-the-project-hierarchy" style="color: inherit; text-decoration: none;">
+							<h2>Taking into account the project hierarchy</h2>
+						</a>
+						<p>When scheduling tasks, the Gantt engine takes the hierarchy into account by following these two principles:</p>
+						<ul>
+							<li>Each task inherits its parent (<em>summary</em>) task restrictions (dependencies and constraints).</li>
+							<li>A summary task <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start date</a> and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end date</a> should match the minimum
+								<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start date</a> and maximum <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end date</a> of its children respectively. Its
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> equals the sum of the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> values of all its children.</li>
+						</ul>
+						<p>The <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#percentdone">% completed</a> value of a parent task is calculated based on its children&#39;s progress. It
+							is determined by dividing the sum of each child&#39;s completed duration by the total duration of all children. The
+						completed duration for each child is obtained by multiplying its individual percentage completion value by its duration.</p>
+						<p>To explain this more, consider the following example:
+						<img src="../media/gantt-chart.png" alt="Gantt Chart" class="b-half"></p>
+						<p>It has the following values:</p>
+						<table>
+							<thead>
+								<tr>
+									<th>Cell</th>
+									<th>Duration</th>
+									<th>Complete Duration</th>
+								</tr>
+							</thead>
+							<tbody><tr>
+									<td>Contact designers</td>
+									<td>5</td>
+									<td>350</td>
+								</tr>
+								<tr>
+									<td>Shortlist designers</td>
+									<td>3</td>
+									<td>180</td>
+								</tr>
+								<tr>
+									<td>Review design</td>
+									<td>2</td>
+									<td>100</td>
+								</tr>
+								<tr>
+									<td>Inform management...</td>
+									<td>0</td>
+									<td>0</td>
+								</tr>
+								<tr>
+									<td>Apply design...</td>
+									<td>7</td>
+									<td>0</td>
+								</tr>
+								<tr>
+									<td><strong>Sum of all</strong></td>
+									<td>17</td>
+									<td>630</td>
+								</tr>
+						</tbody></table>
+						<p>Next, divide the sum of the complete duration by the sum of the duration
+						(<code>630/17</code>), which will result in <strong>37%</strong>.</p>
+						<p><strong>FYI:</strong> calculation of % done for parent tasks can be disabled by setting
+						<a href="_lib_engine_quark_model_gantt_ganttprojectmixin_.ganttprojectmixin.html#autocalculatepercentdoneforparenttasks">autoCalculatePercentDoneForParentTasks</a> to <code>false</code>.</p>
+						<p>Following the above rules, the Gantt engine recalculates summary tasks when their children are updated. The same
+						goes for the reverse case, child tasks will react to changes to constraints and dependencies of their parents.</p>
+						<a href="#event-scheduling-mode" id="event-scheduling-mode" style="color: inherit; text-decoration: none;">
+							<h2>Event scheduling mode</h2>
+						</a>
+						<p>Unlike the dependencies and constraints affecting the task position on the time axis,
+							the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#schedulingmode">scheduling mode</a> specifies how the task&#39;s properties depend on each other.
+						It defines which properties are <strong>fixed</strong> (provided by the user) and which should be <strong>calculated</strong>.</p>
+						<p>There are four <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#schedulingmode">scheduling modes</a> available in the Gantt engine:</p>
+						<ul>
+							<li>Normal (default mode).</li>
+							<li>Fixed Duration</li>
+							<li>Fixed Effort</li>
+							<li>Fixed Units</li>
+						</ul>
+						<p>There is also an additional <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effortdriven">effortDriven</a> flag allowing to fix
+							the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">task effort</a> value. When set, it tells the task to preserve its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a>
+						value and instead recalculate other properties.</p>
+						<a href="#normal" id="normal" style="color: inherit; text-decoration: none;">
+							<h3>Normal</h3>
+						</a>
+						<p>In the Normal mode (default), the task is scheduled based on information about its start/end dates.
+						The task <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#assigned">assignments</a> are not calculated in this mode.</p>
+						<p>This mode is always used for summary tasks.</p>
+						<p>The <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effortdriven">effortDriven</a> flag is not used in this mode.</p>
+						<a href="#fixed-duration" id="fixed-duration" style="color: inherit; text-decoration: none;">
+							<h3>Fixed Duration</h3>
+						</a>
+						<p>Fixed Duration mode means that the task has fixed <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#startdate">start</a> and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#enddate">end</a> dates
+							and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a>, but its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> is computed dynamically
+						based on the assigned resources.</p>
+						<p>A typical example of such a task is a meeting. Meetings typically have pre-defined start and end dates, and the
+							The more people participating in the meeting, the more effort is spent on the task.
+						When the duration of such a task increases, its effort increases, too.</p>
+						<p>Changes to the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> of such a task will cause assignment units recalculation and vice-versa
+						(assignments change will cause recalculation of the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a>).</p>
+						<p>Enabling <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effortdriven">effortDriven</a> for a task will change that behavior and force the task to
+							<strong>always</strong> recalculate its assignment units whenever the task changes its <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a> or
+						<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a>.</p>
+						<div class="warning">
+							Calculations provided by this mode work only if the task has at least one resource assigned.
+						</div>
+						<a href="#fixed-effort" id="fixed-effort" style="color: inherit; text-decoration: none;">
+							<h3>Fixed Effort</h3>
+						</a>
+						<p>Fixed Effort mode means that the task has a fixed <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> and computed
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a>.
+						The more resources are assigned to the task, the less the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a> will be.</p>
+						<p>A typical example is a &quot;paint the walls&quot; task - several painters will complete it faster.</p>
+						<p>Enabling the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effortdriven">effortDriven</a> flag makes no sense in this mode.</p>
+						<div class="warning">
+							Calculations provided by this mode work only if the task has at least one resource assigned.
+						</div>
+						<a href="#fixed-units" id="fixed-units" style="color: inherit; text-decoration: none;">
+							<h3>Fixed Units</h3>
+						</a>
+						<p>Fixed Units mode means, that task has fixed <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#assigned">assignments</a> and computed
+							<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a>
+						or <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a>.</p>
+						<p>Changes to the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> of such a task will cause <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a> recalculation
+							and
+						vice-versa (<a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a> change will cause recalculation of <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a>).</p>
+						<p>Changes of the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#assigned">assignment</a> of such a task will cause <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effort">effort</a> recalculation
+						and <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#duration">duration</a> recalculation if the <a href="_lib_engine_quark_model_gantt_ganttevent_.ganttevent.html#effortdriven">effortDriven</a> flag is enabled.</p>
+						<div class="warning">
+							Calculations provided by this mode work only if the task has at least one resource assigned.
+						</div>
+					</div>
+				</div>
+			</section>
+			<section class="tsd-panel tsd-hierarchy">
+				<h3>Hierarchy</h3>
+				<ul class="tsd-hierarchy">
+					<li>
+						<span class="target">GanttTasksScheduling</span>
+					</li>
+				</ul>
+			</section>
+		</div>
+		<div class="col-4 col-menu menu-sticky-wrap menu-highlight">
+			<nav class="tsd-navigation primary">
+				<ul>
+					<li class="globals  ">
+						<a href="../globals.html"><em>Globals</em></a>
+					</li>
+					<li class="current tsd-kind-module">
+						<a href="../modules/_docs_src_gantt_tasks_scheduling_.html">&quot;docs_<wbr>src/gantt_<wbr>tasks_<wbr>scheduling&quot;</a>
+					</li>
+				</ul>
+			</nav>
+			<nav class="tsd-navigation secondary menu-sticky">
+				<ul class="before-current">
+				</ul>
+				<ul class="current">
+					<li class="current tsd-kind-class tsd-parent-kind-module">
+						<a href="_docs_src_gantt_tasks_scheduling_.gantttasksscheduling.html" class="tsd-kind-icon">Gantt<wbr>Tasks<wbr>Scheduling</a>
+					</li>
+				</ul>
+				<ul class="after-current">
+				</ul>
+			</nav>
+		</div>
+	</div>
+</div>
+<footer class="with-border-bottom">
+	<div class="container">
+		<h2>Legend</h2>
+		<div class="tsd-legend-group">
+			<ul class="tsd-legend">
+				<li class="tsd-kind-object-literal"><span class="tsd-kind-icon">Object literal</span></li>
+				<li class="tsd-kind-variable"><span class="tsd-kind-icon">Variable</span></li>
+				<li class="tsd-kind-function"><span class="tsd-kind-icon">Function</span></li>
+				<li class="tsd-kind-function tsd-has-type-parameter"><span class="tsd-kind-icon">Function with type parameter</span></li>
+				<li class="tsd-kind-type-alias"><span class="tsd-kind-icon">Type alias</span></li>
+				<li class="tsd-kind-type-alias tsd-has-type-parameter"><span class="tsd-kind-icon">Type alias with type parameter</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-class"><span class="tsd-kind-icon">Class</span></li>
+				<li class="tsd-kind-class tsd-has-type-parameter"><span class="tsd-kind-icon">Class with type parameter</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-enum"><span class="tsd-kind-icon">Enumeration</span></li>
+			</ul>
+		</div>
+	</div>
+</footer>
+<div class="container tsd-generator">
+	<p>Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p>
+</div>
+<div class="overlay"></div>
+<script src="../assets/js/main.js"></script>
+<script>if (location.protocol == 'file:') document.write('<script src="../assets/js/search.js"><' + '/script>');</script>
+</body>
+</html>

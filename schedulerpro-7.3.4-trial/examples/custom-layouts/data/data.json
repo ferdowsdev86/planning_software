@@ -1,0 +1,221 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "a",
+        "name" : "Rob",
+        "type" : "Sales"
+      },
+      {
+        "id"   : "b",
+        "name" : "Mike",
+        "type" : "Sales"
+      },
+      {
+        "id"   : "c",
+        "name" : "Kate",
+        "type" : "Sales"
+      },
+      {
+        "id"   : "d",
+        "name" : "Lisa",
+        "type" : "Developer"
+      },
+      {
+        "id"   : "e",
+        "name" : "Dave",
+        "type" : "Developer"
+      },
+      {
+        "id"   : "f",
+        "name" : "Arnold",
+        "type" : "Developer"
+      },
+      {
+        "id"   : "g",
+        "name" : "Lee",
+        "type" : "Marketing"
+      },
+      {
+        "id"   : "h",
+        "name" : "Jong",
+        "type" : "Marketing"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "a",
+        "name"       : "Meeting #1",
+        "startDate"  : "2017-02-07 13:00",
+        "endDate"    : "2017-02-07 16:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "a",
+        "name"       : "Meeting #2",
+        "startDate"  : "2017-02-07 12:00",
+        "endDate"    : "2017-02-07 15:00",
+        "priority"   : "low",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "a",
+        "name"       : "Meeting #3",
+        "startDate"  : "2017-02-07 13:00",
+        "endDate"    : "2017-02-07 16:00",
+        "priority"   : "high",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "a",
+        "name"       : "Meeting #4",
+        "startDate"  : "2017-02-07 09:00",
+        "endDate"    : "2017-02-07 11:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "a",
+        "name"       : "Appointment #1",
+        "startDate"  : "2017-02-07 10:00",
+        "endDate"    : "2017-02-07 12:00",
+        "priority"   : "high",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "a",
+        "name"       : "Appointment #2",
+        "startDate"  : "2017-02-07 11:00",
+        "endDate"    : "2017-02-07 13:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "c",
+        "name"       : "Appointment #3",
+        "startDate"  : "2017-02-07 14:00",
+        "endDate"    : "2017-02-07 17:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "c",
+        "name"       : "Appointment #4",
+        "startDate"  : "2017-02-07 15:00",
+        "endDate"    : "2017-02-07 18:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "c",
+        "name"       : "Appointment #5",
+        "startDate"  : "2017-02-07 15:00",
+        "endDate"    : "2017-02-07 18:00",
+        "priority"   : "high",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "c",
+        "name"       : "Meeting #1",
+        "startDate"  : "2017-02-07 11:00",
+        "endDate"    : "2017-02-07 14:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 11,
+        "resourceId" : "c",
+        "name"       : "Meeting #2",
+        "startDate"  : "2017-02-07 12:00",
+        "endDate"    : "2017-02-07 15:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 12,
+        "resourceId" : "c",
+        "name"       : "Meeting #3",
+        "startDate"  : "2017-02-07 13:00",
+        "endDate"    : "2017-02-07 16:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 13,
+        "resourceId" : "e",
+        "name"       : "Meeting #4",
+        "startDate"  : "2017-02-07 09:00",
+        "endDate"    : "2017-02-07 11:00",
+        "priority"   : "low",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 14,
+        "resourceId" : "e",
+        "name"       : "Appointment #1",
+        "startDate"  : "2017-02-07 10:00",
+        "endDate"    : "2017-02-07 12:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 15,
+        "resourceId" : "e",
+        "name"       : "Appointment #2",
+        "startDate"  : "2017-02-07 11:00",
+        "endDate"    : "2017-02-07 13:00",
+        "priority"   : "high",
+        "confirmed"  : true
+      },
+      {
+        "id"         : 16,
+        "resourceId" : "f",
+        "name"       : "Appointment #3",
+        "startDate"  : "2017-02-07 14:00",
+        "endDate"    : "2017-02-07 17:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 17,
+        "resourceId" : "f",
+        "name"       : "Appointment #4",
+        "startDate"  : "2017-02-07 15:00",
+        "endDate"    : "2017-02-07 18:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      },
+      {
+        "id"         : 18,
+        "resourceId" : "f",
+        "name"       : "Appointment #5",
+        "startDate"  : "2017-02-07 15:00",
+        "endDate"    : "2017-02-07 18:00",
+        "priority"   : "high",
+        "confirmed"  : false
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "startDate" : "2017-02-07 11:00",
+        "endDate"   : "2017-02-07 12:00"
+      }
+    ]
+  }
+}

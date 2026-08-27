@@ -1,0 +1,22 @@
+{
+  "title": "Maps Integration demo (Vue 3 + Vite)",
+  "description": "This example shows how to integrate the Scheduler with a Mapbox GL JS API in Vue 3.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/lib/Address.ts",
+    "src/lib/AddressSearchField.ts",
+    "src/lib/Drag.ts",
+    "src/lib/MapPanel.ts",
+    "src/lib/Task.ts",
+    "src/lib/Types.ts",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

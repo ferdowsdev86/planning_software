@@ -1,0 +1,10 @@
+{
+  "title": "Pro Calendar editor demo",
+  "description": "Shows Calendar editor allowing to modify resource working hours",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

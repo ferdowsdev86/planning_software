@@ -1,0 +1,26 @@
+{
+  "name": "fastreact-clone",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "api": "node server/index.mjs",
+    "db:deploy": "bash database/deploy.sh"
+  },
+  "dependencies": {
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@^7.3.4",
+    "@bryntum/schedulerpro-vue-3": "^7.3.4",
+    "@fortawesome/fontawesome-free": "^7.3.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.23.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.0"
+  }
+}

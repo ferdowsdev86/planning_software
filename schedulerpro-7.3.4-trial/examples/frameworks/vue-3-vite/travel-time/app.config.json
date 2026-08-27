@@ -1,0 +1,15 @@
+{
+  "title": "Travel time demo (Vue 3 + Vite)",
+  "description": "This demo shows how to visualize travel time before/after an event",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Columns demo (React)",
+  "description": "Displays columns of different types on left and right sides of the schedule.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Drag unplanned tasks from a grid",
+  "description": "Drag unplanned tasks from a list onto the Scheduler component",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Appointment.js",
+    "lib/Doctor.js",
+    "lib/Drag.js",
+    "lib/Schedule.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ]
+}

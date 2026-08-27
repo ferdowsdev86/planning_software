@@ -1,0 +1,14 @@
+{
+  "title": "Filtering Demo (React)",
+  "description": "This shows how to use the Bryntum React Scheduler and other Widgets to filter or highlight the scheduled tasks.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

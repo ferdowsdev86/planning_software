@@ -1,0 +1,49 @@
+:root {
+    --event-height : 40px;
+}
+
+.b-scheduler-pro {
+    .b-time-axis-sub-grid {
+        --b-grid-cell-background : var(--b-neutral-95);
+    }
+
+    .b-nested-events-parent {
+        --b-nested-events-parent-color : var(--b-neutral-0);
+
+        > .b-sch-event {
+            box-shadow    : 0 0 5px #00000050;
+            border-radius : 6px;
+            background    : var(--b-primary-95);
+
+            > .b-sch-event-content {
+                align-items    : center;
+                margin         : 0;
+                max-width      : 100%;
+                padding-inline : .5em;
+                /* To get overflow ellipsis */
+                display        : block;
+                line-height    : 2.5em;
+                font-size      : .8em;
+            }
+        }
+
+        .b-nested-events-container {
+            background    : repeating-linear-gradient(#00000000, #00000000 var(--event-height), var(--b-neutral-80), var(--b-neutral-80) calc(var(--event-height) + 1px)) color-mix(in srgb, var(--b-neutral-100), transparent 40%);
+            border-radius : 0 0 5px 5px;
+        }
+    }
+}
+
+.b-sch-event-wrap.b-nested-event {
+    .b-sch-event {
+        background : var(--b-primary);
+        color      : var(--b-neutral-95);
+    }
+
+    &.b-drag-invalid {
+        .b-sch-event {
+            background : color-mix(in srgb, var(--b-color-red), var(--b-mix) 20%);
+            color      : var(--b-neutral-95);
+        }
+    }
+}

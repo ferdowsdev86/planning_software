@@ -1,0 +1,10 @@
+{
+  "title": "Event context menu demo",
+  "description": "Shows how to customize the items of the EventMenu",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

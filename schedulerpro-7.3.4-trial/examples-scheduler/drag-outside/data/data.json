@@ -1,0 +1,146 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Angelo"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Celia"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Dave"
+      },
+      {
+        "id"   : "r4",
+        "name" : "George"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Gloria"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Kate"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Lisa"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Mark"
+      },
+      {
+        "id"   : "r9",
+        "name" : "Maxim"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Steve"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "resourceId"   : "r1",
+        "startDate"    : "2022-08-26T09:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Drag me out of here",
+        "iconCls"      : "fa fa-exclamation-circle",
+        "eventColor"   : "gray"
+      },
+      {
+        "id"           : 2,
+        "resourceId"   : "r2",
+        "startDate"    : "2022-08-26T11:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Drag me out to the grid",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 3,
+        "resourceId"   : "r3",
+        "startDate"    : "2022-08-26T10:00",
+        "duration"     : 4,
+        "durationUnit" : "h",
+        "name"         : "Drag drop me",
+        "iconCls"      : "fa fa-clock"
+      },
+      {
+        "id"           : 4,
+        "resourceId"   : "r4",
+        "startDate"    : "2022-08-26T09:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Unschedule me",
+        "iconCls"      : "fa fa-check",
+        "eventColor"   : "lime"
+      },
+      {
+        "id"           : 5,
+        "resourceId"   : "r5",
+        "startDate"    : "2022-08-26T14:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Activity",
+        "iconCls"      : "fa fa-clock"
+      },
+      {
+        "id"           : 6,
+        "resourceId"   : "r6",
+        "startDate"    : "2022-08-26T16:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Meeting",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 7,
+        "resourceId"   : "r6",
+        "startDate"    : "2022-08-26T07:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Meeting",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 8,
+        "resourceId"   : "r7",
+        "startDate"    : "2022-08-26T09:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Meeting",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 9,
+        "resourceId"   : "r8",
+        "startDate"    : "2022-08-26T08:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Important meeting",
+        "iconCls"      : "fa fa-lock",
+        "eventColor"   : "red",
+        "draggable"    : false,
+        "resizable"    : false
+      },
+      {
+        "id"           : 10,
+        "resourceId"   : "r9",
+        "startDate"    : "2022-08-26T08:00",
+        "duration"     : 7,
+        "durationUnit" : "h",
+        "name"         : "Conference",
+        "iconCls"      : "fa fa-calendar"
+      }
+    ]
+  }
+}

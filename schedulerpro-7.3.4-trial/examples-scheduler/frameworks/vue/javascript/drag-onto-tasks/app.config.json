@@ -1,0 +1,18 @@
+{
+  "title": "Drag onto tasks (Vue 2)",
+  "description": "This example shows how to drag any DOM node and drop it onto a task in the Vue Scheduler to update some aspect of it.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/data/equipment.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/lib/Drag.js",
+    "src/lib/Task.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

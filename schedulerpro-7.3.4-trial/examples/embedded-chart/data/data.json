@@ -1,0 +1,864 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"               : 1,
+        "name"             : "Lab #11",
+        "iconCls"          : "fa fa-vial",
+        "rowExpanded"      : true,
+        "maxCapacity"      : 200,
+        "showCapacityLine" : true
+      },
+      {
+        "id"      : 2,
+        "name"    : "Lab #12",
+        "iconCls" : "fa fa-vial"
+      },
+      {
+        "id"      : 3,
+        "name"    : "Lab #13",
+        "iconCls" : "fa fa-vial"
+      },
+      {
+        "id"      : 4,
+        "name"    : "Radioactive Lab #1",
+        "iconCls" : "fa fa-radiation"
+      },
+      {
+        "id"      : 5,
+        "name"    : "Radioactive Lab #2",
+        "iconCls" : "fa fa-radiation"
+      },
+      {
+        "id"      : 6,
+        "name"    : "X-Ray lab",
+        "iconCls" : "fa fa-x-ray"
+      },
+      {
+        "id"      : 7,
+        "name"    : "Biosafety lab level 3",
+        "iconCls" : "fa fa-biohazard"
+      },
+      {
+        "id"      : 8,
+        "name"    : "Biosafety lab level 4",
+        "iconCls" : "fa fa-biohazard"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 2,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 3,
+        "startDate"    : "2025-04-05T00:00:00",
+        "endDate"      : "2025-04-07T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "RNA Sequencing",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 4,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "RNA Sequencing",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 5,
+        "startDate"    : "2025-04-11T00:00:00",
+        "endDate"      : "2025-04-13T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 6,
+        "startDate"    : "2025-04-13T00:00:00",
+        "endDate"      : "2025-04-15T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 7,
+        "startDate"    : "2025-04-15T00:00:00",
+        "endDate"      : "2025-04-17T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 8,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 9,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "(q)PCR",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 10,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "(q)PCR",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 11,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Purity test",
+        "resourceId"   : 1
+      },
+      {
+        "id"           : 12,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "(q)PCR",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 13,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacterial identification",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 14,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 15,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 16,
+        "startDate"    : "2025-04-11T00:00:00",
+        "endDate"      : "2025-04-13T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 17,
+        "startDate"    : "2025-04-13T00:00:00",
+        "endDate"      : "2025-04-15T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 18,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "RNA Sequencing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 19,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Blood analysis",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 20,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Microbial identification ",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 21,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 22,
+        "startDate"    : "2025-04-27T00:00:00",
+        "endDate"      : "2025-04-29T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "RNA Sequencing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 23,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 2
+      },
+      {
+        "id"           : 24,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 25,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 26,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 27,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 28,
+        "startDate"    : "2025-04-15T00:00:00",
+        "endDate"      : "2025-04-17T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 29,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 30,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 31,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Hybrid Mollicute Screening",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 32,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 33,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 34,
+        "startDate"    : "2025-04-27T00:00:00",
+        "endDate"      : "2025-04-29T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 35,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 3
+      },
+      {
+        "id"           : 36,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 37,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 38,
+        "startDate"    : "2025-04-05T00:00:00",
+        "endDate"      : "2025-04-07T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 39,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Microbial identification ",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 40,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Hybrid Mollicute Screening",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 41,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 42,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 43,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Microbial identification ",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 44,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Purity test",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 45,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 4
+      },
+      {
+        "id"           : 46,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 47,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 48,
+        "startDate"    : "2025-04-05T00:00:00",
+        "endDate"      : "2025-04-07T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 49,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Hybrid Mollicute Screening",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 50,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacterial identification",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 51,
+        "startDate"    : "2025-04-11T00:00:00",
+        "endDate"      : "2025-04-13T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 52,
+        "startDate"    : "2025-04-13T00:00:00",
+        "endDate"      : "2025-04-15T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 53,
+        "startDate"    : "2025-04-15T00:00:00",
+        "endDate"      : "2025-04-17T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Covid variant analysis",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 54,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacterial identification",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 55,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Blood analysis",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 56,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 57,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 5
+      },
+      {
+        "id"           : 58,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 59,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Microbial identification ",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 60,
+        "startDate"    : "2025-04-15T00:00:00",
+        "endDate"      : "2025-04-17T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 61,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 62,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Hybrid Mollicute Screening",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 63,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 64,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 65,
+        "startDate"    : "2025-04-27T00:00:00",
+        "endDate"      : "2025-04-29T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 66,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 6
+      },
+      {
+        "id"           : 67,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Virus Seed characterization",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 68,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 69,
+        "startDate"    : "2025-04-09T00:00:00",
+        "endDate"      : "2025-04-11T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Blood analysis",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 70,
+        "startDate"    : "2025-04-11T00:00:00",
+        "endDate"      : "2025-04-13T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 71,
+        "startDate"    : "2025-04-13T00:00:00",
+        "endDate"      : "2025-04-15T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 72,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 73,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 74,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 75,
+        "startDate"    : "2025-04-27T00:00:00",
+        "endDate"      : "2025-04-29T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 76,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA fingerprinting",
+        "resourceId"   : 7
+      },
+      {
+        "id"           : 77,
+        "startDate"    : "2025-04-01T00:00:00",
+        "endDate"      : "2025-04-03T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Hybrid Mollicute Screening",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 78,
+        "startDate"    : "2025-04-03T00:00:00",
+        "endDate"      : "2025-04-05T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacteriophage",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 79,
+        "startDate"    : "2025-04-05T00:00:00",
+        "endDate"      : "2025-04-07T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Bacterial identification",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 80,
+        "startDate"    : "2025-04-07T00:00:00",
+        "endDate"      : "2025-04-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "RNA Sequencing",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 81,
+        "startDate"    : "2025-04-11T00:00:00",
+        "endDate"      : "2025-04-13T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 82,
+        "startDate"    : "2025-04-13T00:00:00",
+        "endDate"      : "2025-04-15T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Electron microscopy",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 83,
+        "startDate"    : "2025-04-15T00:00:00",
+        "endDate"      : "2025-04-17T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA fingerprinting",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 84,
+        "startDate"    : "2025-04-17T00:00:00",
+        "endDate"      : "2025-04-19T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "DNA Sequencing",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 85,
+        "startDate"    : "2025-04-19T00:00:00",
+        "endDate"      : "2025-04-21T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Purity test",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 86,
+        "startDate"    : "2025-04-21T00:00:00",
+        "endDate"      : "2025-04-23T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Disinfectant efficacy testing",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 87,
+        "startDate"    : "2025-04-23T00:00:00",
+        "endDate"      : "2025-04-25T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 88,
+        "startDate"    : "2025-04-25T00:00:00",
+        "endDate"      : "2025-04-27T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Retrovirus",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 89,
+        "startDate"    : "2025-04-27T00:00:00",
+        "endDate"      : "2025-04-29T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Purity test",
+        "resourceId"   : 8
+      },
+      {
+        "id"           : 90,
+        "startDate"    : "2025-04-29T00:00:00",
+        "endDate"      : "2025-05-01T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "day",
+        "name"         : "Glycan analysis",
+        "resourceId"   : 8
+      }
+    ]
+  }
+}

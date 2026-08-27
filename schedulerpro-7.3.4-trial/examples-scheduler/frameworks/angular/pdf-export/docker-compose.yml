@@ -1,0 +1,5 @@
+services:
+  web:
+    image: "bryntum/pdf-export-server:latest"
+    ports:
+      - "8080:8080"

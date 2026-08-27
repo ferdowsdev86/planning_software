@@ -1,0 +1,151 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+
+.b-scheduler {
+  --b-avatar-border-radius                        : 7px;
+  --b-avatar-size                                 : 3em;
+  --b-avatar-aspect-ratio                         : auto;
+
+  --b-event-resize-handle-height                  : 45%;
+  --b-event-resize-handle-hover-height            : 50%;
+  --b-event-resize-handle-inset                   : 0.5em;
+
+  --b-horizontal-time-axis-border-width           : 0;
+
+  --b-grid-header-font-weight                     : bold;
+
+  --b-resource-time-range-align-items             : center;
+
+  --b-time-range-opacity                          : 0.3;
+
+  --b-resource-time-range-background-transparency : 0%;
+
+  .b-sch-time-range {
+      --b-time-range-background        : var(--b-neutral-90);
+      --b-time-range-header-background : var(--b-time-range-background);
+  }
+
+  .b-sch-resource-time-range {
+      --b-resource-time-range-background : var(--b-neutral-100);
+      --b-resource-time-range-color      : var(--b-neutral-70);
+  }
+}
+
+.b-lowest .b-sch-header-time-axis-cell {
+  border-bottom : 1px solid var(--b-grid-header-border-color);
+}
+
+.b-sch-event-wrap:not(.b-milestone-wrap) {
+  --b-sch-event-border-radius  : 2em;
+  --b-sch-event-padding-inline : 1em;
+
+  .b-sch-event-content {
+      flex : 1;
+
+      i {
+          margin-inline-start : auto;
+          margin-inline-end   : 0;
+      }
+
+      sup {
+          margin-inline-start : 0.3em;
+          font-size           : 0.7em;
+      }
+  }
+}
+
+.b-sch-time-axis-cell {
+  --b-grid-cell-background : url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%239C92AC' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M5 0h1L0 6V5zM6 5v1H5z'/%3E%3C/g%3E%3C/svg%3E") var(--b-neutral-95);
+
+  pointer-events           : none;
+}
+
+.b-sch-resource-time-range {
+  cursor            : pointer;
+  transition        : background-color 0.4s;
+
+  border-inline-end : 1px solid var(--b-column-lines-tick-color);
+
+  > div {
+      justify-content : center;
+  }
+}
+
+.b-scheduler:not(.b-dragging-event, .b-resizing-event, .b-event-editor-editing) {
+  .b-sch-resource-time-range.b-selected,
+  &:not(.b-reserving-dates) .b-sch-resource-time-range:hover {
+      color         : #555;
+      font-weight   : bold;
+      border-radius : 5px;
+      border        : 2px solid #ac31fe;
+
+      &.b-selected:not(.b-last) {
+          border-start-end-radius : 0;
+          border-end-end-radius   : 0;
+          border-inline-end       : 0;
+
+          .b-sch-event-content {
+              margin-inline-end : 5px;
+          }
+      }
+
+      &.b-selected:not(.b-first) {
+          border-inline-start       : 0;
+          border-start-start-radius : 0;
+          border-end-start-radius   : 0;
+      }
+  }
+
+  &.b-invalid-reservation .b-sch-resource-time-range.b-selected {
+      border-color : #ff0000;
+  }
+}
+
+.b-sch-header-time-axis-cell {
+  --b-grid-header-color : var(--b-neutral-60);
+
+  &.b-sch-day-header-cell-6,
+  &.b-sch-day-header-cell-0 {
+      --b-grid-header-color : var(--b-neutral-20);
+  }
+}
+
+.shaded {
+  border-inline-end : 2px solid var(--b-color-red);
+  opacity           : var(--b-time-range-opacity);
+  z-index           : 8 !important;
+  cursor            : default;
+  pointer-events    : auto;
+}
+
+.b-grid-header .shaded {
+  height : 100% !important;
+  top    : 0;
+}
+
+.b-sch-event-tooltip.b-floating {
+  h4 {
+      margin : 0 0 0.3em 0;
+
+      &:not(:first-child) {
+          margin-top : 1em;
+      }
+  }
+}
+
+.b-reserving-dates {
+  .b-sch-resource-time-range:not(.b-selected) {
+      background : var(--b-neutral-95);
+  }
+}

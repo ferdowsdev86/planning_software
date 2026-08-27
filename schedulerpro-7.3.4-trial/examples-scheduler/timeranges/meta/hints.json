@@ -1,0 +1,14 @@
+{
+  ".coffee": {
+    "title": "Time ranges",
+    "content": "Drag to move or drag-resize from the left or right side to change duration of the time ranges."
+  },
+  ".b-sch-line": {
+    "title": "Lines",
+    "content": "Drag to change move the line"
+  },
+  "[data-ref=todayButton]": {
+    "title": "Go to today",
+    "content": "To see the current time line"
+  }
+}

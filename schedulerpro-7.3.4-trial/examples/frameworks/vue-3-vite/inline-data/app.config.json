@@ -1,0 +1,17 @@
+{
+  "title": "Inline data demo (Vue 3 + Vite)",
+  "description": "This demo shows using inline data for Scheduler Pro",
+  "source": [
+    "index.html",
+    "package.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/AppData.ts",
+    "src/lib/VehicleConditionColumn.ts",
+    "src/lib/VehicleConditionCombo.ts",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

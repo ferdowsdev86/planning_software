@@ -1,0 +1,147 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "rating"     : 5,
+        "name"       : "Cabin #1",
+        "eventColor" : "red",
+        "iconCls"    : "fa fa-home",
+        "sleeps"     : 8
+      },
+      {
+        "id"         : 2,
+        "rating"     : 4.5,
+        "name"       : "Cabin #2",
+        "iconCls"    : "fa fa-home",
+        "eventColor" : "pink",
+        "sleeps"     : 6
+      },
+      {
+        "id"         : 3,
+        "rating"     : 5,
+        "name"       : "The Lodge",
+        "iconCls"    : "fa fa-home",
+        "eventColor" : "violet",
+        "sleeps"     : 6
+      },
+      {
+        "id"         : 4,
+        "rating"     : 2,
+        "name"       : "The Royal Retreat",
+        "iconCls"    : "fa fa-hotel",
+        "eventColor" : "purple",
+        "sleeps"     : 4
+      },
+      {
+        "id"         : 5,
+        "rating"     : 3,
+        "name"       : "The Tree Nest",
+        "iconCls"    : "fa fa-tree",
+        "eventColor" : "blue",
+        "sleeps"     : 2
+      },
+      {
+        "id"         : 6,
+        "rating"     : 4,
+        "iconCls"    : "fa fa-campground",
+        "name"       : "The Luxury Tent",
+        "eventColor" : "lime",
+        "sleeps"     : 2
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : 1,
+        "name"       : "Mr Woods",
+        "guests"     : 3,
+        "startDate"  : "2022-12-01",
+        "endDate"    : "2022-12-03"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : 1,
+        "guests"     : 2,
+        "name"       : "Ms Davis",
+        "startDate"  : "2022-12-03",
+        "endDate"    : "2022-12-05"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : 2,
+        "guests"     : 4,
+        "name"       : "Bonnie and Clyde",
+        "startDate"  : "2022-12-01",
+        "endDate"    : "2022-12-03"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : 3,
+        "name"       : "Smith Family",
+        "guests"     : 5,
+        "startDate"  : "2022-12-02",
+        "endDate"    : "2022-12-05"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 4,
+        "guests"     : 1,
+        "name"       : "K. West",
+        "startDate"  : "2022-12-02",
+        "endDate"    : "2022-12-05"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 5,
+        "guests"     : 2,
+        "name"       : "Larry Bird",
+        "startDate"  : "2022-12-03",
+        "endDate"    : "2022-12-07"
+      },
+      {
+        "id"         : 7,
+        "startDate"  : "2022-12-02",
+        "endDate"    : "2022-12-07",
+        "guests"     : 2,
+        "name"       : "John & Jenny Doe",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 8,
+        "startDate"  : "2022-12-08",
+        "endDate"    : "2022-12-13",
+        "guests"     : 2,
+        "name"       : "The Johnsons",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 9,
+        "startDate"  : "2022-12-14",
+        "endDate"    : "2022-12-19",
+        "guests"     : 2,
+        "name"       : "K. Jackson",
+        "resourceId" : 6
+      },
+      {
+        "id"         : 10,
+        "startDate"  : "2022-12-13",
+        "endDate"    : "2022-12-18",
+        "guests"     : 2,
+        "name"       : "Flintstones",
+        "resourceId" : 1
+      },
+      {
+        "id"         : 11,
+        "startDate"  : "2022-12-09",
+        "endDate"    : "2022-12-12",
+        "guests"     : 2,
+        "name"       : "Dalton Gang",
+        "resourceId" : 2
+      }
+    ]
+  }
+}

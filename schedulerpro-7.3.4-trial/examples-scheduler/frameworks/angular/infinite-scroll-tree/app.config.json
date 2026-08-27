@@ -1,0 +1,20 @@
+{
+  "title": "Infinite scroll tree (Angular)",
+  "description": "Shows a Scheduler with hierarchical resource data and both infinite timeline scroll as well as infinite resource scroll. The backend is made in PHP",
+  "source": [
+    "angular.json",
+    "package.json",
+    "php/data/resources.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

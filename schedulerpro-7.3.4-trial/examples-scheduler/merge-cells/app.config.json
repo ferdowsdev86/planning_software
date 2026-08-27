@@ -1,0 +1,10 @@
+{
+  "title": "Merge cells demo",
+  "description": "This example shows how to use the `mergeCells` option on columns to merge cells with the same value into a single cell spanning multiple rows",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "title": "Docked Event Editor",
+  "description": "This example shows the event editor docked inside the browser viewport.",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

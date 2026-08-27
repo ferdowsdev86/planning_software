@@ -1,0 +1,10 @@
+{
+  "[data-ref=unplanned] [data-id='12']": {
+    "align": {
+      "align": "t-b",
+      "offset": [0, 180]
+    },
+    "title": "Unplanned tasks",
+    "content": "Drag these tasks onto the schedule to assign to a doctor. <br><br><b>Note:</b> This demo uses the <a href='https://bryntum.com/products/grid/'>Bryntum Grid</a> component which is licensed separately."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Simple demo (Vue 2)",
+  "description": "Shows a super simple integration of the Vue Scheduler into a Vue app.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

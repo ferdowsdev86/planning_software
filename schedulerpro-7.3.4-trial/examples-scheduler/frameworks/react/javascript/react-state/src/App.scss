@@ -1,0 +1,39 @@
+/* FontAwesome is not built-in, but used for icons */
+@import "~@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@import "~@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@import "~@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @import "~@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@import "~@bryntum/demo-resources/scss/example-webpack.scss";
+
+.b-sch-event:not(.b-sch-event-milestone) {
+    border-radius : 2px;
+}
+
+.selected-event {
+    margin-inline-end : 1em;
+    text-transform    : uppercase;
+    text-align        : right;
+    white-space       : nowrap;
+    text-overflow     : ellipsis;
+}
+
+.selected-event span {
+    font-weight : 800;
+}
+
+.small-text {
+    font-size : 0.7em;
+}
+
+.yes-button,
+.no-button {
+    flex    : 1;
+    border  : none;
+    outline : none;
+}

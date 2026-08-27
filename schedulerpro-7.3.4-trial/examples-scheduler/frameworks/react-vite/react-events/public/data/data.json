@@ -1,0 +1,123 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      { "id" : "r1", "name" : "Angelo" },
+      { "id" : "r2", "name" : "Linda" },
+      { "id" : "r3", "name" : "Arnold" },
+      { "id" : "r4", "name" : "Gloria" },
+      { "id" : "r5", "name" : "Kate" },
+      { "id" : "r6", "name" : "Henrik" },
+      { "id" : "r7", "name" : "Malik" },
+      { "id" : "r8", "name" : "Hitomi" },
+      { "id" : "r9", "name" : "Rob" },
+      { "id" : "r10", "name" : "Team", "image" : false }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "startDate"  : "2023-06-01 10:00",
+        "endDate"    : "2023-06-01 14:00",
+        "name"       : "I'm React JSX component",
+        "icon"       : "fa fa-atom",
+        "eventColor" : "orange",
+        "percentage" : 50
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r2",
+        "startDate"  : "2023-06-01 11:00",
+        "endDate"    : "2023-06-01 14:00",
+        "name"       : "Drag me",
+        "icon"       : "fa fa-arrows-alt",
+        "eventColor" : "purple",
+        "percentage" : 30
+      },
+      {
+        "id"           : 3,
+        "resourceId"   : "r3",
+        "startDate"    : "2023-06-01 14:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Double click me",
+        "icon"         : "fa fa-mouse-pointer",
+        "eventColor"   : "violet",
+        "percentage"   : 20
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r4",
+        "startDate"  : "2023-06-01 8:00",
+        "endDate"    : "2023-06-01 12:00",
+        "name"       : "Right click me",
+        "icon"       : "fa fa-mouse-pointer",
+        "eventColor" : "indigo",
+        "percentage" : 75
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r5",
+        "startDate"  : "2023-06-01 13:00",
+        "endDate"    : "2023-06-01 17:00",
+        "name"       : "Resize me",
+        "icon"       : "fa fa-arrows-alt-h",
+        "eventColor" : "lime",
+        "percentage" : 40
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r9",
+        "startDate"  : "2023-06-01 12:00",
+        "endDate"    : "2023-06-01 16:00",
+        "name"       : "Important meeting",
+        "icon"       : "fa fa-exclamation-triangle",
+        "eventColor" : "red",
+        "percentage" : 75
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r6",
+        "startDate"  : "2023-06-01 7:00",
+        "endDate"    : "2023-06-01 11:00",
+        "name"       : "Sports event",
+        "icon"       : "fa fa-basketball-ball",
+        "eventColor" : "green",
+        "percentage" : 65
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r7",
+        "startDate"  : "2023-06-01 9:00",
+        "endDate"    : "2023-06-01 14:00",
+        "name"       : "Dad's birthday!",
+        "icon"       : "fa fa-birthday-cake",
+        "eventColor" : "deep-orange",
+        "percentage" : 80
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r8",
+        "startDate"  : "2023-06-01 14:00",
+        "endDate"    : "2023-06-01 18:00",
+        "name"       : "Client Conference",
+        "icon"       : "fa fa-hand",
+        "eventColor" : "blue",
+        "percentage" : 55
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "r10",
+        "startDate"  : "2023-06-01 10:00",
+        "endDate"    : "2023-06-01 14:00",
+        "name"       : "Weekly Review",
+        "icon"       : "fa fa-calendar",
+        "eventColor" : "pink",
+        "percentage" : 90
+      }
+
+    ]
+  }
+}

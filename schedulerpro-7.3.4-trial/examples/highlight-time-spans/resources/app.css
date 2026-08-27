@@ -1,0 +1,71 @@
+.b-sch-event-tooltip {
+    min-width : 15em;
+
+    dl {
+        margin : 0;
+    }
+
+    dt, dd {
+        margin-inline-start : 0;
+    }
+
+    dt {
+        font-weight   : bold;
+        margin-bottom : .5em;
+    }
+
+    dd {
+        display     : flex;
+        align-items : center;
+
+        &:not(:last-child) {
+            margin-bottom : 1.5em;
+        }
+
+        .b-icon {
+            margin-inline-end : 0.5em;
+        }
+    }
+}
+
+.b-sch-header-row:first-child .b-sch-header-time-axis-cell {
+    font-weight : bold;
+}
+
+/* Resource info column styling */
+.b-resource-info {
+    align-content   : space-evenly;
+
+    --b-avatar-size : 2.8em;
+
+    i {
+        font-size : 1.3em;
+    }
+
+    .b-resource-name {
+        font-size : 1.1em;
+    }
+
+    .b-active-status {
+        font-size         : 0.8em;
+        margin-inline-end : 1.5em;
+        color             : var(--b-neutral-85);
+
+        &.b-active {
+            color : var(--b-color-lime);
+        }
+    }
+}
+
+.b-sch-event .b-icon {
+    font-size : 1.3em;
+}
+
+.b-delivery-window {
+    font-size  : .7em;
+    margin-top : .5em;
+}
+
+[data-ref="maxEndTime"] label {
+    text-align : center;
+}

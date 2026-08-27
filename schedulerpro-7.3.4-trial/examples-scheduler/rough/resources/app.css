@@ -1,0 +1,16 @@
+.b-sch-event-wrap {
+    --b-sch-event-font-weight : 600;
+
+    canvas {
+        position           : absolute;
+        inset-inline-start : 0;
+        top                : 0;
+    }
+
+    .b-sch-event-content {
+        text-shadow : 0 -1px var(--b-neutral-100),
+        0 1px var(--b-neutral-100),
+        -1px 0 var(--b-neutral-100),
+        1px 0 var(--b-neutral-100);
+    }
+}

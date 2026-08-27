@@ -1,0 +1,16 @@
+{
+  "title": "Basic thin (React + Vite)",
+  "description": "This example shows basic thin setup of the Bryntum Scheduler Pro",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/AppData.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

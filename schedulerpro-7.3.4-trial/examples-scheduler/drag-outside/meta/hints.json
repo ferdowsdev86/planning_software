@@ -1,0 +1,6 @@
+{
+  ".b-grid": {
+    "title": "Drag & drop events here",
+    "content": "You can drag events from the schedule and drop them here.<br><br><strong>Please note this table is powered by the <a href='https://bryntum.com/products/grid'>Bryntum Grid</a>, which is licensed separately.<strong>"
+  }
+}

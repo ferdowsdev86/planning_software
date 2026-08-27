@@ -1,0 +1,78 @@
+.b-grid-sub-grid-locked {
+    background                : var(--b-neutral-98);
+
+    --b-grid-cell-background  : transparent;
+    --b-grid-row-border-color : var(--b-neutral-98);
+
+    .b-grid-row {
+        .b-resource-info-cell,
+        .b-resource-info {
+            overflow : visible;
+        }
+
+        img {
+            width  : 3em;
+            height : 3em;
+            border : 3px solid var(--b-primary-85);
+        }
+    }
+}
+
+.b-time-axis-sub-grid {
+    --b-column-lines-tick-style  : dashed;
+    --b-column-lines-major-style : dotted;
+
+    .b-grid-cell {
+        border-bottom-style : dashed;
+    }
+
+    .b-sch-event {
+        --b-sch-event-border-radius : 2px;
+    }
+}
+
+.b-sch-event-wrap {
+    height   : 2em;
+    overflow : visible;
+
+    &.b-milestone-wrap {
+        translate          : 0 2.5em;
+
+        --b-milestone-size : 20px;
+    }
+
+    .b-sch-event {
+        overflow : visible;
+    }
+
+    .b-sch-event-content {
+        overflow : visible;
+    }
+
+    .fa-square:before {
+        display : block;
+        rotate  : 45deg;
+    }
+
+    .b-start-marker,
+    .b-end-marker {
+        position  : absolute;
+        color     : var(--b-primary-70);
+        top       : 50%;
+        margin    : 0 !important;
+        translate : 0 -50%;
+        font-size : 1.2em;
+    }
+
+    .b-start-marker {
+        inset-inline-start : -1.2em;
+    }
+
+    .b-end-marker {
+        inset-inline-end : -1.2em;
+    }
+}
+
+.b-sch-header-text {
+    text-align : center;
+}

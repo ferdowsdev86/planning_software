@@ -1,0 +1,21 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<bryntum-scheduler-pro-project-model
+    #project
+    [events] = "projectData.events"
+    [resources] = "projectData.resources"
+    [assignments] = "projectData.assignments"
+    [dependencies] = "projectData.dependencies"
+></bryntum-scheduler-pro-project-model>
+
+<bryntum-scheduler-pro
+    #schedulerpro
+    [startDate] = "schedulerProProps.startDate"
+    [endDate] = "schedulerProProps.endDate"
+    [viewPreset] = "schedulerProProps.viewPreset"
+    [forceFit] = "schedulerProProps.forceFit"
+    [smoothZoom] = "schedulerProProps.smoothZoom"
+    [columns] = "schedulerProProps.columns"
+    [project] = "project"
+></bryntum-scheduler-pro>

@@ -1,0 +1,6 @@
+{
+  "[data-index='1'] [data-column-id=\"line\"]": {
+    "title": "Sparkline column",
+    "content": "Shows the numbers from the month columns in an easy-to-read sparkline chart. Line, bar, and pie types are supported"
+  }
+}

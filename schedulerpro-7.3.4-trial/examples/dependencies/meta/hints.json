@@ -1,0 +1,10 @@
+{
+  "[data-event-id='1']": {
+    "title": "Drag to affect others",
+    "content": "Dragging an event affects successors"
+  },
+  "[data-assignment-id='18']": {
+    "title": "Multi assigned",
+    "content": "Drag to affect other assignments of the same event"
+  }
+}

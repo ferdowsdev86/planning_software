@@ -1,0 +1,79 @@
+[
+  {
+    "id"           : 32421,
+    "name"         : "Prepare meeting",
+    "duration"     : 1,
+    "durationUnit" : "h",
+    "note"         : "Bring laptop + bag"
+  },
+  {
+    "id"           : 21422,
+    "name"         : "Code review",
+    "duration"     : 3,
+    "durationUnit" : "h",
+    "note"         : "Use Chat GPT"
+  },
+  {
+    "id"           : 21423,
+    "name"         : "Fix customer bug",
+    "duration"     : 2,
+    "durationUnit" : "h",
+    "note"         : "Ask for test case"
+  },
+  {
+    "id"           : 21426,
+    "name"         : "Add chart widget",
+    "duration"     : 2,
+    "durationUnit" : "h",
+    "note"         : "Need API key"
+  },
+  {
+    "id"           : 21429,
+    "name"         : "Plan company offsite",
+    "duration"     : 2,
+    "durationUnit" : "h",
+    "note"         : "Bring cold beers"
+  },
+  {
+    "id"           : 21439,
+    "name"         : "Attend conference",
+    "duration"     : 2,
+    "durationUnit" : "h",
+    "note"         : "Prepare cool demos"
+  },
+  {
+    "id"           : 21442,
+    "name"         : "Update production server",
+    "duration"     : 1,
+    "durationUnit" : "h",
+    "note"         : "Latest firmware"
+  },
+  {
+    "id"           : 21420,
+    "name"         : "Book flight",
+    "duration"     : 1,
+    "durationUnit" : "h",
+    "note"         : "Taxi shuttle needed"
+  },
+  {
+    "id"           : 21522,
+    "name"         : "Customer support call",
+    "duration"     : 1,
+    "durationUnit" : "h",
+    "note"         : "Study customer test case"
+  },
+  {
+    "id"           : 21462,
+    "name"         : "Angular bug fix",
+    "duration"     : 3,
+    "durationUnit" : "h",
+    "note"         : "Migrate to latest Angular"
+  },
+  {
+    "id"           : 21472,
+    "name"         : "React feature fix",
+    "duration"     : 2,
+    "durationUnit" : "h",
+    "note"         : "Needs senior dev"
+  }
+]

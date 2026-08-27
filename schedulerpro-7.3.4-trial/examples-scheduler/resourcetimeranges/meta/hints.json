@@ -1,0 +1,6 @@
+{
+  "[data-ref=drawThresholdSlider]": {
+    "title": "Draw threshold",
+    "content": "Skip rendering time ranges narrower than this"
+  }
+}

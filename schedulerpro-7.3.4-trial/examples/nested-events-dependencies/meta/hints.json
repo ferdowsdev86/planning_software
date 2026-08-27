@@ -1,0 +1,10 @@
+{
+  ".b-sch-dependency": {
+    "title": "Dependencies",
+    "content": "Supports parent to parent, child to child, parent to child & child to parent dependencies"
+  },
+  "[data-ref=drawAround]": {
+    "title": "Experimental feature",
+    "content": "Draw dependencies around parent events, instead of crossing over them"
+  }
+}

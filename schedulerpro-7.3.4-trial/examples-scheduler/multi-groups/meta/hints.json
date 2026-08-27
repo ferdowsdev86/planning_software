@@ -1,0 +1,12 @@
+{
+  ".b-resource-meta": {
+    "title": "",
+    "align": "s-e",
+    "content": "Resources can be members of more than one group"
+  },
+  ".b-grid-row[data-index=\"4\"] .b-resource-meta": {
+    "title": "",
+    "align": "s-e",
+    "content": "This resource is part of \"Accounts\" and \"Consultants\""
+  }
+}

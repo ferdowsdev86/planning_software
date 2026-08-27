@@ -1,0 +1,160 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+
+:root {
+    --station-color     : #888;
+    --event-color       : #9a9a9a;
+    --parent-background : #ddd;
+    --parent-color      : #333;
+}
+
+
+.b-theme-classic-dark {
+    --parent-background : #222;
+    --parent-color      : #eee;
+}
+
+
+// Parent styling
+.b-sch-event-wrap.b-nested-events-parent {
+    // Gray backdrop, extending outside of the event
+    &::before {
+        content          : '';
+        background-color : var(--parent-background);
+        opacity          : 0.5;
+        position         : absolute;
+        top              : -5px;
+        left             : -5px;
+        right            : -5px;
+        bottom           : -5px;
+        border-radius    : 3px;
+    }
+
+    // Alter backdrop on hover
+    &:hover::before {
+        background-image : linear-gradient(#00000010, #00000010);
+    }
+
+    > .b-sch-event:not(.b-milestone) {
+        background-color : transparent;
+        color            : var(--parent-color);
+
+        // Don't alter event appearance on hover or selection
+        &:hover,
+        &.b-sch-event-selected,
+        &.b-sch-event-selected:hover {
+            background-image : none;
+
+            > .b-sch-event-content,
+            > .b-sch-event-content * {
+                color : var(--parent-color);
+            }
+        }
+
+        > .b-sch-event-content {
+            width               : 80%;
+            position            : static;
+            margin-inline-start : 0.35em;
+            align-self          : start;
+
+            i.fa {
+                font-size  : 1.2em;
+                margin     : 0;
+                position   : absolute;
+                top        : 0;
+                right      : 0.25em;
+                .b-rtl & {
+                    left  : 0.25em;
+                    right : auto;
+                }
+                opacity    : 0.7;
+                transition : opacity .2s;
+                cursor     : pointer;
+
+                &:hover {
+                    opacity : 1;
+                }
+            }
+        }
+
+        > .b-task-percent-bar-outer {
+            display : none;
+        }
+    }
+
+    &.exceeded {
+        &::before {
+            border : 1px solid red;
+        }
+
+        > .b-sch-event > {
+            .b-sch-event-content,
+            .b-sch-event-content * {
+                color : red !important;
+            }
+        }
+    }
+}
+
+// Nested event styling
+.b-nested-events-container {
+    .b-sch-event-wrap > .b-sch-event,
+    .b-sch-event-resizing .b-sch-event-wrap:not(.b-nested-events-parent) > .b-sch-event {
+        // Create some space between nested events horizontally
+        width            : calc(100% - 6px);
+        left             : 3px;
+
+        .b-rtl & {
+            left  : auto;
+            right : 3px;
+        }
+    }
+}
+
+.b-nested-event > .b-sch-event {
+    background-color : currentColor;
+    border-radius    : 3px;
+
+    .b-sch-event-content {
+        color : #fff;
+    }
+}
+
+.b-dragging-event .b-nested-events-parent .b-sch-event:hover .b-nested-events-container {
+    background-image : none;
+}
+
+.b-grid-cell[data-column=name] {
+    display               : grid;
+    grid-template-columns : 3em 1fr;
+    gap                   : 0.5em;
+    align-content         : center;
+
+    i {
+        grid-row         : 1 / 3;
+        font-size        : 1.5em;
+        min-width        : 2em;
+        height           : 2em;
+        border-radius    : 50%;
+        display          : flex;
+        align-items      : center;
+        justify-content  : center;
+        background-color : var(--station-color);
+        color            : #fff;
+    }
+
+    .name {
+        font-weight : bold;
+    }
+}

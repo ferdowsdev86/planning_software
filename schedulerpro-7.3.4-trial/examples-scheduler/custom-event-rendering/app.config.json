@@ -1,0 +1,10 @@
+{
+  "title": "Custom event rendering demo",
+  "description": "Shows a how to render custom HTML into the event bars",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/events.js",
+    "resources/app.css"
+  ]
+}

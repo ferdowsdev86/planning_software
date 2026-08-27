@@ -1,0 +1,126 @@
+/* FontAwesome is not built-in, but used for icons */
+@import "~@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@import "~@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@import "~@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @import "~@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@import "~@bryntum/demo-resources/scss/example-webpack.scss";
+
+.b-scheduler {
+    --terminal-hide-delay : 300ms;
+}
+
+.b-sch-event-wrap .b-sch-event {
+    --b-sch-event-border-radius : 3px;
+    --b-sch-event-font-weight   : 300;
+    --b-sch-event-box-shadow    : var(--b-elevation-2);
+
+    &.lubrication {
+        background   : repeating-linear-gradient(-45deg, #01BAEF, #01BAEF 7px, white 7px, white 14px);
+        border-color : #01BAEF;
+    }
+}
+
+/* Make sliders align nicely in menus */
+.b-slider-internal-label {
+    width : 10em;
+}
+
+.b-menu-content > .b-checkbox {
+    border-top    : 1px solid var(--b-neutral-70);
+    padding-block : .5em;
+    height        : 3em;
+}
+
+.b-sch-event-wrap.b-milestone-wrap {
+    /* --b-sch-event-justify-content : center; */
+
+    .b-sch-event.b-sch-event-with-icon .b-sch-event-content {
+        border-radius : 100%;
+        height        : 100%;
+
+        i {
+            font-size : calc(0.5px * var(--b-event-height));
+        }
+    }
+
+    /* Override color set in style in eventRenderer */
+    label {
+        color : var(--b-neutral-50);
+    }
+}
+
+.b-sch-dependency {
+    &.special-dependency {
+        stroke-dasharray : 5, 5;
+        stroke-width     : 2;
+    }
+
+    &.extra-special-dependency {
+        stroke-dasharray : 6;
+    }
+}
+
+.marker-thin .b-sch-dependency-arrow {
+    fill   : transparent;
+    /* Fallback for Safari */
+    stroke : var(--b-dependency-color);
+    /* Supported by Chrome & FF */
+    stroke : context-stroke;
+}
+
+@keyframes draw {
+    50% {
+        stroke-dashoffset : 0;
+    }
+}
+
+.b-click-area {
+    transition : stroke .5s;
+}
+
+.b-highlight-click-area .b-click-area {
+    stroke : #55555522;
+}
+
+.b-highlight-hover-area .b-sch-terminal-hover-area {
+    background    : #55555522;
+    border-radius : 3px;
+}
+
+/* region Terminals */
+.animate-terminals .b-sch-terminal {
+    animation : ShowTerminal 0.2s linear;
+}
+
+@keyframes ShowTerminal {
+    0% {
+        opacity : 0;
+    }
+
+    100% {
+        opacity : 1;
+    }
+}
+
+.animate-terminals .b-hiding-terminals .b-sch-terminal {
+    animation : HideTerminal var(--terminal-hide-delay) linear forwards;
+}
+
+@keyframes HideTerminal {
+    0% {
+        opacity : 1;
+    }
+
+    100% {
+        opacity : 0;
+    }
+}
+
+/* endregion */
+

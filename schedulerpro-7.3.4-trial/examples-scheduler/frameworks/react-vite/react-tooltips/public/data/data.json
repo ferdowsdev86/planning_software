@@ -1,0 +1,117 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"        : "a",
+        "name"      : "Arcady",
+        "role"      : "Core developer",
+        "important" : false
+      },
+      {
+        "id"        : "b",
+        "name"      : "Dave",
+        "role"      : "Tech Sales",
+        "important" : false
+      },
+      {
+        "id"        : "c",
+        "name"      : "Henrik",
+        "role"      : "Sales",
+        "important" : false
+      },
+      {
+        "id"        : "d",
+        "name"      : "Linda",
+        "role"      : "Core developer",
+        "important" : true
+      },
+      {
+        "id"        : "e",
+        "name"      : "Maxim",
+        "role"      : "Developer & UX",
+        "important" : false
+      },
+      {
+        "id"        : "f",
+        "name"      : "Mike",
+        "role"      : "CEO",
+        "important" : false
+      },
+      {
+        "id"        : "g",
+        "name"      : "Lee",
+        "role"      : "CTO",
+        "important" : true
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "a",
+        "name"       : "Meeting #1",
+        "startDate"  : "2025-02-07 11:00",
+        "endDate"    : "2025-02-07 14:00",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "b",
+        "name"       : "Meeting #2",
+        "startDate"  : "2025-02-07 12:00",
+        "endDate"    : "2025-02-07 15:00",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "c",
+        "name"       : "Meeting #3",
+        "startDate"  : "2025-02-07 13:00",
+        "endDate"    : "2025-02-07 16:00",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "d",
+        "name"       : "Meeting",
+        "startDate"  : "2025-02-07 09:00",
+        "endDate"    : "2025-02-07 11:00",
+        "iconCls"    : "fa fa-exclamation-triangle"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "e",
+        "name"       : "Appointment #1",
+        "startDate"  : "2025-02-07 10:00",
+        "endDate"    : "2025-02-07 12:00",
+        "iconCls"    : "fa fa-calendar-alt"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "f",
+        "name"       : "Appointment #2",
+        "startDate"  : "2025-02-07 11:00",
+        "endDate"    : "2025-02-07 13:00",
+        "iconCls"    : "fa fa-calendar-alt"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "g",
+        "name"       : "Appointment #3",
+        "startDate"  : "2025-02-07 10:00",
+        "endDate"    : "2025-02-07 12:00",
+        "iconCls"    : "fa fa-calendar-alt"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "g",
+        "name"       : "Appointment",
+        "startDate"  : "2025-02-07 15:00",
+        "endDate"    : "2025-02-07 18:00",
+        "iconCls"    : "fa fa-exclamation-triangle"
+      }
+    ]
+  }
+}

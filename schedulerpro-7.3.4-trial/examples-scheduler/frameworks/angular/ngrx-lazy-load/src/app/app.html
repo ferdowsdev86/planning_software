@@ -1,0 +1,17 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<div id="content" class="demo-app">
+    <bryntum-scheduler
+        #scheduler
+        [startDate] = "schedulerProps.startDate"
+        [endDate] = "schedulerProps.endDate"
+        [infiniteScroll] = "schedulerProps.infiniteScroll"
+        [visibleDate] = "schedulerProps.visibleDate"
+        [resourceImagePath] = "schedulerProps.resourceImagePath"
+        [columns] = "schedulerProps.columns"
+        [resourceStore] = "schedulerProps.resourceStore"
+        [eventStore] = "schedulerProps.eventStore"
+        [nonWorkingTimeFeature] = "schedulerProps.nonWorkingTimeFeature"
+    ></bryntum-scheduler>
+</div>

@@ -1,0 +1,16 @@
+{
+  "title": "Basic setup (Vue 3 + Vite)",
+  "description": "This example shows basic setup of the Bryntum Scheduler Pro.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

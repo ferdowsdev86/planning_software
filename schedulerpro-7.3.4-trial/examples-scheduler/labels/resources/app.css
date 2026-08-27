@@ -1,0 +1,4 @@
+.b-sch-label.custom {
+    font-weight : bold;
+    color       : var(--b-neutral-0);
+}

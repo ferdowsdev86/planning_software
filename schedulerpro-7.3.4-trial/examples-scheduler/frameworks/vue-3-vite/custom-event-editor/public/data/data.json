@@ -1,0 +1,91 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Mike"
+      },
+      { "id" : "r2", "name" : "Linda" },
+      { "id" : "r3", "name" : "Arnold" },
+      { "id" : "r4", "name" : "Angelo" },
+      { "id" : "r5", "name" : "Celia" },
+      { "id" : "r6", "name" : "Kate" },
+      { "id" : "r7", "name" : "Linda" },
+      { "id" : "r8", "name" : "Mark" },
+      { "id" : "r9", "name" : "Rob" },
+      { "id" : "r10", "name" : "Maxim" }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "startDate"  : "2025-05-01T10:00",
+        "endDate"    : "2025-05-01T12:00",
+        "name"       : "Meeting #1",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r2",
+        "startDate"  : "2025-05-01T12:00",
+        "endDate"    : "2025-05-01T14, 30:00",
+        "name"       : "Appointment #1",
+        "iconCls"    : "fa fa-arrows-alt"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "r3",
+        "startDate"  : "2025-05-01T14:00",
+        "endDate"    : "2025-05-01T16:00",
+        "name"       : "Meeting #2",
+        "eventColor" : "purple",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r4",
+        "startDate"  : "2025-05-01T8:00",
+        "endDate"    : "2025-05-01T11:00",
+        "name"       : "Breakfast with customer",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r5",
+        "startDate"  : "2025-05-01T14:00",
+        "endDate"    : "2025-05-01T17:00",
+        "name"       : "Very important meeting #11",
+        "iconCls"    : "fa fa-arrows-alt-h"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r6",
+        "startDate"  : "2025-05-01T16:00",
+        "endDate"    : "2025-05-01T19:00",
+        "name"       : "Important meeting",
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r6",
+        "startDate"  : "2025-05-01T6:00",
+        "endDate"    : "2025-05-01T8:00",
+        "name"       : "Sports event",
+        "iconCls"    : "fa fa-basketball-ball"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r7",
+        "startDate"  : "2025-05-01T9:00",
+        "endDate"    : "2025-05-01T11, 30:00",
+        "name"       : "Dad's birthday!",
+        "iconCls"    : "fa fa-birthday-cake",
+        "style"      : "background-color: teal; color: #fff; font-size: 18px"
+      }
+    ]
+  }
+}

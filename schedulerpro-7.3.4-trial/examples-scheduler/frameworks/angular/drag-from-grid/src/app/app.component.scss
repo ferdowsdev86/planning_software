@@ -1,0 +1,69 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+.demo-app {
+    display        : flex;
+    flex-direction : column;
+}
+
+#content {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+}
+
+.b-sch-event {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+}
+
+.b-grid-header {
+    height : 57px;
+}
+
+.b-unassigned-class.b-drag-proxy {
+    &.b-drag-invalid{
+        --b-primary : var(--b-color-red);
+    }
+
+    &.b-horizontal {
+        align-items          : center;
+        padding-inline-start : .5em;
+        flex-flow            : row nowrap;
+        justify-content      : flex-start;
+
+        i {
+            margin-inline-end : .5em;
+        }
+    }
+
+    &.b-vertical {
+        justify-content : flex-start;
+        padding-top     : .5em;
+    }
+}
+
+[data-column="duration"] {
+    div.b-grid-header-text .b-grid-header-text-content {
+        text-align : center;
+
+        i {
+            font-size : 1.3em;
+            margin    : 0;
+        }
+    }
+}
+
+.b-sch-tooltip-start-date,
+.b-sch-tooltip-end-date {
+    margin-top : 0.2em;
+}

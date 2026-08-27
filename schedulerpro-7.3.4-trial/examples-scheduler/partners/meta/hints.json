@@ -1,0 +1,7 @@
+{
+  ".b-time-axis-cell": {
+    "align": "b-t",
+    "title": "",
+    "content": "When you scroll the time axis left or right, the Scheduler below stays in sync"
+  }
+}

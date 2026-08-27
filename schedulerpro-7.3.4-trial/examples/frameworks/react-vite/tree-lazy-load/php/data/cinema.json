@@ -1,0 +1,252 @@
+[
+  {
+    "id"   : "1",
+    "name" : "Grand Arc Cinema",
+    "city" : "New York"
+  },
+  {
+    "id"   : "2",
+    "name" : "Lumière Palace",
+    "city" : "Paris"
+  },
+  {
+    "id"   : "3",
+    "name" : "Skyline Pictures",
+    "city" : "Los Angeles"
+  },
+  {
+    "id"   : "4",
+    "name" : "Regency Theatre",
+    "city" : "London"
+  },
+  {
+    "id"   : "5",
+    "name" : "Sunset Cinema",
+    "city" : "Sydney"
+  },
+  {
+    "id"   : "6",
+    "name" : "CineLux Roma",
+    "city" : "Rome"
+  },
+  {
+    "id"   : "7",
+    "name" : "NeoScreen 21",
+    "city" : "Tokyo"
+  },
+  {
+    "id"   : "8",
+    "name" : "Nordic Filmhaus",
+    "city" : "Oslo"
+  },
+  {
+    "id"   : "9",
+    "name" : "Silver Reel",
+    "city" : "Toronto"
+  },
+  {
+    "id"   : "10",
+    "name" : "Oasis Cinemas",
+    "city" : "Dubai"
+  },
+  {
+    "id"   : "11",
+    "name" : "Mirage Theatre",
+    "city" : "Las Vegas"
+  },
+  {
+    "id"   : "12",
+    "name" : "Atlantic Screen",
+    "city" : "Dublin"
+  },
+  {
+    "id"   : "13",
+    "name" : "Ciné Lumière",
+    "city" : "Lyon"
+  },
+  {
+    "id"   : "14",
+    "name" : "Galaxy Multiplex",
+    "city" : "Chicago"
+  },
+  {
+    "id"   : "15",
+    "name" : "The Film Hall",
+    "city" : "Amsterdam"
+  },
+  {
+    "id"   : "16",
+    "name" : "Cinema Aurora",
+    "city" : "Buenos Aires"
+  },
+  {
+    "id"   : "17",
+    "name" : "Plaza 9",
+    "city" : "Berlin"
+  },
+  {
+    "id"   : "18",
+    "name" : "Moonlight Screens",
+    "city" : "San Francisco"
+  },
+  {
+    "id"   : "19",
+    "name" : "Cinema del Mar",
+    "city" : "Barcelona"
+  },
+  {
+    "id"   : "20",
+    "name" : "Pacific View Theatre",
+    "city" : "Vancouver"
+  },
+  {
+    "id"   : "21",
+    "name" : "Empire Motion",
+    "city" : "Manchester"
+  },
+  {
+    "id"   : "22",
+    "name" : "Rio Cinema",
+    "city" : "Rio de Janeiro"
+  },
+  {
+    "id"   : "23",
+    "name" : "Velvet Screens",
+    "city" : "Vienna"
+  },
+  {
+    "id"   : "24",
+    "name" : "Majestic Cineplex",
+    "city" : "Cape Town"
+  },
+  {
+    "id"   : "25",
+    "name" : "CineNova",
+    "city" : "Stockholm"
+  },
+  {
+    "id"   : "26",
+    "name" : "CityLights Cinema",
+    "city" : "Melbourne"
+  },
+  {
+    "id"   : "27",
+    "name" : "Arthouse 17",
+    "city" : "Prague"
+  },
+  {
+    "id"   : "28",
+    "name" : "Golden Frame Theatre",
+    "city" : "Seattle"
+  },
+  {
+    "id"   : "29",
+    "name" : "Zenith Screens",
+    "city" : "Hong Kong"
+  },
+  {
+    "id"   : "30",
+    "name" : "The Lighthouse",
+    "city" : "Wellington"
+  },
+  {
+    "id"   : "31",
+    "name" : "Platinum Screen",
+    "city" : "Chicago"
+  },
+  {
+    "id"   : "32",
+    "name" : "CineJet",
+    "city" : "San Diego"
+  },
+  {
+    "id"   : "33",
+    "name" : "Panorama Theatre",
+    "city" : "Athens"
+  },
+  {
+    "id"   : "34",
+    "name" : "Festival Screens",
+    "city" : "Cannes"
+  },
+  {
+    "id"   : "35",
+    "name" : "Urban Flix",
+    "city" : "Austin"
+  },
+  {
+    "id"   : "36",
+    "name" : "Star Theatre",
+    "city" : "Mumbai"
+  },
+  {
+    "id"   : "37",
+    "name" : "Dreamlight Cinema",
+    "city" : "Copenhagen"
+  },
+  {
+    "id"   : "38",
+    "name" : "IndieScreen",
+    "city" : "Portland"
+  },
+  {
+    "id"   : "39",
+    "name" : "Lotus Cinemas",
+    "city" : "Bangkok"
+  },
+  {
+    "id"   : "40",
+    "name" : "The Retro Reel",
+    "city" : "Brussels"
+  },
+  {
+    "id"   : "41",
+    "name" : "Marquee 12",
+    "city" : "Phoenix"
+  },
+  {
+    "id"   : "42",
+    "name" : "Ocean View Cinema",
+    "city" : "Honolulu"
+  },
+  {
+    "id"   : "43",
+    "name" : "The Projection House",
+    "city" : "Zurich"
+  },
+  {
+    "id"   : "44",
+    "name" : "Fusion Theatre",
+    "city" : "Singapore"
+  },
+  {
+    "id"   : "45",
+    "name" : "NeoClassic Films",
+    "city" : "Warsaw"
+  },
+  {
+    "id"   : "46",
+    "name" : "Cine Horizon",
+    "city" : "Lima"
+  },
+  {
+    "id"   : "47",
+    "name" : "Parkside Cinema",
+    "city" : "Philadelphia"
+  },
+  {
+    "id"   : "48",
+    "name" : "Skybox Theatre",
+    "city" : "Minneapolis"
+  },
+  {
+    "id"   : "49",
+    "name" : "The Framehouse",
+    "city" : "Helsinki"
+  },
+  {
+    "id"   : "50",
+    "name" : "CineBellevue",
+    "city" : "Geneva"
+  }
+]

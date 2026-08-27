@@ -1,0 +1,185 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      { "id" : "r1", "name" : "Mike" },
+      { "id" : "r2", "name" : "Linda" },
+      { "id" : "r3", "name" : "Lisa" },
+      { "id" : "r4", "name" : "Madison" },
+      { "id" : "r5", "name" : "Mark" },
+      { "id" : "r6", "name" : "Kate" },
+      { "id" : "r7", "name" : "Dan" },
+      { "id" : "r8", "name" : "Henrik" },
+      { "id" : "r9", "name" : "Rob" },
+      { "id" : "r10", "name" : "Gloria" }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "startDate"  : "2019-01-01T08:00",
+        "endDate"    : "2019-01-01T11:00",
+        "name"       : "Investigation",
+        "iconCls"    : "fa fa-search"
+      }, {
+        "id"         : 2,
+        "resourceId" : "r1",
+        "startDate"  : "2019-01-01T13:00",
+        "endDate"    : "2019-01-01T15:00",
+        "name"       : "Brief",
+        "iconCls"    : "fa fa-newspaper"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "r2",
+        "startDate"  : "2019-01-01T08:00",
+        "endDate"    : "2019-01-01T09:30",
+        "name"       : "Scrum",
+        "iconCls"    : "fa fa-bullhorn"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T08:00",
+        "endDate"    : "2019-01-01T09:30",
+        "name"       : "Scrum",
+        "iconCls"    : "fa fa-bullhorn"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r4",
+        "startDate"  : "2019-01-01T07:00",
+        "endDate"    : "2019-01-01T11:00",
+        "name"       : "Meeting",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r4",
+        "startDate"  : "2019-01-01T15:00",
+        "endDate"    : "2019-01-01T17:00",
+        "name"       : "Meeting",
+        "iconCls"    : "fa fa-calendar",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r6",
+        "startDate"  : "2019-01-01T12:30",
+        "endDate"    : "2019-01-01T19:00",
+        "name"       : "Important meeting",
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r6",
+        "startDate"  : "2019-01-01T09:00",
+        "endDate"    : "2019-01-01T12:00",
+        "name"       : "Generic meeting",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r7",
+        "startDate"  : "2019-01-01T09:00",
+        "endDate"    : "2019-01-01T11:00",
+        "name"       : "Dad\"s birthday",
+        "iconCls"    : "fa fa-birthday-cake",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T13:00",
+        "endDate"    : "2019-01-01T20:00",
+        "name"       : "Golf tournament",
+        "iconCls"    : "fa fa-golf-ball",
+        "eventColor" : "green"
+      }
+    ]
+  },
+  "resourceTimeRanges" : {
+    "rows" : [
+      {
+        "id"             : 1,
+        "resourceId"     : "r1",
+        "startDate"      : "2019-01-01T11:00",
+        "endDate"        : "2019-01-01T13:00",
+        "name"           : "Lunch",
+        "recurrenceRule" : "FREQ=DAILY",
+        "important"      : false
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r8",
+        "startDate"  : "2019-01-01T11:00",
+        "endDate"    : "2019-01-01T13:00",
+        "name"       : "Lunch",
+        "important"  : false
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "r9",
+        "startDate"  : "2019-01-01T11:00",
+        "endDate"    : "2019-01-01T13:00",
+        "name"       : "Lunch",
+        "important"  : false
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r10",
+        "startDate"  : "2019-01-01T11:00",
+        "endDate"    : "2019-01-01T13:00",
+        "name"       : "Lunch",
+        "important"  : false
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r3",
+        "startDate"  : "2019-01-01T12:00",
+        "endDate"    : "2019-01-01T14:00",
+        "name"       : "Lunch",
+        "important"  : false
+      },
+      {
+        "id"           : 6,
+        "resourceId"   : "r4",
+        "startDate"    : "2019-01-01T12:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Lunch",
+        "important"    : false
+      },
+      {
+        "id"             : 7,
+        "resourceId"     : "r2",
+        "startDate"      : "2019-01-01T10:00",
+        "endDate"        : "2019-01-01T17:00",
+        "name"           : "Car maintenance",
+        "timeRangeColor" : "red",
+        "important"      : true
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r7",
+        "startDate"  : "2019-01-01T12:00",
+        "endDate"    : "2019-01-01T18:00",
+        "name"       : "Afternoon off (custom style)",
+        "style"      : "background: rgba(255,165,0,.3);color : orange",
+        "important"  : true
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r5",
+        "startDate"  : "2019-01-01T06:00",
+        "endDate"    : "2019-01-01T20:00",
+        "name"       : "Parental leave (custom CSS)",
+        "cls"        : "custom",
+        "important"  : true
+      }
+    ]
+  }
+}

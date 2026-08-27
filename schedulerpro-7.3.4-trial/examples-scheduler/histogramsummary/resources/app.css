@@ -1,0 +1,36 @@
+.b-scheduler {
+
+    .b-grid-footer-container {
+        height : 60px;
+    }
+
+    .b-grid-footer.b-sch-time-axis-column {
+        align-items : flex-end;
+
+        .b-time-axis-tick {
+            position    : relative;
+            overflow    : visible;
+            background  : var(--b-primary);
+            align-items : center;
+            transition  : height 0.3s;
+            padding     : 0;
+
+            &:not(:last-child) {
+                border-inline-end : none;
+            }
+
+            label {
+                position    : absolute;
+                top         : -15px;
+                overflow    : hidden;
+                font-weight : bold;
+                font-size   : 0.85em;
+            }
+
+            &.b-summarybar-label-inside label {
+                top : 3px;
+            }
+        }
+    }
+}
+

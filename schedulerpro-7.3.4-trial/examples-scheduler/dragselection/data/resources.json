@@ -1,0 +1,12 @@
+[
+  { "id" : "r1", "name" : "Mike" },
+  { "id" : "r2", "name" : "Linda" },
+  { "id" : "r3", "name" : "Don" },
+  { "id" : "r4", "name" : "Karen", "eventColor" : "teal" },
+  { "id" : "r5", "name" : "Doug" },
+  { "id" : "r6", "name" : "Peter" },
+  { "id" : "r7", "name" : "Sam", "eventColor" : "teal" },
+  { "id" : "r8", "name" : "Melissa" },
+  { "id" : "r9", "name" : "John" },
+  { "id" : "r10", "name" : "Ellen" }
+]

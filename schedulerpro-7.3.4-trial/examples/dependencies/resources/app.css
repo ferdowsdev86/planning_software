@@ -1,0 +1,4 @@
+/* Depart displays icon to the right of its text */
+.depart i {
+    order : 1;
+}

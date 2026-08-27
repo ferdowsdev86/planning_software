@@ -1,0 +1,15 @@
+{
+  "title": "Timeline histogram demo (Vue 3 + Vite)",
+  "description": "Shows a timeline histogram",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

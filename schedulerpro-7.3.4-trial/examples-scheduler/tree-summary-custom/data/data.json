@@ -1,0 +1,857 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : 200,
+        "name"       : "Amit Anderson",
+        "eventColor" : "blue",
+        "children"   : [
+          {
+            "id"   : 10,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 11,
+            "name" : "High"
+          },
+          {
+            "id"   : 12,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 100,
+        "name"       : "Linda Smith",
+        "role"       : "UI/UX Designer",
+        "eventColor" : "blue",
+        "children"   : [
+          {
+            "id"   : 1,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 2,
+            "name" : "High"
+          },
+          {
+            "id"   : 3,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"          : 101,
+        "name"        : "Angelo Robertson",
+        "role"        : "Frontend Developer",
+        "hoursPerDay" : 4,
+        "eventColor"  : "green",
+        "children"    : [
+          {
+            "id"   : 4,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 5,
+            "name" : "High"
+          },
+          {
+            "id"   : 6,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 102,
+        "name"       : "Celia Streisand",
+        "role"       : "Backend Developer",
+        "eventColor" : "red",
+        "children"   : [
+          {
+            "id"   : 7,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 8,
+            "name" : "High"
+          },
+          {
+            "id"   : 9,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 103,
+        "name"       : "Ellen Ford",
+        "role"       : "DevOps Engineer",
+        "expanded"   : true,
+        "eventColor" : "orange",
+        "children"   : [
+          {
+            "id"   : 201,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 202,
+            "name" : "High"
+          },
+          {
+            "id"   : 203,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 104,
+        "name"       : "Dave Rooney",
+        "role"       : "QA Engineer",
+        "eventColor" : "purple",
+        "children"   : [
+          {
+            "id"   : 13,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 14,
+            "name" : "High"
+          },
+          {
+            "id"   : 15,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 105,
+        "name"       : "George Gordon",
+        "role"       : "Project Manager",
+        "eventColor" : "teal",
+        "children"   : [
+          {
+            "id"   : 16,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 17,
+            "name" : "High"
+          },
+          {
+            "id"   : 18,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"          : 106,
+        "name"        : "Rob Miller",
+        "role"        : "Business Analyst",
+        "hoursPerDay" : 8,
+        "eventColor"  : "pink",
+        "children"    : [
+          {
+            "id"   : 19,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 20,
+            "name" : "High"
+          },
+          {
+            "id"   : 21,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"         : 107,
+        "name"       : "Henrik Brown",
+        "role"       : "Data Scientist",
+        "eventColor" : "yellow",
+        "children"   : [
+          {
+            "id"   : 22,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 23,
+            "name" : "High"
+          },
+          {
+            "id"   : 24,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"          : 108,
+        "name"        : "Lisa Garcia",
+        "role"        : "Content Writer",
+        "eventColor"  : "lightblue",
+        "hoursPerDay" : 6,
+        "children"    : [
+          {
+            "id"   : 25,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 26,
+            "name" : "High"
+          },
+          {
+            "id"   : 27,
+            "name" : "Normal"
+          }
+        ]
+      },
+      {
+        "id"          : 109,
+        "name"        : "Kate Williams",
+        "role"        : "IT Support",
+        "eventColor"  : "grey",
+        "hoursPerDay" : 4,
+        "children"    : [
+          {
+            "id"   : 28,
+            "name" : "Critical"
+          },
+          {
+            "id"   : 29,
+            "name" : "High"
+          },
+          {
+            "id"   : 30,
+            "name" : "Normal"
+          }
+        ]
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "resourceId"   : 202,
+        "name"         : "Implement Wordpress",
+        "startDate"    : "2025-01-08",
+        "effortPerDay" : 4,
+        "duration"     : 3
+      },
+      {
+        "id"           : 2,
+        "resourceId"   : 202,
+        "name"         : "PHP Hacks",
+        "startDate"    : "2025-01-14",
+        "effortPerDay" : 4,
+        "duration"     : 3
+      },
+      {
+        "id"           : 3,
+        "resourceId"   : 201,
+        "name"         : "Design Icons",
+        "startDate"    : "2025-01-14",
+        "effortPerDay" : 4,
+        "duration"     : 2
+      },
+      {
+        "id"           : 4,
+        "resourceId"   : 201,
+        "name"         : "Dark Theme Icons",
+        "startDate"    : "2025-01-06",
+        "effortPerDay" : 4,
+        "duration"     : 2
+      },
+      {
+        "id"           : 5,
+        "resourceId"   : 203,
+        "name"         : "Photoshop work",
+        "startDate"    : "2025-01-02",
+        "effortPerDay" : 4,
+        "duration"     : 2
+      },
+      {
+        "id"           : 6,
+        "resourceId"   : 203,
+        "name"         : "Review feedback",
+        "startDate"    : "2025-01-09",
+        "effortPerDay" : 4,
+        "duration"     : 2
+      },
+      {
+        "id"           : 7,
+        "name"         : "Build System Setup",
+        "resourceId"   : 10,
+        "startDate"    : "2025-01-06",
+        "endDate"      : "2025-01-08",
+        "duration"     : 2,
+        "effortPerDay" : 4,
+        "progress"     : 60
+      },
+      {
+        "id"           : 8,
+        "name"         : "Pipeline Optimization",
+        "resourceId"   : 10,
+        "startDate"    : "2025-01-13",
+        "endDate"      : "2025-01-15",
+        "duration"     : 2,
+        "effortPerDay" : 6,
+        "progress"     : 60
+      },
+      {
+        "id"           : 9,
+        "name"         : "Log Configuration",
+        "resourceId"   : 11,
+        "startDate"    : "2025-01-09",
+        "endDate"      : "2025-01-11",
+        "duration"     : 2,
+        "effortPerDay" : 2,
+        "progress"     : 50
+      },
+      {
+        "id"           : 10,
+        "name"         : "Alerting Setup",
+        "resourceId"   : 11,
+        "startDate"    : "2025-01-16",
+        "endDate"      : "2025-01-18",
+        "duration"     : 2,
+        "effortPerDay" : 4,
+        "progress"     : 50,
+        "icon"         : "fa fa-warning"
+      },
+      {
+        "id"           : 11,
+        "name"         : "Deployment Script",
+        "resourceId"   : 12,
+        "startDate"    : "2025-01-10",
+        "endDate"      : "2025-01-13",
+        "duration"     : 3,
+        "effortPerDay" : 3,
+        "progress"     : 75
+      },
+      {
+        "id"           : 12,
+        "name"         : "Automated Rollback",
+        "resourceId"   : 12,
+        "startDate"    : "2025-01-17",
+        "endDate"      : "2025-01-20",
+        "duration"     : 3,
+        "effortPerDay" : 4,
+        "progress"     : 75
+      },
+      {
+        "id"           : 13,
+        "name"         : "Wireframe Review",
+        "resourceId"   : 4,
+        "startDate"    : "2025-01-06",
+        "endDate"      : "2025-01-08",
+        "duration"     : 2,
+        "effortPerDay" : 2,
+        "progress"     : 40
+      },
+      {
+        "id"           : 14,
+        "name"         : "UI Prototype Development",
+        "resourceId"   : 4,
+        "startDate"    : "2025-01-13",
+        "endDate"      : "2025-01-15",
+        "duration"     : 2,
+        "effortPerDay" : 2,
+        "progress"     : 40
+      },
+      {
+        "id"           : 15,
+        "name"         : "Component Testing",
+        "resourceId"   : 5,
+        "startDate"    : "2025-01-09",
+        "endDate"      : "2025-01-11",
+        "duration"     : 2,
+        "effortPerDay" : 4,
+        "progress"     : 60
+      },
+      {
+        "id"           : 16,
+        "name"         : "Component Integration",
+        "resourceId"   : 5,
+        "startDate"    : "2025-01-16",
+        "endDate"      : "2025-01-18",
+        "duration"     : 2,
+        "effortPerDay" : 2,
+        "progress"     : 60
+      },
+      {
+        "id"           : 17,
+        "name"         : "Critical Bug Fixes",
+        "resourceId"   : 6,
+        "startDate"    : "2025-01-10",
+        "endDate"      : "2025-01-13",
+        "duration"     : 3,
+        "effortPerDay" : 2,
+        "progress"     : 20
+      },
+      {
+        "id"           : 18,
+        "name"         : "Regression Testing",
+        "resourceId"   : 6,
+        "startDate"    : "2025-01-17",
+        "endDate"      : "2025-01-20",
+        "effortPerDay" : 4,
+        "duration"     : 3,
+        "progress"     : 20
+      },
+      {
+        "id"           : 19,
+        "name"         : "Endpoint Design",
+        "resourceId"   : 7,
+        "startDate"    : "2025-01-06",
+        "endDate"      : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 70,
+        "effortPerDay" : 6
+      },
+      {
+        "id"           : 20,
+        "name"         : "API Testing",
+        "resourceId"   : 7,
+        "startDate"    : "2025-01-13",
+        "endDate"      : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 70,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 21,
+        "name"         : "Database Schema Design",
+        "resourceId"   : 8,
+        "startDate"    : "2025-01-09",
+        "endDate"      : "2025-01-11",
+        "duration"     : 2,
+        "progress"     : 45,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 22,
+        "name"         : "Data Migration",
+        "resourceId"   : 8,
+        "startDate"    : "2025-01-16",
+        "endDate"      : "2025-01-18",
+        "duration"     : 2,
+        "progress"     : 45,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 23,
+        "name"         : "User Authentication",
+        "resourceId"   : 9,
+        "startDate"    : "2025-01-10",
+        "endDate"      : "2025-01-13",
+        "duration"     : 2,
+        "progress"     : 80,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 24,
+        "name"         : "Session Management",
+        "resourceId"   : 9,
+        "startDate"    : "2025-01-17",
+        "endDate"      : "2025-01-20",
+        "duration"     : 3,
+        "progress"     : 80,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 25,
+        "name"         : "Unit Test Case Design",
+        "resourceId"   : 13,
+        "startDate"    : "2025-01-06",
+        "endDate"      : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 85,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 26,
+        "name"         : "Integration Test Planning",
+        "resourceId"   : 13,
+        "startDate"    : "2025-01-13",
+        "endDate"      : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 85,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 27,
+        "name"         : "Regression Cycle 1",
+        "resourceId"   : 14,
+        "startDate"    : "2025-01-09",
+        "endDate"      : "2025-01-11",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 28,
+        "name"         : "Regression Cycle 2",
+        "resourceId"   : 14,
+        "startDate"    : "2025-01-16",
+        "endDate"      : "2025-01-18",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 29,
+        "name"         : "Load Testing",
+        "resourceId"   : 15,
+        "startDate"    : "2025-01-07",
+        "duration"     : 3,
+        "progress"     : 20,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 30,
+        "name"         : "Stress Testing",
+        "resourceId"   : 15,
+        "startDate"    : "2025-01-13",
+        "duration"     : 3,
+        "progress"     : 20,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 31,
+        "name"         : "Exploratory Data Analysis",
+        "resourceId"   : 22,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 65,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 32,
+        "name"         : "Data Cleaning",
+        "resourceId"   : 22,
+        "startDate"    : "2025-01-13",
+        "duration"     : 2,
+        "progress"     : 65,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 33,
+        "name"         : "Feature Engineering",
+        "resourceId"   : 23,
+        "startDate"    : "2025-01-09",
+        "duration"     : 2,
+        "progress"     : 45,
+        "effortPerDay" : 6
+      },
+      {
+        "id"           : 34,
+        "name"         : "Model Tuning",
+        "resourceId"   : 23,
+        "startDate"    : "2025-01-16",
+        "duration"     : 2,
+        "progress"     : 45,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 35,
+        "name"         : "Chart Creation",
+        "resourceId"   : 24,
+        "startDate"    : "2025-01-06",
+        "duration"     : 3,
+        "progress"     : 30,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 36,
+        "name"         : "Dashboard Design",
+        "resourceId"   : 24,
+        "startDate"    : "2025-01-13",
+        "duration"     : 2,
+        "progress"     : 30,
+        "effortPerDay" : 8
+      },
+      {
+        "id"           : 37,
+        "name"         : "Backlog Review",
+        "resourceId"   : 16,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 38,
+        "name"         : "Sprint Goal Setting",
+        "resourceId"   : 16,
+        "startDate"    : "2025-01-14",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 39,
+        "name"         : "Resource Assessment",
+        "resourceId"   : 17,
+        "startDate"    : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 70,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 40,
+        "name"         : "Team Assignment",
+        "resourceId"   : 17,
+        "startDate"    : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 70,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 41,
+        "name"         : "Client Onboarding",
+        "resourceId"   : 18,
+        "startDate"    : "2025-01-06",
+        "duration"     : 3,
+        "progress"     : 90,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 42,
+        "name"         : "Monthly Review",
+        "resourceId"   : 18,
+        "startDate"    : "2025-01-16",
+        "duration"     : 2,
+        "progress"     : 90,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 43,
+        "name"         : "Icon Set Creation",
+        "resourceId"   : 1,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 30,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 44,
+        "name"         : "Icon Set Review",
+        "resourceId"   : 1,
+        "startDate"    : "2025-01-14",
+        "duration"     : 2,
+        "progress"     : 30,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 45,
+        "name"         : "Homepage Layout Design",
+        "resourceId"   : 2,
+        "startDate"    : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 6
+      },
+      {
+        "id"           : 46,
+        "name"         : "Responsive Design Adjustments",
+        "resourceId"   : 2,
+        "startDate"    : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 47,
+        "name"         : "Logo Concept Sketches",
+        "resourceId"   : 3,
+        "startDate"    : "2025-01-09",
+        "duration"     : 2,
+        "progress"     : 80,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 48,
+        "name"         : "Logo Finalization",
+        "resourceId"   : 3,
+        "startDate"    : "2025-01-14",
+        "duration"     : 3,
+        "progress"     : 80,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 49,
+        "name"         : "Draft Blog Article",
+        "resourceId"   : 25,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 50,
+        "name"         : "Blog Editing",
+        "resourceId"   : 25,
+        "startDate"    : "2025-01-14",
+        "duration"     : 2,
+        "progress"     : 50,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 51,
+        "name"         : "Write API Documentation",
+        "resourceId"   : 26,
+        "startDate"    : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 52,
+        "name"         : "User Guide Creation",
+        "resourceId"   : 26,
+        "startDate"    : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 6
+      },
+      {
+        "id"           : 53,
+        "name"         : "Keyword Research",
+        "resourceId"   : 27,
+        "startDate"    : "2025-01-09",
+        "duration"     : 3,
+        "progress"     : 60,
+        "effortPerDay" : 1
+      },
+      {
+        "id"           : 54,
+        "name"         : "On-Page Optimization",
+        "resourceId"   : 27,
+        "startDate"    : "2025-01-13",
+        "duration"     : 3,
+        "progress"     : 60,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 55,
+        "name"         : "Support Ticket Resolution",
+        "resourceId"   : 28,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 80,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 56,
+        "name"         : "Customer Follow-up",
+        "resourceId"   : 28,
+        "startDate"    : "2025-01-14",
+        "duration"     : 2,
+        "progress"     : 80,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 57,
+        "name"         : "Server Maintenance",
+        "resourceId"   : 29,
+        "startDate"    : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 65,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 58,
+        "name"         : "Database Optimization",
+        "resourceId"   : 29,
+        "startDate"    : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 65,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 59,
+        "name"         : "Patch Deployment",
+        "resourceId"   : 30,
+        "startDate"    : "2025-01-09",
+        "duration"     : 2,
+        "progress"     : 45,
+        "effortPerDay" : 1
+      },
+      {
+        "id"           : 60,
+        "name"         : "Feature Updates",
+        "resourceId"   : 30,
+        "startDate"    : "2025-01-17",
+        "duration"     : 3,
+        "progress"     : 45,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 61,
+        "name"         : "Initial Requirements Meeting",
+        "resourceId"   : 19,
+        "startDate"    : "2025-01-06",
+        "duration"     : 2,
+        "progress"     : 60,
+        "effortPerDay" : 4
+      },
+      {
+        "id"           : 62,
+        "name"         : "Requirement Validation",
+        "resourceId"   : 19,
+        "startDate"    : "2025-01-14",
+        "duration"     : 2,
+        "progress"     : 60,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 63,
+        "name"         : "Current Process Analysis",
+        "resourceId"   : 20,
+        "startDate"    : "2025-01-08",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 5
+      },
+      {
+        "id"           : 64,
+        "name"         : "Process Improvement Planning",
+        "resourceId"   : 20,
+        "startDate"    : "2025-01-15",
+        "duration"     : 2,
+        "progress"     : 40,
+        "effortPerDay" : 2
+      },
+      {
+        "id"           : 65,
+        "name"         : "Preliminary Interviews",
+        "resourceId"   : 21,
+        "startDate"    : "2025-01-09",
+        "duration"     : 3,
+        "progress"     : 75,
+        "effortPerDay" : 3
+      },
+      {
+        "id"           : 66,
+        "name"         : "Follow-up Interviews",
+        "resourceId"   : 21,
+        "startDate"    : "2025-01-17",
+        "duration"     : 3,
+        "progress"     : 75,
+        "effortPerDay" : 4
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "cls"       : "b-day-highlight",
+        "startDate" : "2025-01-14",
+        "name"      : "Holiday",
+        "duration"  : 1
+      }
+    ]
+  }
+}

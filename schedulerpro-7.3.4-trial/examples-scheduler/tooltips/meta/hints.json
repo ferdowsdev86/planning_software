@@ -1,0 +1,6 @@
+{
+  ".b-warn-icon": {
+    "title": "Specific tooltips inside event bar",
+    "content": "You can show custom tooltips for icons or other elements inside an event bar element."
+  }
+}

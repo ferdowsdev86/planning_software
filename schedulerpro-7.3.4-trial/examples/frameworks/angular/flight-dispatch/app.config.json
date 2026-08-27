@@ -1,0 +1,23 @@
+{
+  "title": "Flight Dispatch Scheduling demo (Angular)",
+  "description": "Shows a typical flight dispatch UI implemented with Scheduler Pro",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/lib/legend.ts",
+    "src/app/models/aircraft.model.ts",
+    "src/app/models/flight.model.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

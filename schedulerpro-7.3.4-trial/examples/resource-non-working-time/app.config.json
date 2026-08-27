@@ -1,0 +1,10 @@
+{
+  "title": "Pro Resource non-working time demo",
+  "description": "Shows a Scheduler Pro setup with a working hour calendars per resource",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

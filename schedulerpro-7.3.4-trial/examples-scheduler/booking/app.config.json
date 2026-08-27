@@ -1,0 +1,14 @@
+{
+  "title": "Property booking demo",
+  "description": "This example shows a demo booking application, using ResourceTimeRanges and the summary feature.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/DailyRateStore.js",
+    "lib/DaySelector.js",
+    "lib/PropertyModel.js",
+    "lib/ReservationModel.js",
+    "resources/app.css"
+  ]
+}

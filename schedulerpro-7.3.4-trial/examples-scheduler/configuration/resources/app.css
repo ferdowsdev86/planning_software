@@ -1,0 +1,28 @@
+.b-sch-event {
+    .value {
+        background-color : rgba(0, 0, 0, 0.2);
+        height           : 100%;
+        display          : flex;
+        justify-content  : flex-end;
+        align-items      : center;
+
+        &:not(:empty) {
+            padding-inline : 6px;
+        }
+    }
+}
+
+.b-scheduler {
+    .fa-moon:before,
+    .fa-sun:before {
+        margin-inline-end : 0.75em;
+    }
+
+    .fa-moon:before {
+        color : var(--b-color-indigo);
+    }
+
+    .fa-sun:before {
+        color : var(--b-color-yellow);
+    }
+}

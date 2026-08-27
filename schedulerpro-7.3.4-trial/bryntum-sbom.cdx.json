@@ -1,0 +1,175 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "serialNumber": "urn:uuid:71e10686-576f-42ec-8ac7-0eb25103e628",
+  "metadata": {
+    "timestamp": "2026-07-22T09:47:46.478Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "bryntum-sbom-generator",
+          "version": "1.0.0"
+        }
+      ]
+    },
+    "component": {
+      "type": "library",
+      "name": "bryntum-suite",
+      "version": "7.3.4",
+      "description": "Bryntum Suite - Professional JavaScript UI Components",
+      "licenses": [
+        {
+          "license": {
+            "name": "Bryntum License",
+            "url": "https://bryntum.com/products/grid/docs/guide/Grid/licenses"
+          }
+        }
+      ],
+      "supplier": {
+        "name": "Bryntum",
+        "url": [
+          "https://bryntum.com"
+        ]
+      },
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://bryntum.com"
+        },
+        {
+          "type": "documentation",
+          "url": "https://bryntum.com/products/grid/docs/"
+        },
+        {
+          "type": "license",
+          "url": "https://bryntum.com/products/grid/docs/guide/Grid/licenses"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "later",
+      "version": "1.2.0",
+      "description": "A library for determining recurring schedules",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/later@1.2.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/bunkat/later"
+        }
+      ],
+      "properties": [
+        {
+          "name": "bryntum:product",
+          "value": "Engine"
+        },
+        {
+          "name": "bryntum:location",
+          "value": "Engine/lib/Engine/vendor/later/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "chart.js",
+      "version": "4.4.2",
+      "description": "Simple yet flexible JavaScript charting library",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/chart.js@4.4.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.chartjs.org"
+        }
+      ],
+      "properties": [
+        {
+          "name": "bryntum:product",
+          "value": "Chart"
+        },
+        {
+          "name": "bryntum:location",
+          "value": "Chart/lib/Chart/vendor/chartjs/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dom-TreeWalker-polyfill",
+      "version": "1.0.0",
+      "description": "JavaScript implementation of W3 DOM4 TreeWalker interface (Salesforce LWC only)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/AaronBuxworthy/dom-TreeWalker-polyfill@1.0.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/AaronBuxworthy/dom-TreeWalker-polyfill"
+        }
+      ],
+      "properties": [
+        {
+          "name": "bryntum:product",
+          "value": "Core (Salesforce)"
+        },
+        {
+          "name": "bryntum:location",
+          "value": "Core/lib/Core/override/salesforce/TreeWalker.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@bryntum/chronograph",
+      "version": "1.0.3",
+      "description": "Open-source reactive computational engine, implemented in TypeScript",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/@bryntum/chronograph@1.0.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/bryntum/chronograph"
+        }
+      ],
+      "properties": [
+        {
+          "name": "bryntum:product",
+          "value": "Engine"
+        },
+        {
+          "name": "bryntum:location",
+          "value": "Engine/lib/ChronoGraph/"
+        }
+      ]
+    }
+  ]
+}

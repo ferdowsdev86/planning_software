@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta name="description" content="This demo demonstrates SchedulerPro integration with Mapbox GL JS for location-based task visualization and TanStack Table for rendering a custom sortable unplanned tasks grid with drag-and-drop scheduling functionality."/>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Bryntum Scheduler Pro - Map integration</title>
+	<script src="../_shared/browser/helper.js"></script>
+	<link rel="stylesheet" href="../../build/fontawesome/css/fontawesome.css">
+	<link rel="stylesheet" href="../../build/fontawesome/css/solid.css">
+	<link rel="stylesheet" href="../../build/schedulerpro.css">
+	<link rel="stylesheet" href="../_shared/shared.css">
+	<!-- To facilitate theme switching, our demos programmatically include a theme in helper.js above. -->
+	<!-- If you want to include a single theme in your app, including the line below would be easier -->
+	<!--<link rel="stylesheet" href="../../build/svalbard-light.css" data-bryntum-theme>-->
+	<link rel="stylesheet" href="vendor/mapbox-gl.css">
+	<link rel="stylesheet" href="resources/app.css">
+</head>
+
+<body>
+	<div id="container" role="main" aria-label="Bryntum example app">
+		<div id="content" class="demo-app">
+	<div id="main"></div>
+</div>
+	</div>
+	<!-- Using Ecma Modules bundle -->
+	<script src="vendor/mapbox-gl.js"></script>
+	<script src="vendor/tanstack.js"></script>
+	<script src="../_shared/locales/examples.locales.umd.js"></script>
+	<script data-default-locale="En" type="module" src="app.module.js"></script>
+</body>
+
+</html>

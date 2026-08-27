@@ -1,0 +1,14 @@
+{
+  ".b-sch-event": {
+    "title": "Events",
+    "content": "Clicking an event highlights the marker it represents on the map"
+  },
+  ".mapboxgl-marker": {
+    "title": "Map markers",
+    "content": "Clicking a marker highlights the event it represents in the schedule"
+  },
+  ".b-slide-toggle": {
+    "title": "Unscheduled events",
+    "content": "Click slide toggle to reveal unscheduled events, which you can drag onto the schedule"
+  }
+}

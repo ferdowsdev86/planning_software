@@ -1,0 +1,10 @@
+{
+  "title": "Lazy loaded nested events",
+  "description": "This demo demonstrates nested events using a lazy loaded project",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,26 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<div id = "content" class="demo-app">
+    <bryntum-scheduler
+        #scheduler
+        [viewPreset] = "schedulerProps.viewPreset!"
+        [visibleDate] = "schedulerProps.visibleDate!"
+        [infiniteScroll] = "schedulerProps.infiniteScroll!"
+        [bufferCoef] = "schedulerProps.bufferCoef!"
+        [bufferThreshold] = "schedulerProps.bufferThreshold!"
+        [minZoomLevel] = "schedulerProps.minZoomLevel!"
+        [tickSize] = "schedulerProps.tickSize!"
+        [selectionMode] = "schedulerProps.selectionMode!"
+        [smoothZoom] = "schedulerProps.smoothZoom!"
+
+        [groupFeature] = false
+        [filterFeature] = false
+        [treeFeature] = true
+
+        [columns] = "schedulerProps.columns!"
+        [resourceStore] = "schedulerProps.resourceStore!"
+        [eventStore] = "schedulerProps.eventStore!"
+        [tbar] = "schedulerProps.tbar!"
+    ></bryntum-scheduler>
+</div>

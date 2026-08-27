@@ -1,0 +1,121 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"    : "r1",
+        "name"  : "Mike",
+        "years" : 25
+      },
+      {
+        "id"    : "r2",
+        "name"  : "Linda",
+        "years" : 3
+      },
+      {
+        "id"    : "r3",
+        "name"  : "Don",
+        "years" : 1
+      },
+      {
+        "id"    : "r4",
+        "name"  : "Karen",
+        "years" : 8
+      },
+      {
+        "id"    : "r5",
+        "name"  : "Doug",
+        "years" : 11
+      },
+      {
+        "id"    : "r6",
+        "name"  : "Angelo",
+        "years" : 4
+      },
+      {
+        "id"    : "r7",
+        "name"  : "Daniel",
+        "years" : 7
+      },
+      {
+        "id"    : "r8",
+        "name"  : "Melissa",
+        "years" : 6
+      },
+      {
+        "id"    : "r9",
+        "name"  : "John",
+        "years" : 2
+      },
+      {
+        "id"    : "r10",
+        "name"  : "Macy",
+        "years" : 0
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId" : "r1",
+        "startDate"  : "2024-12-01T09:00:00",
+        "endDate"    : "2024-12-01T11:00:00",
+        "name"       : "Click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r2",
+        "startDate"  : "2024-12-01T11:00:00",
+        "endDate"    : "2024-12-01T12:30:00",
+        "name"       : "Drag me",
+        "iconCls"    : "fa fa-arrows-alt"
+      },
+      {
+        "resourceId" : "r3",
+        "startDate"  : "2024-12-01T13:00:00",
+        "endDate"    : "2024-12-01T15:00:00",
+        "name"       : "Double click me",
+        "eventColor" : "purple",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r4",
+        "startDate"  : "2024-12-01T07:00:00",
+        "endDate"    : "2024-12-01T10:00:00",
+        "name"       : "Right click me",
+        "iconCls"    : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId" : "r5",
+        "startDate"  : "2024-12-01T14:00:00",
+        "endDate"    : "2024-12-01T16:00:00",
+        "name"       : "Resize me",
+        "iconCls"    : "fa fa-arrows-alt-h"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2024-12-01T15:00:00",
+        "endDate"    : "2024-12-01T18:00:00",
+        "name"       : "Important meeting",
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "resourceId" : "r9",
+        "startDate"  : "2024-12-01T13:00:00",
+        "endDate"    : "2024-12-01T16:00:00",
+        "name"       : "Sports event",
+        "iconCls"    : "fa fa-basketball-ball"
+      },
+      {
+        "resourceId" : "r7",
+        "startDate"  : "2024-12-01T08:00:00",
+        "endDate"    : "2024-12-01T10:30:00",
+        "name"       : "Dad's birthday!",
+        "iconCls"    : "fa fa-birthday-cake",
+        "style"      : "background-color: teal; font-size: 18px; color: #fff",
+        "eventStyle" : "none"
+      }
+    ]
+  }
+}

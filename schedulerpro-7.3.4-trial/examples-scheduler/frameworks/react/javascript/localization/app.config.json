@@ -1,0 +1,28 @@
+{
+  "title": "Localization demo (React)",
+  "description": "This demo shows how to localize the React Scheduler. You can localize it to any language using the JSON language files provided.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/locales/en/translation.json",
+    "public/locales/ru/translation.json",
+    "public/locales/se/translation.json",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/components/Header.js",
+    "src/components/Loading.js",
+    "src/components/LocaleCombo.js",
+    "src/components/schedulerConfig.js",
+    "src/containers/Content.js",
+    "src/containers/Main.js",
+    "src/context/SettingsContext.js",
+    "src/i18n.js",
+    "src/index.js",
+    "src/locales/app.locale.En.js",
+    "src/locales/app.locale.Ru.js",
+    "src/locales/app.locale.SvSE.js",
+    "src/locales/locales.js"
+  ]
+}

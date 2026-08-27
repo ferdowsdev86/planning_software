@@ -1,0 +1,58 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+.b-timeline-histogram {
+
+    rect.b-series-work.too-much-work {
+        /* display work bar red if it's > maxWork */
+        fill : red;
+    }
+
+    &.b-hide-work {
+        rect.b-series-work {
+            display : none;
+        }
+    }
+
+    &.b-hide-travelTime {
+        rect.b-series-travelTime {
+            display : none;
+        }
+    }
+
+    &.b-hide-maxWork {
+        path.b-series-maxWork {
+            display : none;
+        }
+    }
+}
+
+.b-button {
+    &.work-button {
+        .fa {
+            color : #4caf50;
+        }
+    }
+
+    &.travelTime-button {
+        .fa {
+            color : #1565c0;
+        }
+    }
+
+    &.maxWork-button {
+        .fa {
+            color : red;
+        }
+    }
+}

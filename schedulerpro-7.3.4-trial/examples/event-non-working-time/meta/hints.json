@@ -1,0 +1,6 @@
+{
+  ".fa-calendar-week": {
+    "title": "Uses event calendar",
+    "content": "Events with an icon has an event calendar assigned. Use the event editor to pick another calendar"
+  }
+}

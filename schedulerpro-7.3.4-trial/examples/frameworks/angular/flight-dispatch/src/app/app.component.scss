@@ -1,0 +1,222 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+.b-scheduler-pro {
+    --b-grid-header-padding : .5em;
+}
+
+.b-sch-event {
+    container-name : event;
+    container-type : size;
+
+    .b-sch-event-content {
+        flex-direction : column;
+        align-items    : flex-start;
+        gap            : 0;
+    }
+}
+
+.b-buffer-label {
+    display : none;
+
+    .b-sch-event-hover & {
+        display : block;
+    }
+}
+
+.b-sch-event-content {
+    flex   : 1;
+    height : 100%;
+
+    .b-flight-number {
+        display     : flex;
+        flex        : 1;
+        flex-shrink : 0;
+        align-items : center;
+        font-size   : .8em;
+        transition  : font-size .3s;
+        gap         : 0.5em;
+    }
+
+    .b-flight-details {
+        display     : flex;
+        align-items : center;
+        font-size   : .8em;
+        transition  : flex .3s;
+        flex        : 0;
+        min-height  : 0;
+        overflow    : clip;
+    }
+
+    .b-flight-duration {
+        margin-inline-start : auto;
+    }
+}
+
+@container event (height > 32px) {
+    .b-sch-event .b-flight-details {
+        flex : 1;
+    }
+}
+
+@container event (height > 52px) {
+    .b-sch-event .b-flight-number {
+        font-size : 1.1em;
+    }
+}
+
+.b-popup.b-sch-event-tooltip {
+    max-width : 35em;
+
+    .b-panel-content {
+        display         : flex;
+        min-height      : 10em;
+        flex-direction  : column;
+        justify-content : space-around;
+        padding         : 2em;
+        flex-wrap       : nowrap;
+        margin          : 0;
+    }
+
+    .flight {
+        display       : flex;
+        border-radius : 1em;
+        overflow      : hidden;
+        margin        : 0 20px;
+
+        > div {
+            padding         : 0.5em;
+            display         : flex;
+            align-items     : center;
+            justify-content : center;
+            white-space     : nowrap;
+        }
+
+        strong {
+            margin-inline-end : .5em;
+        }
+
+        .flightTime {
+            background : lightblue;
+            padding    : 0 5em;
+            width      : 270px;
+        }
+
+        .taxiing {
+            display        : flex;
+            width          : 53px;
+            background     : #eee;
+            flex-direction : column;
+        }
+
+        &:nth-child(3) {
+            margin-top : 3em;
+        }
+
+        .fa-arrow-right {
+            margin : 0 .5em;
+        }
+    }
+
+    .timing {
+        display              : flex;
+        margin-top           : .5em;
+        color                : #999;
+        font-size            : .8em;
+        padding-inline-start : 0.5em;
+
+        > div:not(.duration) {
+            width : 55px;
+        }
+
+        .duration {
+            flex       : 1;
+            text-align : center;
+            width      : 190px;
+        }
+    }
+
+    .warning {
+        display     : flex;
+        margin-top  : 2em;
+        color       : darkred;
+        white-space : nowrap;
+        font-weight : 500;
+        font-size   : .9em;
+
+        i {
+            margin-inline-end : .5em;
+        }
+    }
+}
+
+.b-list.b-legend {
+    display               : grid;
+    background-color      : transparent;
+    min-width             : 76em;
+    grid-template-columns : repeat(7, 11em);
+
+    &:has(.b-selected) .b-list-item:not(.b-selected) {
+        opacity : .5;
+    }
+
+    .b-selected-icon {
+        display : none;
+    }
+
+    .b-list-item {
+        background-color : transparent !important;
+        transition       : opacity .4s;
+        border           : 0 !important;
+        padding          : 0.4em;
+
+        &.b-selected {
+            font-weight : 600;
+
+            .b-selected-icon {
+                visibility : hidden;
+            }
+        }
+
+        .b-selected-icon {
+            visibility : hidden;
+        }
+
+        .b-color-square {
+            height        : 1em;
+            width         : 1em;
+            border-radius : 4px;
+
+            background    : var(--b-primary-70)
+        }
+
+        .b-using-keyboard &.b-active {
+            .b-legend-text {
+                outline        : 2px solid #feac31;
+                outline-offset : 1px;
+            }
+        }
+
+        .b-color-square,
+        .fa {
+            &,
+            &:before {
+                width : 1em;
+            }
+        }
+
+        .fa {
+            color : var(--b-primary-70);
+        }
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "title": "Simple event editor demo (React)",
+  "description": "Double click event bars to edit name easily",
+  "source": [
+    "package.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

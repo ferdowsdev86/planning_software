@@ -1,0 +1,7 @@
+{
+  ".b-tiny-mce-field": {
+    "align": "l0-r0",
+    "title": "Rich text editor",
+    "content": "This demo uses the awesome TinyMCE to provide a rich text editor for the event description. The editor is configured to allow only a subset of the available features, to keep the UI simple and focused on the most common use cases.<br><br><b>Note:</b> This demo uses the <a href='https://www.tiny.cloud/'>TinyMCE</a> editor which you need to license separately."
+  }
+}

@@ -1,0 +1,165 @@
+.b-sch-event-wrap {
+    > .b-sch-event {
+        border-radius  : 0.25em;
+        container-name : event;
+        container-type : size;
+        margin-top     : 0;
+        font-size      : .9em;
+
+        .b-sch-event-content {
+            width                 : 100%;
+            height                : 100%;
+            display               : grid;
+            grid-template-areas   :
+                "meta-top    name   times"
+                "meta-bottom labels labels";
+            grid-template-columns : 1.5em minmax(8em, 1fr) auto;
+            grid-template-rows    : 30px 1fr;
+            gap                   : 0.5em;
+            margin                : 0;
+            padding-bottom        : 1em;
+        }
+
+        .b-guest-count,
+        .b-name-ct,
+        .b-times,
+        .b-label-ct {
+            display     : flex;
+            align-items : center;
+        }
+
+        .b-guest-count {
+            opacity         : 1;
+            grid-area       : meta-top;
+            width           : 100%;
+            height          : 100%;
+            justify-content : center;
+            background      : var(--b-color-blue);
+            color           : var(--b-primary-100);
+        }
+
+        .b-name-ct {
+            grid-area : name;
+            gap       : 0.5em;
+
+            i {
+                margin-inline-end : 0 !important;
+            }
+        }
+
+        .b-times {
+            display   : none;
+            grid-area : times;
+            font-size : 0.8em;
+
+            .b-show-event-times & {
+                display : flex;
+            }
+        }
+
+        .b-label-ct {
+            grid-area  : labels;
+            align-self : end;
+            opacity    : 1;
+            transition : grid-area 0.4s;
+            gap        : 0.5em;
+        }
+    }
+}
+
+.b-reservation-label {
+    padding       : 0.2em 0.8em;
+    border-radius : 1em;
+    font-size     : 0.8em;
+    background    : color-mix(in srgb, var(--b-primary) 20%, var(--b-panel-background) 22%);
+    color         : var(--b-primary);
+}
+
+@container event (height < 30px) {
+    .b-sch-event-wrap > .b-sch-event {
+        .b-sch-event-content {
+            grid-template-rows : 25px 1fr;
+        }
+
+        .b-meta-icon,
+        .b-label-ct {
+            opacity   : 0;
+            animation : none;
+        }
+    }
+}
+
+.b-sch-header-time-axis-cell {
+    .b-sch-header-row-0 & {
+        font-weight : 400;
+    }
+
+    &.hour {
+        font-size : 1.15em;
+    }
+
+    &.minute .b-sch-header-text {
+        opacity : 0.6;
+    }
+}
+
+.b-sch-horizontal .b-sch-event:not(.b-milestone) .b-sch-event-content {
+    max-width : calc(100% - 0.5em);
+}
+
+.b-reserved-by {
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    font-weight   : 500;
+
+    .b-new-guest & {
+        font-weight : 600;
+    }
+}
+
+.b-group-row {
+    .b-grid-cell {
+        border-block : 1px solid var(--b-grid-header-border-color);
+    }
+
+    &[data-index="0"] .b-grid-cell {
+        border-top : none;
+    }
+}
+
+.b-time-ranges-body-canvas .b-sch-line {
+    border-inline-start-color : var(--b-color-blue);
+}
+
+.b-time-ranges-header-canvas .b-sch-line {
+    max-height     : 1.7em;
+    min-width      : 5em;
+    translate      : -50%;
+    padding-inline : 1em;
+    font-size      : 1.2em;
+    border-radius  : .25em;
+    background     : var(--b-color-blue);
+    cursor         : ew-resize;
+    line-height    : 1;
+}
+
+.fa-credit-card {
+    color : var(--b-color-blue);
+}
+
+.b-date-strip {
+    margin-inline-start : auto;
+}
+
+.b-table-seats {
+    margin-inline-start : auto;
+}
+
+.b-table-seats {
+    font-size : .7em;
+}
+
+.b-grid-cell .fa-chair {
+    margin-inline-end : .5em;
+    color             : var(--b-color-blue);
+}

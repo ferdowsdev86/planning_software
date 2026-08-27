@@ -1,0 +1,136 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"    : "r1",
+        "name"  : "Mike",
+        "image" : "mike.png"
+      },
+      {
+        "id"    : "r2",
+        "name"  : "Celia",
+        "image" : "celia.png"
+      },
+      {
+        "id"    : "r3",
+        "name"  : "Lee",
+        "image" : "lee.png"
+      },
+      {
+        "id"    : "r4",
+        "name"  : "Emilia",
+        "image" : "emilia.png"
+      },
+      {
+        "id"    : "r5",
+        "name"  : "Dan",
+        "image" : "dan.png"
+      },
+      {
+        "id"    : "r6",
+        "name"  : "Mark",
+        "image" : "mark.png"
+      },
+      {
+        "id"    : "r7",
+        "name"  : "Rob",
+        "image" : "rob.png"
+      },
+      {
+        "id"    : "r8",
+        "name"  : "Steve",
+        "image" : "steve.png"
+      },
+      {
+        "id"    : "r9",
+        "name"  : "Malik",
+        "image" : "malik.png"
+      },
+      {
+        "id"    : "r10",
+        "name"  : "Georg",
+        "image" : "George.png"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId"   : "r1",
+        "startDate"    : "2017-01-01 10:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Review website",
+        "note"         : "Link to website",
+        "href"         : "https://www.google.com",
+        "iconCls"      : "fa fa-mouse-pointer"
+      },
+      {
+        "resourceId"   : "r2",
+        "startDate"    : "2017-01-01 12:00",
+        "duration"     : 1.5,
+        "durationUnit" : "h",
+        "name"         : "Bryntum onsite meeting",
+        "note"         : "Location",
+        "href"         : "https://www.google.se/maps/place/Bryntum/@59.3340293,18.0662579,15z/data=!4m2!3m1!1s0x0:0xc76e8fef322e5c57?ved=2ahUKEwiche7e0aveAhXRh6YKHUoLDvcQ_BIwDXoECAcQCw",
+        "iconCls"      : "fa fa-arrows-alt"
+      },
+      {
+        "resourceId"   : "r3",
+        "startDate"    : "2017-01-01 14:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Walk the dog",
+        "note"         : "Don't forget to bring waste bags. Or the dog.",
+        "image"        : "resources/dog.jpg",
+        "eventColor"   : "purple",
+        "iconCls"      : "fa fa-dog"
+      },
+      {
+        "resourceId"   : "r4",
+        "startDate"    : "2017-01-01 08:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Go for cold swim",
+        "image"        : "resources/lake.jpg",
+        "iconCls"      : "fa fa-swimmer",
+        "warning"      : "Make sure to crack the ice first"
+      },
+      {
+        "resourceId"   : "r5",
+        "startDate"    : "2017-01-01 15:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Dentist appointment",
+        "iconCls"      : "fa fa-arrows-alt-h",
+        "warning"      : "Pain expected"
+      },
+      {
+        "resourceId"   : "r6",
+        "startDate"    : "2017-01-01 16:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "name"         : "Important meeting",
+        "iconCls"      : "fa fa-users",
+        "eventColor"   : "red"
+      },
+      {
+        "resourceId"   : "r6",
+        "startDate"    : "2017-01-01 06:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Pick up client from airport",
+        "iconCls"      : "fa fa-plane"
+      },
+      {
+        "resourceId"   : "r7",
+        "startDate"    : "2017-01-01 09:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "name"         : "Dad's birthday",
+        "iconCls"      : "fa fa-birthday-cake"
+      }
+    ]
+  }
+}

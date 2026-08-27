@@ -1,0 +1,10 @@
+{
+  ".b-split-clone .b-grid-sub-grid": {
+    "title": "Split view",
+    "content": "The scheduler to the left is the original grid, while this is a scroll synced clone of it"
+  },
+  ".b-button-group": {
+    "title": "Split the scheduler",
+    "content": "Use these buttons to split the scheduler into multiple views, or right click in a cell / at a date and use the context menu to split there"
+  }
+}

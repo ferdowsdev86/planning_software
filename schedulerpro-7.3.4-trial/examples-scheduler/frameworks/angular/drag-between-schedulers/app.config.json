@@ -1,0 +1,21 @@
+{
+  "title": "Drag between schedulers (Angular)",
+  "description": "You can drag drop tasks between different Angular Scheduler component instances on the page.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "src/tsconfig.app.json",
+    "src/tsconfig.spec.json",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

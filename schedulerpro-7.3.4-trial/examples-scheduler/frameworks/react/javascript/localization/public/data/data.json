@@ -1,0 +1,81 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      { "id" : "r1", "name" : "Mike", "company" : "Big Fish inc" },
+      { "id" : "r2", "name" : "Linda", "company" : "Small rocket co" },
+      { "id" : "r3", "name" : "Dan", "company" : "Big Fish inc" },
+      { "id" : "r4", "name" : "Celia", "company" : "Big Fish inc" },
+      { "id" : "r5", "name" : "Malik", "company" : "Small rocket co" },
+      { "id" : "r6", "name" : "Gloria", "company" : "Small rocket co" }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"          : 1,
+        "resourceId"  : "r1",
+        "name"        : "Meeting",
+        "color"       : "green",
+        "percentDone" : 60,
+        "startDate"   : "2017-01-01T10:00",
+        "endDate"     : "2017-01-01T12:00"
+      },
+      {
+        "id"          : 2,
+        "resourceId"  : "r2",
+        "name"        : "Lunch",
+        "color"       : "blue",
+        "percentDone" : 20,
+        "startDate"   : "2017-01-01T12:00",
+        "endDate"     : "2017-01-01T14:00"
+      },
+      {
+        "id"          : 3,
+        "resourceId"  : "r3",
+        "name"        : "Meeting",
+        "color"       : "green",
+        "percentDone" : 80,
+        "startDate"   : "2017-01-01T14:00",
+        "endDate"     : "2017-01-01T16:00"
+      },
+      {
+        "id"          : 4,
+        "resourceId"  : "r4",
+        "name"        : "Meeting",
+        "color"       : "green",
+        "percentDone" : 90,
+        "startDate"   : "2017-01-01T08:00",
+        "endDate"     : "2017-01-01T11:00"
+      },
+      {
+        "id"          : 5,
+        "resourceId"  : "r5",
+        "name"        : "Phone",
+        "color"       : "red",
+        "percentDone" : 40,
+        "startDate"   : "2017-01-01T15:00",
+        "endDate"     : "2017-01-01T17:00"
+      },
+      {
+        "id"          : 6,
+        "resourceId"  : "r6",
+        "name"        : "Workout",
+        "color"       : "orange",
+        "percentDone" : 70,
+        "startDate"   : "2017-01-01T16:00",
+        "endDate"     : "2017-01-01T18:00"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : "lunch",
+        "startDate" : "2017-02-07 12:00",
+        "endDate"   : "2017-02-07 13:00",
+        "name"      : "Lunch"
+      }
+    ]
+  }
+}

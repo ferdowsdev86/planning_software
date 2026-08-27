@@ -1,0 +1,10 @@
+{
+  "title": "Tooltips demo",
+  "description": "Shows you how to customize the event tooltip",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "title": "Event Editor with Cascading Combos (Angular)",
+  "description": "The Event Editor feature displays a popup where you can edit the fields for your events. The popup has multiple custom fields, which have dependencies on each other",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/lib/Stores.ts",
+    "src/app/lib/Types.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

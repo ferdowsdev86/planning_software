@@ -1,0 +1,16 @@
+{
+  "title": "Skill matching",
+  "description": "Define skills for resources and annotate tasks with the skills required to perform the task",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/Schedule.js",
+    "lib/Skill.js",
+    "lib/Task.js",
+    "lib/Technician.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ]
+}

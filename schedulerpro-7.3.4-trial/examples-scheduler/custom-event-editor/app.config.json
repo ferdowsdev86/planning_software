@@ -1,0 +1,11 @@
+{
+  "title": "Custom Event Editor demo",
+  "description": "A custom event editor implemented with Bootstrap",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

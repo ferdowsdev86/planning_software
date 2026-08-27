@@ -1,0 +1,67 @@
+{
+  "name": "simpleeditor",
+  "description": "Simple event editor demo (Vue 3)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "https://bryntum.com",
+  "scripts": {
+    "serve": "vue-cli-service serve --mode=development",
+    "build": "vue-cli-service build --mode=production",
+    "start": "vue-cli-service serve --mode=development",
+    "lint": "vue-cli-service lint",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/transparent-users/*": "copy public/users/",
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/schedulerpro/fontawesome/**": "copy public/themes/fontawesome/",
+    "node_modules/@bryntum/schedulerpro/*.css*": "copy public/themes/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-vue-3": "7.3.4",
+    "core-js": "3.8.3",
+    "vue": "3.2.13"
+  },
+  "devDependencies": {
+    "@babel/core": "7.12.16",
+    "@babel/eslint-parser": "7.12.16",
+    "@vue/cli-plugin-babel": "5.0.0",
+    "@vue/cli-plugin-eslint": "5.0.0",
+    "@vue/cli-service": "5.0.8",
+    "eslint": "7.32.0",
+    "eslint-plugin-vue": "8.0.3",
+    "postinstall": "0.7.4",
+    "sass": "1.57.0",
+    "sass-loader": "13.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ],
+  "eslintConfig-disabled": {
+    "root": true,
+    "env": {
+      "node": true
+    },
+    "extends": [
+      "plugin:vue/vue3-essential",
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "parser": "@babel/eslint-parser"
+    },
+    "rules": {}
+  }
+}

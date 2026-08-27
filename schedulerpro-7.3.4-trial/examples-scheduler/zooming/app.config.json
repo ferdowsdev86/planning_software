@@ -1,0 +1,10 @@
+{
+  "title": "Zooming demo",
+  "description": "Demonstrates smooth zooming with zoom controls, TimeZoomSlider, and a large dataset.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "canvas": {
+    "title": "Embedded 3rd party chart",
+    "content": "By rendering an extra row based layer you can show additional important information. This example uses the excellent <a target='_blank' href='https://chartjs.org' style='font-weight:bold'>Chart.js</a> (MIT licensed)"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Basic Setup (Vue 3 + Nuxt)",
+  "description": "This example shows basic setup of the Scheduler in Nuxt.",
+  "source": [
+    "nuxt.config.ts",
+    "package.json",
+    "public/data/data.json",
+    "tsconfig.json"
+  ]
+}

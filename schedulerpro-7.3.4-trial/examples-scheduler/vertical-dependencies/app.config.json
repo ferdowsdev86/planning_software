@@ -1,0 +1,10 @@
+{
+  "title": "Dependencies in vertical mode",
+  "description": "Shows a scheduler in vertical mode with dependencies",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

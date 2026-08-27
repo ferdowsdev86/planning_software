@@ -1,0 +1,6 @@
+{
+  ".b-lowest .b-sch-header-time-axis-cell:first-child": {
+    "title": "Header summary",
+    "content": "Updates as you move events in the schedule"
+  }
+}

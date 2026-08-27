@@ -1,0 +1,11 @@
+{
+  "title": "Time zone demo",
+  "description": "Shows how time zone support can be implemented",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/data.js",
+    "resources/app.css"
+  ]
+}

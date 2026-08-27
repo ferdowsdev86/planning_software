@@ -1,0 +1,26 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<div class = "demo-app">
+    <div class = "demo-toolbar align-right">
+        <bryntum-lang-select
+            [value] = "currentLanguage"
+            (onChange) = "changeLanguage($event)"
+        ></bryntum-lang-select>
+    </div>
+
+    <bryntum-scheduler
+        #scheduler
+        [barMargin] = "schedulerProps.barMargin"
+        [columns] = "schedulerProps.columns"
+        [crudManager] = "schedulerProps.crudManager"
+        [endDate] = "schedulerProps.endDate"
+        [eventColor] = "schedulerProps.eventColor"
+        [resourceImagePath] = "schedulerProps.resourceImagePath"
+        [rowHeight] = "schedulerProps.rowHeight"
+        [smoothZoom] = "schedulerProps.smoothZoom"
+        [startDate] = "schedulerProps.startDate"
+        [timeRangesFeature] = "schedulerProps.timeRangesFeature"
+        [viewPreset] = "schedulerProps.viewPreset"
+    ></bryntum-scheduler>
+</div>

@@ -1,0 +1,16 @@
+{
+  "title": "Infinite scroll tree  (Vue 3 + Vite)",
+  "description": "Shows a Scheduler with hierarchical resource data and both infinite timeline scroll as well as infinite resource scroll. The backend is made in PHP",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/php/data/resources.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

@@ -1,0 +1,12 @@
+.b-lowest .b-sch-header-time-axis-cell {
+    font-size : .7em;
+}
+
+.b-percent-value {
+    display   : inline-block;
+    min-width : 2em;
+}
+
+.percent-tooltip .b-tooltip-content {
+    text-align : center;
+}

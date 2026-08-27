@@ -1,0 +1,50 @@
+/* Hide empty text element in vertical timeaxis header, to give filtering field more space */
+.b-grid-headers-locked .b-grid-header {
+    .b-grid-header-text {
+        display : none;
+    }
+
+    .b-filter-bar-field {
+        margin : .5em 0;
+    }
+}
+
+.b-sch-event {
+    &:not(.b-milestone) {
+        flex-wrap                    : wrap;
+        align-content                : flex-start;
+        --b-sch-event-padding-inline : .75em;
+        --b-sch-event-padding-block  : .75em;
+    }
+
+    .b-event-text-wrap {
+        flex      : 1;
+        max-width : 80%;
+        overflow  : visible;
+    }
+
+    &:not(.b-sch-event-narrow) i {
+        margin-bottom : .4em;
+        order         : 2;
+    }
+
+    .time {
+        font-size   : .9em;
+        white-space : nowrap;
+    }
+
+    .name {
+        font-weight : 600;
+    }
+
+    &:not(.b-sch-event-narrow) {
+        .name {
+            margin-top : .4em;
+        }
+    }
+}
+
+.b-grid > .b-toolbar > .b-content-element > .b-button.b-text {
+    width : 7em;
+}
+

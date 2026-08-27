@@ -1,0 +1,9 @@
+{
+  "title": "Layers demo",
+  "description": "Shows how to move the different layers along the z-axis",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

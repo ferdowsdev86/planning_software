@@ -1,0 +1,10 @@
+{
+  "title": "Pro Event non-working time demo",
+  "description": "Shows Scheduler Pro using and visualizing per event calendars",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

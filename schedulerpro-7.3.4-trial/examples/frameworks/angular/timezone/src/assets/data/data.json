@@ -1,0 +1,48 @@
+{
+  "resources" : [
+    { "id" : 1, "name" : "Rob" },
+    { "id" : 2, "name" : "Mike" },
+    { "id" : 3, "name" : "Kate" },
+    { "id" : 4, "name" : "Lisa" },
+    { "id" : 5, "name" : "Dave" },
+    { "id" : 6, "name" : "Arnold" },
+    { "id" : 7, "name" : "Lee" },
+    { "id" : 8, "name" : "Jong" }
+  ],
+  "eventsOdd" : [
+    { "startDate"    : 2, "duration"     : 7, "durationUnit" : "hour", "name"         : "Repair", "resourceId"   : 4, "children"     : [
+      { "startDate" : 2, "duration" : 3, "durationUnit" : "hour", "name" : "Door", "resourceId" : 4 },
+      { "startDate" : 6, "duration" : 3, "durationUnit" : "hour", "name" : "Window", "resourceId" : 4 }
+    ]},
+    { "startDate" : 1, "duration" : 4, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime", "resourceId" : 1 },
+    { "startDate" : 0, "duration" : 5, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink", "resourceId" : 3 },
+    { "startDate" : 8, "duration" : 5, "durationUnit" : "hour", "name" : "Measure", "eventColor" : "indigo", "resourceId" : 2 },
+    { "startDate" : 11, "duration" : 4, "durationUnit" : "hour", "name" : "Estimate", "eventColor" : "blue", "resourceId" : 5 },
+    { "startDate" : 9, "duration" : 6, "durationUnit" : "hour", "name" : "Calculate", "resourceId" : 6 },
+    { "startDate" : 12, "duration" : 3, "durationUnit" : "hour", "name" : "Simulate", "eventColor" : "blue", "resourceId" : 8 },
+    { "startDate" : 17, "duration" : 7, "durationUnit" : "hour", "name" : "Order", "eventColor" : "lime", "resourceId" : 7 },
+    { "startDate" : 16, "duration" : 3, "durationUnit" : "hour", "name" : "Engage", "resourceId" : 8 },
+    { "startDate" : 20,  "duration" : 3, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime", "resourceId" : 8}
+  ],
+  "eventsEven" : [
+    { "startDate" : 5, "duration" : 3, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink", "resourceId" : 1},
+    { "startDate"    : 0, "duration"     : 6, "durationUnit" : "hour", "name"         : "Repair", "resourceId"   : 4, "children"     : [
+      { "startDate" : 0, "duration" : 3, "durationUnit" : "hour", "name" : "Door", "resourceId" : 4 },
+      { "startDate" : 4, "duration" : 2, "durationUnit" : "hour", "name" : "Window", "resourceId" : 4 }
+    ] },
+    { "startDate" : 3, "duration" : 4, "durationUnit" : "hour", "name" : "Measure", "eventColor" : "indigo", "resourceId" : 5 },
+    { "startDate" : 8, "duration" : 4, "durationUnit" : "hour", "name" : "Estimate", "eventColor" : "blue", "resourceId" : 2 },
+    { "startDate" : 12, "duration" : 5, "durationUnit" : "hour", "name" : "Calculate", "resourceId" : 6 },
+    { "startDate" : 10, "duration" : 3, "durationUnit" : "hour", "name" : "Simulate", "eventColor" : "blue", "resourceId" : 7 },
+    { "startDate" : 13, "duration" : 3, "durationUnit" : "hour", "name" : "Order", "eventColor" : "lime", "resourceId" : 3 },
+    { "startDate" : 16, "duration" : 5, "durationUnit" : "hour", "name" : "Engage", "resourceId" : 1 },
+    { "startDate" : 17, "duration" : 3, "durationUnit" : "hour", "name" : "Repair", "eventColor" : "lime", "resourceId" : 8 },
+    { "startDate" : 21, "duration" : 3, "durationUnit" : "hour", "name" : "Inspect", "eventColor" : "pink", "resourceId" : 8 }
+  ],
+  "timeRanges" : [
+    { "id" : 1, "startDate" : "2020-00-01 00:00", "endDate" : "2020-00-01 08:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Night shift (UTC: 0-8)", "cls" : "night-shift" },
+    { "id" : 2, "startDate" : "2020-00-01 08:00", "endDate" : "2020-00-01 16:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Day shift (UTC: 8-16)", "cls" : "day-shift" },
+    { "id" : 3, "startDate" : "2020-00-01 16:00", "endDate" : "2020-00-02 00:00", "recurrenceRule" : "FREQ=DAILY", "name" : "Evening shift (UTC: 16-24)", "cls" : "evening-shift" }
+  ],
+  "resourceTimeRanges" : [{ "id" : 1, "resourceId" : 2, "startDate" : 13, "endDate" : 16, "name" : "Not available", "reccurenceRule" : "FREQ=DAILY" }]
+}

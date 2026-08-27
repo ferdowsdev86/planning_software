@@ -1,0 +1,43 @@
+.b-grid-cell i {
+    display           : inline-flex;
+    align-items       : center;
+    justify-content   : center;
+    color             : var(--b-neutral-30);
+    background-color  : var(--b-neutral-90);
+    border-radius     : 50%;
+    width             : 2.5em;
+    height            : 2.5em;
+    margin-inline-end : .5em;
+}
+
+.b-sch-event {
+    &.finishnoearlierthan,
+    &.finishnolaterthan,
+    &.mustfinishon {
+        i {
+            position         : absolute;
+            inset-inline-end : 1em;
+        }
+    }
+}
+
+.b-sch-event-tooltip {
+    dl, dt, dd {
+        padding : 0;
+        margin  : 0;
+    }
+
+    dd {
+        margin-top    : 0.3em;
+        line-height   : 1em;
+        margin-bottom : 0.3em;
+
+        &:not(:last-child) {
+            margin-bottom : 0.75em;
+        }
+    }
+
+    dt {
+        font-weight : bold;
+    }
+}

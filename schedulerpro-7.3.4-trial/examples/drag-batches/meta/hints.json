@@ -1,0 +1,10 @@
+{
+  ".order-cell": {
+    "title": "Drag unscheduled orders",
+    "content": "Dragging an order onto the schedule board will create a chain of tasks based on the order template. <br><br><strong>Please note this table is powered by the <a href='https://bryntum.com/products/grid'>Bryntum Grid</a>, which is licensed separately.<strong>"
+  },
+  ".b-sch-event-content": {
+    "title": "Demo tasks belong to an order",
+    "content": "When you reschedule an order, all successors are moved too"
+  }
+}

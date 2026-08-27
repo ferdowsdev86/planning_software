@@ -1,0 +1,9 @@
+{
+  "title": "Multi group membership demo",
+  "description": "This example shows how resources may be members of multiple groups",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ]
+}

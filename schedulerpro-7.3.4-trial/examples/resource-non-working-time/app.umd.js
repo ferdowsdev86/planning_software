@@ -1,0 +1,131 @@
+var {
+    SchedulerPro,
+    DateHelper,
+    Tooltip,
+    Toast
+} = window.bryntum.schedulerpro;
+const scheduler = new SchedulerPro({
+    // A Project holds the data and the calculation engine for Scheduler Pro. It also acts as a CrudManager, allowing
+    // loading data into all stores at once
+    project : {
+        autoLoad : true,
+        loadUrl  : './data/data.json'
+    },
+    appendTo       : 'container',
+    // Enables smoother wheel and pinch zooming
+    smoothZoom     : true,
+    startDate      : '2020-03-23T07:00',
+    endDate        : '2020-03-23T23:00',
+    rowHeight      : 70,
+    eventStyle     : 'outlined',
+    resourceImages : {
+        path      : '../_shared/images/transparent-users/',
+        extension : '.png'
+    },
+    viewPreset : {
+        tickWidth         : 20,
+        displayDateFormat : 'll HH:mm',
+        shiftIncrement    : 1,
+        shiftUnit         : 'day',
+        defaultSpan       : 24,
+        timeResolution    : {
+            unit      : 'minute',
+            increment : 30
+        },
+        headers : [{
+            unit       : 'day',
+            dateFormat : 'ddd DD/MM' //Mon 01/10
+        }, {
+            unit       : 'hour',
+            dateFormat : 'HH'
+        }]
+    },
+    features : {
+        dependencies           : false,
+        nonWorkingTime         : false,
+        resourceNonWorkingTime : {
+            enableMouseEvents : true
+        },
+        timeRanges : {
+            showCurrentTimeLine : true
+        }
+    },
+    columns : [{
+        type           : 'resourceInfo',
+        text           : 'Worker',
+        showEventCount : false,
+        showRole       : true
+    }, {
+        type  : 'resourceCalendar',
+        text  : 'Shift',
+        width : 140
+    }],
+    tbar : [{
+        type  : 'buttongroup',
+        items : [{
+            icon     : 'b-icon b-icon-previous',
+            onAction : 'up.onPreviousDayClick'
+        }, {
+            type     : 'button',
+            text     : 'Today',
+            onAction : 'up.onTodayClick'
+        }, {
+            icon     : 'b-icon b-icon-next',
+            onAction : 'up.onNextDayClick'
+        }]
+    }, {
+        type    : 'slidetoggle',
+        checked : true,
+        text    : 'Show non working time',
+        onAction({
+            checked
+        }) {
+            scheduler.features.resourceNonWorkingTime.disabled = !checked;
+        }
+    }, {
+        type    : 'slidetoggle',
+        checked : true,
+        text    : 'Enable mouse interaction',
+        onAction({
+            checked
+        }) {
+            scheduler.features.resourceNonWorkingTime.enableMouseEvents = checked;
+        }
+    }],
+    onNextDayClick() {
+        this.shiftNext();
+    },
+    onTodayClick() {
+        const startDate = DateHelper.clearTime(new Date());
+        startDate.setHours(7);
+        this.startDate = startDate;
+    },
+    onPreviousDayClick() {
+        this.shiftPrevious();
+    },
+    listeners : {
+        paint() {
+            const scheduler = this;
+            scheduler.rangeTooltip = new Tooltip({
+                rootElement : document.body,
+                forSelector : '.b-sch-resource-non-working-time',
+                getHtml     : ({
+                    event
+                }) => {
+                    const rangeRecord = scheduler.features.resourceNonWorkingTime.resolveResourceNonWorkingTimeInterval(event.target),
+                        hours = DateHelper.as('hour', rangeRecord.duration, rangeRecord.durationUnit),
+                        text = rangeRecord.name || 'Nonworking time';
+                    return `${text} (${hours} ${DateHelper.getLocalizedNameOfUnit('hour', hours !== 1)})`;
+                }
+            });
+        },
+        resourceNonWorkingTimeClick({
+            resourceNonWorkingTimeRecord
+        }) {
+            Toast.show(`You clicked ${resourceNonWorkingTimeRecord.name || 'a nonworking time block'}`);
+        },
+        destroy() {
+            this.rangeTooltip.destroy();
+        }
+    }
+});

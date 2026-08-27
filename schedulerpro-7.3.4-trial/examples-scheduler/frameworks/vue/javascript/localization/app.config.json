@@ -1,0 +1,24 @@
+{
+  "title": "Localization demo (Vue 2)",
+  "description": "Shows how to combine the i18next framework with Vue Scheduler localization.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/locales/en/translation.json",
+    "public/locales/ru/translation.json",
+    "public/locales/sv/translation.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/components/LocaleCombo.vue",
+    "src/i18n.js",
+    "src/locales/app.locale.En.js",
+    "src/locales/app.locale.Ru.js",
+    "src/locales/app.locale.SvSE.js",
+    "src/locales/index.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

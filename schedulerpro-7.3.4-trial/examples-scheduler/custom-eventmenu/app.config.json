@@ -1,0 +1,10 @@
+{
+  "title": "Custom Event menu demo",
+  "description": "A custom event menu implemented with Bootstrap",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ],
+  "disableCodePen": true
+}

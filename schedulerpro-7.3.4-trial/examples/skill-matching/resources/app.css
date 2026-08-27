@@ -1,0 +1,207 @@
+#main {
+    display                             : flex;
+    flex                                : 1 1 100%;
+    flex-direction                      : row;
+
+    .b-scheduler-pro {
+        border-inline-end : 1px solid var(--b-neutral-80);
+
+        .b-sch-event-content {
+            flex-direction  : column;
+            align-items     : flex-start;
+            justify-content : center;
+            gap             : 0;
+        }
+
+    }
+
+    --b-avatar-size                     : 2.3em;
+    --b-region-resize-splitter-width    : 1px;
+    --b-calendar-highlight-border-width : 1px;
+    --b-sch-event-font-size             : 15px;
+}
+
+.b-panel-header.b-panel-ui-toolbar {
+    min-height           : 3em;
+
+    --b-panel-header-gap : 0;
+}
+
+.b-sch-header-text {
+    font-size : 1.1em;
+}
+
+.b-filter-bar-compact .b-filter-bar-field .b-field-trigger.fa-filter {
+    display : flex;
+    order   : -1;
+}
+
+.b-resource-info .b-resource-meta {
+    margin-top : 0.3em;
+
+    i {
+        margin-inline-end : 0.5em;
+    }
+}
+
+.b-group-state-icon {
+    margin-inline : 0.85em 0.5em;
+}
+
+.b-unplanned-grid {
+    .b-grid-cell i {
+        font-size : 1.5em;
+    }
+
+    .name-container {
+        display        : flex;
+        flex-direction : column;
+        flex           : 1;
+    }
+
+    .vehicle-ct {
+        display       : grid;
+        place-items   : center;
+        margin-inline : 0.5em 0.25em;
+        width         : 4em;
+        gap           : 0.5em;
+    }
+}
+
+.b-event-header {
+    margin-bottom : .2em;
+}
+
+.main-info {
+    display       : flex;
+    flex          : 1;
+    margin-bottom : 0.3em;
+
+    .task-name {
+        font-weight : 500;
+    }
+}
+
+.meta-info {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1;
+    align-items    : center;
+    font-size      : .8em;
+}
+
+.licensePlate {
+    font-size   : 0.8em;
+    font-weight : 400;
+}
+
+.b-drag-proxy {
+    opacity : 1 !important;
+
+    .b-sch-event {
+        background-color : rgba(170, 238, 176);
+    }
+
+    &.b-dragging.b-drag-invalid .b-sch-event {
+        outline : 2px solid #f44336;
+    }
+}
+
+.b-sch-event .fa {
+    display : none;
+}
+
+.b-sch-event-content {
+    .b-event-header {
+        display     : flex;
+        align-items : center;
+        width       : 100%;
+    }
+
+    .b-event-duration {
+        margin-inline-start : auto;
+        font-size           : .8em;
+    }
+}
+
+[data-assignment-id*="_generated"] .sch-event {
+    opacity : 0.4;
+    filter  : grayscale(1);
+}
+
+ul.skills {
+    padding       : 0;
+    margin-block  : 0;
+    margin-inline : 0 auto;
+
+    li {
+        display           : inline-flex;
+        padding           : 0.2em 0.8em;
+        border-radius     : 1em;
+        font-size         : 0.8em;
+        margin-inline-end : 0.5em;
+        list-style        : none;
+        align-items       : center;
+
+        background        : var(--b-primary-90);
+        color             : var(--b-primary-35);
+    }
+}
+
+.b-sch-event-tooltip {
+    .b-panel-content.b-popup-content {
+        display               : grid;
+        grid-template-columns : 15em auto;
+        grid-column-gap       : 2em;
+        grid-row-gap          : 2em;
+    }
+
+    .field {
+        display        : flex;
+        flex-direction : column;
+        font-weight    : 500;
+
+        label {
+            margin-bottom : 0.5em;
+            color         : #888;
+        }
+    }
+}
+
+.b-popup.b-sch-event-tooltip,
+.b-event-drag-tooltip {
+    max-width : 45em;
+
+    ul {
+        white-space : nowrap;
+    }
+
+    strong {
+        display       : flex;
+        align-items   : center;
+        margin-bottom : 0.5em;
+    }
+
+    .b-tooltip-section {
+        display : block;
+
+        i {
+            display           : inline-block;
+            margin-inline-end : .5em;
+        }
+    }
+}
+
+.b-event-drag-tooltip {
+    --b-panel-gap : 1em;
+}
+
+.b-sch-tip-message {
+    display     : flex;
+    flex-wrap   : nowrap;
+    align-items : center;
+}
+
+.b-sch-event-wrap {
+    padding-inline : .4em;
+}

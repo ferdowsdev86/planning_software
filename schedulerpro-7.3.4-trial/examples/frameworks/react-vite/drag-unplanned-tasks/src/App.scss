@@ -1,0 +1,170 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+body #content.demo-app {
+    display : flex;
+    flex    : 1 1 100%;
+
+    &:not(.b-side-by-side) {
+        flex-direction : column;
+
+        .scheduler-container {
+            order : 0;
+        }
+
+        .b-splitter {
+            order : 1;
+        }
+
+        .grid-container {
+            order : 2;
+        }
+    }
+
+    &.b-side-by-side {
+        flex-direction : row;
+
+        .b-grid-header {
+            height : 5em;
+        }
+    }
+}
+
+.scheduler-container {
+    flex      : 1 1 0;
+    min-width : 8em;
+}
+
+.grid-container {
+    flex      : 0 1 350px;
+    min-width : 1em;
+}
+
+.b-toolbar:not(.b-outer) {
+    height : 6em;
+}
+
+.b-filter-bar-compact {
+    .b-filter-bar-field {
+        .b-field-inner input {
+            &:not(:focus)::placeholder {
+                color : var(--b-neutral-70);
+            }
+        }
+
+        .b-field-trigger.fa-filter {
+            display : flex !important;
+            margin  : 0 0.5em;
+            order   : -1;
+        }
+    }
+}
+
+:is(.scheduler-container, .grid-container) {
+    display        : flex;
+    flex-direction : column;
+
+    > :first-child {
+        flex : 0 0 auto;
+    }
+}
+
+div.b-resource-info {
+    --b-avatar-size : 3em;
+}
+
+.b-unplanned-grid {
+    --b-toolbar-gap : 0;
+
+    .fa-clock {
+        margin-inline-end : 0 !important;
+    }
+
+    .name-container {
+        display             : flex;
+        flex-direction      : column;
+        margin-inline-start : 0.3em;
+    }
+}
+
+.patient-name {
+    font-size  : 0.8em;
+    margin-top : 0.2em;
+}
+
+.b-drag-proxy {
+    opacity : 1;
+
+    .b-unassigned-class {
+        pointer-events : none;
+        transform      : none !important;
+
+        &:first-child {
+            z-index : 100;
+        }
+
+        .b-sch-event {
+            opacity : 1;
+            margin  : 5px 0;
+        }
+    }
+
+    &.b-drag-invalid {
+        --b-primary : var(--b-color-red);
+    }
+}
+
+.b-aborting.b-unassigned-class {
+    transition     : transform 0.3s !important;
+    position       : absolute !important;
+    z-index        : 10000;
+    pointer-events : none;
+    opacity        : 0.8;
+    box-sizing     : border-box;
+
+    --b-primary    : var(--b-color-red);
+}
+
+.b-sch-event {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+
+    .patient-name {
+        font-weight : 400;
+    }
+
+    .b-sch-event-content > .b-jsx-container {
+        display : contents;
+    }
+}
+
+.b-sch-highlighted-calendar-range {
+    animation : fadein 0.5s;
+}
+
+[data-assignment-id*="_generated"] .sch-event {
+    opacity : 0.4;
+    filter  : grayscale(1);
+}
+
+@keyframes fadein {
+    0% {
+        opacity : 0;
+    }
+    100% {
+        opacity : 1;
+    }
+}
+
+.b-exceeds-axis-width {
+    clip-path : polygon(0% 0%, calc(100% - 2em) 0%, 100% 50%, calc(100% - 2em) 100%, 0% 100%);
+}

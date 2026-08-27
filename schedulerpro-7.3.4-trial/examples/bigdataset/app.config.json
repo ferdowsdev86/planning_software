@@ -1,0 +1,9 @@
+{
+  "title": "Big data set demo",
+  "description": "Demonstrates Scheduler Pro using a big project.",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

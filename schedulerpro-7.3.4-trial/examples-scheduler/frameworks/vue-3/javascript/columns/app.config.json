@@ -1,0 +1,15 @@
+{
+  "title": "Columns demo (Vue 3)",
+  "description": "Displays columns of different types on left and right sides of the schedule",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

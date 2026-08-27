@@ -1,0 +1,40 @@
+{
+  "name": "basic-thin",
+  "description": "Custom build using WebPack and thin bundles",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "https://bryntum.com",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "npx webpack",
+    "start": "npx webpack serve"
+  },
+  "dependencies": {
+    "@bryntum/core-thin": "npm:@bryntum/core-thin-trial@7.3.4",
+    "@bryntum/engine-thin": "npm:@bryntum/engine-thin-trial@7.3.4",
+    "@bryntum/grid-thin": "npm:@bryntum/grid-thin-trial@7.3.4",
+    "@bryntum/scheduler-thin": "npm:@bryntum/scheduler-thin-trial@7.3.4"
+  },
+  "devDependencies": {
+    "@babel/core": "7.26.0",
+    "@babel/preset-env": "7.26.0",
+    "babel-loader": "9.2.1",
+    "copy-webpack-plugin": "12.0.2",
+    "css-loader": "7.1.2",
+    "html-webpack-plugin": "5.6.3",
+    "mini-css-extract-plugin": "2.9.2",
+    "sass": "1.81.0",
+    "sass-loader": "16.0.3",
+    "webpack": "5.104.1",
+    "webpack-cli": "5.1.4",
+    "webpack-dev-server": "5.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Airport dolly scheduling demo",
+  "description": "This demo visualizes transport scheduling at an airport",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

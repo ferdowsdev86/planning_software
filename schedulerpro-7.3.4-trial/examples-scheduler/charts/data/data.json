@@ -1,0 +1,298 @@
+{
+  "success" : true,
+  "events"  : {
+    "rows" : [
+      {
+        "id"         : 4,
+        "resourceId" : 6,
+        "name"       : "London 895",
+        "startDate"  : "2024-09-12T08:20",
+        "endDate"    : "2024-09-12T09:50"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 4,
+        "name"       : "Moscow 167",
+        "startDate"  : "2024-09-12T09:10",
+        "endDate"    : "2024-09-12T10:40"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 5,
+        "name"       : "Berlin 291",
+        "startDate"  : "2024-09-12T09:25",
+        "endDate"    : "2024-09-12T11:25"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : 7,
+        "name"       : "Brussels 107",
+        "startDate"  : "2024-09-12T12:10",
+        "endDate"    : "2024-09-12T13:50"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : 8,
+        "name"       : "Krasnodar 101",
+        "startDate"  : "2024-09-12T14:30",
+        "endDate"    : "2024-09-12T16:10"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : 17,
+        "name"       : "Split 811",
+        "startDate"  : "2024-09-12T16:10",
+        "endDate"    : "2024-09-12T18:30"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : 18,
+        "name"       : "Rome 587",
+        "startDate"  : "2024-09-12T13:15",
+        "endDate"    : "2024-09-12T14:25"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : 24,
+        "name"       : "Prague 978",
+        "startDate"  : "2024-09-12T16:40",
+        "endDate"    : "2024-09-12T18:00"
+      },
+      {
+        "id"         : 12,
+        "resourceId" : 25,
+        "name"       : "Stockholm 581",
+        "startDate"  : "2024-09-12T11:10",
+        "endDate"    : "2024-09-12T12:30"
+      },
+      {
+        "id"         : 13,
+        "resourceId" : 10,
+        "name"       : "Copenhagen 111",
+        "startDate"  : "2024-09-12T16:10",
+        "endDate"    : "2024-09-12T18:30"
+      },
+      {
+        "id"         : 14,
+        "resourceId" : 11,
+        "name"       : "Gothenburg 233",
+        "startDate"  : "2024-09-12T13:15",
+        "endDate"    : "2024-09-12T14:25"
+      },
+      {
+        "id"         : 15,
+        "resourceId" : 12,
+        "name"       : "New York 231",
+        "startDate"  : "2024-09-12T16:40",
+        "endDate"    : "2024-09-12T18:00"
+      },
+      {
+        "id"         : 16,
+        "resourceId" : 13,
+        "name"       : "Paris 321",
+        "startDate"  : "2024-09-12T11:10",
+        "endDate"    : "2024-09-12T12:30"
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Kastrup Airport",
+        "iconCls"  : "fa fa-plane",
+        "expanded" : true,
+        "children" : [
+          {
+            "id"       : 2,
+            "name"     : "Terminal A",
+            "iconCls"  : "fa fa-building",
+            "expanded" : true,
+            "children" : [
+              {
+                "id"       : 3,
+                "name"     : "Gates 1 - 5",
+                "expanded" : true,
+                "children" : [
+                  {
+                    "id"       : 4,
+                    "name"     : "Gate 1",
+                    "leaf"     : true,
+                    "capacity" : 100,
+                    "waiting"  : 10
+                  },
+                  {
+                    "id"       : 5,
+                    "name"     : "Gate 2",
+                    "leaf"     : true,
+                    "capacity" : 45,
+                    "waiting"  : 5
+                  },
+                  {
+                    "id"       : 6,
+                    "name"     : "Gate 3",
+                    "leaf"     : true,
+                    "capacity" : 45,
+                    "waiting"  : 15
+                  },
+                  {
+                    "id"       : 7,
+                    "name"     : "Gate 4",
+                    "leaf"     : true,
+                    "capacity" : 65,
+                    "waiting"  : 30
+                  },
+                  {
+                    "id"       : 8,
+                    "name"     : "Gate 5",
+                    "leaf"     : true,
+                    "capacity" : 75,
+                    "waiting"  : 30
+                  }
+                ]
+              },
+              {
+                "id"       : 9,
+                "name"     : "Gates 6 - 10",
+                "expanded" : true,
+                "children" : [
+                  {
+                    "id"       : 10,
+                    "name"     : "Gate 6",
+                    "leaf"     : true,
+                    "capacity" : 77,
+                    "waiting"  : 20,
+                    "domestic" : true
+                  },
+                  {
+                    "id"       : 11,
+                    "name"     : "Gate 7",
+                    "leaf"     : true,
+                    "capacity" : 85,
+                    "waiting"  : 40
+                  },
+                  {
+                    "id"       : 12,
+                    "name"     : "Gate 8",
+                    "leaf"     : true,
+                    "capacity" : 95,
+                    "waiting"  : 5
+                  },
+                  {
+                    "id"       : 13,
+                    "name"     : "Gate 9",
+                    "leaf"     : true,
+                    "capacity" : 55,
+                    "waiting"  : 0
+                  },
+                  {
+                    "id"       : 14,
+                    "name"     : "Gate 10",
+                    "leaf"     : true,
+                    "capacity" : 15,
+                    "waiting"  : 20
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id"       : 15,
+            "name"     : "Terminal B",
+            "iconCls"  : "fa fa-building",
+            "expanded" : true,
+            "children" : [
+              {
+                "id"       : 16,
+                "name"     : "Gates 1 - 5",
+                "expanded" : true,
+                "children" : [
+                  {
+                    "id"       : 17,
+                    "name"     : "Gate 1",
+                    "leaf"     : true,
+                    "capacity" : 15,
+                    "waiting"  : 10
+                  },
+                  {
+                    "id"       : 18,
+                    "name"     : "Gate 2",
+                    "leaf"     : true,
+                    "capacity" : 45,
+                    "waiting"  : 80
+                  },
+                  {
+                    "id"       : 19,
+                    "name"     : "Gate 3",
+                    "leaf"     : true,
+                    "capacity" : 45,
+                    "waiting"  : 70,
+                    "domestic" : true
+                  },
+                  {
+                    "id"       : 20,
+                    "name"     : "Gate 4",
+                    "leaf"     : true,
+                    "capacity" : 65,
+                    "waiting"  : 10,
+                    "domestic" : true
+                  },
+                  {
+                    "id"       : 21,
+                    "name"     : "Gate 5",
+                    "capacity" : 70,
+                    "waiting"  : 70,
+                    "domestic" : true
+                  }
+                ]
+              },
+              {
+                "id"       : 22,
+                "name"     : "Gates 6 - 10",
+                "expanded" : true,
+                "children" : [
+                  {
+                    "id"       : 23,
+                    "name"     : "Gate 6",
+                    "leaf"     : true,
+                    "capacity" : 80,
+                    "waiting"  : 0,
+                    "domestic" : true
+                  },
+                  {
+                    "id"       : 24,
+                    "name"     : "Gate 7",
+                    "leaf"     : true,
+                    "capacity" : 120,
+                    "waiting"  : 5
+                  },
+                  {
+                    "id"       : 25,
+                    "name"     : "Gate 8",
+                    "leaf"     : true,
+                    "capacity" : 125,
+                    "waiting"  : 20
+                  },
+                  {
+                    "id"       : 26,
+                    "name"     : "Gate 9",
+                    "leaf"     : true,
+                    "capacity" : 100,
+                    "waiting"  : 10
+                  },
+                  {
+                    "id"       : 27,
+                    "name"     : "Gate 10",
+                    "leaf"     : true,
+                    "capacity" : 100,
+                    "waiting"  : 70
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

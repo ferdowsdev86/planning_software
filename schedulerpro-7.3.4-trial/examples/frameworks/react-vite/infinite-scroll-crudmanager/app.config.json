@@ -1,0 +1,15 @@
+{
+  "title": "Infinite scroll and CrudManager",
+  "description": "Shows a SchedulerPro with both infinite timeline scroll and infinite resource scroll, managed by the CrudManager. The backend is made in PHP.",
+  "source": [
+    "index.html",
+    "package.json",
+    "php/data/resources.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

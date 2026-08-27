@@ -1,0 +1,10 @@
+{
+  "title": "Pro Split events demo",
+  "description": "Shows the events split to segments that can be dragged and resized individually",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

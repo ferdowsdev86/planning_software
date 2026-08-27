@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <%= data.CSP %>
+    <title><%- data.title %></title>
+    <script src="../_shared/browser/helper.js"></script>
+    <link rel="stylesheet" href="../../resources/fontawesome/css/fontawesome.css">
+    <link rel="stylesheet" href="../../resources/fontawesome/css/solid.css">
+    <link rel="stylesheet" href="../../build/<%= data.pkg.name %>.css">
+    <link rel="stylesheet" href="../../build/svalbard-light.css" data-bryntum-theme>
+    <link rel="stylesheet" href="../_shared/shared.css">
+</head>
+<body>
+<div id="container"></div>
+<% if (!data.bundle.es6 && !data.index.noLocales) { %>
+    <script src="../_shared/locales/examples.locales.umd.js"></script>
+<% } %>
+
+<% if (data.bundle.umd) { %>
+    <script data-default-locale="<%= data.index.locale %>" src="../../build/<%= data.pkg.name %>.umd.js"></script>
+    <script src="../_shared/shared.umd.js"></script>
+<% } %>
+
+    <script <% if (data.bundle.module) { %>data-default-locale="<%= data.index.locale %>" <% } %><% if (!data.bundle.umd) { %>type="module" <% } %>src="app<%= data.bundle.suffix %>.js"></script>
+
+<% if (!data.bundle.umd) { %>
+    <script nomodule <%= data.CSPNonce %>>
+        document.location = 'index.umd.html' + document.location.search;
+    </script>
+<% } %>
+
+</body>
+</html>

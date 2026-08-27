@@ -1,0 +1,7 @@
+{
+  ".b-tab": {
+    "title": "Advanced filtering",
+    "content": "Lets you define one or more filters for the fields in the SchedulerResourceStore or SchedulerEventStore. ",
+    "align": "l-r"
+  }
+}

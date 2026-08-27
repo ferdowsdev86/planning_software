@@ -1,0 +1,102 @@
+
+.widget-card {
+    display        : flex;
+    border-radius  : var(--b-widget-border-radius);
+    padding        : 1.5em;
+    gap            : 2.5em;
+    min-width      : 0;
+    position       : relative;
+    flex-direction : column;
+    background     : var(--b-neutral-100);
+    overflow       : hidden;
+
+    &.b-hidden {
+        display : none;
+    }
+}
+
+.widget-card-header {
+    display        : flex;
+    flex-direction : column;
+}
+
+.widget-card-header-top {
+    display         : flex;
+    align-items     : center;
+    justify-content : space-between;
+    white-space     : nowrap;
+}
+
+.widget-card-header-title {
+    font-weight   : 600;
+    font-size     : 1.4em;
+    flex          : 1;
+    min-width     : 0;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    white-space   : nowrap;
+}
+
+.widget-card-category {
+    font-size      : 0.75em;
+    padding        : 0.4em 0.75em;
+    border         : 1px solid var(--b-primary-50);
+    color          : var(--b-primary-50);
+    border-radius  : var(--b-widget-border-radius);
+    text-transform : uppercase;
+    letter-spacing : 0.5px;
+    white-space    : nowrap;
+    flex-shrink    : 0;
+}
+
+.widget-card-description {
+    font-size  : 0.9em;
+    color      : var(--text-secondary-color);
+    opacity    : 0.5;
+    margin-top : 0.4em;
+}
+
+.widget-card-content {
+    display        : flex;
+    flex-direction : column;
+    gap            : .75em;
+    min-width      : 0;
+    flex           : 1;
+    position       : relative;
+    min-height     : 0;
+
+    &.b-centered {
+        align-items : center;
+    }
+}
+
+/* TaskBoard priority tag styling */
+.prio-tag {
+    font-size      : .8em;
+    padding        : .25em .5em;
+    border-radius  : .25em;
+    background     : var(--b-primary-95);
+    color          : var(--b-primary-60);
+    font-weight    : 600;
+    text-transform : uppercase;
+
+    &.high {
+        --b-primary : var(--b-color-red);
+    }
+
+    &.medium {
+        --b-primary : var(--b-color-orange);
+    }
+
+    &.low {
+        --b-primary : var(--b-color-green);
+    }
+
+    /* Flag icon */
+
+    &::before {
+        content           : '\f024';
+        margin-inline-end : 0.5em;
+        font-family       : var(--b-widget-icon-font-family);
+    }
+}

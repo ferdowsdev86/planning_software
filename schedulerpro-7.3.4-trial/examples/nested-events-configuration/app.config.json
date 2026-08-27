@@ -1,0 +1,10 @@
+{
+  "title": "Nested events configuration options",
+  "description": "A more advanced demo using nested events, letting you try out different configuration options for the feature",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

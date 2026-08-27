@@ -1,0 +1,9 @@
+{
+  "title": "Partner timelines demo",
+  "description": "Dual timelines in sync",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

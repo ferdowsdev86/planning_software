@@ -1,0 +1,6 @@
+{
+  "[data-ref=printButton]": {
+    "title": "Print",
+    "content": "Open dialog to print content using browser print dialog"
+  }
+}

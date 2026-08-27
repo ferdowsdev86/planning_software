@@ -1,0 +1,15 @@
+{
+  "title": "Scheduler + Chart demo",
+  "description": "This example shows a Chart side by side with a Scheduler.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ],
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Event Editor with Cascading Combos (React + Vite)",
+  "description": "The Event Editor feature displays a popup where you can edit the fields for your events. The popup has multiple custom fields, which have dependencies on each other.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.ts",
+    "src/lib/Stores.tsx",
+    "src/lib/Types.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

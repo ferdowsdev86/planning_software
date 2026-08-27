@@ -1,0 +1,103 @@
+/* Make everything slighly larger than in other demos */
+body {
+    font-size : 15px !important;
+}
+
+/* Align contents of normal grid cells to the top */
+.b-grid-cell:not(.b-group-title)[data-column=name] {
+    align-items : start;
+}
+
+/* Custom employee info */
+.employee {
+    flex                  : 1;
+    display               : grid;
+    column-gap            : 1em;
+    row-gap               : .5em;
+    align-items           : start;
+    margin-top            : 1em;
+    grid-template-columns : auto 1fr auto;
+
+    /* Resource image */
+    img {
+        border-radius : 50%;
+        width         : 3em;
+        grid-column   : 1;
+        grid-row      : 1 / 4;
+        border        : 3px solid var(--b-primary-30);
+        background    : var(--b-primary-95);
+    }
+
+    /* Resource info */
+    .name {
+        grid-column : 2;
+        font-size   : 1.1em;
+        font-weight : bold;
+    }
+
+    .role {
+        grid-column : 2;
+        font-size   : .9em;
+    }
+
+    .team {
+        grid-column : 2;
+        font-size   : .9em;
+    }
+
+    /* Assignments info */
+    .tasks,
+    .duration {
+        grid-column : 3;
+        color       : #999;
+        font-size   : .9em;
+
+        &::before {
+            margin-inline-end : .25em;
+        }
+    }
+
+    .tasks {
+        grid-row : 1;
+    }
+
+    .duration {
+        grid-row : 2;
+    }
+}
+
+/* Customized event look */
+.b-scheduler .b-sch-event {
+    --b-sch-event-padding-inline  : .5em;
+    --b-sch-event-padding-block   : .5em;
+    /* Want some more space between events */
+    --b-sch-event-width-reduction : 10px;
+
+    /* Stretch event content to fill entire event */
+    .b-sch-event-content {
+        flex        : 1;
+        align-items : flex-start;
+    }
+}
+
+/* Custom event content styling */
+.info {
+    flex                  : 1;
+    display               : grid;
+    grid-template-columns : 1fr auto;
+}
+
+.title {
+    font-weight : 400;
+}
+
+.assigned,
+.event-duration {
+    font-size   : .9em;
+    font-weight : 300;
+}
+
+.event-duration {
+    grid-column : 2;
+    grid-row    : 1;
+}

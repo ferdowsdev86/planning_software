@@ -1,0 +1,15 @@
+{
+  "title": "Test for recurring event rendering (Vue 3 + Vite)",
+  "description": "This example shows a demo using custom Vue component as event renderer",
+  "source": [
+    "package.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/components/VueEventRenderer.vue",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

@@ -1,0 +1,362 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "weekends"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"                       : "weekends",
+        "name"                     : "Weekends",
+        "unspecifiedTimeIsWorking" : true,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 00:00 on saturday",
+            "recurrentEndDate"   : "at 00:00 on monday",
+            "isWorking"          : false
+          }
+        ]
+      },
+      {
+        "id"                       : "tue-thu",
+        "name"                     : "Short week",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 00:00 on tuesday",
+            "recurrentEndDate"   : "at 00:00 on friday",
+            "isWorking"          : true
+          }
+        ]
+      },
+      {
+        "id"                       : "no-monday",
+        "name"                     : "No mondays",
+        "unspecifiedTimeIsWorking" : true,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 00:00 on monday",
+            "recurrentEndDate"   : "at 00:00 on tuesday",
+            "isWorking"          : false
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"     : 1,
+        "name"   : "Steve Masterson",
+        "rating" : 5,
+        "image"  : "steve"
+      },
+      {
+        "id"     : 2,
+        "name"   : "Rob Murphy",
+        "rating" : 4,
+        "image"  : "rob"
+      },
+      {
+        "id"     : 3,
+        "name"   : "Mike Williams",
+        "rating" : 3,
+        "image"  : "mike"
+      },
+      {
+        "id"     : 4,
+        "name"   : "Lisa Mac",
+        "rating" : 2,
+        "image"  : "lisa"
+      },
+      {
+        "id"     : 5,
+        "name"   : "Kate Gervais",
+        "rating" : 4,
+        "image"  : "kate"
+      },
+      {
+        "id"     : 6,
+        "name"   : "Gloria Martin",
+        "rating" : 2,
+        "image"  : "gloria"
+      },
+      {
+        "id"     : 7,
+        "name"   : "Dave Hart",
+        "rating" : 3,
+        "image"  : "dave"
+      },
+      {
+        "id"     : 8,
+        "name"   : "Arcady Rock",
+        "rating" : 4,
+        "image"  : "arcady"
+      },
+      {
+        "id"     : 9,
+        "name"   : "Maxim Carrey",
+        "rating" : 5,
+        "image"  : "maxim"
+      },
+      {
+        "id"     : 10,
+        "name"   : "Angelo Allen",
+        "rating" : 4,
+        "image"  : "angelo"
+      },
+      {
+        "id"     : 11,
+        "name"   : "Emilia Estevez",
+        "rating" : 3,
+        "image"  : "emilia"
+      },
+      {
+        "id"     : 12,
+        "name"   : "Malik Burr",
+        "rating" : 2,
+        "image"  : "malik"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Week-long project",
+        "startDate"    : "2022-09-05",
+        "duration"     : 7,
+        "durationUnit" : "days",
+        "calendar"     : "tue-thu"
+      },
+      {
+        "id"           : 2,
+        "name"         : "Project #1",
+        "startDate"    : "2022-09-05",
+        "duration"     : 3,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 3,
+        "name"         : "Project #2",
+        "startDate"    : "2022-09-08",
+        "duration"     : 4,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 4,
+        "name"         : "Project #3",
+        "startDate"    : "2022-09-15",
+        "duration"     : 3,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 5,
+        "name"         : "Project #4",
+        "startDate"    : "2022-09-21",
+        "duration"     : 2,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 6,
+        "name"         : "Fun project",
+        "startDate"    : "2022-09-09",
+        "duration"     : 5,
+        "durationUnit" : "days",
+        "calendar"     : "no-monday"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Short project #1",
+        "startDate"    : "2022-09-01",
+        "duration"     : 3,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 8,
+        "name"         : "Bit longer project #1",
+        "startDate"    : "2022-09-05",
+        "duration"     : 9,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 9,
+        "name"         : "Short project #2",
+        "startDate"    : "2022-09-10",
+        "duration"     : 4,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 10,
+        "name"         : "Bit longer project #2",
+        "startDate"    : "2022-09-10",
+        "duration"     : 12,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 11,
+        "name"         : "Two day project",
+        "startDate"    : "2022-09-08",
+        "duration"     : 2,
+        "durationUnit" : "days"
+      },
+      {
+        "id"           : 12,
+        "name"         : "Three day project",
+        "startDate"    : "2022-09-05",
+        "duration"     : 3,
+        "durationUnit" : "days"
+      },
+      {
+        "id"        : 13,
+        "name"      : "Delivery",
+        "startDate" : "2022-09-12",
+        "duration"  : 2
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 7
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 2
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 2
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 2
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 2
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 2
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 3
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 1
+      },
+      {
+        "id"       : 9,
+        "event"    : 9,
+        "resource" : 3
+      },
+      {
+        "id"       : 10,
+        "event"    : 10,
+        "resource" : 3
+      },
+      {
+        "id"       : 11,
+        "event"    : 11,
+        "resource" : 4
+      },
+      {
+        "id"       : 12,
+        "event"    : 12,
+        "resource" : 5
+      },
+      {
+        "id"       : 13,
+        "event"    : 12,
+        "resource" : 8
+      },
+      {
+        "id"       : 14,
+        "event"    : 12,
+        "resource" : 10
+      },
+      {
+        "id"       : 15,
+        "event"    : 2,
+        "resource" : 6
+      },
+      {
+        "id"       : 16,
+        "event"    : 3,
+        "resource" : 6
+      },
+      {
+        "id"       : 17,
+        "event"    : 4,
+        "resource" : 6
+      },
+      {
+        "id"       : 18,
+        "event"    : 5,
+        "resource" : 6
+      },
+      {
+        "id"       : 19,
+        "event"    : 6,
+        "resource" : 6
+      },
+      {
+        "id"       : 20,
+        "event"    : 2,
+        "resource" : 12
+      },
+      {
+        "id"       : 21,
+        "event"    : 4,
+        "resource" : 12
+      },
+      {
+        "id"       : 22,
+        "event"    : 6,
+        "resource" : 12
+      },
+      {
+        "id"       : 23,
+        "event"    : 1,
+        "resource" : 11
+      },
+      {
+        "id"       : 24,
+        "event"    : 11,
+        "resource" : 9
+      },
+      {
+        "id"       : 25,
+        "event"    : 13,
+        "resource" : 5
+      },
+      {
+        "id"       : 26,
+        "event"    : 13,
+        "resource" : 8
+      },
+      {
+        "id"       : 27,
+        "event"    : 11,
+        "resource" : 7
+      },
+      {
+        "id"       : 28,
+        "event"    : 1,
+        "resource" : 1
+      }
+    ]
+  }
+}

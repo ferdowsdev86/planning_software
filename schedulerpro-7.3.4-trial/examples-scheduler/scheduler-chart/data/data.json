@@ -1,0 +1,362 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "driver"   : "Ben Smith",
+        "truck"    : "Volvo FH16",
+        "capacity" : 325
+      },
+      {
+        "id"       : 2,
+        "driver"   : "Sarah Johnson",
+        "truck"    : "Scania R730",
+        "capacity" : 310
+      },
+      {
+        "id"       : 3,
+        "driver"   : "Mike Chen",
+        "truck"    : "Mercedes Actros",
+        "capacity" : 290
+      },
+      {
+        "id"       : 4,
+        "driver"   : "Emma Davis",
+        "truck"    : "MAN TGX",
+        "capacity" : 280
+      },
+      {
+        "id"       : 5,
+        "driver"   : "Carlos Rodriguez",
+        "truck"    : "DAF XF",
+        "capacity" : 300
+      },
+      {
+        "id"       : 6,
+        "driver"   : "Olivia Wilson",
+        "truck"    : "Kenworth T680",
+        "capacity" : 315
+      },
+      {
+        "id"       : 7,
+        "driver"   : "James Taylor",
+        "truck"    : "Peterbilt 579",
+        "capacity" : 305
+      },
+      {
+        "id"       : 8,
+        "driver"   : "Sophia Martinez",
+        "truck"    : "Freightliner Cascadia",
+        "capacity" : 295
+      },
+      {
+        "id"       : 9,
+        "driver"   : "Daniel Lee",
+        "truck"    : "Mack Anthem",
+        "capacity" : 285
+      },
+      {
+        "id"       : 10,
+        "driver"   : "Ava Thompson",
+        "truck"    : "International LT",
+        "capacity" : 275
+      },
+      {
+        "id"       : 11,
+        "driver"   : "Ethan Brown",
+        "truck"    : "Volvo VNL",
+        "capacity" : 320
+      },
+      {
+        "id"       : 12,
+        "driver"   : "Isabella Garcia",
+        "truck"    : "Scania S730",
+        "capacity" : 330
+      },
+      {
+        "id"       : 13,
+        "driver"   : "William Anderson",
+        "truck"    : "Mercedes Arocs",
+        "capacity" : 340
+      },
+      {
+        "id"       : 14,
+        "driver"   : "Mia Thomas",
+        "truck"    : "MAN TGS",
+        "capacity" : 270
+      },
+      {
+        "id"       : 15,
+        "driver"   : "Alexander White",
+        "truck"    : "DAF CF",
+        "capacity" : 260
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : 1,
+        "name"       : "Long haul trip",
+        "startDate"  : "2025-05-12T08:00",
+        "endDate"    : "2025-05-15T17:00"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : 2,
+        "name"       : "Delivery to New York",
+        "startDate"  : "2025-05-12T09:00",
+        "endDate"    : "2025-05-13T18:00"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : 2,
+        "name"       : "Return from New York",
+        "startDate"  : "2025-05-14T08:00",
+        "endDate"    : "2025-05-15T16:00"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : 3,
+        "name"       : "Cargo transport",
+        "startDate"  : "2025-05-12T07:00",
+        "endDate"    : "2025-05-14T15:00"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 3,
+        "name"       : "Maintenance break",
+        "startDate"  : "2025-05-15T08:00",
+        "endDate"    : "2025-05-15T12:00",
+        "eventColor" : "gray"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 3,
+        "name"       : "Local delivery",
+        "startDate"  : "2025-05-15T13:00",
+        "endDate"    : "2025-05-16T17:00"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : 4,
+        "name"       : "Cross-country route",
+        "startDate"  : "2025-05-12T06:00",
+        "endDate"    : "2025-05-16T18:00"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : 5,
+        "name"       : "Refrigerated goods",
+        "startDate"  : "2025-05-12T10:00",
+        "endDate"    : "2025-05-13T10:00"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : 5,
+        "name"       : "Hazardous materials",
+        "startDate"  : "2025-05-13T12:00",
+        "endDate"    : "2025-05-14T12:00",
+        "eventColor" : "red"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : 5,
+        "name"       : "Bulk cargo",
+        "startDate"  : "2025-05-14T14:00",
+        "endDate"    : "2025-05-15T14:00"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : 5,
+        "name"       : "Express delivery",
+        "startDate"  : "2025-05-15T16:00",
+        "endDate"    : "2025-05-16T16:00"
+      },
+      {
+        "id"         : 12,
+        "resourceId" : 6,
+        "name"       : "Container transport",
+        "startDate"  : "2025-05-12T08:30",
+        "endDate"    : "2025-05-13T17:30"
+      },
+      {
+        "id"         : 13,
+        "resourceId" : 6,
+        "name"       : "Vehicle transport",
+        "startDate"  : "2025-05-14T08:30",
+        "endDate"    : "2025-05-15T17:30"
+      },
+      {
+        "id"         : 14,
+        "resourceId" : 7,
+        "name"       : "Furniture delivery",
+        "startDate"  : "2025-05-12T07:30",
+        "endDate"    : "2025-05-13T16:30"
+      },
+      {
+        "id"         : 15,
+        "resourceId" : 7,
+        "name"       : "Electronics transport",
+        "startDate"  : "2025-05-14T07:30",
+        "endDate"    : "2025-05-15T16:30"
+      },
+      {
+        "id"         : 16,
+        "resourceId" : 7,
+        "name"       : "Appliance delivery",
+        "startDate"  : "2025-05-16T07:30",
+        "endDate"    : "2025-05-17T16:30"
+      },
+      {
+        "id"         : 17,
+        "resourceId" : 8,
+        "name"       : "Food products",
+        "startDate"  : "2025-05-12T09:30",
+        "endDate"    : "2025-05-14T18:30"
+      },
+      {
+        "id"         : 18,
+        "resourceId" : 8,
+        "name"       : "Beverage delivery",
+        "startDate"  : "2025-05-15T09:30",
+        "endDate"    : "2025-05-17T18:30"
+      },
+      {
+        "id"         : 19,
+        "resourceId" : 9,
+        "name"       : "Construction materials",
+        "startDate"  : "2025-05-12T06:30",
+        "endDate"    : "2025-05-13T15:30"
+      },
+      {
+        "id"         : 20,
+        "resourceId" : 9,
+        "name"       : "Heavy machinery",
+        "startDate"  : "2025-05-14T06:30",
+        "endDate"    : "2025-05-15T15:30"
+      },
+      {
+        "id"         : 21,
+        "resourceId" : 9,
+        "name"       : "Building supplies",
+        "startDate"  : "2025-05-16T06:30",
+        "endDate"    : "2025-05-17T15:30"
+      },
+      {
+        "id"         : 22,
+        "resourceId" : 10,
+        "name"       : "Medical supplies",
+        "startDate"  : "2025-05-12T08:15",
+        "endDate"    : "2025-05-13T17:15"
+      },
+      {
+        "id"         : 23,
+        "resourceId" : 10,
+        "name"       : "Pharmaceutical delivery",
+        "startDate"  : "2025-05-14T08:15",
+        "endDate"    : "2025-05-15T17:15"
+      },
+      {
+        "id"         : 24,
+        "resourceId" : 10,
+        "name"       : "Hospital equipment",
+        "startDate"  : "2025-05-16T08:15",
+        "endDate"    : "2025-05-17T17:15"
+      },
+      {
+        "id"         : 25,
+        "resourceId" : 10,
+        "name"       : "Lab samples",
+        "startDate"  : "2025-05-18T08:15",
+        "endDate"    : "2025-05-19T17:15"
+      },
+      {
+        "id"         : 26,
+        "resourceId" : 11,
+        "name"       : "Retail goods",
+        "startDate"  : "2025-05-12T07:45",
+        "endDate"    : "2025-05-14T16:45"
+      },
+      {
+        "id"         : 27,
+        "resourceId" : 11,
+        "name"       : "Department store delivery",
+        "startDate"  : "2025-05-15T07:45",
+        "endDate"    : "2025-05-17T16:45"
+      },
+      {
+        "id"         : 28,
+        "resourceId" : 12,
+        "name"       : "Agricultural products",
+        "startDate"  : "2025-05-12T06:15",
+        "endDate"    : "2025-05-13T15:15"
+      },
+      {
+        "id"         : 29,
+        "resourceId" : 12,
+        "name"       : "Livestock transport",
+        "startDate"  : "2025-05-14T06:15",
+        "endDate"    : "2025-05-15T15:15"
+      },
+      {
+        "id"         : 30,
+        "resourceId" : 12,
+        "name"       : "Farm equipment",
+        "startDate"  : "2025-05-16T06:15",
+        "endDate"    : "2025-05-17T15:15"
+      },
+      {
+        "id"         : 31,
+        "resourceId" : 12,
+        "name"       : "Grain transport",
+        "startDate"  : "2025-05-18T06:15",
+        "endDate"    : "2025-05-19T15:15"
+      },
+      {
+        "id"         : 32,
+        "resourceId" : 12,
+        "name"       : "Fertilizer delivery",
+        "startDate"  : "2025-05-20T06:15",
+        "endDate"    : "2025-05-21T15:15"
+      },
+      {
+        "id"         : 33,
+        "resourceId" : 13,
+        "name"       : "Textile transport",
+        "startDate"  : "2025-05-12T09:45",
+        "endDate"    : "2025-05-14T18:45"
+      },
+      {
+        "id"         : 34,
+        "resourceId" : 13,
+        "name"       : "Clothing delivery",
+        "startDate"  : "2025-05-15T09:45",
+        "endDate"    : "2025-05-17T18:45"
+      },
+      {
+        "id"         : 35,
+        "resourceId" : 14,
+        "name"       : "Office supplies",
+        "startDate"  : "2025-05-12T08:45",
+        "endDate"    : "2025-05-15T17:45"
+      },
+      {
+        "id"         : 36,
+        "resourceId" : 15,
+        "name"       : "Paper products",
+        "startDate"  : "2025-05-12T07:15",
+        "endDate"    : "2025-05-13T16:15"
+      },
+      {
+        "id"         : 37,
+        "resourceId" : 15,
+        "name"       : "Printing materials",
+        "startDate"  : "2025-05-17T07:15",
+        "endDate"    : "2025-05-18T16:15"
+      }
+    ]
+  }
+}

@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/ZhTw.js';
+import '../../../lib/SchedulerPro/localization/ZhTw.js';
+import './shared.locale.ZhTw.js';
+
+const locale = {
+
+    localeName : 'ZhTw',
+    localeDesc : '繁體中文 (台灣)',
+    localeCode : 'zh-TW',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : '操作',
+        Active              : '啟用',
+        Allocation          : '分配',
+        Calendar            : '日曆',
+        City                : '城市',
+        Condition           : '條件',
+        Consultant          : '顧問',
+        Contractor          : '承包商',
+        Doctor              : '醫生',
+        Driver              : '司機',
+        Expedition          : '探險',
+        'First name'        : '名字',
+        Inspector           : '檢查員',
+        Lag                 : '延遲',
+        Manager             : '經理',
+        Name                : '名稱',
+        Projects            : '項目',
+        Property            : '屬性',
+        Rating              : '評分',
+        Resource            : '資源',
+        Role                : '角色',
+        Score               : '分數',
+        Shift               : '班次',
+        'Speaker rating'    : '演講者評分',
+        Staff               : '員工',
+        Station             : '站',
+        Surname             : '姓氏',
+        Tasks               : '任務',
+        Technicians         : '技術人員',
+        Type                : '類型',
+        'Vehicle Condition' : '車輛狀況',
+        'Work hours'        : '工作時間',
+        Worker              : '工人'
+    },
+
+    Button : {
+        '10K events'                  : '1萬個事件',
+        '1K events'                   : '1千個事件',
+        '5K events'                   : '5千個事件',
+        'Add exception'               : '新增例外',
+        'Add invalid calendar'        : '新增無效日曆',
+        'Add invalid dependency'      : '新增無效依賴',
+        'Add order'                   : '新增訂單',
+        'Add task'                    : '新增任務',
+        'Add week'                    : '新增週',
+        Apr                           : '四月',
+        Aug                           : '八月',
+        August                        : '八月',
+        'Auto-schedule'               : '自動排程',
+        'Bar settings'                : '條形圖設定',
+        Cancel                        : '取消',
+        'Change working time'         : '更改工作時間',
+        'City - Resource'             : '城市 - 資源',
+        Custom                        : '自訂',
+        Dark                          : '深色',
+        Dec                           : '十二月',
+        Default                       : '預設',
+        'Default layouts'             : '預設佈局',
+        Delete                        : '刪除',
+        Dependencies                  : '依賴關係',
+        'Drag & resize settings'      : '拖曳與調整大小設定',
+        Edit                          : '編輯',
+        'Edit calendar'               : '編輯日曆',
+        'Enable mouse interaction'    : '啟用滑鼠互動',
+        Feb                           : '二月',
+        'Filter out non-working time' : '過濾非工作時間',
+        'Hide scheduled'              : '隱藏已排程',
+        'Highlight 9-10am + 2-4pm'    : '突出顯示9-10am + 2-4pm',
+        'Highlight while dragging'    : '拖動時突出顯示',
+        'Horizontal mode'             : '水平模式',
+        Jan                           : '一月',
+        Jul                           : '七月',
+        Jun                           : '六月',
+        'Layout function'             : '佈局功能',
+        Light                         : '淺色',
+        Login                         : '登入',
+        Logout                        : '登出',
+        Mar                           : '三月',
+        March                         : '三月',
+        May                           : '五月',
+        'New event'                   : '新事件',
+        'Next day'                    : '下一天',
+        Nov                           : '十一月',
+        Oct                           : '十月',
+        Overlap                       : '重疊',
+        Pack                          : '打包',
+        'Previous day'                : '前一天',
+        Reset                         : '重設',
+        'Reset data'                  : '重置資料',
+        'Resource - City'             : '資源 - 城市',
+        'Resource ranges'             : '資源範圍',
+        Save                          : '儲存',
+        Sep                           : '九月',
+        'Show setup time'             : '顯示設置時間',
+        Stack                         : '堆疊',
+        Sync                          : '同步',
+        Today                         : '今天',
+        'Vertical mode'               : '垂直模式',
+        'Zoom in'                     : '放大',
+        'Zoom out'                    : '縮小'
+    },
+
+    Checkbox : {
+        Cultural                : '文化',
+        'Draw around parents'   : '繪製父項周圍',
+        'Enable bar tooltip'    : '啟用條形圖提示',
+        Music                   : '音樂',
+        'Show bar texts'        : '顯示條形圖文字',
+        'Show max allocation'   : '顯示最大分配',
+        'Show non working time' : '顯示非工作時間',
+        Sports                  : '運動',
+        Technology              : '科技'
+    },
+
+    Slider : {
+        'Max capacity' : '最大容量',
+        'Row height'   : '行高'
+    },
+
+    Label : {
+        Days                        : '天',
+        'Group by'                  : '分組依據',
+        Months                      : '月',
+        Settings                    : '設定',
+        'Viewing a repeating event' : '查看重複事件'
+    },
+
+    Combo : {
+        'Current timezone' : '目前時區',
+        'Group events by'  : '事件分組依據',
+        Parent             : '父項',
+        Resources          : '資源',
+        Show               : '顯示'
+    },
+
+    NumberField : {
+        '% complete' : '% 完成',
+        Events       : '事件',
+        Every        : '每',
+        Resources    : '資源'
+    },
+
+    TextField : {
+        Doctor           : '醫生',
+        Name             : '名稱',
+        'Server address' : '伺服器地址',
+        Username         : '使用者名稱'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : '勾選以顯示最大資源分配線',
+        'Check to show resource allocation in the bars'                                                            : '勾選以在條形圖中顯示資源分配',
+        'Check to show tooltips when moving mouse over bars'                                                       : '勾選以在滑鼠移動到條形圖上時顯示工具提示',
+        'Click to group by City - Resource'                                                                        : '按一下以城市 - 資源分組',
+        'Click to group by Resource - City'                                                                        : '按一下以資源 - 城市分組',
+        'Collapse all groups'                                                                                      : '摺疊所有群組',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : '停用樹狀分組功能並返回預設的資源 - 指派視圖',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : '輸入每個資源要生成的事件數量，然後按 [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : '輸入要生成的資源行數，然後按 [ENTER]',
+        'Expand all groups'                                                                                        : '展開所有群組',
+        Friday                                                                                                     : '星期五',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : '如果兩個區段相鄰放置，您可以選擇將它們合併或保持分開',
+        Monday                                                                                                     : '星期一',
+        Saturday                                                                                                   : '星期六',
+        Sunday                                                                                                     : '星期日',
+        Thursday                                                                                                   : '星期四',
+        'Toggle layout'                                                                                            : '切換佈局',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : '嘗試將未計劃的事件適配到當前顯示的時間範圍內',
+        Tuesday                                                                                                    : '星期二',
+        'View next day'                                                                                            : '查看下一天',
+        'View previous day'                                                                                        : '查看前一天',
+        'View today, to see the current time line'                                                                 : '查看今天，以查看當前時間線',
+        Wednesday                                                                                                  : '星期三'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : '自動合併相鄰區段',
+        'Auto-send'                    : '自動發送',
+        'Auto-sync'                    : '自動同步',
+        'Compact mode'                 : '緊湊模式',
+        'Constrain drag to row'        : '限制拖曳至行',
+        'Dark mode'                    : '深色模式',
+        'Days are working by default'  : '天數預設為工作日',
+        'Enable bar tooltip'           : '啟用工具提示',
+        'Enable highlighting'          : '啟用高亮',
+        'Enable mouse interaction'     : '啟用鼠標交互',
+        'Enable task drag drop'        : '啟用任務拖放',
+        'Filter out non-working time'  : '過濾非工作時間',
+        'Highlight 9-10am + 2-4pm'     : '突出顯示 9-10am + 2-4pm',
+        'Highlight while dragging'     : '拖動時突出顯示',
+        'Show non working time'        : '顯示非工作時間',
+        'Show setup time'              : '顯示設置時間',
+        'Show summaries'               : '顯示摘要',
+        'Snap to grid'                 : '對齊網格',
+        'View Planned dates'           : '查看計劃日期'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Ar.js';
+import '../../../lib/SchedulerPro/localization/Ar.js';
+import './shared.locale.Ar.js';
+
+const locale = {
+
+    localeName : 'Ar',
+    localeDesc : 'اللغة العربية',
+    localeCode : 'ar',
+    localeRtl  : true,
+
+    Column : {
+        Actions             : 'الإجراءات',
+        Active              : 'نشط',
+        Allocation          : 'التخصيص',
+        Calendar            : 'التقويم',
+        City                : 'المدينة',
+        Condition           : 'الحالة',
+        Consultant          : 'استشاري',
+        Contractor          : 'المقاول',
+        Doctor              : 'الطبيب',
+        Driver              : 'سائق',
+        Expedition          : 'البعثة',
+        'First name'        : 'الاسم الأول',
+        Inspector           : 'المفتش',
+        Lag                 : 'التأخير',
+        Manager             : 'مدير',
+        Name                : 'الاسم',
+        Projects            : 'المشاريع',
+        Property            : 'الملكية',
+        Rating              : 'تقييم',
+        Resource            : 'المورد',
+        Role                : 'الدور',
+        Score               : 'النتيجة',
+        Shift               : 'الوردية',
+        'Speaker rating'    : 'تقييم المتحدث',
+        Staff               : 'الموظفين',
+        Station             : 'المحطة',
+        Surname             : 'اللقب',
+        Tasks               : 'المهام',
+        Technicians         : 'الفنيين',
+        Type                : 'النوع',
+        'Vehicle Condition' : 'حالة المركبة',
+        'Work hours'        : 'ساعات العمل',
+        Worker              : 'العامل'
+    },
+
+    Button : {
+        '10K events'                  : '10 آلاف حدث',
+        '1K events'                   : 'ألف حدث',
+        '5K events'                   : '5 آلاف حدث',
+        'Add exception'               : 'إضافة استثناء',
+        'Add invalid calendar'        : 'إضافة تقويم غير صالح',
+        'Add invalid dependency'      : 'إضافة تبعية غير صالحة',
+        'Add order'                   : 'إضافة طلب',
+        'Add task'                    : 'إضافة مهمة',
+        'Add week'                    : 'إضافة أسبوع',
+        Apr                           : 'أبريل',
+        Aug                           : 'أغسطس',
+        August                        : 'أغسطس',
+        'Auto-schedule'               : 'جدولة تلقائية',
+        'Bar settings'                : 'إعدادات الشريط',
+        Cancel                        : 'إلغاء',
+        'Change working time'         : 'تغيير وقت العمل',
+        'City - Resource'             : 'المدينة - المورد',
+        Custom                        : 'مخصص',
+        Dark                          : 'داكن',
+        Dec                           : 'ديسمبر',
+        Default                       : 'افتراضي',
+        'Default layouts'             : 'التخطيطات الافتراضية',
+        Delete                        : 'حذف',
+        Dependencies                  : 'التبعيات',
+        'Drag & resize settings'      : 'إعدادات السحب وتغيير الحجم',
+        Edit                          : 'تعديل',
+        'Edit calendar'               : 'تحرير التقويم',
+        'Enable mouse interaction'    : 'تمكين تفاعل الماوس',
+        Feb                           : 'فبراير',
+        'Filter out non-working time' : 'تصفية الوقت غير العامل',
+        'Hide scheduled'              : 'إخفاء المجدول',
+        'Highlight 9-10am + 2-4pm'    : 'تسليط الضوء من 9-10 صباحًا + 2-4 مساءً',
+        'Highlight while dragging'    : 'تسليط الضوء أثناء السحب',
+        'Horizontal mode'             : 'الوضع الأفقي',
+        Jan                           : 'يناير',
+        Jul                           : 'يوليو',
+        Jun                           : 'يونيو',
+        'Layout function'             : 'وظيفة التخطيط',
+        Light                         : 'فاتح',
+        Login                         : 'تسجيل الدخول',
+        Logout                        : 'تسجيل الخروج',
+        Mar                           : 'مارس',
+        March                         : 'مارس',
+        May                           : 'مايو',
+        'New event'                   : 'حدث جديد',
+        'Next day'                    : 'اليوم التالي',
+        Nov                           : 'نوفمبر',
+        Oct                           : 'أكتوبر',
+        Overlap                       : 'تداخل',
+        Pack                          : 'حزمة',
+        'Previous day'                : 'اليوم السابق',
+        Reset                         : 'إعادة تعيين',
+        'Reset data'                  : 'إعادة تعيين البيانات',
+        'Resource - City'             : 'المورد - المدينة',
+        'Resource ranges'             : 'نطاقات الموارد',
+        Save                          : 'حفظ',
+        Sep                           : 'سبتمبر',
+        'Show setup time'             : 'إظهار وقت الإعداد',
+        Stack                         : 'تكديس',
+        Sync                          : 'مزامنة',
+        Today                         : 'اليوم',
+        'Vertical mode'               : 'الوضع الرأسي',
+        'Zoom in'                     : 'تكبير',
+        'Zoom out'                    : 'تصغير'
+    },
+
+    Checkbox : {
+        Cultural                : 'ثقافي',
+        'Draw around parents'   : 'ارسم حول الوالدين',
+        'Enable bar tooltip'    : 'تمكين تلميح الشريط',
+        Music                   : 'موسيقى',
+        'Show bar texts'        : 'إظهار نصوص الشريط',
+        'Show max allocation'   : 'إظهار الحد الأقصى للتخصيص',
+        'Show non working time' : 'عرض الوقت غير العامل',
+        Sports                  : 'رياضة',
+        Technology              : 'تكنولوجيا'
+    },
+
+    Slider : {
+        'Max capacity' : 'الحد الأقصى للسعة',
+        'Row height'   : 'ارتفاع الصف'
+    },
+
+    Label : {
+        Days                        : 'أيام',
+        'Group by'                  : 'تجميع حسب',
+        Months                      : 'أشهر',
+        Settings                    : 'الإعدادات',
+        'Viewing a repeating event' : 'عرض حدث متكرر'
+    },
+
+    Combo : {
+        'Current timezone' : 'المنطقة الزمنية الحالية',
+        'Group events by'  : 'تجميع الأحداث حسب',
+        Parent             : 'الأصل',
+        Resources          : 'الموارد',
+        Show               : 'عرض'
+    },
+
+    NumberField : {
+        '% complete' : '% مكتمل',
+        Events       : 'الأحداث',
+        Every        : 'كل',
+        Resources    : 'الموارد'
+    },
+
+    TextField : {
+        Doctor           : 'طبيب',
+        Name             : 'الاسم',
+        'Server address' : 'عنوان الخادم',
+        Username         : 'اسم المستخدم'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'تحقق لعرض خط تخصيص الموارد الأقصى',
+        'Check to show resource allocation in the bars'                                                            : 'تحقق لعرض تخصيص الموارد في الأشرطة',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'تحقق لعرض التلميحات عند تحريك الماوس فوق الأشرطة',
+        'Click to group by City - Resource'                                                                        : 'انقر للتجميع حسب المدينة - المورد',
+        'Click to group by Resource - City'                                                                        : 'انقر للتجميع حسب المورد - المدينة',
+        'Collapse all groups'                                                                                      : 'طي جميع المجموعات',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'تعطيل ميزة تجميع الشجرة والعودة إلى العرض الافتراضي للمورد - التعيين',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'أدخل عدد الأحداث لكل مورد لتوليدها واضغط [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'أدخل عدد صفوف الموارد لتوليدها واضغط [ENTER]',
+        'Expand all groups'                                                                                        : 'توسيع جميع المجموعات',
+        Friday                                                                                                     : 'الجمعة',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'إذا تم وضع مقطعين بجانب بعضهما البعض، يمكنك دمجهما أو إبقائهما منفصلين',
+        Monday                                                                                                     : 'الاثنين',
+        Saturday                                                                                                   : 'السبت',
+        Sunday                                                                                                     : 'الأحد',
+        Thursday                                                                                                   : 'الخميس',
+        'Toggle layout'                                                                                            : 'تبديل التخطيط',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'يحاول ملاءمة الأحداث غير المخططة في الإطار الزمني المعروض حاليًا',
+        Tuesday                                                                                                    : 'الثلاثاء',
+        'View next day'                                                                                            : 'عرض اليوم التالي',
+        'View previous day'                                                                                        : 'عرض اليوم السابق',
+        'View today, to see the current time line'                                                                 : 'عرض اليوم، لرؤية الخط الزمني الحالي',
+        Wednesday                                                                                                  : 'الأربعاء'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'دمج تلقائي للمقاطع المتجاورة',
+        'Auto-send'                    : 'الإرسال التلقائي',
+        'Auto-sync'                    : 'المزامنة التلقائية',
+        'Compact mode'                 : 'وضع مضغوط',
+        'Constrain drag to row'        : 'تقييد السحب إلى الصف',
+        'Dark mode'                    : 'الوضع الداكن',
+        'Days are working by default'  : 'الأيام تعمل بشكل افتراضي',
+        'Enable bar tooltip'           : 'تمكين تلميح الشريط',
+        'Enable highlighting'          : 'تمكين التمييز',
+        'Enable mouse interaction'     : 'تمكين تفاعل الماوس',
+        'Enable task drag drop'        : 'تمكين سحب وإفلات المهام',
+        'Filter out non-working time'  : 'تصفية الوقت غير العامل',
+        'Highlight 9-10am + 2-4pm'     : 'تسليط الضوء على 9-10 صباحًا + 2-4 مساءً',
+        'Highlight while dragging'     : 'تسليط الضوء أثناء السحب',
+        'Show non working time'        : 'عرض الوقت غير العامل',
+        'Show setup time'              : 'عرض وقت الإعداد',
+        'Show summaries'               : 'عرض الملخصات',
+        'Snap to grid'                 : 'الالتقاط إلى الشبكة',
+        'View Planned dates'           : 'عرض التواريخ المخططة'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

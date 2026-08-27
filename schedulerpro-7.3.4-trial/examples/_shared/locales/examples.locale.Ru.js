@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Ru.js';
+import '../../../lib/SchedulerPro/localization/Ru.js';
+import './shared.locale.Ru.js';
+
+const locale = {
+
+    localeName : 'Ru',
+    localeDesc : 'Русский',
+    localeCode : 'ru',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Действия',
+        Active              : 'Активный',
+        Allocation          : 'Распределение',
+        Calendar            : 'Календарь',
+        City                : 'Город',
+        Condition           : 'Состояние',
+        Consultant          : 'Консультант',
+        Contractor          : 'Подрядчик',
+        Doctor              : 'Доктор',
+        Driver              : 'Водитель',
+        Expedition          : 'Экспедиция',
+        'First name'        : 'Имя',
+        Inspector           : 'Инспектор',
+        Lag                 : 'Задержка',
+        Manager             : 'Менеджер',
+        Name                : 'Имя',
+        Projects            : 'Проекты',
+        Property            : 'Собственность',
+        Rating              : 'Рейтинг',
+        Resource            : 'Ресурс',
+        Role                : 'Роль',
+        Score               : 'Оценка',
+        Shift               : 'Смена',
+        'Speaker rating'    : 'Рейтинг докладчика',
+        Staff               : 'Персонал',
+        Station             : 'Станция',
+        Surname             : 'Фамилия',
+        Tasks               : 'Задачи',
+        Technicians         : 'Техники',
+        Type                : 'Тип',
+        'Vehicle Condition' : 'Состояние транспортного средства',
+        'Work hours'        : 'Рабочие часы',
+        Worker              : 'Работник'
+    },
+
+    Button : {
+        '10K events'                  : '10K событий',
+        '1K events'                   : '1K событий',
+        '5K events'                   : '5K событий',
+        'Add exception'               : 'Добавить исключение',
+        'Add invalid calendar'        : 'Добавить недействительный календарь',
+        'Add invalid dependency'      : 'Добавить недействительную зависимость',
+        'Add order'                   : 'Добавить заказ',
+        'Add task'                    : 'Добавить задачу',
+        'Add week'                    : 'Добавить неделю',
+        Apr                           : 'Апр',
+        Aug                           : 'Авг',
+        August                        : 'Август',
+        'Auto-schedule'               : 'Авто-расписание',
+        'Bar settings'                : 'Настройки панели',
+        Cancel                        : 'Отмена',
+        'Change working time'         : 'Изменить рабочее время',
+        'City - Resource'             : 'Город - Ресурс',
+        Custom                        : 'Пользовательский',
+        Dark                          : 'Темный',
+        Dec                           : 'Дек',
+        Default                       : 'По умолчанию',
+        'Default layouts'             : 'Макеты по умолчанию',
+        Delete                        : 'Удалить',
+        Dependencies                  : 'Зависимости',
+        'Drag & resize settings'      : 'Настройки перетаскивания и изменения размера',
+        Edit                          : 'Редактировать',
+        'Edit calendar'               : 'Редактировать календарь',
+        'Enable mouse interaction'    : 'Включить взаимодействие с мышью',
+        Feb                           : 'Фев',
+        'Filter out non-working time' : 'Фильтровать нерабочее время',
+        'Hide scheduled'              : 'Скрыть запланированное',
+        'Highlight 9-10am + 2-4pm'    : 'Выделить 9-10 утра + 2-4 дня',
+        'Highlight while dragging'    : 'Выделять при перетаскивании',
+        'Horizontal mode'             : 'Горизонтальный режим',
+        Jan                           : 'Янв',
+        Jul                           : 'Июл',
+        Jun                           : 'Июн',
+        'Layout function'             : 'Функция макета',
+        Light                         : 'Светлый',
+        Login                         : 'Войти',
+        Logout                        : 'Выйти',
+        Mar                           : 'Мар',
+        March                         : 'Март',
+        May                           : 'Май',
+        'New event'                   : 'Новое событие',
+        'Next day'                    : 'Следующий день',
+        Nov                           : 'Ноя',
+        Oct                           : 'Окт',
+        Overlap                       : 'Перекрытие',
+        Pack                          : 'Упаковать',
+        'Previous day'                : 'Предыдущий день',
+        Reset                         : 'Сбросить',
+        'Reset data'                  : 'Сбросить данные',
+        'Resource - City'             : 'Ресурс - Город',
+        'Resource ranges'             : 'Диапазоны ресурсов',
+        Save                          : 'Сохранить',
+        Sep                           : 'Сен',
+        'Show setup time'             : 'Показать время настройки',
+        Stack                         : 'Стек',
+        Sync                          : 'Синхронизировать',
+        Today                         : 'Сегодня',
+        'Vertical mode'               : 'Вертикальный режим',
+        'Zoom in'                     : 'Увеличить',
+        'Zoom out'                    : 'Уменьшить'
+    },
+
+    Checkbox : {
+        Cultural                : 'Культурный',
+        'Draw around parents'   : 'Рисовать вокруг родителей',
+        'Enable bar tooltip'    : 'Включить всплывающую подсказку для полосы',
+        Music                   : 'Музыка',
+        'Show bar texts'        : 'Показать текст на панелях',
+        'Show max allocation'   : 'Показать максимальное распределение',
+        'Show non working time' : 'Показать нерабочее время',
+        Sports                  : 'Спорт',
+        Technology              : 'Технологии'
+    },
+
+    Slider : {
+        'Max capacity' : 'Максимальная вместимость',
+        'Row height'   : 'Высота строки'
+    },
+
+    Label : {
+        Days                        : 'Дни',
+        'Group by'                  : 'Группировать по',
+        Months                      : 'Месяцы',
+        Settings                    : 'Настройки',
+        'Viewing a repeating event' : 'Просмотр повторяющегося события'
+    },
+
+    Combo : {
+        'Current timezone' : 'Текущий часовой пояс',
+        'Group events by'  : 'Группировать события по',
+        Parent             : 'Родитель',
+        Resources          : 'Ресурсы',
+        Show               : 'Показать'
+    },
+
+    NumberField : {
+        '% complete' : '% завершено',
+        Events       : 'События',
+        Every        : 'Каждый',
+        Resources    : 'Ресурсы'
+    },
+
+    TextField : {
+        Doctor           : 'Доктор',
+        Name             : 'Имя',
+        'Server address' : 'Адрес сервера',
+        Username         : 'Имя пользователя'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Отметьте, чтобы показать линию максимального распределения ресурсов',
+        'Check to show resource allocation in the bars'                                                            : 'Отметьте, чтобы показать распределение ресурсов на панелях',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Отметьте, чтобы показывать подсказки при наведении мыши на столбцы',
+        'Click to group by City - Resource'                                                                        : 'Нажмите, чтобы сгруппировать по городу - ресурсу',
+        'Click to group by Resource - City'                                                                        : 'Нажмите, чтобы сгруппировать по ресурсу - городу',
+        'Collapse all groups'                                                                                      : 'Свернуть все группы',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Отключить функцию группировки дерева и вернуться к виду по умолчанию Ресурс - Назначение',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Введите количество событий на ресурс для генерации и нажмите [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Введите количество строк ресурсов для генерации и нажмите [ENTER]',
+        'Expand all groups'                                                                                        : 'Развернуть все группы',
+        Friday                                                                                                     : 'Пятница',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Если два сегмента расположены рядом, вы можете либо объединить их, либо оставить раздельными',
+        Monday                                                                                                     : 'Понедельник',
+        Saturday                                                                                                   : 'Суббота',
+        Sunday                                                                                                     : 'Воскресенье',
+        Thursday                                                                                                   : 'Четверг',
+        'Toggle layout'                                                                                            : 'Переключить макет',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Пытается вписать незапланированные события в текущий отображаемый временной интервал',
+        Tuesday                                                                                                    : 'Вторник',
+        'View next day'                                                                                            : 'Просмотр следующего дня',
+        'View previous day'                                                                                        : 'Просмотр предыдущего дня',
+        'View today, to see the current time line'                                                                 : 'Просмотр сегодня, чтобы увидеть текущую временную линию',
+        Wednesday                                                                                                  : 'Среда'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Автоматически объединять соседние сегменты',
+        'Auto-send'                    : 'Автоотправка',
+        'Auto-sync'                    : 'Автосинхронизация',
+        'Compact mode'                 : 'Компактный режим',
+        'Constrain drag to row'        : 'Ограничить перетаскивание по строке',
+        'Dark mode'                    : 'Тёмный режим',
+        'Days are working by default'  : 'Дни по умолчанию рабочие',
+        'Enable bar tooltip'           : 'Включить подсказку на панели',
+        'Enable highlighting'          : 'Включить выделение',
+        'Enable mouse interaction'     : 'Включить взаимодействие мыши',
+        'Enable task drag drop'        : 'Включить перетаскивание задач',
+        'Filter out non-working time'  : 'Исключить нерабочее время',
+        'Highlight 9-10am + 2-4pm'     : 'Выделить 9-10 утра + 2-4 дня',
+        'Highlight while dragging'     : 'Выделять при перетаскивании',
+        'Show non working time'        : 'Показать нерабочее время',
+        'Show setup time'              : 'Показать время настройки',
+        'Show summaries'               : 'Показать сводки',
+        'Snap to grid'                 : 'Привязка к сетке',
+        'View Planned dates'           : 'Просмотр запланированных дат'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

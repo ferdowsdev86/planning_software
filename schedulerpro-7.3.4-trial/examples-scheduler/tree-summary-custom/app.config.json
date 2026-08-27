@@ -1,0 +1,12 @@
+{
+  "title": "Customized Tree Summary demo",
+  "description": "This demo shows how to rollup and summarize tree data and customize the way the rollup data are shown",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Resource.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ]
+}

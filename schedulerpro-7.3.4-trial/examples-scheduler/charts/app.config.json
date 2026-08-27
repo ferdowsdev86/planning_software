@@ -1,0 +1,15 @@
+{
+  "title": "Charts demo",
+  "description": "Shows how to use a chart designer widget to configure and display a chart from Scheduler data.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ],
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

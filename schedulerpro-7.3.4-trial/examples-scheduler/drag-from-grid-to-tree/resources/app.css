@@ -1,0 +1,29 @@
+.b-sch-event-wrap {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+}
+
+#main {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+}
+
+.b-grid-header {
+    height : 57px;
+}
+
+.b-grid-base {
+    .b-panel-ui-toolbar,
+    .b-top-toolbar {
+        height : 65px;
+    }
+}
+
+.b-unassigned-class.b-drag-proxy.b-drag-invalid {
+    --b-primary : var(--b-color-red);
+}
+
+.b-sch-tooltip-start-date,
+.b-sch-tooltip-end-date {
+    margin-top : 0.2em;
+}

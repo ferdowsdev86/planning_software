@@ -1,0 +1,10 @@
+{
+  ".exceeded": {
+    "title": "Capacity exceeded",
+    "content": "Station can only handle 3 simultaneous jobs, 4 are assigned"
+  },
+  ".b-toolbar .b-button.b-has-menu": {
+    "title": "Configuration options",
+    "content": "Use the controls in the toolbar to try out the NestedEvent features configuration options"
+  }
+}

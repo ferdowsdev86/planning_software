@@ -1,0 +1,27 @@
+{
+  "title": "AI-Powered Skill matching",
+  "description": "Demonstrates the Bryntum AI Assistant integrated into the Scheduler Pro",
+  "source": [
+    "app.js",
+    "authenticate.js",
+    "data/data.json",
+    "index.html",
+    "lib/AI.js",
+    "lib/Drag.js",
+    "lib/MainSchedule.js",
+    "lib/Schedule.js",
+    "lib/Skill.js",
+    "lib/Task.js",
+    "lib/Technician.js",
+    "lib/trainingData.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ],
+  "disableCodePen": true,
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

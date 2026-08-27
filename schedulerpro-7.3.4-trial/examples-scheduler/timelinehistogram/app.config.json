@@ -1,0 +1,10 @@
+{
+  "title": "Timeline histogram demo",
+  "description": "Shows a timeline histogram",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

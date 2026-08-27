@@ -1,0 +1,12 @@
+{
+  "title": "Pro inline data demo",
+  "description": "Shows using inline data for Scheduler Pro",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/data.js",
+    "lib/VehicleConditionColumn.js",
+    "lib/VehicleConditionCombo.js",
+    "resources/app.css"
+  ]
+}

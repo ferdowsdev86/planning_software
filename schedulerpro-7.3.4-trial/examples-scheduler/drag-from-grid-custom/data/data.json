@@ -1,0 +1,180 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "name" : "Arcady",
+        "role" : "Core developer"
+      },
+      {
+        "id"         : 2,
+        "name"       : "Dave",
+        "eventColor" : "green",
+        "role"       : "Tech Sales"
+      },
+      {
+        "id"         : 3,
+        "name"       : "Henrik",
+        "eventColor" : "green",
+        "role"       : "Sales"
+      },
+      {
+        "id"         : 4,
+        "name"       : "Linda",
+        "eventColor" : "red",
+        "role"       : "Core developer"
+      },
+      {
+        "id"         : 5,
+        "name"       : "Maxim",
+        "eventColor" : "red",
+        "role"       : "Developer & UX"
+      },
+      {
+        "id"         : 6,
+        "name"       : "Mike",
+        "eventColor" : "red",
+        "role"       : "CEO"
+      },
+      {
+        "id"   : 7,
+        "name" : "Lee",
+        "role" : "CTO"
+      },
+      {
+        "id"   : 8,
+        "name" : "Amit",
+        "role" : "Core developer"
+      },
+      {
+        "id"         : 9,
+        "name"       : "Kate",
+        "eventColor" : "blue",
+        "role"       : "Tech Sales"
+      },
+      {
+        "id"         : 10,
+        "name"       : "Jong",
+        "eventColor" : "blue",
+        "role"       : "Sales"
+      },
+      {
+        "id"   : 11,
+        "name" : "Lola",
+        "role" : "Core developer"
+      },
+      {
+        "id"   : 12,
+        "name" : "Lisa",
+        "role" : "UX"
+      },
+      {
+        "id"   : 13,
+        "name" : "Steve",
+        "role" : "COO"
+      },
+      {
+        "id"   : 14,
+        "name" : "Malik",
+        "role" : "CFO"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : "r1",
+        "resourceId"   : 1,
+        "name"         : "Restart server",
+        "icon"         : "fa fa-server",
+        "startDate"    : "2025-12-01T08:00:00",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "draggable"    : false,
+        "resizable"    : true,
+        "note"         : "Not draggable"
+      },
+      {
+        "id"           : "r2",
+        "resourceId"   : 1,
+        "name"         : "Upgrade memory",
+        "icon"         : "fa fa-laptop",
+        "startDate"    : "2025-12-01T15:00:00",
+        "cls"          : "",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "Min 32GB"
+      },
+      {
+        "id"           : "r3",
+        "resourceId"   : 2,
+        "name"         : "Visit customer",
+        "icon"         : "fa fa-user",
+        "startDate"    : "2025-12-01T09:00:00",
+        "cls"          : "",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "2311 Market st."
+      },
+      {
+        "id"           : "r4",
+        "resourceId"   : 3,
+        "name"         : "Arrange meetup",
+        "icon"         : "fa fa-users",
+        "startDate"    : "2025-12-01T09:00:00",
+        "cls"          : "",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "32 attending"
+      },
+      {
+        "id"           : "r5",
+        "resourceId"   : 7,
+        "name"         : "Make coffee",
+        "startDate"    : "2025-12-01T12:00:00",
+        "icon"         : "fa fa-coffee",
+        "duration"     : 4,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "Extra strong"
+      },
+      {
+        "id"           : "r6",
+        "resourceId"   : 9,
+        "name"         : "Conference prep",
+        "icon"         : "fa fa-building",
+        "startDate"    : "2025-12-01T09:00:00",
+        "cls"          : "Special",
+        "duration"     : 3,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "Bring badges"
+      },
+      {
+        "id"           : "r16",
+        "resourceId"   : 11,
+        "name"         : "Presentation",
+        "icon"         : "fa fa-video",
+        "startDate"    : "2025-12-01T13:00:00",
+        "cls"          : "Special",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "draggable"    : true,
+        "resizable"    : true,
+        "note"         : "Max 20 slides"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : []
+  }
+}

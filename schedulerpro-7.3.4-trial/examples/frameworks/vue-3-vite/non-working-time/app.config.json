@@ -1,0 +1,16 @@
+{
+  "title": "Pro non-working time demo (Vue 3 + Vite)",
+  "description": "Shows a Scheduler Pro setup with a working hours calendar and time axis filtering",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/AppData.ts",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

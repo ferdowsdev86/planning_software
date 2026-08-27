@@ -1,0 +1,17 @@
+{
+  "title": "PDF export demo (Vue 2)",
+  "description": "Shows how to use the PDF export feature in the Vue Scheduler component.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/components/Button.vue",
+    "src/components/Header.vue",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

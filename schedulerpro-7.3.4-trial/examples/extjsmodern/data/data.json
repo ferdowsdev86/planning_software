@@ -1,0 +1,383 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "workhours"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"                       : "workhours",
+        "name"                     : "Working hours",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 8:00",
+            "recurrentEndDate"   : "at 16:00",
+            "isWorking"          : true
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "weld",
+        "name" : "Welding station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "drill",
+        "name" : "Drilling station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "press",
+        "name" : "Pressing station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "cut",
+        "name" : "Cutting station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "inspect",
+        "name" : "Inspection station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "pack",
+        "name" : "Packing station",
+        "type" : "Station"
+      },
+      {
+        "id"   : "team1",
+        "name" : "Team 1",
+        "type" : "team"
+      },
+      {
+        "id"   : "team2",
+        "name" : "Team 2",
+        "type" : "team"
+      },
+      {
+        "id"   : "team3",
+        "name" : "Team 3",
+        "type" : "team"
+      },
+      {
+        "id"   : "team4",
+        "name" : "Team 4",
+        "type" : "team"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"          : "order1weld",
+        "name"        : "Weld",
+        "order"       : "Order 1",
+        "startDate"   : "2020-04-06",
+        "duration"    : 6,
+        "contact"     : "Steve",
+        "phone"       : "555-451237",
+        "percentDone" : 100
+      },
+      {
+        "id"          : "order1drill",
+        "name"        : "Drill",
+        "order"       : "Order 1",
+        "duration"    : 4,
+        "contact"     : "Steve",
+        "phone"       : "555-451237",
+        "percentDone" : 80
+      },
+      {
+        "id"       : "order1press",
+        "name"     : "Press",
+        "order"    : "Order 1",
+        "duration" : 7,
+        "note"     : "Go slow, high quality required",
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"       : "order1cut",
+        "name"     : "Cut",
+        "order"    : "Order 1",
+        "duration" : 3,
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"       : "order1inspect",
+        "name"     : "Inspect",
+        "order"    : "Order 1",
+        "duration" : 3,
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"       : "order1pack",
+        "name"     : "Pack",
+        "order"    : "Order 1",
+        "duration" : 3,
+        "note"     : "Use the new material",
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"          : "order2weld",
+        "name"        : "Weld",
+        "order"       : "Order 2",
+        "startDate"   : "2020-04-06T15:00",
+        "duration"    : 6,
+        "contact"     : "Megan",
+        "phone"       : "555-012401",
+        "percentDone" : 90
+      },
+      {
+        "id"       : "order2drill",
+        "name"     : "Drill",
+        "order"    : "Order 2",
+        "duration" : 4,
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"       : "order2press",
+        "name"     : "Press",
+        "order"    : "Order 2",
+        "duration" : 7,
+        "contact"  : "Megan",
+        "phone"    : "555-012401"
+      },
+      {
+        "id"       : "order2cut",
+        "name"     : "Cut",
+        "order"    : "Order 2",
+        "duration" : 5,
+        "contact"  : "Megan",
+        "phone"    : "555-012401"
+      },
+      {
+        "id"       : "order2inspect",
+        "name"     : "Inspect",
+        "order"    : "Order 2",
+        "duration" : 3,
+        "contact"  : "Megan",
+        "phone"    : "555-012401"
+      },
+      {
+        "id"       : "order2pack",
+        "name"     : "Pack",
+        "order"    : "Order 2",
+        "duration" : 3,
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : "order1weld",
+        "resource" : "weld"
+      },
+      {
+        "id"       : 2,
+        "event"    : "order1drill",
+        "resource" : "drill"
+      },
+      {
+        "id"       : 3,
+        "event"    : "order1press",
+        "resource" : "press"
+      },
+      {
+        "id"       : 4,
+        "event"    : "order1cut",
+        "resource" : "cut"
+      },
+      {
+        "id"       : 5,
+        "event"    : "order1inspect",
+        "resource" : "inspect"
+      },
+      {
+        "id"       : 6,
+        "event"    : "order1pack",
+        "resource" : "pack"
+      },
+      {
+        "id"               : 7,
+        "event"            : "order1weld",
+        "resource"         : "team2",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 8,
+        "event"            : "order1drill",
+        "resource"         : "team1",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 9,
+        "event"            : "order1press",
+        "resource"         : "team3",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 10,
+        "event"            : "order1cut",
+        "resource"         : "team1",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 11,
+        "event"            : "order1inspect",
+        "resource"         : "team4",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 12,
+        "event"            : "order1pack",
+        "resource"         : "team4",
+        "drawDependencies" : false
+      },
+      {
+        "id"       : 13,
+        "event"    : "order2weld",
+        "resource" : "weld"
+      },
+      {
+        "id"       : 14,
+        "event"    : "order2drill",
+        "resource" : "drill"
+      },
+      {
+        "id"       : 15,
+        "event"    : "order2press",
+        "resource" : "press"
+      },
+      {
+        "id"       : 16,
+        "event"    : "order2cut",
+        "resource" : "cut"
+      },
+      {
+        "id"       : 17,
+        "event"    : "order2inspect",
+        "resource" : "inspect"
+      },
+      {
+        "id"       : 18,
+        "event"    : "order2pack",
+        "resource" : "pack"
+      },
+      {
+        "id"               : 19,
+        "event"            : "order2weld",
+        "resource"         : "team2",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 20,
+        "event"            : "order2drill",
+        "resource"         : "team2",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 21,
+        "event"            : "order2press",
+        "resource"         : "team3",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 22,
+        "event"            : "order2cut",
+        "resource"         : "team3",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 23,
+        "event"            : "order2inspect",
+        "resource"         : "team4",
+        "drawDependencies" : false
+      },
+      {
+        "id"               : 24,
+        "event"            : "order2pack",
+        "resource"         : "team4",
+        "drawDependencies" : false
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "fromEvent" : "order1weld",
+        "toEvent"   : "order1drill",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 2,
+        "fromEvent" : "order1drill",
+        "toEvent"   : "order1press",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 3,
+        "fromEvent" : "order1press",
+        "toEvent"   : "order1cut",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 4,
+        "fromEvent" : "order1cut",
+        "toEvent"   : "order1inspect",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 5,
+        "fromEvent" : "order1inspect",
+        "toEvent"   : "order1pack",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 6,
+        "fromEvent" : "order2weld",
+        "toEvent"   : "order2drill",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 7,
+        "fromEvent" : "order2drill",
+        "toEvent"   : "order2press",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 8,
+        "fromEvent" : "order2press",
+        "toEvent"   : "order2cut",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 9,
+        "fromEvent" : "order2cut",
+        "toEvent"   : "order2inspect",
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 10,
+        "fromEvent" : "order2inspect",
+        "toEvent"   : "order2pack",
+        "fromSide"  : "bottom"
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Pro Resource histogram demo",
+  "description": "Show a Scheduler Pro and a Resource Histogram visualizing resource allocation in sync",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ]
+}

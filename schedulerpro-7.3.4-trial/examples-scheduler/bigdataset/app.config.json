@@ -1,0 +1,9 @@
+{
+  "title": "Big data set demo",
+  "description": "Demonstrates that the scheduler performs well even with many many rows.",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

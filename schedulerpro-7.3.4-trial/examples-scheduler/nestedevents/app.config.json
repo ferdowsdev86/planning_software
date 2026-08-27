@@ -1,0 +1,10 @@
+{
+  "title": "Nested events demo",
+  "description": "Shows a more advanced use of eventRenderer to render \"nested events\".",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

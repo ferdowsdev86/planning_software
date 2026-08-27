@@ -1,0 +1,39 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<bryntum-scheduler-pro-project-model
+    #project
+    [loadUrl]="projectProps.loadUrl!"
+    [autoLoad]="projectProps.autoLoad!"
+    [resourceStore]="projectProps.resourceStore!"
+    [eventStore]="projectProps.eventStore!"
+></bryntum-scheduler-pro-project-model>
+
+<bryntum-scheduler-pro
+    #schedulerPro
+    [project]="project!"
+    [startDate]="schedulerProProps.startDate!"
+    [endDate]="schedulerProProps.endDate!"
+    [rowHeight]="schedulerProProps.rowHeight!"
+    [barMargin]="schedulerProProps.barMargin!"
+    [tickSize]="schedulerProProps.tickSize!"
+    [eventStyle]="schedulerProProps.eventStyle!"
+    [allowOverlap]="schedulerProProps.allowOverlap!"
+    [snap]="schedulerProProps.snap!"
+    [eventLayout]="schedulerProProps.eventLayout!"
+    [columns]="schedulerProProps.columns!"
+    [viewPreset]="schedulerProProps.viewPreset!"
+    [treeFeature]="schedulerProProps.treeFeature!"
+    [dependenciesFeature]="schedulerProProps.dependenciesFeature!"
+    [splitFeature]="schedulerProProps.splitFeature!"
+    [eventBufferFeature]="schedulerProProps.eventBufferFeature!"
+    [eventDragFeature]="schedulerProProps.eventDragFeature!"
+    [taskEditFeature]="schedulerProProps.taskEditFeature!"
+    [eventTooltipFeature]="schedulerProProps.eventTooltipFeature!"
+    [eventMenuFeature]="schedulerProProps.eventMenuFeature!"
+    [resourceTimeRangesFeature]="schedulerProProps.resourceTimeRangesFeature!"
+    [eventRenderer]="schedulerProProps.eventRenderer!"
+    [tbar]="schedulerProProps.tbar!"
+    [useInitialAnimation]="schedulerProProps.useInitialAnimation!"
+    [smoothZoom]="schedulerProProps.smoothZoom!"
+></bryntum-scheduler-pro>

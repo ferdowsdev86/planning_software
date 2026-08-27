@@ -1,0 +1,20 @@
+/* SVG milestones */
+div.b-sch-event-wrap.b-milestone-wrap.r2 {
+    .b-sch-event-content::before {
+        content : none;
+    }
+
+    label {
+        inset-inline-start : -11px;
+    }
+
+    .b-event-text-wrap {
+        display     : flex;
+        align-items : center;
+        gap         : 0.25em;
+    }
+}
+
+.b-sch-event .fa {
+    color : #3bc9db;
+}

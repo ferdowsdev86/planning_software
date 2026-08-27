@@ -1,0 +1,263 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "workweek"
+  },
+
+  "calendars" : {
+    "rows" : [
+      {
+        "id"        : "workweek",
+        "name"      : "Work week",
+        "intervals" : [
+          {
+            "recurrentStartDate" : "on Sat",
+            "recurrentEndDate"   : "on Mon",
+            "isWorking"          : false
+          }
+        ]
+      },
+      {
+        "id"                       : "tue/thu",
+        "name"                     : "Tuesdays or Thursdays",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "name"               : "Tuesday",
+            "recurrentStartDate" : "on Tue",
+            "recurrentEndDate"   : "on Wed",
+            "isWorking"          : true
+          },
+          {
+            "name"               : "Thursday",
+            "recurrentStartDate" : "on Thu",
+            "recurrentEndDate"   : "on Fri",
+            "isWorking"          : true
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"      : 1,
+        "name"    : "Angelo",
+        "vehicle" : "helicopter",
+        "city"    : "London",
+        "active"  : true
+      },
+      {
+        "id"      : 2,
+        "name"    : "Dave",
+        "vehicle" : "truck-moving",
+        "city"    : "New York",
+        "active"  : true
+      },
+      {
+        "id"      : 3,
+        "name"    : "Henrik",
+        "vehicle" : "truck-moving",
+        "city"    : "Paris",
+        "active"  : true
+      },
+      {
+        "id"      : 4,
+        "name"    : "Linda",
+        "vehicle" : "truck-pickup",
+        "city"    : "Shanghai",
+        "active"  : false
+      },
+      {
+        "id"      : 5,
+        "name"    : "Chang",
+        "vehicle" : "truck",
+        "city"    : "Illinois",
+        "active"  : true
+      },
+      {
+        "id"      : 6,
+        "name"    : "Mike",
+        "vehicle" : "car-side",
+        "city"    : "San Diego",
+        "active"  : false
+      },
+      {
+        "id"      : 7,
+        "name"    : "Lee",
+        "vehicle" : "shuttle-van",
+        "city"    : "San Diego",
+        "active"  : true
+      },
+      {
+        "id"      : 8,
+        "name"    : "Madison",
+        "vehicle" : "truck",
+        "city"    : "Vienna",
+        "active"  : false
+      },
+      {
+        "id"      : 9,
+        "name"    : "Rob",
+        "vehicle" : "truck",
+        "city"    : "Vienna",
+        "active"  : false
+      },
+      {
+        "id"      : 10,
+        "name"    : "Malik",
+        "vehicle" : "truck",
+        "city"    : "Vienna",
+        "active"  : false
+      },
+      {
+        "id"      : 11,
+        "name"    : "Kate",
+        "vehicle" : "truck",
+        "city"    : "Vienna",
+        "active"  : false
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Parcel",
+        "iconCls"      : "fa fa-box",
+        "duration"     : 1,
+        "eventColor"   : "green",
+        "startDate"    : "2022-05-25T13:00",
+        "minStartTime" : 11,
+        "maxEndTime"   : 16
+      },
+      {
+        "id"           : 2,
+        "name"         : "Big box",
+        "iconCls"      : "fa fa-box",
+        "duration"     : 1,
+        "startDate"    : "2022-05-25T15:00",
+        "minStartTime" : 14,
+        "maxEndTime"   : 19
+      },
+      {
+        "id"           : 3,
+        "name"         : "Furniture",
+        "iconCls"      : "fa fa-chair",
+        "duration"     : 1,
+        "startDate"    : "2022-05-25T09:30",
+        "minStartTime" : 9,
+        "maxEndTime"   : 12
+      },
+      {
+        "id"           : 4,
+        "name"         : "IKEA",
+        "iconCls"      : "fa fa-couch",
+        "duration"     : 1,
+        "startDate"    : "2022-05-25T14:30",
+        "minStartTime" : 10,
+        "maxEndTime"   : 17
+      },
+      {
+        "id"           : 5,
+        "name"         : "Hazardous materials",
+        "iconCls"      : "fa fa-radiation",
+        "eventColor"   : "red",
+        "duration"     : 2,
+        "startDate"    : "2022-05-25T10:00",
+        "minStartTime" : 10,
+        "maxEndTime"   : 15
+      },
+      {
+        "id"           : 6,
+        "name"         : "Navy supplies",
+        "iconCls"      : "fa fa-ship",
+        "duration"     : 1.5,
+        "startDate"    : "2022-05-25T12:00",
+        "minStartTime" : 10,
+        "maxEndTime"   : 16
+      },
+      {
+        "id"           : 7,
+        "name"         : "Navy supplies",
+        "iconCls"      : "fa fa-ship",
+        "duration"     : 1.5,
+        "startDate"    : "2022-05-25T12:00",
+        "minStartTime" : 10,
+        "maxEndTime"   : 16
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 1
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 2
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 3
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 4
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 5
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 6
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 7
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 5
+      },
+      {
+        "id"       : 9,
+        "event"    : 9,
+        "resource" : 7
+      },
+      {
+        "id"       : 10,
+        "event"    : 9,
+        "resource" : 8
+      },
+      {
+        "id"       : 11,
+        "event"    : 10,
+        "resource" : 9
+      },
+      {
+        "id"       : 12,
+        "event"    : 11,
+        "resource" : 9
+      },
+      {
+        "id"       : 13,
+        "event"    : 12,
+        "resource" : 10
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : []
+  }
+}

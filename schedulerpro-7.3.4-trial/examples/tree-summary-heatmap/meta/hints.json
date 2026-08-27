@@ -1,0 +1,7 @@
+{
+  ".b-sch-tick-summary-cell:nth-child(4)": {
+    "title": "Tree Summary",
+    "content": "Shows the number of events scheduled for each day",
+    "align": "t2-b0"
+  }
+}

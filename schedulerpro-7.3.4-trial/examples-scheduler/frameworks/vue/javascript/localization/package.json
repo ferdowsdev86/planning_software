@@ -1,0 +1,80 @@
+{
+  "name": "localization",
+  "description": "Localization demo (Vue 2)",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "homepage": "https://bryntum.com",
+  "scripts": {
+    "start": "vue-cli-service serve",
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "lint": "vue-cli-service lint",
+    "postinstall": "postinstall"
+  },
+  "postinstall": {
+    "node_modules/@bryntum/demo-resources/images/favicon.png": "copy public/favicon.png",
+    "node_modules/@bryntum/demo-resources/images/transparent-users/*": "copy public/users/"
+  },
+  "dependencies": {
+    "@bryntum/demo-resources": "7.3.4",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4",
+    "@bryntum/schedulerpro-vue": "7.3.4",
+    "@panter/vue-i18next": "0.15.0",
+    "i18next": "15.0.9",
+    "i18next-browser-languagedetector": "3.0.1",
+    "i18next-xhr-backend": "2.0.1",
+    "vue": "2.6.10",
+    "vue-flag-icon": "1.0.6"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-babel": "3.5.0",
+    "@vue/cli-plugin-eslint": "3.5.0",
+    "@vue/cli-service": "3.5.0",
+    "babel-eslint": "10.0.1",
+    "eslint": "5.8.0",
+    "eslint-config-standard": "12.0.0",
+    "eslint-plugin-import": "2.17.3",
+    "eslint-plugin-node": "9.1.0",
+    "eslint-plugin-promise": "4.1.1",
+    "eslint-plugin-standard": "4.0.0",
+    "eslint-plugin-vue": "5.0.0",
+    "postinstall": "0.7.4",
+    "sass": "1.42.0",
+    "sass-loader": "7.1.0",
+    "vue-cli-plugin-modular-vuex": "0.15.2",
+    "vue-template-compiler": "2.6.10"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions"
+  ],
+  "postcss": {
+    "plugins": {
+      "autoprefixer": {}
+    }
+  },
+  "eslintConfig-disabled": {
+    "root": true,
+    "env": {
+      "node": true
+    },
+    "extends": [
+      "plugin:vue/essential",
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "parser": "babel-eslint"
+    },
+    "rules": {
+      "vue/no-parsing-error": 1
+    }
+  }
+}

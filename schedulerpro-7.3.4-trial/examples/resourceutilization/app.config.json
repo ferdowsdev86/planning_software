@@ -1,0 +1,10 @@
+{
+  "title": "Pro Resource utilization demo",
+  "description": "Show a Scheduler Pro and a Resource Utilization visualizing resource allocation in sync",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

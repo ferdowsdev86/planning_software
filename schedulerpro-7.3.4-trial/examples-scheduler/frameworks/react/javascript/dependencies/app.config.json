@@ -1,0 +1,14 @@
+{
+  "title": "Dependencies demo (React)",
+  "description": "This demo contains a React Scheduler with the dependencies feature in action. You can connect tasks from any side.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

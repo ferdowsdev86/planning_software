@@ -1,0 +1,15 @@
+{
+  "title": "Rendering Vue components into grid cells (Vue 2)",
+  "description": "The Bryntum Scheduler component for Vue lets you render native Vue Components into grid cells.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/components/AppButton.vue",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

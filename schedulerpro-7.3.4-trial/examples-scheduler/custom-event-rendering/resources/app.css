@@ -1,0 +1,81 @@
+.b-scheduler {
+    --b-event-resize-handle-background       : var(--b-neutral-90);
+    --b-event-resize-handle-hover-background : var(--b-neutral-85);
+
+    .b-grid-sub-grid-normal {
+        --b-grid-cell-background    : transparent;
+        --b-column-lines-tick-color : var(--b-neutral-90);
+
+        background                  : var(--b-neutral-95);
+    }
+
+    .b-sch-event-wrap {
+        --b-sch-event-background          : var(--b-primary-100);
+        --b-sch-event-hover-background    : var(--b-primary-98);
+        --b-sch-event-selected-background : var(--b-primary-96);
+        --b-sch-event-box-shadow          : var(--b-elevation-1);
+        --b-sch-event-border-radius       : 0.5em;
+        --b-sch-event-color               : var(--b-neutral-20);
+        --b-sch-event-padding-inline      : 0.75em;
+    }
+
+    .b-sch-event-content {
+        flex-direction  : column;
+        justify-content : space-evenly;
+    }
+
+    .b-resource-avatar {
+        border : 1px solid var(--b-neutral-100);
+    }
+
+    .b-type-timeoff {
+        background-size  : 7px 7px !important;
+        background-image : linear-gradient(-45deg, rgba(0, 0, 0, 0) 46%, var(--b-neutral-80) 49%, var(--b-neutral-80) 52%, rgba(0, 0, 0, 0) 49%);
+    }
+}
+
+.b-sch-event-content {
+    .header,
+    .footer {
+        display         : flex;
+        align-items     : center;
+        justify-content : space-between;
+        width           : 100%;
+    }
+
+    .footer {
+        gap : .5em;
+    }
+
+    .footer span {
+        margin-inline-end : auto;
+        overflow          : hidden;
+        text-overflow     : ellipsis;
+        padding-inline-end : .5em;
+    }
+
+    .b-resource-avatar {
+        margin-inline-start : -.7em;
+
+        &:hover {
+            z-index : 10;
+        }
+    }
+}
+
+.progress-outer {
+    display       : flex;
+    width         : 5em;
+    height        : .5em;
+    border-radius : .5em;
+    background    : var(--b-primary-95);
+
+    .progress-fill {
+        background    : var(--b-primary-50);
+        border-radius : inherit;
+
+        .b-scheduler:not(.b-grid-refreshing) & {
+            transition : width .3s;
+        }
+    }
+}

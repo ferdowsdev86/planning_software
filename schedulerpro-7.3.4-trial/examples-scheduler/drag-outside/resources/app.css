@@ -1,0 +1,36 @@
+.b-bryntum {
+    --indicator-color        : var(--b-neutral-80);
+    --indicator-active-color : var(--b-neutral-60);
+}
+
+#main {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+}
+
+.b-grid-header {
+    height : 60px;
+}
+
+.b-external-grid {
+    flex : 0 0 300px;
+
+    &.b-grid-empty .b-empty-text {
+        width           : calc(100% - 2em);
+        height          : calc(100% - 2em);
+        display         : flex;
+        justify-content : center;
+        align-items     : center;
+        font-size       : 1.3em;
+        color           : var(--indicator-color);
+        border          : 2px dashed var(--indicator-color);
+        margin          : 1em;
+
+        transition      : color .2s, border .2s;
+    }
+
+    &.b-drop-target {
+        --indicator-color : var(--indicator-active-color);
+    }
+}

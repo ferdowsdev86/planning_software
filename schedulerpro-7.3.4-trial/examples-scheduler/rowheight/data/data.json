@@ -1,0 +1,157 @@
+{
+  "resources" : {
+    "rows" : [
+      { "id" : "r1", "name" : "Mike", "eventColor" : "pink" },
+      { "id" : "r2", "name" : "Linda", "eventColor" : "orange" },
+      { "id" : "r3", "name" : "Dan", "eventColor" : "violet" },
+      { "id" : "r4", "name" : "Madison", "eventColor" : "blue" },
+      { "id" : "r5", "name" : "Malik", "eventColor" : "purple", "rowHeight" : 90, "resourceMargin" : { "start" : 10, "end" : 10 } },
+      { "id" : "r6", "name" : "Rob", "eventColor" : "indigo" },
+      { "id" : "r7", "name" : "Kate", "eventColor" : "teal" },
+      { "id" : "r8", "name" : "Lisa", "eventColor" : "lime" },
+      { "id" : "r9", "name" : "Arnold", "eventColor" : "cyan" },
+      { "id" : "r10", "name" : "Jenny", "eventColor" : "red" },
+      { "id" : "r11", "name" : "Steve", "eventColor" : "deep-orange" },
+      { "id" : "r12", "name" : "Barbara", "eventColor" : "green" },
+      { "id" : "r13", "name" : "Dave", "eventColor" : "light-green" },
+      { "id" : "r14", "name" : "Gloria", "eventColor" : "amber" },
+      { "id" : "r15", "name" : "Henrik", "eventColor" : "green" },
+      { "id" : "r16", "name" : "Celia", "eventColor" : "pink" },
+      { "id" : "r17", "name" : "George", "eventColor" : "orange" },
+      { "id" : "r18", "name" : "Hitomi", "eventColor" : "violet" },
+      { "id" : "r19", "name" : "James", "eventColor" : "blue" },
+      { "id" : "r20", "name" : "Emilia", "eventColor" : "purple" },
+      { "id" : "r21", "name" : "Lee", "eventColor" : "indigo" },
+      { "id" : "r22", "name" : "Ellen", "eventColor" : "teal" },
+      { "id" : "r23", "name" : "Mark", "eventColor" : "lime" },
+      { "id" : "r24", "name" : "Karen", "eventColor" : "cyan" },
+      { "id" : "r25", "name" : "Angelo", "eventColor" : "red" },
+      { "id" : "r26", "name" : "Melissa", "eventColor" : "deep-orange" },
+      { "id" : "r27", "name" : "Peter", "eventColor" : "green" },
+      { "id" : "r28", "name" : "Jane", "eventColor" : "light-green" },
+      { "id" : "r29", "name" : "Maxim", "eventColor" : "amber" },
+      { "id" : "r30", "name" : "Lola", "eventColor" : "gantt-green" }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      { "id" : 1, "resourceId" : "r1", "name" : "Fork project", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-code-branch" },
+      { "id" : 2, "resourceId" : "r1", "name" : "Extend test", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-search" },
+      { "id" : 3, "resourceId" : "r2", "name" : "UI testing", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-user" },
+      { "id" : 4, "resourceId" : "r3", "name" : "Release to prod server", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-server" },
+      { "id" : 5, "resourceId" : "r4", "name" : "Update docs", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-book" },
+      { "id" : 6, "resourceId" : "r5", "name" : "Fix bug", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-bug" },
+      { "id" : 7, "resourceId" : "r6", "name" : "Fix IE issues", "startDate" : "2026-01-01T16:00", "endDate" : "2026-01-01T18:00", "iconCls" : "fa fa-band-aid" },
+
+      { "id" : 8, "resourceId" : "r7", "name" : "Sprint planning", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-calendar" },
+      { "id" : 9, "resourceId" : "r7", "name" : "Backend review", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-code" },
+      { "id" : 10, "resourceId" : "r7", "name" : "API design", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-drafting-compass" },
+      { "id" : 11, "resourceId" : "r7", "name" : "Schema migration", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-database" },
+      { "id" : 12, "resourceId" : "r7", "name" : "Load testing", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-tachometer-alt" },
+      { "id" : 13, "resourceId" : "r7", "name" : "Deploy staging", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-rocket" },
+      { "id" : 92, "resourceId" : "r7", "name" : "Peer review", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-user-friends" },
+      { "id" : 93, "resourceId" : "r7", "name" : "Lint pass", "startDate" : "2026-01-01T09:30", "endDate" : "2026-01-01T11:30", "iconCls" : "fa fa-broom" },
+
+      { "id" : 14, "resourceId" : "r8", "name" : "Write tests", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-vial" },
+      { "id" : 15, "resourceId" : "r8", "name" : "Refactor module", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-wrench" },
+
+      { "id" : 16, "resourceId" : "r9", "name" : "Team standup", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T09:00", "iconCls" : "fa fa-users" },
+      { "id" : 17, "resourceId" : "r9", "name" : "Performance audit", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-chart-line" },
+      { "id" : 18, "resourceId" : "r9", "name" : "Security review", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-shield-alt" },
+      { "id" : 19, "resourceId" : "r9", "name" : "Dependency update", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-sync" },
+      { "id" : 20, "resourceId" : "r9", "name" : "Cache optimization", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-bolt" },
+      { "id" : 21, "resourceId" : "r9", "name" : "Monitoring setup", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-eye" },
+
+      { "id" : 22, "resourceId" : "r10", "name" : "Client meeting", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-handshake" },
+      { "id" : 23, "resourceId" : "r10", "name" : "Proposal draft", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-file-alt" },
+      { "id" : 24, "resourceId" : "r10", "name" : "Budget review", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-dollar-sign" },
+      { "id" : 25, "resourceId" : "r10", "name" : "Scope alignment", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-bullseye" },
+      { "id" : 26, "resourceId" : "r10", "name" : "Risk assessment", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-exclamation-triangle" },
+
+      { "id" : 27, "resourceId" : "r11", "name" : "Code review", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-glasses" },
+      { "id" : 28, "resourceId" : "r11", "name" : "Merge branches", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-code-branch" },
+
+      { "id" : 29, "resourceId" : "r12", "name" : "Design review", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-paint-brush" },
+      { "id" : 30, "resourceId" : "r12", "name" : "Prototype build", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-hammer" },
+      { "id" : 31, "resourceId" : "r12", "name" : "Usability test", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-mouse-pointer" },
+      { "id" : 32, "resourceId" : "r12", "name" : "Style guide update", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-palette" },
+      { "id" : 33, "resourceId" : "r12", "name" : "Icon set refresh", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-icons" },
+      { "id" : 34, "resourceId" : "r12", "name" : "Responsive layout", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-mobile-alt" },
+
+      { "id" : 35, "resourceId" : "r13", "name" : "Data migration", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-exchange-alt" },
+      { "id" : 36, "resourceId" : "r13", "name" : "Backup verify", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-hdd" },
+
+      { "id" : 37, "resourceId" : "r14", "name" : "Onboarding session", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-chalkboard-teacher" },
+      { "id" : 38, "resourceId" : "r14", "name" : "Training material", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-graduation-cap" },
+
+      { "id" : 39, "resourceId" : "r15", "name" : "Infra provisioning", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-server" },
+      { "id" : 40, "resourceId" : "r15", "name" : "CI pipeline fix", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-cogs" },
+      { "id" : 41, "resourceId" : "r15", "name" : "Docker build", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-cube" },
+      { "id" : 42, "resourceId" : "r15", "name" : "Terraform apply", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-cloud" },
+      { "id" : 43, "resourceId" : "r15", "name" : "DNS cutover", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-globe" },
+      { "id" : 44, "resourceId" : "r15", "name" : "SSL renewal", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-lock" },
+
+      { "id" : 45, "resourceId" : "r16", "name" : "Feature demo", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-tv" },
+      { "id" : 46, "resourceId" : "r16", "name" : "Stakeholder sync", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-comments" },
+
+      { "id" : 47, "resourceId" : "r17", "name" : "Accessibility audit", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-universal-access" },
+      { "id" : 48, "resourceId" : "r17", "name" : "Contrast fixes", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-adjust" },
+      { "id" : 49, "resourceId" : "r17", "name" : "Screen reader test", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-assistive-listening-systems" },
+      { "id" : 50, "resourceId" : "r17", "name" : "Keyboard nav fix", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-keyboard" },
+      { "id" : 51, "resourceId" : "r17", "name" : "ARIA labels", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-tags" },
+
+      { "id" : 52, "resourceId" : "r18", "name" : "i18n extraction", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-language" },
+      { "id" : 53, "resourceId" : "r18", "name" : "Translation review", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T18:00", "iconCls" : "fa fa-spell-check" },
+
+      { "id" : 54, "resourceId" : "r19", "name" : "API versioning", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-code" },
+      { "id" : 55, "resourceId" : "r19", "name" : "Rate limiter", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-traffic-light" },
+
+      { "id" : 56, "resourceId" : "r20", "name" : "Auth flow rework", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-key" },
+      { "id" : 57, "resourceId" : "r20", "name" : "Token refresh", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-sync-alt" },
+      { "id" : 58, "resourceId" : "r20", "name" : "Session mgmt", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-user-lock" },
+      { "id" : 59, "resourceId" : "r20", "name" : "MFA setup", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-shield-alt" },
+      { "id" : 60, "resourceId" : "r20", "name" : "OAuth integration", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-sign-in-alt" },
+      { "id" : 61, "resourceId" : "r20", "name" : "Permissions audit", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-user-shield" },
+
+      { "id" : 62, "resourceId" : "r21", "name" : "Log aggregation", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-stream" },
+      { "id" : 63, "resourceId" : "r21", "name" : "Alert rules", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-bell" },
+
+      { "id" : 64, "resourceId" : "r22", "name" : "Email templates", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-envelope" },
+      { "id" : 65, "resourceId" : "r22", "name" : "Notification system", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-bell" },
+      { "id" : 66, "resourceId" : "r22", "name" : "Push integration", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-paper-plane" },
+      { "id" : 67, "resourceId" : "r22", "name" : "SMS gateway", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-sms" },
+      { "id" : 68, "resourceId" : "r22", "name" : "Webhook setup", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-plug" },
+
+      { "id" : 69, "resourceId" : "r23", "name" : "Report builder", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-chart-bar" },
+      { "id" : 70, "resourceId" : "r23", "name" : "CSV export", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-file-csv" },
+
+      { "id" : 71, "resourceId" : "r24", "name" : "Search indexing", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-search" },
+      { "id" : 72, "resourceId" : "r24", "name" : "Query optimizer", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T18:00", "iconCls" : "fa fa-filter" },
+
+      { "id" : 73, "resourceId" : "r25", "name" : "Webpack config", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-box" },
+      { "id" : 74, "resourceId" : "r25", "name" : "Tree shaking", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-leaf" },
+      { "id" : 75, "resourceId" : "r25", "name" : "Bundle analysis", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-chart-pie" },
+      { "id" : 76, "resourceId" : "r25", "name" : "Code splitting", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-cut" },
+      { "id" : 77, "resourceId" : "r25", "name" : "Minification", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-compress" },
+
+      { "id" : 78, "resourceId" : "r26", "name" : "Regression test", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-redo" },
+      { "id" : 79, "resourceId" : "r26", "name" : "Smoke test", "startDate" : "2026-01-01T14:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-fire" },
+
+      { "id" : 80, "resourceId" : "r27", "name" : "GraphQL schema", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-project-diagram" },
+      { "id" : 81, "resourceId" : "r27", "name" : "Resolver tuning", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T18:00", "iconCls" : "fa fa-sliders-h" },
+
+      { "id" : 82, "resourceId" : "r28", "name" : "Feature flags", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-flag" },
+      { "id" : 83, "resourceId" : "r28", "name" : "A/B framework", "startDate" : "2026-01-01T09:00", "endDate" : "2026-01-01T12:00", "iconCls" : "fa fa-random" },
+      { "id" : 84, "resourceId" : "r28", "name" : "Analytics hook", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-chart-area" },
+      { "id" : 85, "resourceId" : "r28", "name" : "Rollout plan", "startDate" : "2026-01-01T11:00", "endDate" : "2026-01-01T14:00", "iconCls" : "fa fa-tasks" },
+      { "id" : 86, "resourceId" : "r28", "name" : "Canary deploy", "startDate" : "2026-01-01T13:00", "endDate" : "2026-01-01T16:00", "iconCls" : "fa fa-dove" },
+
+      { "id" : 87, "resourceId" : "r29", "name" : "Release notes", "startDate" : "2026-01-01T10:00", "endDate" : "2026-01-01T13:00", "iconCls" : "fa fa-sticky-note" },
+      { "id" : 88, "resourceId" : "r29", "name" : "Changelog update", "startDate" : "2026-01-01T15:00", "endDate" : "2026-01-01T17:00", "iconCls" : "fa fa-list" },
+
+      { "id" : 89, "resourceId" : "r30", "name" : "Vendor sync", "startDate" : "2026-01-01T08:00", "endDate" : "2026-01-01T11:00", "iconCls" : "fa fa-building" },
+      { "id" : 90, "resourceId" : "r30", "name" : "Contract review", "startDate" : "2026-01-01T12:00", "endDate" : "2026-01-01T15:00", "iconCls" : "fa fa-file-contract" },
+      { "id" : 91, "resourceId" : "r30", "name" : "SLA check", "startDate" : "2026-01-01T16:00", "endDate" : "2026-01-01T18:00", "iconCls" : "fa fa-clipboard-check" }
+    ]
+  }
+}

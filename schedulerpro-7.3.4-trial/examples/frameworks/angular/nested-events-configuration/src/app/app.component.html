@@ -1,0 +1,33 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<bryntum-scheduler-pro-project-model
+  #project
+  [autoLoad]="projectProps.autoLoad!"
+  [transport]="projectProps.transport!"
+  [eventStore]="projectProps.eventStore!"
+  [resourceStore]="projectProps.resourceStore!"
+></bryntum-scheduler-pro-project-model>
+
+<bryntum-scheduler-pro
+  [project]="project"
+  [startDate]="schedulerProProps.startDate!"
+  [endDate]="schedulerProProps.endDate!"
+  [smoothZoom]="schedulerProProps.smoothZoom!"
+  [viewPreset]="schedulerProProps.viewPreset!"
+  [displayDateFormat]="schedulerProProps.displayDateFormat!"
+  [rowHeight]="schedulerProProps.rowHeight!"
+  [resourceMargin]="schedulerProProps.resourceMargin!"
+  [eventStyle]="schedulerProProps.eventStyle!"
+  [eventColor]="schedulerProProps.eventColor!"
+  [columns]="schedulerProProps.columns!"
+  [eventRenderer]="schedulerProProps.eventRenderer!"
+  [tbar]="schedulerProProps.tbar!"
+  [nestedEventsFeature]="schedulerProProps.nestedEventsFeature!"
+  [dependenciesFeature]="schedulerProProps.dependenciesFeature!"
+  [nonWorkingTimeFeature]="schedulerProProps.nonWorkingTimeFeature!"
+  [scheduleMenuFeature]="schedulerProProps.scheduleMenuFeature!"
+  [percentBarFeature]="schedulerProProps.percentBarFeature!"
+  [eventDragFeature]="schedulerProProps.eventDragFeature!"
+  [eventResizeFeature]="schedulerProProps.eventResizeFeature!"
+></bryntum-scheduler-pro>

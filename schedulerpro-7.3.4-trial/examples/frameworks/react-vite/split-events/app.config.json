@@ -1,0 +1,19 @@
+{
+  "title": "Pro Split events demo",
+  "description": "Shows the events split to segments that can be dragged and resized individually",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/TruckEventModel.ts",
+    "src/lib/TruckResourceModel.ts",
+    "src/main.tsx",
+    "src/vite-env.d.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

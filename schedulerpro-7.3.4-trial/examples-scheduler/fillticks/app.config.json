@@ -1,0 +1,11 @@
+{
+  "title": "Fill ticks demo",
+  "description": "This demo uses the `fillTicks` config to force events to be rendered as full ticks. Only affects rendering, the events retain their configured start and end dates on the data level.",
+  "source": [
+    "app.js",
+    "data/events.json",
+    "data/resources.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

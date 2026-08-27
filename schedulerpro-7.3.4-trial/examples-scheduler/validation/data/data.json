@@ -1,0 +1,176 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Arcady",
+        "available"    : true,
+        "allowOverlap" : true,
+        "role"         : "Developer"
+      },
+      {
+        "id"           : 2,
+        "name"         : "Dave",
+        "available"    : true,
+        "allowOverlap" : true,
+        "role"         : "Sales"
+      },
+      {
+        "id"           : 3,
+        "name"         : "Henrik",
+        "available"    : true,
+        "allowOverlap" : true,
+        "role"         : "Designer"
+      },
+      {
+        "id"           : 4,
+        "name"         : "Linda",
+        "available"    : true,
+        "allowOverlap" : true,
+        "role"         : "Developer"
+      },
+      {
+        "id"           : 5,
+        "name"         : "Maxim",
+        "available"    : true,
+        "allowOverlap" : true,
+        "role"         : "Developer"
+      },
+      {
+        "id"            : 6,
+        "name"          : "Mike",
+        "available"     : false,
+        "cls"           : "unavailable",
+        "statusMessage" : "18 month Swedish paternity leave",
+        "allowOverlap"  : true,
+        "role"          : "Sales"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Lee",
+        "available"    : true,
+        "allowOverlap" : false,
+        "role"         : "CEO"
+      },
+      {
+        "id"           : 8,
+        "name"         : "Madison",
+        "available"    : true,
+        "allowOverlap" : false,
+        "role"         : "CTO"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : 1,
+        "name"       : "Scrum",
+        "startDate"  : "2019-02-07 10:00",
+        "endDate"    : "2019-02-07 11:00",
+        "type"       : "Meeting",
+        "eventColor" : "orange",
+        "iconCls"    : "fa fa-users"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : 1,
+        "name"       : "Cannot drag",
+        "startDate"  : "2019-02-07 12:30",
+        "endDate"    : "2019-02-07 14:00",
+        "type"       : "Meeting",
+        "eventColor" : "red",
+        "iconCls"    : "fa fa-weight-hanging",
+        "draggable"  : false
+      },
+      {
+        "id"         : 3,
+        "resourceId" : 2,
+        "name"       : "Prepare campaign",
+        "startDate"  : "2019-02-07 13:00",
+        "endDate"    : "2019-02-07 16:00",
+        "type"       : "Sales",
+        "eventColor" : "indigo",
+        "iconCls"    : "fa fa-image"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : 3,
+        "name"       : "Marketing meeting",
+        "startDate"  : "2019-02-07 13:00",
+        "endDate"    : "2019-02-07 16:00",
+        "type"       : "Marketing",
+        "cls"        : "marketing",
+        "eventColor" : "orange",
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 4,
+        "name"       : "Coding session",
+        "startDate"  : "2019-02-07 09:00",
+        "endDate"    : "2019-02-07 11:00",
+        "type"       : "Coding",
+        "cls"        : "code",
+        "eventColor" : "indigo",
+        "iconCls"    : "fa fa-code"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 5,
+        "name"       : "UX improvements",
+        "startDate"  : "2019-02-07 08:00",
+        "endDate"    : "2019-02-07 10:00",
+        "type"       : "Coding",
+        "eventColor" : "indigo",
+        "iconCls"    : "fa fa-code"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : 5,
+        "name"       : "Fixed Time",
+        "startDate"  : "2019-02-07 10:00",
+        "endDate"    : "2019-02-07 11:30",
+        "type"       : "Fixed",
+        "cls"        : "lunch",
+        "eventColor" : "red",
+        "iconCls"    : "fa fa-weight-hanging",
+        "resizable"  : false
+      },
+      {
+        "id"         : 8,
+        "resourceId" : 7,
+        "name"       : "Golf",
+        "startDate"  : "2019-02-07 11:00",
+        "endDate"    : "2019-02-07 17:00",
+        "type"       : "Golf",
+        "cls"        : "golf",
+        "eventColor" : "green",
+        "iconCls"    : "fa fa-golf-ball"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : 8,
+        "name"       : "Golf",
+        "startDate"  : "2019-02-07 11:00",
+        "endDate"    : "2019-02-07 17:00",
+        "type"       : "Golf",
+        "eventColor" : "green",
+        "iconCls"    : "fa fa-golf-ball"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "startDate"    : "2019-02-07 11:30",
+        "duration"     : 1,
+        "durationUnit" : "h",
+        "name"         : "Lunch"
+      }
+    ]
+  }
+}

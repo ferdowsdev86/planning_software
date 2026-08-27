@@ -1,0 +1,42 @@
+.b-scheduler-pro.b-bryntum {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+}
+
+/* Icon in night shift calendar */
+.b-sch-resource-non-working-time {
+    > div {
+        justify-content : center;
+    }
+
+    i {
+        margin          : 0.5em;
+        font-size       : 1.2em;
+        color           : var(--b-neutral-50);
+        border          : 3px solid var(--b-neutral-50);
+        border-radius   : 50%;
+        height          : 2.5em;
+        width           : 2.5em;
+        display         : flex;
+        align-items     : center;
+        justify-content : center;
+    }
+
+    &:hover {
+        outline        : 2px solid var(--b-color-orange);
+        outline-offset : -2px;
+    }
+}
+
+.break {
+    /* Theme-aware stripe: dark in light theme, light in dark theme, for contrast against the timeline surface */
+    background-image : linear-gradient(-45deg, transparent 46%, var(--b-neutral-10) 22%, var(--b-neutral-10) 51%, transparent 42%);
+    background-size  : 6px 6px;
+
+    .b-sch-event-content {
+        background    : var(--b-neutral-100);
+        padding       : 0.3em 1em;
+        border-radius : 1em;
+        height        : auto;
+    }
+}
+

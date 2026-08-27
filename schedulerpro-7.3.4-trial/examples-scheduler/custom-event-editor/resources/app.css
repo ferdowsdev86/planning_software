@@ -1,0 +1,136 @@
+.b-grid-cell[data-column="name"] {
+    font-size   : 1.1em;
+    font-weight : bold;
+}
+
+.b-sch-event-wrap.b-style-none {
+    --b-sch-event-border-radius       : .5em;
+    --b-sch-event-background          : var(--b-primary-95);
+    --b-sch-event-hover-background    : var(--b-primary-93);
+    --b-sch-event-selected-background : var(--b-primary-91);
+    --b-sch-event-color               : var(--b-neutral-20);
+    --b-sch-event-box-shadow          : var(--b-elevation-1);
+    --b-sch-event-font-size           : 15px;
+
+    .b-sch-event-content {
+        align-items : center;
+    }
+
+    &.away {
+        --b-primary : var(--b-color-orange);
+    }
+
+    /* "Shrink" the events inside the wrap */
+    .b-sch-event {
+        margin : .5em;
+        width  : calc(100% - 1em);
+    }
+
+    i {
+        font-size : 1.4em;
+    }
+}
+
+.time,
+.arena {
+    font-size : .8em;
+    color     : var(--b-neutral-60);
+}
+
+.modal-backdrop {
+    background : var(--b-modal-mask-background);
+}
+
+.modal-content {
+    background   : var(--b-popup-background);
+    color        : var(--b-widget-color);
+    border       : var(--b-popup-border);
+    border-color : var(--b-widget-border-color);
+    box-shadow   : var(--b-panel-overlay-box-shadow);
+}
+
+.modal-title {
+    color       : var(--b-panel-header-color);
+    font-weight : var(--b-panel-header-font-weight);
+}
+
+.modal-header {
+    background    : var(--b-panel-header-background);
+    border-bottom : var(--b-panel-header-border-bottom);
+    color         : var(--b-panel-header-color);
+
+    .close {
+        color       : var(--b-widget-color);
+        opacity     : 0.7;
+        font-weight : 300;
+    }
+
+    .close:hover {
+        color   : var(--b-widget-color);
+        opacity : 1;
+    }
+}
+
+.modal-body {
+    background : var(--b-popup-background);
+    color      : var(--b-widget-color);
+
+    label {
+        color : var(--b-widget-color);
+    }
+
+    .form-control,
+    .custom-select {
+        background: var(--b-neutral-100);
+        color: var(--b-widget-color);
+        border-color: var(--b-widget-border-color);
+    }
+
+    .form-control:focus,
+    .custom-select:focus {
+        background: var(--b-neutral-100);
+        color: var(--b-widget-color);
+        border-color: var(--b-primary);
+        box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--b-primary) 25%, transparent);
+    }
+
+    .form-control[readonly] {
+        background   : var(--b-neutral-95);
+        color        : var(--b-neutral-40);
+        border-color : var(--b-widget-border-color);
+    }
+
+    select option {
+        background : var(--b-neutral-100);
+        color      : var(--b-widget-color);
+    }
+}
+
+.modal-footer {
+    background : var(--b-panel-bottom-toolbar-background);
+    border-top : var(--b-panel-header-border-bottom);
+    
+    .btn-secondary {
+        background   : var(--b-neutral-90);
+        border-color : var(--b-widget-border-color);
+        color        : var(--b-widget-color);
+    }
+
+    .btn-secondary:hover {
+        background   : var(--b-neutral-85);
+        border-color : var(--b-neutral-70);
+        color        : var(--b-widget-color);
+    }
+
+    .btn-primary {
+        background   : var(--b-primary);
+        border-color : var(--b-primary);
+        color        : var(--b-button-filled-color)
+    }
+
+    .btn-primary:hover {
+        background   : color-mix(in srgb, var(--b-primary) 85%, var(--b-opposite));
+        border-color : color-mix(in srgb, var(--b-primary) 85%, var(--b-opposite));
+        color        : var(--b-button-filled-color);
+    }
+}

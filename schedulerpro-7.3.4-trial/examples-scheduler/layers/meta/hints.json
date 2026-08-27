@@ -1,0 +1,6 @@
+{
+  ".b-list-item .fa-chevron-down": {
+    "title": "Move layer up/down",
+    "content": "Click these buttons to move the different layers up and down in the z-index stack"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "title": "Recurring events test demo (React + Vite)",
+  "description": "This demo is for testing support of recurring events with React renderers",
+  "source": [
+    "index.html",
+    "package.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/components/ScheduleEvent.tsx",
+    "src/lib/AppEventModel.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "title": "Paged Scheduler with mocked Ajax",
+  "description": "This example demonstrates that the Scheduler can access large data sets page by page",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Lazy loading with RTK Query (React + Vite)",
+  "description": "Resources and events are lazily loaded on demand via Redux Toolkit Query, so the scheduler scrolls smoothly through large datasets on both axes.",
+  "source": [
+    "index.html",
+    "package.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/AppResourceModel.ts",
+    "src/main.tsx",
+    "src/services/schedulerApi.ts",
+    "src/store/store.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

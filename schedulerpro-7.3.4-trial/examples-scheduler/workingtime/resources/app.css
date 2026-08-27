@@ -1,0 +1,41 @@
+[data-reference=outer] {
+    display        : flex;
+    flex           : 1;
+    flex-direction : column;
+}
+
+[data-reference=horizontal] {
+    display        : flex;
+    flex           : 1;
+    flex-direction : row;
+}
+
+[data-reference=container] {
+    display  : flex;
+    flex     : 1;
+    overflow : hidden;
+}
+
+[data-reference=info] {
+    padding       : 1em;
+    color         : var(--b-neutral-20);
+    opacity       : .8;
+    transition    : background-color .2s, color .2s;
+    background    : color-mix(in srgb, var(--b-color-orange), var(--b-mix) 80%);
+    border-bottom : 1px solid var(--b-grid-cell-border-color);
+
+    &.not-in-use {
+        background-color : var(--b-neutral-90);
+    }
+}
+
+[data-reference=tools] {
+    flex                : 0 0 15em;
+    border-inline-start : 1px solid var(--b-neutral-90);
+    border-radius       : 0;
+    padding             : 1em;
+
+    .b-field label {
+        flex : 0 0 7em;
+    }
+}

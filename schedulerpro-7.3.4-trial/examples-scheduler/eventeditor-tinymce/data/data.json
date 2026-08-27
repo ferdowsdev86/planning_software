@@ -1,0 +1,143 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "a",
+        "name" : "Arcady",
+        "role" : "Developer"
+      },
+      {
+        "id"   : "b",
+        "name" : "Dave",
+        "role" : "Sales"
+      },
+      {
+        "id"   : "c",
+        "name" : "Henrik",
+        "role" : "Sales"
+      },
+      {
+        "id"   : "d",
+        "name" : "Linda",
+        "role" : "Developer"
+      },
+      {
+        "id"   : "e",
+        "name" : "Maxim",
+        "role" : "Developer"
+      },
+      {
+        "id"   : "f",
+        "name" : "Mike",
+        "role" : "Sales"
+      },
+      {
+        "id"   : "g",
+        "name" : "Lee",
+        "role" : "CEO"
+      },
+      {
+        "id"   : "h",
+        "name" : "Madison",
+        "role" : "CTO"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"          : 1,
+        "resourceId"  : "a",
+        "name"        : "Team Scrum",
+        "startDate"   : "2025-02-07 11:00",
+        "endDate"     : "2025-02-07 13:00",
+        "description" : "<p><strong>Location:</strong> Conference Room A</p><p>A daily stand-up meeting to align the team on progress, discuss blockers, and plan tasks for the day.</p>",
+        "eventType"   : "meeting",
+        "eventColor"  : "red",
+        "iconCls"     : "fa fa-users"
+      },
+      {
+        "id"          : 2,
+        "resourceId"  : "b",
+        "name"        : "Prepare Campaign",
+        "startDate"   : "2025-02-07 12:00",
+        "endDate"     : "2025-02-07 15:00",
+        "description" : "<p><strong>Location:</strong> Home Office</p><p>Brainstorming session to finalize the marketing campaign strategy, including content creation and ad planning.</p>",
+        "eventType"   : "internal",
+        "eventColor"  : "indigo",
+        "iconCls"     : "fa fa-image"
+      },
+      {
+        "id"          : 3,
+        "resourceId"  : "c",
+        "name"        : "Marketing Meeting",
+        "startDate"   : "2025-02-07 13:00",
+        "endDate"     : "2025-02-07 16:00",
+        "description" : "<p><strong>Location:</strong> Client's Office</p><p>Discussion with the client's marketing team to align on campaign objectives and key deliverables.</p>",
+        "eventType"   : "meeting",
+        "eventColor"  : "orange",
+        "iconCls"     : "fa fa-calendar"
+      },
+      {
+        "id"          : 4,
+        "resourceId"  : "d",
+        "name"        : "Coding Session",
+        "startDate"   : "2025-02-07 09:00",
+        "endDate"     : "2025-02-07 11:00",
+        "description" : "<p><strong>Location:</strong> Development Hub</p><p>Focused coding session for implementing new features and bug fixes.</p>",
+        "eventType"   : "internal",
+        "eventColor"  : "indigo",
+        "iconCls"     : "fa fa-code"
+      },
+      {
+        "id"          : 5,
+        "resourceId"  : "e",
+        "name"        : "UX Improvements",
+        "startDate"   : "2025-02-07 10:00",
+        "endDate"     : "2025-02-07 13:00",
+        "description" : "<p><strong>Location:</strong> Remote</p><p>Review and refine UI/UX designs based on user feedback and analytics data.</p>",
+        "type"        : "Dental",
+        "eventType"   : "internal",
+        "eventColor"  : "indigo",
+        "iconCls"     : "fa fa-code"
+      },
+      {
+        "id"          : 6,
+        "resourceId"  : "f",
+        "name"        : "Customer Meeting",
+        "startDate"   : "2025-02-07 11:00",
+        "endDate"     : "2025-02-07 14:00",
+        "description" : "<p><strong>Location:</strong> Client's Office</p><p>Meeting with key stakeholders to discuss service enhancements and future collaboration opportunities.</p>",
+        "type"        : "Medical",
+        "eventType"   : "appointment",
+        "eventColor"  : "orange",
+        "iconCls"     : "fa fa-calendar"
+      },
+      {
+        "id"          : 7,
+        "resourceId"  : "g",
+        "name"        : "Golf",
+        "startDate"   : "2025-02-07 14:00",
+        "endDate"     : "2025-02-07 17:00",
+        "description" : "<p><strong>Location:</strong> Country Club</p><p>A networking event with potential clients and business partners over a round of golf.</p>",
+        "type"        : "Medical",
+        "eventType"   : "appointment",
+        "eventColor"  : "green",
+        "iconCls"     : "fa fa-golf-ball"
+      },
+      {
+        "id"          : 8,
+        "resourceId"  : "h",
+        "name"        : "Golf",
+        "startDate"   : "2025-02-07 14:00",
+        "endDate"     : "2025-02-07 17:00",
+        "description" : "<p><strong>Location:</strong> Client's Golf Club</p><p>A relaxed yet strategic meeting with partners to discuss upcoming collaborations while enjoying a game.</p>",
+        "type"        : "Dental",
+        "eventType"   : "appointment",
+        "eventColor"  : "green",
+        "iconCls"     : "fa fa-golf-ball"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "title": "Inline data demo (Angular)",
+  "description": "This demo shows using inline data for Scheduler Pro",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.data.ts",
+    "src/app/app.module.ts",
+    "src/app/lib/AppResource.ts",
+    "src/app/lib/VehicleCondition.ts",
+    "src/app/lib/VehicleConditionColumn.ts",
+    "src/app/lib/VehicleConditionCombo.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

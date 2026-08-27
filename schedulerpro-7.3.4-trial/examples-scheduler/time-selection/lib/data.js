@@ -1,0 +1,139 @@
+export default class Data {
+    static resources = [
+        {
+            id   : 'a',
+            name : 'Arcady',
+            role : 'Developer'
+        },
+        {
+            id   : 'b',
+            name : 'Dave',
+            role : 'Sales'
+        },
+        {
+            id   : 'c',
+            name : 'Henrik',
+            role : 'Sales'
+        },
+        {
+            id   : 'd',
+            name : 'Linda',
+            role : 'Developer'
+        },
+        {
+            id   : 'e',
+            name : 'Maxim',
+            role : 'Developer'
+        },
+        {
+            id   : 'f',
+            name : 'Mike',
+            role : 'Sales'
+        },
+        {
+            id   : 'g',
+            name : 'Lee',
+            role : 'CEO'
+        },
+        {
+            id   : 'h',
+            name : 'Madison',
+            role : 'CTO'
+        }
+    ];
+
+    static events = [
+        {
+            id         : 1,
+            resourceId : 'a',
+            name       : 'Team scrum',
+            startDate  : '2022-02-07 11:00',
+            endDate    : '2022-02-07 13:00',
+            location   : 'Some office',
+            eventType  : 'meeting',
+            eventColor : '#ff0000',
+            iconCls    : 'fa fa-users'
+        },
+        {
+            id         : 2,
+            resourceId : 'b',
+            name       : 'Prepare campaign',
+            startDate  : '2022-02-07 12:00',
+            endDate    : '2022-02-07 15:00',
+            location   : 'Home office',
+            eventType  : 'internal',
+            eventColor : 'indigo',
+            iconCls    : 'fa fa-image'
+        },
+        {
+            id         : 3,
+            resourceId : 'c',
+            name       : 'Marketing meeting',
+            startDate  : '2022-02-07 13:00',
+            endDate    : '2022-02-07 16:00',
+            location   : 'Customer office',
+            eventType  : 'meeting',
+            eventColor : 'orange',
+            iconCls    : 'fa fa-calendar'
+        },
+        {
+            id         : 4,
+            resourceId : 'd',
+            name       : 'Coding session',
+            startDate  : '2022-02-07 09:00',
+            endDate    : '2022-02-07 11:00',
+            location   : 'Some office',
+            eventType  : 'internal',
+            eventColor : 'indigo',
+            iconCls    : 'fa fa-code'
+        },
+        {
+            id         : 5,
+            resourceId : 'e',
+            name       : 'UX improvements',
+            startDate  : '2022-02-07 10:00',
+            endDate    : '2022-02-07 13:00',
+            location   : 'Home office',
+            type       : 'Dental',
+            eventType  : 'internal',
+            eventColor : 'indigo',
+            iconCls    : 'fa fa-code'
+        },
+        {
+            id         : 6,
+            resourceId : 'f',
+            name       : 'Customer meeting',
+            startDate  : '2022-02-07 11:00',
+            endDate    : '2022-02-07 14:00',
+            location   : 'Customer office',
+            type       : 'Medical',
+            eventType  : 'appointment',
+            eventColor : 'orange',
+            iconCls    : 'fa fa-calendar'
+        },
+        {
+            id         : 7,
+            resourceId : 'g',
+            name       : 'Golf',
+            startDate  : '2022-02-07 14:00',
+            endDate    : '2022-02-07 17:00',
+            location   : 'Home office',
+            type       : 'Medical',
+            eventType  : 'appointment',
+            eventColor : 'green',
+            iconCls    : 'fa fa-golf-ball'
+        },
+        {
+            id         : 8,
+            resourceId : 'h',
+            name       : 'Golf',
+            startDate  : '2022-02-07 14:00',
+            endDate    : '2022-02-07 17:00',
+            location   : 'Customer office',
+            type       : 'Dental',
+            eventType  : 'appointment',
+            eventColor : 'green',
+            iconCls    : 'fa fa-golf-ball'
+        }
+    ];
+}

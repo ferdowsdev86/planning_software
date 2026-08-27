@@ -1,0 +1,271 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "name"     : "Team Alpha",
+        "expanded" : true,
+        "iconCls"  : "fa fa-users",
+        "image"    : false,
+        "children" : [
+          {
+            "id"   : 1,
+            "name" : "Arcady"
+          },
+          {
+            "id"         : 2,
+            "name"       : "Dave",
+            "eventColor" : "green"
+          },
+          {
+            "id"         : 3,
+            "name"       : "Henrik",
+            "eventColor" : "green"
+          },
+          {
+            "id"         : 4,
+            "name"       : "Linda",
+            "eventColor" : "red"
+          }
+        ]
+      },
+      {
+        "name"     : "Team Beta",
+        "expanded" : true,
+        "iconCls"  : "fa fa-users",
+        "image"    : false,
+        "children" : [
+          {
+            "id"         : 5,
+            "name"       : "Maxim",
+            "eventColor" : "red"
+          },
+          {
+            "id"         : 6,
+            "name"       : "Mike",
+            "eventColor" : "red"
+          },
+          {
+            "id"   : 7,
+            "name" : "Lee"
+          },
+          {
+            "id"   : 8,
+            "name" : "Amit"
+          }
+        ]
+      },
+      {
+        "name"     : "Team Black Ops",
+        "expanded" : true,
+        "iconCls"  : "fa fa-users",
+        "image"    : false,
+        "children" : [
+          {
+            "id"         : 9,
+            "name"       : "Kate",
+            "eventColor" : "blue"
+          },
+          {
+            "id"         : 10,
+            "name"       : "Jong",
+            "eventColor" : "blue"
+          },
+          {
+            "id"   : 11,
+            "name" : "Lola"
+          },
+          {
+            "id"   : 12,
+            "name" : "Lisa"
+          }
+        ]
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Hack server (fixed)",
+        "iconCls"      : "fa fa-server",
+        "startDate"    : "2023-05-08T00:00:00",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "draggable"    : false,
+        "resizable"    : true
+      },
+      {
+        "id"           : 2,
+        "name"         : "Cyber attack",
+        "iconCls"      : "fa fa-laptop",
+        "startDate"    : "2023-05-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 3,
+        "name"         : "Port scan",
+        "iconCls"      : "fa fa-user",
+        "startDate"    : "2023-05-09T00:00:00",
+        "duration"     : 2,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 4,
+        "name"         : "Planning",
+        "iconCls"      : "fa fa-users",
+        "startDate"    : "2023-05-09T00:00:00",
+        "duration"     : 1,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 5,
+        "name"         : "Enforce firewall",
+        "startDate"    : "2023-05-09T00:00:00",
+        "iconCls"      : "fa fa-server",
+        "duration"     : 2,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 6,
+        "name"         : "Backup server",
+        "iconCls"      : "fa fa-server",
+        "startDate"    : "2023-05-09T00:00:00",
+        "cls"          : "Special",
+        "duration"     : 2,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Presentation",
+        "iconCls"      : "fa fa-video",
+        "startDate"    : "2023-05-11T00:00:00",
+        "cls"          : "Special",
+        "duration"     : 2,
+        "durationUnit" : "d"
+      },
+      {
+        "id"           : 21,
+        "name"         : "Project Black",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-cog"
+      },
+      {
+        "id"           : 22,
+        "name"         : "Project X",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-cog"
+      },
+      {
+        "id"           : 23,
+        "name"         : "X-Mission",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-user-secret"
+      },
+      {
+        "id"           : 24,
+        "name"         : "Installation",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-circle-check"
+      },
+      {
+        "id"           : 25,
+        "name"         : "Meeting X",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-question"
+      },
+      {
+        "id"           : 26,
+        "name"         : "Meeting",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-user-check"
+      },
+      {
+        "id"           : 27,
+        "name"         : "Fly onsite",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-plane"
+      },
+      {
+        "id"           : 29,
+        "name"         : "Book flight",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-plane"
+      },
+      {
+        "id"           : 30,
+        "name"         : "Covert ops",
+        "duration"     : 2,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-phone"
+      },
+      {
+        "id"           : 31,
+        "name"         : "Covert ops",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-bug"
+      },
+      {
+        "id"           : 32,
+        "name"         : "Secret mission",
+        "duration"     : 1,
+        "durationUnit" : "d",
+        "iconCls"      : "fa fa-fw fa-cog"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : 1,
+        "eventId"    : 1
+      },
+      {
+        "id"         : 2,
+        "resourceId" : 2,
+        "eventId"    : 2
+      },
+      {
+        "id"         : 3,
+        "resourceId" : 3,
+        "eventId"    : 3
+      },
+      {
+        "id"         : 4,
+        "resourceId" : 4,
+        "eventId"    : 4
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 5,
+        "eventId"    : 5
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 6,
+        "eventId"    : 6
+      },
+      {
+        "id"         : 7,
+        "resourceId" : 7,
+        "eventId"    : 7
+      },
+      {
+        "id"         : 8,
+        "resourceId" : 8,
+        "eventId"    : 8
+      }
+    ]
+  }
+}

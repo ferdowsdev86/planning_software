@@ -1,0 +1,34 @@
+:root{
+  --backlog-background:rgba(250, 250, 250, 0.8);
+}
+
+.b-theme-classic-dark{
+  --backlog-background:rgba(80, 80, 87, 0.8);
+}
+
+.backlog{
+  border-bottom:3px solid #777;
+}
+.backlog .b-grid-headers{
+  height:62px;
+}
+.backlog .b-grid-row{
+  border-bottom:none;
+  background:var(--backlog-background);
+}
+
+.b-sch-event{
+  display:grid;
+  grid-template-columns:1fr;
+  align-items:stretch;
+  border-radius:10px;
+}
+.b-sch-event .b-sch-event-content{
+  margin:0 !important;
+  text-align:center;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+/*# sourceMappingURL=app.css.map */

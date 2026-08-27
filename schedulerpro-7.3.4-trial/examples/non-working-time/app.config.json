@@ -1,0 +1,10 @@
+{
+  "title": "Pro non-working time demo",
+  "description": "Shows a Scheduler Pro setup with a working hours calendar and time axis filtering",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

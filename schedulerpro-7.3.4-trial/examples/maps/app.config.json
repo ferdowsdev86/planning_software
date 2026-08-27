@@ -1,0 +1,18 @@
+{
+  "title": "Map integration",
+  "description": "This example shows how to integrate the Scheduler with a Mapbox GL JS API.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Address.js",
+    "lib/AddressSearchField.js",
+    "lib/Drag.js",
+    "lib/MapPanel.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

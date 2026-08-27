@@ -1,0 +1,114 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "bryntum-suite-7.3.4",
+  "documentNamespace": "https://bryntum.com/spdx/bryntum-suite-7.3.4-1784713666478",
+  "creationInfo": {
+    "created": "2026-07-22T09:47:46.478Z",
+    "creators": [
+      "Tool: bryntum-sbom-generator-1.0.0",
+      "Organization: Bryntum"
+    ],
+    "licenseListVersion": "3.19"
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-RootPackage",
+      "name": "bryntum-suite",
+      "versionInfo": "7.3.4",
+      "downloadLocation": "https://bryntum.com",
+      "filesAnalyzed": false,
+      "licenseConcluded": "LicenseRef-Bryntum",
+      "licenseDeclared": "LicenseRef-Bryntum",
+      "copyrightText": "Copyright (c) 2026 Bryntum AB",
+      "supplier": "Organization: Bryntum",
+      "description": "Bryntum Suite - Professional JavaScript UI Components"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-1",
+      "name": "later",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "https://github.com/bunkat/later",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2013 BunKat",
+      "description": "A library for determining recurring schedules",
+      "comment": "Bundled in Engine/lib/Engine/vendor/later/ for Engine product"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-2",
+      "name": "chart.js",
+      "versionInfo": "4.4.2",
+      "downloadLocation": "https://www.chartjs.org",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "(c) 2024 Chart.js Contributors",
+      "description": "Simple yet flexible JavaScript charting library",
+      "comment": "Bundled in Chart/lib/Chart/vendor/chartjs/ for Chart product"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-3",
+      "name": "dom-TreeWalker-polyfill",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "https://github.com/AaronBuxworthy/dom-TreeWalker-polyfill",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Timo Tijhof",
+      "description": "JavaScript implementation of W3 DOM4 TreeWalker interface (Salesforce LWC only)",
+      "comment": "Bundled in Core/lib/Core/override/salesforce/TreeWalker.js for Core (Salesforce) product"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-4",
+      "name": "@bryntum/chronograph",
+      "versionInfo": "1.0.3",
+      "downloadLocation": "https://github.com/bryntum/chronograph",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Nickolay Platonov, Bryntum",
+      "description": "Open-source reactive computational engine, implemented in TypeScript",
+      "comment": "Bundled in Engine/lib/ChronoGraph/ for Engine product"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-RootPackage",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-1"
+    },
+    {
+      "spdxElementId": "SPDXRef-RootPackage",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-2"
+    },
+    {
+      "spdxElementId": "SPDXRef-RootPackage",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-3"
+    },
+    {
+      "spdxElementId": "SPDXRef-RootPackage",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-4"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-RootPackage"
+    }
+  ],
+  "hasExtractedLicensingInfos": [
+    {
+      "licenseId": "LicenseRef-Bryntum",
+      "extractedText": "Bryntum commercial license. See https://bryntum.com/products/grid/docs/guide/Grid/licenses",
+      "name": "Bryntum License",
+      "seeAlsos": [
+        "https://bryntum.com/products/grid/docs/guide/Grid/licenses"
+      ]
+    }
+  ]
+}

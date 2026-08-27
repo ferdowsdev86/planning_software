@@ -1,0 +1,17 @@
+{
+  "title": "Event rendering demo (Vue 3 + Vite)",
+  "description": "This example shows a demo using custom Vue component as event renderer",
+  "source": [
+    "package.json",
+    "public/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/components/VueEventRenderer.vue",
+    "src/lib/CustomEvent.ts",
+    "src/main.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

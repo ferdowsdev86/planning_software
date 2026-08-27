@@ -1,0 +1,16 @@
+{
+  "title": "Custom event editor demo (React)",
+  "description": "This demo contains a React Scheduler control with a custom event editor popup implemented in React.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/components/Popup.js",
+    "src/components/Popup.scss",
+    "src/index.js"
+  ]
+}

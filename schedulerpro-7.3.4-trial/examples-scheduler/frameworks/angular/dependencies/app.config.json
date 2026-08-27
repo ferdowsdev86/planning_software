@@ -1,0 +1,22 @@
+{
+  "title": "Dependencies demo (Angular)",
+  "description": "This example shows how you can visualize dependencies between tasks by loading data using the CrudManager in Angular.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "src/tsconfig.app.json",
+    "src/tsconfig.spec.json",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  ".b-group-title": {
+    "align": {
+      "align": "l-r"
+    },
+    "title": "Click to toggle group collapse",
+    "content": "The summary data will be shown in the header row when the group is collapsed."
+  },
+  ".b-time-axis-group-summary .b-time-axis-tick": {
+    "title": "Group summary",
+    "content": "Displayed below each group. Hover to show explanation tooltip"
+  }
+}

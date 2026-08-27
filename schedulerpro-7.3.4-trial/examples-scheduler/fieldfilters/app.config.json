@@ -1,0 +1,12 @@
+{
+  "title": "Field Filters demo",
+  "description": "Shows how to use FieldFilterPickerGroup to filter the resource and event stores of the Schedule.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/EventFilterPanel.js",
+    "lib/FilterPanel.js",
+    "lib/ResourceFilterPanel.js"
+  ]
+}

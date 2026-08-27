@@ -1,0 +1,16 @@
+{
+  "title": "Sparklines demo",
+  "description": "This example shows how the SparklineColumn can display sparkline charts inline in a Scheduler row.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ],
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

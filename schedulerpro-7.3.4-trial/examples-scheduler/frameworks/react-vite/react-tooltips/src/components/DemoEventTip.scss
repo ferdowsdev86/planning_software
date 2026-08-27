@@ -1,0 +1,65 @@
+// Cancel the default Bryntum tooltip padding
+.react-tooltip .b-tooltip-content {
+    padding : 0;
+}
+
+.event-tip {
+    // Tooltip header with event name
+    header {
+        font-size        : 1.3em;
+        font-weight      : bold;
+        background-color : #fff5e6;
+        margin           : 0;
+        padding          : 0.8em 12px;
+    }
+
+    // Override browser defaults for dl
+    dl {
+        padding      : 1em 12px;
+        margin       : 0;
+        margin-block : 0;
+        display      : flex;
+    }
+
+    // Same size of left and right of the tooltip
+    dl div {
+        flex : 1;
+    }
+
+    dl div:first-child dd {
+        margin-inline-end : 1.2em;
+    }
+
+    // Bold dt content
+    dt {
+        font-weight : bold;
+    }
+
+    // Grid for avatar and times
+    dd {
+        margin-inline         : 0;
+        margin-top            : 0.25em;
+        display               : grid;
+        grid-template-columns : 0.5fr 1fr;
+        white-space           : nowrap;
+        align-items           : center;
+        height                : 4em;
+    }
+
+    // Adjust spacing of grid content
+    .times dd {
+        padding : 0.4em 0;
+
+        label {
+            margin-inline-end : 0.4em;
+        }
+    }
+
+    // Circular resource image
+    .resource-image {
+        width             : 3em;
+        height            : 3em;
+        border-radius     : 100%;
+        margin-inline-end : 0.5em;
+    }
+}

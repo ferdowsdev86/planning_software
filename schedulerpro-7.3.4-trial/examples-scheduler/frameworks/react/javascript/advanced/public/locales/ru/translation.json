@@ -1,0 +1,8 @@
+{
+  "selectLanguage": "Выберите язык",
+  "zoomIn": "Приблизить",
+  "zoomOut": "Уменьшить",
+  "fullscreen": "Полноэкранный",
+  "reload": "Загрузить другие данные",
+  "Request failed with status code 404": "Запрос не выполнен с кодом состояния 404"
+}

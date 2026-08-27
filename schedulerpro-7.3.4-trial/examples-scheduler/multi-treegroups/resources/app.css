@@ -1,0 +1,11 @@
+.b-tree-cell-value {
+    flex-direction : column;
+    align-items    : flex-start;
+
+    .teams {
+        font-size     : 0.8em;
+        color         : var(--b-neutral-65);
+        overflow      : hidden;
+        text-overflow : ellipsis;
+    }
+}

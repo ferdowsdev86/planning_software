@@ -1,0 +1,250 @@
+{
+  "success" : true,
+  "events"  : {
+    "rows" : [
+      {
+        "id"            : 1,
+        "name"          : "Fix broken manhole",
+        "startDate"     : "2021-11-01T10:00",
+        "duration"      : 2,
+        "eventColor"    : "blue",
+        "iconCls"       : "fa fa-wrench",
+        "preamble"      : "110min",
+        "preambleText"  : "Congestion",
+        "preambleIcon"  : "fa fa-bicycle",
+        "preambleCls"   : "congestion",
+        "postamble"     : "45min",
+        "postambleIcon" : "fa fa-helicopter",
+        "address"       : {
+          "name" : "Brooklyn Bridge",
+          "lat"  : 40.7061,
+          "lon"  : -73.9969
+        }
+      },
+      {
+        "id"         : 2,
+        "name"       : "Server upgrade",
+        "eventColor" : "orange",
+        "iconCls"    : "fa fa-sun",
+        "startDate"  : "2021-11-01T14:00",
+        "duration"   : 2.5,
+        "preamble"   : "30min",
+        "postamble"  : "25min",
+        "address"    : {
+          "name" : "Lincoln tunnel",
+          "lat"  : 40.762491,
+          "lon"  : -74.009914
+        }
+      },
+      {
+        "id"        : 3,
+        "name"      : "Customer visit",
+        "iconCls"   : "fa fa-wrench",
+        "startDate" : "2021-11-01T08:00",
+        "duration"  : 3,
+        "preamble"  : "53min",
+        "postamble" : "43min",
+        "address"   : {
+          "name" : "Midtown Manhattan",
+          "lat"  : 40.7549,
+          "lon"  : -73.9840
+        }
+      },
+      {
+        "id"         : 4,
+        "name"       : "Fix broken pipe",
+        "eventColor" : "orange",
+        "iconCls"    : "fa fa-sun",
+        "startDate"  : "2021-11-01T13:00",
+        "duration"   : 6,
+        "preamble"   : "28min",
+        "postamble"  : "29min",
+        "address"    : {
+          "name" : "Broadway",
+          "lat"  : 40.790886,
+          "lon"  : -73.974709
+        }
+      },
+      {
+        "id"        : 5,
+        "name"      : "Fix power outage",
+        "iconCls"   : "fa fa-wrench",
+        "startDate" : "2021-11-01T07:00",
+        "duration"  : 2,
+        "endDate"   : "2021-11-01T09:00",
+        "preamble"  : "35min",
+        "postamble" : "25min",
+        "address"   : {
+          "name" : "Starbucks, Jersey City",
+          "lat"  : 40.726553,
+          "lon"  : -74.033361
+        }
+      },
+      {
+        "id"         : 6,
+        "name"       : "Flooding alert",
+        "iconCls"    : "fa fa-wrench",
+        "startDate"  : "2021-11-01T10:00",
+        "duration"   : 2,
+        "eventColor" : "blue",
+        "preamble"   : "62min",
+        "postamble"  : "44min",
+        "address"    : {
+          "name" : "Union Square",
+          "lat"  : 40.7359,
+          "lon"  : -73.9911
+        }
+      },
+      {
+        "id"         : 7,
+        "name"       : "Redirect traffic",
+        "eventColor" : "orange",
+        "iconCls"    : "fa fa-traffic-light",
+        "startDate"  : "2021-11-01T13:00",
+        "duration"   : 3.5,
+        "preamble"   : "42min",
+        "postamble"  : "55min",
+        "address"    : {
+          "name" : "Kings County Hospital Center",
+          "lat"  : 40.6566,
+          "lon"  : -73.9440
+        }
+      },
+      {
+        "id"         : 8,
+        "name"       : "Fallen tree",
+        "eventColor" : "green",
+        "iconCls"    : "fa fa-tree",
+        "startDate"  : "2021-11-01T08:00",
+        "duration"   : 2,
+        "address"    : {
+          "name" : "1067 Schenectady Ave",
+          "lat"  : 40.647069,
+          "lon"  : -73.932758
+        }
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"    : "r1",
+        "name"  : "Kevin Anderson",
+        "role"  : "Contractor",
+        "image" : "mike"
+      },
+      {
+        "id"    : "r2",
+        "name"  : "Kevin Larson",
+        "role"  : "Contractor",
+        "image" : "amit"
+      },
+      {
+        "id"    : "r3",
+        "name"  : "Brett Hornbach",
+        "role"  : "Contractor",
+        "image" : "angelo"
+      },
+      {
+        "id"    : "r4",
+        "name"  : "Andrew Holt",
+        "role"  : "Contractor",
+        "image" : "jong"
+      },
+      {
+        "id"    : "r5",
+        "name"  : "Nick Arnold",
+        "role"  : "Service technician",
+        "image" : "arnold"
+      },
+      {
+        "id"    : "r6",
+        "name"  : "Matt Daemon",
+        "role"  : "Road Engineer",
+        "image" : "dan"
+      },
+      {
+        "id"    : "r7",
+        "name"  : "Karl Lager",
+        "role"  : "Service technician",
+        "image" : "mark"
+      },
+      {
+        "id"    : "r8",
+        "name"  : "Aaron Wilson",
+        "role"  : "Service technician",
+        "image" : "malik"
+      },
+      {
+        "id"    : "r9",
+        "name"  : "Derek Ronburg",
+        "role"  : "Service technician",
+        "image" : "dave"
+      },
+      {
+        "id"    : "r10",
+        "name"  : "Melinda Patterson",
+        "role"  : "Service technician",
+        "image" : "lola"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "eventId"    : 1,
+        "resourceId" : "r1"
+      },
+      {
+        "id"         : 2,
+        "eventId"    : 2,
+        "resourceId" : "r1"
+      },
+      {
+        "id"         : 3,
+        "eventId"    : 3,
+        "resourceId" : "r2"
+      },
+      {
+        "id"         : 4,
+        "eventId"    : 4,
+        "resourceId" : "r2"
+      },
+      {
+        "id"         : 5,
+        "eventId"    : 5,
+        "resourceId" : "r3"
+      },
+      {
+        "id"         : 6,
+        "eventId"    : 6,
+        "resourceId" : "r4"
+      },
+      {
+        "id"         : 7,
+        "eventId"    : 7,
+        "resourceId" : "r6"
+      },
+      {
+        "id"         : 8,
+        "eventId"    : 8,
+        "resourceId" : "r7"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "startDate" : "2021-11-01",
+        "endDate"   : "2021-11-01T07:00"
+      },
+      {
+        "id"        : 2,
+        "startDate" : "2021-11-01T19:00",
+        "endDate"   : "2021-11-02"
+      }
+    ]
+  }
+}

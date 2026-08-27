@@ -1,0 +1,16 @@
+.b-sch-event-wrap {
+    .b-nested-events-container {
+        background-image : repeating-linear-gradient(135deg, var(--b-neutral-95), var(--b-neutral-95) 3px, var(--b-neutral-100) 3px, var(--b-neutral-100) 6px);
+    }
+
+    &.b-selected,
+    &:hover {
+        .b-nested-events-container {
+            background-image : repeating-linear-gradient(135deg, var(--b-neutral-93), var(--b-neutral-93) 3px, var(--b-neutral-98) 3px, var(--b-neutral-98) 6px);
+        }
+    }
+}
+
+.b-sch-event-tooltip h4 {
+    margin-block : 0.7em 0.2em;
+}

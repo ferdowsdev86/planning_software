@@ -1,0 +1,15 @@
+{
+  "title": "Conflicts demo (Vue 3)",
+  "description": "Shows the conflict resolution popup in action",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

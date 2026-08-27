@@ -1,0 +1,9 @@
+{
+  "title": "Schedule tick cell hover widget",
+  "description": "Shows how to position a widget overlayed at the tick cell that the pointer is hovering",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

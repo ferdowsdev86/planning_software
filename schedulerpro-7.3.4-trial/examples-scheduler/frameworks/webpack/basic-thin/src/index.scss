@@ -1,0 +1,33 @@
+/* FontAwesome is not built-in, but used for icons */
+@import "@bryntum/core-thin/fontawesome/css/fontawesome.css";
+@import "@bryntum/core-thin/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@import "@bryntum/core-thin/core.css";
+@import "@bryntum/grid-thin/grid.css";
+@import "@bryntum/scheduler-thin/scheduler.css";
+
+/* Bryntum theme */
+@import "@bryntum/core-thin/svalbard-light.css";
+@import "@bryntum/core-thin/lib/widget/DemoHeader.css";
+
+
+// Application styling
+
+html,
+body,
+#container,
+{
+    height      : 100%;
+    margin      : 0;
+    display     : flex;
+    font-size   : 14px;
+    font-family : Arial, sans-serif;
+}
+
+body,
+#container {
+    width          : 100%;
+    flex-direction : column;
+    flex           : 1;
+}

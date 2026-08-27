@@ -1,0 +1,669 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "workweek"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"        : "workweek",
+        "name"      : "Work week",
+        "intervals" : [
+          {
+            "recurrentStartDate" : "on Sat",
+            "recurrentEndDate"   : "on Mon",
+            "isWorking"          : false
+          }
+        ]
+      },
+      {
+        "id"                       : "dayshift",
+        "name"                     : "Day shift",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "name"               : "Available",
+            "recurrentStartDate" : "every weekday at 08:00",
+            "recurrentEndDate"   : "every weekday at 18:00",
+            "isWorking"          : true
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "name"       : "Jacob Washington",
+        "role"       : "Automotive Technician",
+        "calendar"   : "dayshift",
+        "type"       : "Technicians",
+        "image"      : false,
+        "eventColor" : "green",
+        "skillIds"   : [
+          4,
+          5
+        ]
+      },
+      {
+        "id"         : 2,
+        "name"       : "David Strauss",
+        "role"       : "Service Technician",
+        "calendar"   : "dayshift",
+        "type"       : "Technicians",
+        "image"      : "dan",
+        "eventColor" : "purple",
+        "skillIds"   : [
+          1,
+          10
+        ]
+      },
+      {
+        "id"         : 3,
+        "name"       : "Henrik Ibsen",
+        "role"       : "Mechanic",
+        "calendar"   : "dayshift",
+        "type"       : "Mechanics",
+        "image"      : "dave",
+        "eventColor" : "blue",
+        "skillIds"   : [
+          5,
+          9
+        ]
+      },
+      {
+        "id"         : 4,
+        "name"       : "Linda von Schmitt",
+        "role"       : "Mechanic",
+        "calendar"   : "dayshift",
+        "type"       : "Mechanics",
+        "image"      : "linda",
+        "eventColor" : "red",
+        "skillIds"   : [
+          1,
+          8
+        ]
+      },
+      {
+        "id"         : 5,
+        "name"       : "Barbara Streisand",
+        "role"       : "Service Technician",
+        "calendar"   : "dayshift",
+        "type"       : "Technicians",
+        "image"      : false,
+        "eventColor" : "orange",
+        "skillIds"   : [
+          2,
+          4
+        ]
+      },
+      {
+        "id"         : 6,
+        "name"       : "Michael Wolf",
+        "role"       : "Mechanic",
+        "calendar"   : "dayshift",
+        "type"       : "Mechanics",
+        "image"      : "george",
+        "eventColor" : "deep-orange",
+        "skillIds"   : [
+          7,
+          8
+        ]
+      },
+      {
+        "id"         : 7,
+        "name"       : "Lee Wong",
+        "role"       : "Service Technician",
+        "calendar"   : "dayshift",
+        "type"       : "Technicians",
+        "image"      : "lee",
+        "eventColor" : "gray",
+        "skillIds"   : [
+          1,
+          6
+        ]
+      },
+      {
+        "id"         : 8,
+        "name"       : "Madison Vik",
+        "role"       : "Auto Body Technician",
+        "calendar"   : "dayshift",
+        "type"       : "Technicians",
+        "image"      : "madison",
+        "eventColor" : "black",
+        "skillIds"   : [
+          1,
+          2
+        ]
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "resourceId"   : 1,
+        "name"         : "Maintenance",
+        "duration"     : 7,
+        "licensePlate" : "SAN7202A",
+        "skillIds"     : [
+          4,
+          5
+        ],
+        "startDate" : "2024-11-04T08:00:00"
+      },
+      {
+        "id"           : 1001,
+        "resourceId"   : 1,
+        "name"         : "Maintenance #2",
+        "duration"     : 6,
+        "licensePlate" : "SAN7202A",
+        "skillIds"     : [
+          4,
+          5
+        ],
+        "startDate" : "2024-11-05T08:00:00"
+      },
+      {
+        "id"           : 1002,
+        "resourceId"   : 1,
+        "name"         : "Maintenance #3",
+        "duration"     : 5,
+        "licensePlate" : "SAN7202A",
+        "skillIds"     : [
+          4,
+          5
+        ],
+        "startDate" : "2024-11-06T08:00:00"
+      },
+      {
+        "id"           : 1003,
+        "resourceId"   : 1,
+        "name"         : "Seat repair",
+        "duration"     : 6,
+        "licensePlate" : "SAN7202A",
+        "skillIds"     : [
+          4,
+          5
+        ],
+        "startDate" : "2024-11-07T08:00:00"
+      },
+      {
+        "id"           : 2,
+        "resourceId"   : 2,
+        "name"         : "Brake check",
+        "duration"     : 6,
+        "licensePlate" : "ASN282A",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-04T10:00:00"
+      },
+      {
+        "id"           : 2002,
+        "resourceId"   : 2,
+        "name"         : "Windshield fix",
+        "duration"     : 1,
+        "licensePlate" : "HQP353C",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-05T10:00:00"
+      },
+      {
+        "id"           : 2003,
+        "resourceId"   : 2,
+        "name"         : "Door paint",
+        "duration"     : 1,
+        "licensePlate" : "HQP353C",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-06T10:00:00"
+      },
+      {
+        "id"           : 3,
+        "resourceId"   : 3,
+        "name"         : "Oil change",
+        "duration"     : 5,
+        "licensePlate" : "ZZW233Q",
+        "skillIds"     : [
+          5
+        ],
+        "startDate" : "2024-11-04T11:00:00"
+      },
+      {
+        "id"           : 4,
+        "resourceId"   : 4,
+        "name"         : "Tire rotate",
+        "duration"     : 7,
+        "licensePlate" : "AM890X",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-05T08:00:00"
+      },
+      {
+        "id"           : 5,
+        "resourceId"   : 5,
+        "name"         : "Battery check",
+        "duration"     : 5,
+        "licensePlate" : "SAQ27-2",
+        "skillIds"     : [
+          2,
+          4
+        ],
+        "startDate" : "2024-11-05T10:00:00"
+      },
+      {
+        "id"           : 6,
+        "resourceId"   : 6,
+        "name"         : "Plug replace",
+        "duration"     : 6,
+        "licensePlate" : "ASIO-22X",
+        "skillIds"     : [
+          7
+        ],
+        "startDate" : "2024-11-05T11:00:00"
+      },
+      {
+        "id"           : 7,
+        "resourceId"   : 7,
+        "name"         : "Filter change",
+        "duration"     : 7,
+        "licensePlate" : "XN9B22X",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-06T08:00:00"
+      },
+      {
+        "id"           : 8,
+        "resourceId"   : 8,
+        "name"         : "Coolant flush",
+        "duration"     : 6,
+        "licensePlate" : "POI72XW",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-06T10:00:00"
+      },
+      {
+        "id"           : 9,
+        "resourceId"   : 5,
+        "name"         : "Trans. fluid",
+        "duration"     : 5,
+        "licensePlate" : "ASY820",
+        "skillIds"     : [
+          4
+        ],
+        "startDate" : "2024-11-06T11:00:00"
+      },
+      {
+        "id"           : 10,
+        "resourceId"   : 2,
+        "name"         : "Brake insp.",
+        "duration"     : 5,
+        "licensePlate" : "NXI221",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-07T08:00:00"
+      },
+      {
+        "id"           : 11,
+        "resourceId"   : 3,
+        "name"         : "Wheel align",
+        "duration"     : 2,
+        "licensePlate" : "JAP282X",
+        "skillIds"     : [
+          9
+        ],
+        "startDate" : "2024-11-07T10:00:00"
+      },
+      {
+        "id"           : 12,
+        "resourceId"   : 6,
+        "name"         : "Exhaust check",
+        "duration"     : 6,
+        "licensePlate" : "QQIX087",
+        "skillIds"     : [
+          8
+        ],
+        "startDate" : "2024-11-07T11:00:00"
+      },
+      {
+        "id"           : 13,
+        "resourceId"   : 1,
+        "name"         : "Wiper replace",
+        "duration"     : 5,
+        "licensePlate" : "WQIG123",
+        "skillIds"     : [
+          5
+        ],
+        "startDate" : "2024-11-08T08:00:00"
+      },
+      {
+        "id"           : 14,
+        "resourceId"   : 4,
+        "name"         : "Suspension chk",
+        "duration"     : 6,
+        "licensePlate" : "QWEG123",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-08T10:00:00"
+      },
+      {
+        "id"           : 15,
+        "resourceId"   : 8,
+        "name"         : "Diagnostic",
+        "duration"     : 5,
+        "licensePlate" : "XMVO790",
+        "skillIds"     : [
+          2
+        ],
+        "startDate" : "2024-11-08T11:00:00"
+      },
+      {
+        "id"           : 16,
+        "resourceId"   : 1,
+        "name"         : "Engine Check",
+        "duration"     : 7,
+        "licensePlate" : "ENG723A",
+        "skillIds"     : [
+          5
+        ],
+        "startDate" : "2024-11-11T08:00:00"
+      },
+      {
+        "id"           : 17,
+        "resourceId"   : 2,
+        "name"         : "Clutch Adjustment",
+        "duration"     : 6,
+        "licensePlate" : "CLT290A",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-11T10:00:00"
+      },
+      {
+        "id"           : 18,
+        "resourceId"   : 3,
+        "name"         : "Tire Balancing",
+        "duration"     : 5,
+        "licensePlate" : "BAL238X",
+        "skillIds"     : [
+          5
+        ],
+        "startDate" : "2024-11-11T13:00:00"
+      },
+      {
+        "id"           : 19,
+        "resourceId"   : 4,
+        "name"         : "Starter Motor Replace",
+        "duration"     : 8,
+        "licensePlate" : "STR881P",
+        "skillIds"     : [
+          1,
+          8
+        ],
+        "startDate" : "2024-11-12T08:00:00"
+      },
+      {
+        "id"           : 20,
+        "resourceId"   : 5,
+        "name"         : "Air Conditioning Repair",
+        "duration"     : 6,
+        "licensePlate" : "AIR402X",
+        "skillIds"     : [
+          2
+        ],
+        "startDate" : "2024-11-12T11:00:00"
+      },
+      {
+        "id"           : 21,
+        "resourceId"   : 6,
+        "name"         : "Fuel Pump Inspection",
+        "duration"     : 5,
+        "licensePlate" : "FUE820R",
+        "skillIds"     : [
+          7
+        ],
+        "startDate" : "2024-11-13T09:00:00"
+      },
+      {
+        "id"           : 22,
+        "resourceId"   : 7,
+        "name"         : "Timing Belt Replace",
+        "duration"     : 3,
+        "licensePlate" : "TIM990T",
+        "skillIds"     : [
+          1
+        ],
+        "startDate" : "2024-11-13T10:00:00"
+      },
+      {
+        "id"           : 23,
+        "resourceId"   : 8,
+        "name"         : "Radiator Flush",
+        "duration"     : 6,
+        "licensePlate" : "RAD721C",
+        "skillIds"     : [
+          1,
+          2
+        ],
+        "startDate" : "2024-11-14T08:00:00"
+      },
+      {
+        "id"           : 24,
+        "resourceId"   : 1,
+        "name"         : "Alternator Repair",
+        "duration"     : 5,
+        "licensePlate" : "ALT911X",
+        "skillIds"     : [
+          5
+        ],
+        "startDate" : "2024-11-14T11:00:00"
+      },
+      {
+        "id"           : 25,
+        "resourceId"   : 3,
+        "name"         : "Dashboard Diagnostics",
+        "duration"     : 4,
+        "licensePlate" : "DIA833Q",
+        "skillIds"     : [
+          5,
+          9
+        ],
+        "startDate" : "2024-11-15T08:00:00"
+      }
+    ]
+  },
+  "unplanned" : {
+    "rows" : [
+      {
+        "id"           : 101,
+        "name"         : "Scheduled maintenance",
+        "duration"     : 6,
+        "licensePlate" : "XNZ930",
+        "skillIds"     : [
+          1,
+          2
+        ]
+      },
+      {
+        "id"           : 102,
+        "name"         : "Brake pad replace",
+        "duration"     : 8,
+        "licensePlate" : "FLZ930A",
+        "iconCls"      : "fa fa-car",
+        "skillIds"     : [
+          7
+        ]
+      },
+      {
+        "id"           : 103,
+        "name"         : "Oil change",
+        "duration"     : 7,
+        "licensePlate" : "XCN2081",
+        "skillIds"     : [
+          5
+        ]
+      },
+      {
+        "id"           : 104,
+        "name"         : "Tire rotation",
+        "duration"     : 1,
+        "licensePlate" : "ABT20XU",
+        "skillIds"     : [
+          4
+        ]
+      },
+      {
+        "id"           : 105,
+        "name"         : "Battery inspection",
+        "duration"     : 7,
+        "licensePlate" : "ZPT23LU",
+        "skillIds"     : [
+          2
+        ]
+      },
+      {
+        "id"           : 106,
+        "name"         : "Spark plug replace",
+        "duration"     : 2,
+        "licensePlate" : "ZP32TC89",
+        "skillIds"     : [
+          6
+        ]
+      },
+      {
+        "id"           : 107,
+        "name"         : "Air filter replace",
+        "duration"     : 6,
+        "licensePlate" : "TAP780",
+        "skillIds"     : [
+          1
+        ]
+      },
+      {
+        "id"           : 108,
+        "name"         : "Coolant flush",
+        "duration"     : 5,
+        "licensePlate" : "BUR809",
+        "skillIds"     : [
+          9
+        ]
+      },
+      {
+        "id"           : 109,
+        "name"         : "Transmission fluid change",
+        "duration"     : 6,
+        "licensePlate" : "BUR809",
+        "skillIds"     : [
+          7
+        ]
+      },
+      {
+        "id"           : 110,
+        "name"         : "Brake inspection",
+        "duration"     : 8,
+        "licensePlate" : "BUR809",
+        "skillIds"     : [
+          2
+        ]
+      },
+      {
+        "id"           : 111,
+        "name"         : "Wheel alignment",
+        "duration"     : 8,
+        "licensePlate" : "XYU082",
+        "skillIds"     : [
+          4
+        ]
+      },
+      {
+        "id"           : 112,
+        "name"         : "Exhaust system inspection",
+        "duration"     : 6,
+        "licensePlate" : "NMV5675",
+        "skillIds"     : [
+          9
+        ]
+      },
+      {
+        "id"           : 113,
+        "name"         : "Wiper blade replace",
+        "duration"     : 5,
+        "licensePlate" : "ABUY65",
+        "skillIds"     : [
+          10
+        ]
+      },
+      {
+        "id"           : 114,
+        "name"         : "Suspension check",
+        "duration"     : 1,
+        "licensePlate" : "POQ707A",
+        "skillIds"     : [
+          4
+        ]
+      },
+      {
+        "id"           : 115,
+        "name"         : "Diagnostic scan",
+        "duration"     : 5,
+        "licensePlate" : "NAO495",
+        "skillIds"     : [
+          1
+        ]
+      }
+    ]
+  },
+  "skills" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "name" : "Diagnostics"
+      },
+      {
+        "id"   : 2,
+        "name" : "Electrical"
+      },
+      {
+        "id"   : 3,
+        "name" : "Brakes"
+      },
+      {
+        "id"   : 4,
+        "name" : "Suspension"
+      },
+      {
+        "id"   : 5,
+        "name" : "Engine"
+      },
+      {
+        "id"   : 6,
+        "name" : "HVAC"
+      },
+      {
+        "id"   : 7,
+        "name" : "Transmission"
+      },
+      {
+        "id"   : 8,
+        "name" : "Welding"
+      },
+      {
+        "id"   : 9,
+        "name" : "Hydraulics"
+      },
+      {
+        "id"   : 10,
+        "name" : "Bodywork"
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+/* Dont want background transitions when plugging a new project */
+.b-prevent-event-transitions .b-sch-event {
+  transition : none !important;
+}

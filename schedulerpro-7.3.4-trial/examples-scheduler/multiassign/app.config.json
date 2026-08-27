@@ -1,0 +1,8 @@
+{
+  "title": "Multi assignment demo",
+  "description": "Shows a basic scheduler using an SchedulerAssignmentStore to support multi assignment",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

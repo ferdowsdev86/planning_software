@@ -1,0 +1,10 @@
+{
+  "title": "Export Scheduler to Excel",
+  "description": "This demo shows a custom solution of exporting Scheduler data to Excel without involving the server based on a third party library called write-excel-file (https://www.npmjs.com/package/write-excel-file)",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ],
+  "disableCodePen": true
+}

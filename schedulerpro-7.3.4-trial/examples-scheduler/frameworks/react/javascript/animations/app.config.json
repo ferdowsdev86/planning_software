@@ -1,0 +1,14 @@
+{
+  "title": "Animations demo (React)",
+  "description": "This demo contains a React Scheduler component and lets you play with the out-of-the-box animations after data changes.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

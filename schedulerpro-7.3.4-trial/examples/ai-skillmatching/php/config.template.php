@@ -1,0 +1,12 @@
+<?php exit; ?>
+OPENAI_ENDPOINT=your_endpoint_url
+OPENAI_API_KEY=your_api_key
+
+AZURE_OPENAI_ENDPOINT=your_endpoint_url
+AZURE_OPENAI_API_KEY=your_api_key
+
+AZURE_OPENAI_TTS_ENDPOINT=your_endpoint_url
+AZURE_OPENAI_TTS_API_KEY=your_api_key
+
+AZURE_OPENAI_WHISPER_ENDPOINT=your_endpoint_url
+AZURE_OPENAI_WHISPER_API_KEY=your_api_key

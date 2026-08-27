@@ -1,0 +1,15 @@
+{
+  "[data-ref='serverAddress'] input": {
+    "title": "Address",
+    "content": "Address of the server",
+    "align": "t0-b0"
+  },
+  "[data-ref='userName'] input": {
+    "title": "User name",
+    "content": "Other users will see this name when you connect"
+  },
+  "[data-ref='autoSync'] input": {
+    "title": "Auto sync",
+    "content": "Disable to make several changes, then enable to send them all at once"
+  }
+}

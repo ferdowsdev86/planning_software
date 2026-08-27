@@ -1,0 +1,10 @@
+{
+  "title": "Pro Constraints demo",
+  "description": "Using constraints on events to affect their scheduling",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Scheduling Orders",
+  "description": "Create orders and drag onto the Scheduler to schedule",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/Machine.js",
+    "lib/Order.js",
+    "lib/OrderForm.js",
+    "lib/OrderGrid.js",
+    "lib/ProductionProject.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ]
+}

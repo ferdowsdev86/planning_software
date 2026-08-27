@@ -1,0 +1,6 @@
+{
+  "body": {
+    "title": "Lazy loading",
+    "content": "Scroll down to load more resources and events. Each load request will be logged to the console (F12)"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Pro Event effort demo",
+  "description": "Show events that distribute their effort across their duration. Scheduler Pro and a Resource Utilization visualize effort allocation in sync.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,3 @@
+.b-sch-event-wrap.b-style-dashed:not(.b-milestone-wrap) .b-sch-event {
+    justify-content : flex-start;
+}

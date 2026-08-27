@@ -1,0 +1,14 @@
+{
+  "title": "PDF export demo (React)",
+  "description": "This demo contains a React Scheduler with the PDF export feature enabled. You can also export to PNG & Excel",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

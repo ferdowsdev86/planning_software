@@ -1,0 +1,10 @@
+{
+  "title": "Separating resources into a \"locked\" section at the top",
+  "description": "Demonstrates showing a set of resources locked at the top of the Scheduler",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

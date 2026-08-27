@@ -1,0 +1,12 @@
+{
+  ".b-scheduler-header": {
+    "title": "Localized header",
+    "content": "The timeaxis header texts are localized. The same goes for column headers and context menu items",
+    "align": "t-b"
+  },
+  "[data-ref=infoButton]": {
+    "title": "Change locale",
+    "content": "By clicking this button and selecting one",
+    "align": "t100-b100"
+  }
+}

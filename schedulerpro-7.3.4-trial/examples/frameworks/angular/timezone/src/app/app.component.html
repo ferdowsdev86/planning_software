@@ -1,0 +1,35 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div class="demo-app">
+  <div class="demo-toolbar">
+    <div>Current timezone:</div>
+    <bryntum-combo
+        [items]="timeZones"
+        [value]="currentTimeZone"
+        (onSelect)="onTimeZoneSelect($event)"
+        [disabled]="isLoading"
+        filterOperator="*"
+        ariaLabel="Current time zone"
+    ></bryntum-combo>
+    <div class="spacer"></div>
+    <bryntum-button-group
+    [items]="groupItems"
+    ></bryntum-button-group>
+  </div>
+
+  <bryntum-scheduler-pro
+      #schedulerpro
+      [resourceImagePath]="schedulerProProps.resourceImagePath"
+      [timeZone]="schedulerProProps.timeZone"
+      [eventRenderer]="eventRenderer"
+      [timeRangesFeature]="schedulerProProps.timeRangesFeature"
+      [nestedEventsFeature]="schedulerProProps.nestedEventsFeature"
+      [resourceTimeRangesFeature]="schedulerProProps.resourceTimeRangesFeature"
+      [rowHeight]="schedulerProProps.rowHeight"
+      [barMargin]="schedulerProProps.barMargin"
+      [smoothZoom]="schedulerProProps.smoothZoom"
+      [viewPreset]="schedulerProProps.viewPreset"
+      [columns]="schedulerProProps.columns"
+      [project]="schedulerProProps.project"
+  ></bryntum-scheduler-pro>
+</div>

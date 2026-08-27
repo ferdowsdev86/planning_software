@@ -1,0 +1,18 @@
+{
+  ".b-sch-event-wrap[data-event-id='2']": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b-t"
+    },
+    "title": "Double\u00a0click\u00a0this\u00a0event",
+    "content": "and edit its <b>effort</b> to see how it gets distributed for <b>Lee</b> resource in the resource utilization view."
+  },
+  "[data-region='normal'] .b-resource-row[data-record-id='resource-r2'] rect[data-index='3']": {
+    "maxWidth": "20em",
+    "align": {
+      "align": "b0-t"
+    },
+    "title": "Check\u00a0Lee\u00a0resource\u00a0allocation",
+    "content": "The resource is overallocated now. Try reducing <b>Prototype</b> task effort in the top view and see how it gets distributed here."
+  }
+}

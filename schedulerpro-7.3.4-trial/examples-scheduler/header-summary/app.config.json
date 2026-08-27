@@ -1,0 +1,10 @@
+{
+  "title": "Header summary demo",
+  "description": "This example shows a summary in the timeaxis header",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

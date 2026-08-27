@@ -1,0 +1,121 @@
+/* This is styles the demos in FiddlePanels the Bryntum Docs Browser */
+
+.draggable-event-container {
+    margin-top          : 1em;
+    border              : 1px solid rgb(69, 87, 241);
+    border-radius       : 5px;
+    user-select         : none;
+    -webkit-user-select : none;
+    padding             : 0 0 0.4em 0;
+    flex                : 1;
+
+    legend {
+        margin-bottom           : 0.4em;
+        border-top-left-radius  : 3px;
+        border-top-right-radius : 3px;
+        background-color        : rgb(69, 87, 241);
+        padding                 : 0.3em;
+        color                   : #fff;
+    }
+
+    .draggable-event {
+        height           : 25px;
+        align-items      : center;
+        display          : flex;
+        overflow         : hidden;
+        text-overflow    : ellipsis;
+        background-color : rgb(36, 159, 188);
+        border-radius    : 4px;
+        color            : #fdfdfd;
+        padding-left     : 0.3em;
+        font-size        : 0.9em;
+        margin           : 0.4em 0.4em 0 0.4em;
+        cursor           : pointer;
+    }
+}
+
+&.vertical {
+    flex-direction : column;
+    align-items    : stretch;
+    align-content  : center;
+}
+
+.centeredColumn {
+    width           : 100%;
+    align-items     : center;
+    justify-content : center;
+    display         : flex;
+    flex-direction  : column;
+}
+
+:root, :host {
+    --b-tooltip-plain-font-size : 1em !important;
+}
+
+.b-fiddle-theme-container {
+    display         : flex;
+    flex-direction  : row;
+    max-width       : 100%;
+    flex-wrap       : wrap;
+    justify-content : center;
+    align-items     : center;
+    gap             : 0.7em;
+    color           : var(--b-text-2);
+
+    &.grid-layout {
+        display         : grid;
+        column-gap      : 1em;
+        row-gap         : 1.5em;
+        justify-content : center;
+    }
+
+    > .b-panel:not(.b-field-set, .b-date-range-picker),
+    > .b-chart:first-child:last-child {
+        width         : 100%;
+        overflow      : clip;
+
+        box-shadow    : var(--b-elevation-1);
+        border-radius : var(--b-widget-border-radius-large);
+    }
+
+    > * {
+        max-width : 100%;
+    }
+
+    .b-grid-base {
+        width : 100%;
+    }
+
+    &.vertical {
+        flex-direction : column;
+        align-content  : center;
+    }
+
+    /* Examples inject a <p> element as a header. */
+    > p:first-child {
+        font-size    : 1rem;
+        margin-block : 0 0.5em;
+
+        code {
+            font-size : 1em !important;
+        }
+    }
+
+    > .b-container {
+        flex       : unset;
+        align-self : center;
+        overflow   : visible; /* allow ripples to escape */
+    }
+}
+
+kbd {
+    display          : inline-block;
+    border-radius    : .25em;
+    padding          : 0.2em 0.5em;
+    margin           : 0 0.2em;
+    line-height      : 1;
+
+    border           : 1px solid var(--b-neutral-80);
+    box-shadow       : 0 1px 0 var(--b-neutral-80);
+    background-color : var(--b-neutral-97);
+}

@@ -1,0 +1,277 @@
+{
+  "resources" : {
+    "rows" : [
+      {
+        "id"    : "angelo",
+        "name"  : "Angelo Morales",
+        "image" : "angelo.png",
+        "team"  : "Devs",
+        "role"  : "Frontend"
+      },
+      {
+        "id"    : "celia",
+        "name"  : "Celia Grimes",
+        "image" : "celia.png",
+        "team"  : "Devs",
+        "role"  : "Backend"
+      },
+      {
+        "id"    : "dave",
+        "name"  : "Dave Marshal",
+        "image" : "dave.png",
+        "team"  : "Devs",
+        "role"  : "Backend"
+      },
+      {
+        "id"    : "george",
+        "name"  : "George van Pool",
+        "image" : "george.png",
+        "team"  : "Sales",
+        "role"  : "Accountant"
+      },
+      {
+        "id"    : "gloria",
+        "name"  : "Gloria Hernandez",
+        "image" : "gloria.png",
+        "team"  : "Sales",
+        "role"  : "Marketing"
+      },
+      {
+        "id"    : "kate",
+        "name"  : "Kate Jones",
+        "image" : "kate.png",
+        "team"  : "DevOps",
+        "role"  : "DBA"
+      },
+      {
+        "id"    : "lisa",
+        "name"  : "Lisa Gunderson",
+        "image" : "lisa.png",
+        "team"  : "DevOps",
+        "role"  : "Sysadmin"
+      },
+      {
+        "id"    : "mark",
+        "name"  : "Mark Rogers",
+        "image" : "mark.png",
+        "team"  : "Sales",
+        "role"  : "Organizer"
+      },
+      {
+        "id"    : "maxim",
+        "name"  : "Maxim Ivanov",
+        "image" : "maxim.png",
+        "team"  : "Devs",
+        "role"  : "Frontend"
+      },
+      {
+        "id"    : "steve",
+        "name"  : "Steve Williams",
+        "image" : "steve.png",
+        "team"  : "DevOps",
+        "role"  : "SQL wiz"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "startDate" : "2022-09-19",
+        "endDate"   : "2022-09-22",
+        "name"      : "Vue conference"
+      },
+      {
+        "id"         : 2,
+        "startDate"  : "2022-09-22",
+        "endDate"    : "2022-09-24",
+        "name"       : "AFK",
+        "eventColor" : "gray"
+      },
+      {
+        "id"        : 3,
+        "startDate" : "2022-09-23",
+        "endDate"   : "2022-09-25",
+        "name"      : "Coding"
+      },
+      {
+        "id"        : 4,
+        "startDate" : "2022-09-22",
+        "endDate"   : "2022-09-25",
+        "name"      : "Pair programming"
+      },
+      {
+        "id"        : 5,
+        "startDate" : "2022-09-22",
+        "endDate"   : "2022-09-25",
+        "name"      : "Coding"
+      },
+      {
+        "id"         : 6,
+        "startDate"  : "2022-09-20",
+        "endDate"    : "2022-09-22",
+        "name"       : "AFK",
+        "eventColor" : "gray"
+      },
+      {
+        "id"        : 7,
+        "startDate" : "2022-09-20",
+        "endDate"   : "2022-09-23",
+        "name"      : "Evaluate Laravel"
+      },
+      {
+        "id"        : 8,
+        "startDate" : "2022-09-19",
+        "endDate"   : "2022-09-24",
+        "name"      : "Advanced SQL course"
+      },
+      {
+        "id"         : 9,
+        "startDate"  : "2022-09-24",
+        "endDate"    : "2022-09-25",
+        "name"       : "AFK",
+        "eventColor" : "gray"
+      },
+      {
+        "id"        : 10,
+        "startDate" : "2022-09-19",
+        "endDate"   : "2022-09-22",
+        "name"      : "Inspirational kickoff"
+      },
+      {
+        "id"        : 11,
+        "startDate" : "2022-09-22",
+        "endDate"   : "2022-09-25",
+        "name"      : "Organize campaign"
+      },
+      {
+        "id"        : 12,
+        "startDate" : "2022-09-23",
+        "endDate"   : "2022-09-25",
+        "name"      : "Revenue report"
+      },
+      {
+        "id"        : 13,
+        "startDate" : "2022-09-22",
+        "endDate"   : "2022-09-24",
+        "name"      : "Taxes"
+      },
+      {
+        "id"        : 14,
+        "startDate" : "2022-09-19",
+        "endDate"   : "2022-09-23",
+        "name"      : "Bookkeeping"
+      },
+      {
+        "id"        : 15,
+        "startDate" : "2022-09-19",
+        "endDate"   : "2022-09-24",
+        "name"      : "Check backup"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "angelo",
+        "eventId"    : 1
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "maxim",
+        "eventId"    : 1
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "gloria",
+        "eventId"    : 1
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "angelo",
+        "eventId"    : 2
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "angelo",
+        "eventId"    : 3
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "dave",
+        "eventId"    : 4
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "celia",
+        "eventId"    : 4
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "maxim",
+        "eventId"    : 5
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "celia",
+        "eventId"    : 6
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "dave",
+        "eventId"    : 7
+      },
+      {
+        "id"         : 11,
+        "resourceId" : "kate",
+        "eventId"    : 7
+      },
+      {
+        "id"         : 12,
+        "resourceId" : "lisa",
+        "eventId"    : 8
+      },
+      {
+        "id"         : 13,
+        "resourceId" : "steve",
+        "eventId"    : 8
+      },
+      {
+        "id"         : 14,
+        "resourceId" : "lisa",
+        "eventId"    : 9
+      },
+      {
+        "id"         : 15,
+        "resourceId" : "mark",
+        "eventId"    : 10
+      },
+      {
+        "id"         : 16,
+        "resourceId" : "mark",
+        "eventId"    : 11
+      },
+      {
+        "id"         : 17,
+        "resourceId" : "george",
+        "eventId"    : 12
+      },
+      {
+        "id"         : 18,
+        "resourceId" : "george",
+        "eventId"    : 13
+      },
+      {
+        "id"         : 19,
+        "resourceId" : "george",
+        "eventId"    : 14
+      },
+      {
+        "id"         : 20,
+        "resourceId" : "kate",
+        "eventId"    : 15
+      }
+    ]
+  }
+}

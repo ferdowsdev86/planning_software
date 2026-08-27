@@ -1,0 +1,377 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "weekends"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"        : "weekends",
+        "name"      : "Weekends",
+        "intervals" : [
+          {
+            "recurrentStartDate" : "on Sat",
+            "recurrentEndDate"   : "on Mon",
+            "isWorking"          : false
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Drilling station",
+        "iconCls"  : "fa fa-bore-hole",
+        "capacity" : 4,
+        "color"    : "#00539C"
+      },
+      {
+        "id"       : 2,
+        "name"     : "Assembly station",
+        "iconCls"  : "fa fa-screwdriver-wrench",
+        "capacity" : 3,
+        "color"    : "#089C92"
+      },
+      {
+        "id"       : 3,
+        "name"     : "Weighing station",
+        "iconCls"  : "fa fa-weight-hanging",
+        "capacity" : 6,
+        "color"    : "#9C8210"
+      },
+      {
+        "id"       : 4,
+        "name"     : "Measuring station",
+        "iconCls"  : "fa fa-ruler",
+        "capacity" : 3,
+        "color"    : "#00539C"
+      },
+      {
+        "id"       : 5,
+        "name"     : "Painting station",
+        "iconCls"  : "fa fa-brush",
+        "capacity" : 2,
+        "color"    : "#089C92"
+      },
+      {
+        "id"       : 6,
+        "name"     : "Inspection station",
+        "iconCls"  : "fa fa-helmet-safety",
+        "capacity" : 2,
+        "color"    : "#9C8210"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Drilling, large dimensions",
+        "children" : [
+          {
+            "id"          : 11,
+            "name"        : "Metallic compounds",
+            "startDate"   : "2022-01-03",
+            "duration"    : 1,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 12,
+            "name"        : "Lead shielding",
+            "startDate"   : "2022-01-03",
+            "duration"    : 1,
+            "percentDone" : 60,
+            "hazardous"   : true
+          },
+          {
+            "id"          : 13,
+            "name"        : "Alloy constructions",
+            "startDate"   : "2022-01-03",
+            "duration"    : 1,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 14,
+            "name"        : "Polycarbonate housings",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 20
+          }
+        ]
+      },
+      {
+        "id"       : 2,
+        "name"     : "Drilling, small dimensions",
+        "children" : [
+          {
+            "id"          : 21,
+            "name"        : "Circuit boards",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 95
+          },
+          {
+            "id"          : 22,
+            "name"        : "Wooden assemblies",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 40
+          },
+          {
+            "id"          : 23,
+            "name"        : "Plastic prototypes",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 20
+          },
+          {
+            "id"          : 24,
+            "name"        : "Bakelite boxes",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 30
+          }
+        ]
+      },
+      {
+        "id"       : 3,
+        "name"     : "Manual assembly",
+        "children" : [
+          {
+            "id"          : 31,
+            "name"        : "Prototype kit",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 80
+          },
+          {
+            "id"          : 32,
+            "name"        : "Prefab model",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 70
+          },
+          {
+            "id"          : 33,
+            "name"        : "James project",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 60
+          },
+          {
+            "id"          : 34,
+            "name"        : "Extra order",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 5
+          }
+        ]
+      },
+      {
+        "id"       : 4,
+        "name"     : "Automatized assembly",
+        "children" : [
+          {
+            "id"          : 41,
+            "name"        : "Project Banjo",
+            "startDate"   : "2022-01-07",
+            "duration"    : 1,
+            "percentDone" : 20
+          },
+          {
+            "id"          : 42,
+            "name"        : "OEM batch",
+            "startDate"   : "2022-01-07",
+            "duration"    : 1,
+            "percentDone" : 10
+          }
+        ]
+      },
+      {
+        "id"       : 5,
+        "name"     : "Maintenance",
+        "children" : [
+          {
+            "id"          : 51,
+            "name"        : "Cleaning",
+            "startDate"   : "2022-01-03",
+            "duration"    : 2,
+            "percentDone" : 90
+          },
+          {
+            "id"          : 52,
+            "name"        : "Lubrication",
+            "startDate"   : "2022-01-04",
+            "duration"    : 2,
+            "percentDone" : 20
+          },
+          {
+            "id"          : 53,
+            "name"        : "Calibration",
+            "startDate"   : "2022-01-05",
+            "duration"    : 2,
+            "percentDone" : 10
+          },
+          {
+            "id"          : 54,
+            "name"        : "Test run",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 0
+          }
+        ]
+      },
+      {
+        "id"       : 6,
+        "name"     : "Pre production",
+        "children" : [
+          {
+            "id"          : 61,
+            "name"        : "Project Banjo",
+            "startDate"   : "2022-01-03",
+            "duration"    : 1,
+            "percentDone" : 100
+          },
+          {
+            "id"          : 62,
+            "name"        : "James project",
+            "startDate"   : "2022-01-03",
+            "duration"    : 1,
+            "percentDone" : 80
+          }
+        ]
+      },
+      {
+        "id"       : 7,
+        "name"     : "Spec compliance",
+        "children" : [
+          {
+            "id"          : 71,
+            "name"        : "Reruns",
+            "startDate"   : "2022-01-05",
+            "duration"    : 1,
+            "percentDone" : 70
+          },
+          {
+            "id"          : 72,
+            "name"        : "James project",
+            "startDate"   : "2022-01-05",
+            "duration"    : 1,
+            "percentDone" : 50
+          }
+        ]
+      },
+      {
+        "id"       : 8,
+        "name"     : "Quality control",
+        "children" : [
+          {
+            "id"          : 81,
+            "name"        : "James project",
+            "startDate"   : "2022-01-07",
+            "duration"    : 1,
+            "percentDone" : 0
+          }
+        ]
+      },
+      {
+        "id"       : 9,
+        "name"     : "Primer",
+        "children" : [
+          {
+            "id"          : 91,
+            "name"        : "Polycarbonate housings",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 70
+          },
+          {
+            "id"          : 92,
+            "name"        : "Semi-soft shelling",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 50
+          },
+          {
+            "id"          : 93,
+            "name"        : "Chassis",
+            "startDate"   : "2022-01-04",
+            "duration"    : 1,
+            "percentDone" : 90
+          }
+        ]
+      },
+      {
+        "id"       : 10,
+        "name"     : "Varnish",
+        "children" : [
+          {
+            "id"          : 101,
+            "name"        : "Chassis",
+            "startDate"   : "2022-01-06",
+            "duration"    : 1,
+            "percentDone" : 10
+          }
+        ]
+      },
+      {
+        "id"       : 20,
+        "name"     : "Delivery inspection",
+        "children" : [
+          {
+            "id"          : 201,
+            "name"        : "James project",
+            "startDate"   : "2022-01-07",
+            "duration"    : 1,
+            "percentDone" : 10
+          }
+        ]
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      { "id" : 1, "event" : 1, "resource" : 1 },
+      { "id" : 11, "event" : 11, "resource" : 1 },
+      { "id" : 12, "event" : 12, "resource" : 1 },
+      { "id" : 13, "event" : 13, "resource" : 1 },
+      { "id" : 14, "event" : 14, "resource" : 1 },
+      { "id" : 2, "event" : 2, "resource" : 1 },
+      { "id" : 21, "event" : 21, "resource" : 1 },
+      { "id" : 22, "event" : 22, "resource" : 1 },
+      { "id" : 23, "event" : 23, "resource" : 1 },
+      { "id" : 24, "event" : 24, "resource" : 1 },
+      { "id" : 3, "event" : 3, "resource" : 2 },
+      { "id" : 31, "event" : 31, "resource" : 2 },
+      { "id" : 32, "event" : 32, "resource" : 2 },
+      { "id" : 33, "event" : 33, "resource" : 2 },
+      { "id" : 34, "event" : 34, "resource" : 2 },
+      { "id" : 4, "event" : 4, "resource" : 2 },
+      { "id" : 41, "event" : 41, "resource" : 2 },
+      { "id" : 42, "event" : 42, "resource" : 2 },
+      { "id" : 5, "event" : 5, "resource" : 3 },
+      { "id" : 51, "event" : 51, "resource" : 3 },
+      { "id" : 52, "event" : 52, "resource" : 3 },
+      { "id" : 53, "event" : 53, "resource" : 3 },
+      { "id" : 54, "event" : 54, "resource" : 3 },
+      { "id" : 6, "event" : 6, "resource" : 4 },
+      { "id" : 61, "event" : 61, "resource" : 4 },
+      { "id" : 62, "event" : 62, "resource" : 4 },
+      { "id" : 7, "event" : 7, "resource" : 4 },
+      { "id" : 71, "event" : 71, "resource" : 4 },
+      { "id" : 72, "event" : 72, "resource" : 4 },
+      { "id" : 8, "event" : 8, "resource" : 4 },
+      { "id" : 81, "event" : 81, "resource" : 4 },
+      { "id" : 9, "event" : 9, "resource" : 5 },
+      { "id" : 91, "event" : 91, "resource" : 5 },
+      { "id" : 92, "event" : 92, "resource" : 5 },
+      { "id" : 93, "event" : 93, "resource" : 5 },
+      { "id" : 10, "event" : 10, "resource" : 5 },
+      { "id" : 101, "event" : 101, "resource" : 5 },
+      { "id" : 20, "event" : 20, "resource" : 6 },
+      { "id" : 201, "event" : 201, "resource" : 6 }
+    ]
+  }
+}

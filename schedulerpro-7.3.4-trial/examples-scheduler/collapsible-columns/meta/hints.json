@@ -1,0 +1,6 @@
+{
+  "[data-ref=collapseExpand]": {
+    "title": "Expand collapsed columns",
+    "content": "This set of columns starts collapsed, click to expand them"
+  }
+}

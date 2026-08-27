@@ -1,0 +1,8 @@
+{
+  "title": "Infinite Timeline Scroll",
+  "description": "A scheduler which contains a year's worth of events and may be scrolled continuously so that all events may be visited",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

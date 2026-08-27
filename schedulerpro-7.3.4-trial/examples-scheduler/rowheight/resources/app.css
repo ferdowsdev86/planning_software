@@ -1,0 +1,49 @@
+.tiny,
+.tiny .b-sch-event-content {
+    font-size : .75em !important;
+}
+
+[data-ref=horizontal] {
+    display        : flex;
+    flex           : 1;
+    flex-direction : row;
+}
+
+[data-ref=scheduler] {
+    flex     : 1;
+    overflow : hidden;
+
+    > div {
+        width : 100%;
+    }
+}
+
+[data-ref=tools] {
+    border-inline-start : 0;
+    border-radius       : 0;
+    padding             : 0;
+
+    .b-field {
+        width         : 100%;
+        margin-bottom : 1em;
+    }
+
+    > div {
+        justify-content : center;
+
+        .b-panel-content {
+            > .b-widget {
+                flex : 1 0 100%;
+            }
+
+            .b-field label {
+                flex : 0 0 7em;
+            }
+        }
+    }
+}
+
+/* Make the sticky content same size for all cells, looks a bit nicer when stuck that way */
+.b-sticky-cell-content {
+    height : 2.5em;
+}

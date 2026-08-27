@@ -1,0 +1,8 @@
+{
+  "title": "Milestone layout demo",
+  "description": "Shows the different options available to make milestones part of the event layout",
+  "source": [
+    "app.js",
+    "index.html"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  ".b-grid-merged-cells .b-grid-cell": {
+    "title": "Merged cells",
+    "content": "Cells for the same team are merged, as long as Scheduler is sorted by that column"
+  }
+}

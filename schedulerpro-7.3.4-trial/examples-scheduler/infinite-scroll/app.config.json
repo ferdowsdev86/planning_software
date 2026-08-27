@@ -1,0 +1,12 @@
+{
+  "title": "Infinite scroll with lazy loading",
+  "description": "Shows a Scheduler with both infinite timeline scroll as well as infinite resource scroll. The backend is made in PHP.",
+  "source": [
+    "app.js",
+    "data/events.json",
+    "data/resources.json",
+    "data/timeranges.json",
+    "index.html"
+  ],
+  "disableCodePen": true
+}

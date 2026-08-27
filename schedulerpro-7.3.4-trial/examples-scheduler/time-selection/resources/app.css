@@ -1,0 +1,17 @@
+.b-selected-time-span button {
+    background      : transparent;
+    border-radius   : 50%;
+    width           : 1em;
+    height          : 1em;
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    color           : inherit;
+    border          : 0;
+    padding         : 0.8em;
+    cursor          : pointer;
+
+    &:hover {
+        background : #ffffff33;
+    }
+}

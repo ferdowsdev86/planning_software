@@ -1,0 +1,21 @@
+{
+  "[data-event-id='2'] .b-sch-event-segment.b-first": {
+    "title": "First segment",
+    "content": "First segment dragging moves the whole event",
+    "align": "b80-t0"
+  },
+  "[data-event-id='2'] .b-sch-event-segment[data-segment='1']": {
+    "title": "Other segments",
+    "content": "Other segments can be dragged and resized individually",
+    "align": "b0-t0"
+  },
+  "[data-event-id='2'] .b-sch-event-segment.b-last": {
+    "title": "Segments merge",
+    "content": "Segments merge when you drag/resize them close to each other so they touch",
+    "align": "t50-b0"
+  },
+  "[data-event-id='16']": {
+    "title": "Splitting an event",
+    "content": "To split an event please right click it and pick \"Split event\" menu entry"
+  }
+}

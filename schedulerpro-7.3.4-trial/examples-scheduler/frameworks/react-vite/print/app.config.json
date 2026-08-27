@@ -1,0 +1,17 @@
+{
+  "title": "Print demo with React JSX component (React + Vite)",
+  "description": "This demo contains a React Scheduler with the Print feature enabled while using JSX event and cell renderer",
+  "source": [
+    "index.html",
+    "package.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/AppEventModel.ts",
+    "src/main.tsx",
+    "src/vite-env.d.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

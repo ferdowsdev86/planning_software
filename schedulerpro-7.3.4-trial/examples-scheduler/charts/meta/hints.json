@@ -1,0 +1,14 @@
+{
+  ".b-chart-type-thumbnail[data-id=pie]": {
+    "title": "Pre-defined chart types",
+    "content": "Choose from among the most useful common chart types out of the box. Charts are rendered using the third-party <a target=\"_blank\" href=\"https://github.com/chartjs/Chart.js\">Chart.js library</a> (<a target=\"_blank\" href=\"https://github.com/chartjs/Chart.js/blob/master/LICENSE.md\">MIT license</a>)."
+  },
+  ".b-chart-appearance-tab": {
+    "title": "Customize the chart",
+    "content": "Explore other designer tabs to fully customize the chart's appearance"
+  },
+  ".b-grid-cell": {
+    "title": "Create more charts",
+    "content": "Right-click a grid cell and select New Chart to create a chart from the selected cells"
+  }
+}

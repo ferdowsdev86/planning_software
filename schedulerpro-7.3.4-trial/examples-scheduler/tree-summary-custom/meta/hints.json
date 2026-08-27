@@ -1,0 +1,7 @@
+{
+  ".b-over-allocated": {
+    "title": "Tree Summary",
+    "content": "A tooltip is displayed on mouseover, showing how much the resource is currently overallocated.",
+    "align": "t2-b0"
+  }
+}

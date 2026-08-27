@@ -1,0 +1,24 @@
+:root {
+    --b-resource-utilization-resource-bar-color                      : var(--b-neutral-100);
+    --b-resource-utilization-resource-bar-hover-color                : var(--b-neutral-100);
+    --b-resource-utilization-resource-underallocated-bar-color       : var(--b-neutral-100);
+    --b-resource-utilization-resource-underallocated-bar-hover-color : var(--b-neutral-100);
+    --b-resource-utilization-resource-overallocated-bar-color        : color-mix(in srgb, var(--b-color-red), var(--b-mix) 90%);
+    --b-resource-utilization-resource-overallocated-bar-hover-color  : color-mix(in srgb, var(--b-color-red), var(--b-mix) 80%);
+}
+
+text.b-overallocated {
+    --b-resource-utilization-resource-bar-legend-text-fill : color-mix(in srgb, var(--b-color-red), var(--b-opposite) 40%);
+}
+
+.b-assignment-info {
+    dt {
+        font-weight   : 400;
+        margin-bottom : 0.2em;
+    }
+
+    dd {
+        margin-inline-start : 0;
+        font-size           : 0.8em;
+    }
+}

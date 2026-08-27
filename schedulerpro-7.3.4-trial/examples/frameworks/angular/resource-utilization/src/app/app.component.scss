@@ -1,0 +1,62 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/material3-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example-webpack.scss";
+
+:root {
+    --b-resource-utilization-resource-bar-color                      : var(--b-neutral-100);
+    --b-resource-utilization-resource-bar-hover-color                : var(--b-neutral-100);
+    --b-resource-utilization-resource-underallocated-bar-color       : var(--b-neutral-100);
+    --b-resource-utilization-resource-underallocated-bar-hover-color : var(--b-neutral-100);
+    --b-resource-utilization-resource-overallocated-bar-color        : color-mix(in srgb, var(--b-color-red), var(--b-mix) 90%);
+    --b-resource-utilization-resource-overallocated-bar-hover-color  : color-mix(in srgb, var(--b-color-red), var(--b-mix) 80%);
+}
+
+.b-scheduler-pro {
+    /* Override example-webpack.scss */
+    margin-bottom : 2em !important;
+}
+
+.b-resource-utilization {
+    /* Override example-webpack.scss */
+    margin-top : 2em !important;
+
+    .b-grid-cell {
+        background : var(--b-grid-cell-background);
+    }
+
+    .b-column-lines-canvas {
+        z-index : 4;
+    }
+
+    svg g rect.b-series-index-0 {
+        rx           : 1;
+        ry           : 1;
+        stroke       : var(--b-neutral-100);
+        stroke-width : 10px;
+    }
+
+    text.b-overallocated {
+        --b-resource-utilization-resource-bar-legend-text-fill : color-mix(in srgb, var(--b-color-red), var(--b-opposite) 40%);
+    }
+}
+
+.b-assignment-info {
+    dt {
+        font-weight   : 400;
+        margin-bottom : 0.2em;
+    }
+
+    dd {
+        margin-inline-start : 0;
+        font-size           : 0.8em;
+    }
+}

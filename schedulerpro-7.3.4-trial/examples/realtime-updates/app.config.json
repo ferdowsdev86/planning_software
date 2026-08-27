@@ -1,0 +1,18 @@
+{
+  "title": "SchedulerPro realtime updates demo",
+  "description": "Shows changes made by other clients in real time",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/model/Assignment.js",
+    "lib/model/Event.js",
+    "lib/websocket/ProjectWebSocketHandlerMixin.js",
+    "lib/websocket/ProjectWebSocketSubscriberMixin.js",
+    "lib/websocket/WebSocketHelper.js",
+    "lib/websocket/WebSocketManager.js",
+    "lib/websocket/WebSocketProjectModel.js",
+    "lib/widget/LoginWidget.js",
+    "lib/widget/UsersContainer.js",
+    "resources/app.css"
+  ]
+}

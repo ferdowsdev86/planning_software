@@ -1,0 +1,9 @@
+{
+  "title": "Resource collapsing demo",
+  "description": "Using `eventLayout` field of the resource model you can control the collapsed state. \"stack\" means expanded, \"none\" means collapsed.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ]
+}

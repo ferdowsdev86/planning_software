@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Th.js';
+import '../../../lib/SchedulerPro/localization/Th.js';
+import './shared.locale.Th.js';
+
+const locale = {
+
+    localeName : 'Th',
+    localeDesc : 'ไทย',
+    localeCode : 'th',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'การดำเนินการ',
+        Active              : 'ใช้งาน',
+        Allocation          : 'การจัดสรร',
+        Calendar            : 'ปฏิทิน',
+        City                : 'เมือง',
+        Condition           : 'เงื่อนไข',
+        Consultant          : 'ที่ปรึกษา',
+        Contractor          : 'ผู้รับเหมา',
+        Doctor              : 'แพทย์',
+        Driver              : 'คนขับ',
+        Expedition          : 'การเดินทาง',
+        'First name'        : 'ชื่อแรก',
+        Inspector           : 'ผู้ตรวจสอบ',
+        Lag                 : 'ความล่าช้า',
+        Manager             : 'ผู้จัดการ',
+        Name                : 'ชื่อ',
+        Projects            : 'โครงการ',
+        Property            : 'ทรัพย์สิน',
+        Rating              : 'คะแนน',
+        Resource            : 'ทรัพยากร',
+        Role                : 'บทบาท',
+        Score               : 'คะแนน',
+        Shift               : 'กะ',
+        'Speaker rating'    : 'การประเมินผู้พูด',
+        Staff               : 'พนักงาน',
+        Station             : 'สถานี',
+        Surname             : 'นามสกุล',
+        Tasks               : 'งาน',
+        Technicians         : 'ช่างเทคนิค',
+        Type                : 'ประเภท',
+        'Vehicle Condition' : 'สภาพยานพาหนะ',
+        'Work hours'        : 'ชั่วโมงทำงาน',
+        Worker              : 'คนงาน'
+    },
+
+    Button : {
+        '10K events'                  : '10K เหตุการณ์',
+        '1K events'                   : '1K เหตุการณ์',
+        '5K events'                   : '5K เหตุการณ์',
+        'Add exception'               : 'เพิ่มข้อยกเว้น',
+        'Add invalid calendar'        : 'เพิ่มปฏิทินที่ไม่ถูกต้อง',
+        'Add invalid dependency'      : 'เพิ่มการพึ่งพาที่ไม่ถูกต้อง',
+        'Add order'                   : 'เพิ่มคำสั่งซื้อ',
+        'Add task'                    : 'เพิ่มงาน',
+        'Add week'                    : 'เพิ่มสัปดาห์',
+        Apr                           : 'เม.ย.',
+        Aug                           : 'ส.ค.',
+        August                        : 'สิงหาคม',
+        'Auto-schedule'               : 'จัดตารางอัตโนมัติ',
+        'Bar settings'                : 'การตั้งค่าบาร์',
+        Cancel                        : 'ยกเลิก',
+        'Change working time'         : 'เปลี่ยนเวลาทำงาน',
+        'City - Resource'             : 'เมือง - ทรัพยากร',
+        Custom                        : 'กำหนดเอง',
+        Dark                          : 'มืด',
+        Dec                           : 'ธ.ค.',
+        Default                       : 'ค่าเริ่มต้น',
+        'Default layouts'             : 'รูปแบบเริ่มต้น',
+        Delete                        : 'ลบ',
+        Dependencies                  : 'การพึ่งพา',
+        'Drag & resize settings'      : 'การตั้งค่าลากและปรับขนาด',
+        Edit                          : 'แก้ไข',
+        'Edit calendar'               : 'แก้ไขปฏิทิน',
+        'Enable mouse interaction'    : 'เปิดใช้งานการโต้ตอบด้วยเมาส์',
+        Feb                           : 'ก.พ.',
+        'Filter out non-working time' : 'กรองเวลาที่ไม่ทำงานออก',
+        'Hide scheduled'              : 'ซ่อนที่กำหนดเวลา',
+        'Highlight 9-10am + 2-4pm'    : 'เน้น 9-10น. + 2-4น.',
+        'Highlight while dragging'    : 'เน้นขณะลาก',
+        'Horizontal mode'             : 'โหมดแนวนอน',
+        Jan                           : 'ม.ค.',
+        Jul                           : 'ก.ค.',
+        Jun                           : 'มิ.ย.',
+        'Layout function'             : 'ฟังก์ชันการจัดวาง',
+        Light                         : 'สว่าง',
+        Login                         : 'เข้าสู่ระบบ',
+        Logout                        : 'ออกจากระบบ',
+        Mar                           : 'มี.ค.',
+        March                         : 'มีนาคม',
+        May                           : 'พ.ค.',
+        'New event'                   : 'เหตุการณ์ใหม่',
+        'Next day'                    : 'วันถัดไป',
+        Nov                           : 'พ.ย.',
+        Oct                           : 'ต.ค.',
+        Overlap                       : 'ทับซ้อน',
+        Pack                          : 'แพ็ค',
+        'Previous day'                : 'วันก่อนหน้า',
+        Reset                         : 'รีเซ็ต',
+        'Reset data'                  : 'รีเซ็ตข้อมูล',
+        'Resource - City'             : 'ทรัพยากร - เมือง',
+        'Resource ranges'             : 'ช่วงทรัพยากร',
+        Save                          : 'บันทึก',
+        Sep                           : 'ก.ย.',
+        'Show setup time'             : 'แสดงเวลาเตรียมการ',
+        Stack                         : 'ซ้อน',
+        Sync                          : 'ซิงค์',
+        Today                         : 'วันนี้',
+        'Vertical mode'               : 'โหมดแนวตั้ง',
+        'Zoom in'                     : 'ซูมเข้า',
+        'Zoom out'                    : 'ซูมออก'
+    },
+
+    Checkbox : {
+        Cultural                : 'วัฒนธรรม',
+        'Draw around parents'   : 'วาดรอบพ่อแม่',
+        'Enable bar tooltip'    : 'เปิดใช้งานคำแนะนำแถบ',
+        Music                   : 'ดนตรี',
+        'Show bar texts'        : 'แสดงข้อความบาร์',
+        'Show max allocation'   : 'แสดงการจัดสรรสูงสุด',
+        'Show non working time' : 'แสดงเวลาที่ไม่ทำงาน',
+        Sports                  : 'กีฬา',
+        Technology              : 'เทคโนโลยี'
+    },
+
+    Slider : {
+        'Max capacity' : 'ความจุสูงสุด',
+        'Row height'   : 'ความสูงของแถว'
+    },
+
+    Label : {
+        Days                        : 'วัน',
+        'Group by'                  : 'จัดกลุ่มตาม',
+        Months                      : 'เดือน',
+        Settings                    : 'การตั้งค่า',
+        'Viewing a repeating event' : 'กำลังดูเหตุการณ์ที่เกิดซ้ำ'
+    },
+
+    Combo : {
+        'Current timezone' : 'เขตเวลาในปัจจุบัน',
+        'Group events by'  : 'จัดกลุ่มเหตุการณ์ตาม',
+        Parent             : 'ผู้ปกครอง',
+        Resources          : 'ทรัพยากร',
+        Show               : 'แสดง'
+    },
+
+    NumberField : {
+        '% complete' : '% เสร็จสมบูรณ์',
+        Events       : 'เหตุการณ์',
+        Every        : 'ทุก',
+        Resources    : 'ทรัพยากร'
+    },
+
+    TextField : {
+        Doctor           : 'แพทย์',
+        Name             : 'ชื่อ',
+        'Server address' : 'ที่อยู่เซิร์ฟเวอร์',
+        Username         : 'ชื่อผู้ใช้'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'เลือกเพื่อแสดงเส้นการจัดสรรทรัพยากรสูงสุด',
+        'Check to show resource allocation in the bars'                                                            : 'เลือกเพื่อแสดงการจัดสรรทรัพยากรในบาร์',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'เลือกเพื่อแสดงคำแนะนำเมื่อเลื่อนเมาส์เหนือแถบ',
+        'Click to group by City - Resource'                                                                        : 'คลิกเพื่อจัดกลุ่มตามเมือง - ทรัพยากร',
+        'Click to group by Resource - City'                                                                        : 'คลิกเพื่อจัดกลุ่มตามทรัพยากร - เมือง',
+        'Collapse all groups'                                                                                      : 'ยุบกลุ่มทั้งหมด',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'ปิดใช้งานคุณสมบัติการจัดกลุ่มแบบต้นไม้และกลับไปที่มุมมองทรัพยากร - การมอบหมายเริ่มต้น',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'ป้อนจำนวนเหตุการณ์ต่อทรัพยากรเพื่อสร้างและกด [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'ป้อนจำนวนแถวทรัพยากรเพื่อสร้างและกด [ENTER]',
+        'Expand all groups'                                                                                        : 'ขยายกลุ่มทั้งหมด',
+        Friday                                                                                                     : 'วันศุกร์',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'หากสองส่วนถูกวางติดกัน คุณสามารถเลือกให้รวมกันหรือแยกกันได้',
+        Monday                                                                                                     : 'วันจันทร์',
+        Saturday                                                                                                   : 'วันเสาร์',
+        Sunday                                                                                                     : 'วันอาทิตย์',
+        Thursday                                                                                                   : 'วันพฤหัสบดี',
+        'Toggle layout'                                                                                            : 'สลับรูปแบบ',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'พยายามปรับเหตุการณ์ที่ไม่ได้วางแผนให้เข้ากับกรอบเวลาที่แสดงอยู่ในปัจจุบัน',
+        Tuesday                                                                                                    : 'วันอังคาร',
+        'View next day'                                                                                            : 'ดูวันถัดไป',
+        'View previous day'                                                                                        : 'ดูวันก่อนหน้า',
+        'View today, to see the current time line'                                                                 : 'ดูวันนี้เพื่อดูเส้นเวลาในปัจจุบัน',
+        Wednesday                                                                                                  : 'วันพุธ'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'รวมส่วนที่ติดกันอัตโนมัติ',
+        'Auto-send'                    : 'ส่งอัตโนมัติ',
+        'Auto-sync'                    : 'ซิงค์อัตโนมัติ',
+        'Compact mode'                 : 'โหมดกะทัดรัด',
+        'Constrain drag to row'        : 'จำกัดการลากไปที่แถว',
+        'Dark mode'                    : 'โหมดมืด',
+        'Days are working by default'  : 'วันที่ทำงานตามค่าเริ่มต้น',
+        'Enable bar tooltip'           : 'เปิดใช้งานคำแนะนำแถบ',
+        'Enable highlighting'          : 'เปิดใช้งานการเน้น',
+        'Enable mouse interaction'     : 'เปิดใช้งานการโต้ตอบเมาส์',
+        'Enable task drag drop'        : 'เปิดใช้งานการลากและวางงาน',
+        'Filter out non-working time'  : 'กรองเวลาที่ไม่ทำงาน',
+        'Highlight 9-10am + 2-4pm'     : 'เน้นเวลา 9-10 น. + 2-4 น.',
+        'Highlight while dragging'     : 'เน้นขณะลาก',
+        'Show non working time'        : 'แสดงเวลาที่ไม่ทำงาน',
+        'Show setup time'              : 'แสดงเวลาเตรียมการ',
+        'Show summaries'               : 'แสดงสรุป',
+        'Snap to grid'                 : 'ยึดติดกับกริด',
+        'View Planned dates'           : 'ดูวันที่ที่วางแผนไว้'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

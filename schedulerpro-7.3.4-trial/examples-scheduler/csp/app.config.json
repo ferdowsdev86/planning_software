@@ -1,0 +1,9 @@
+{
+  "title": "CSP demo",
+  "description": "This example uses a Content-Security-Policy meta tag to show that Scheduler works with CSP.",
+  "source": [
+    "app.js",
+    "index.html"
+  ],
+  "disableCodePen": true
+}

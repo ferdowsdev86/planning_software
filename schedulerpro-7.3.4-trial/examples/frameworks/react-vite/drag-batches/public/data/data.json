@@ -1,0 +1,495 @@
+{
+  "success" : true,
+  "orders"  : {
+    "rows" : [
+      {
+        "id"          : 1001,
+        "name"        : "Door frames",
+        "customer"    : "BMW",
+        "size"        : 35,
+        "type"        : 1,
+        "firstTaskId" : 1,
+        "lastTaskId"  : 61,
+        "eventColor"  : "blue"
+      },
+      {
+        "id"          : 1002,
+        "customer"    : "Volvo cars",
+        "name"        : "Spare parts",
+        "type"        : 2,
+        "size"        : 60,
+        "firstTaskId" : 7,
+        "lastTaskId"  : 13,
+        "eventColor"  : "green"
+      },
+      {
+        "id"         : 1003,
+        "name"       : "Steering wheel repair",
+        "type"       : 3,
+        "customer"   : "Mitsubishi",
+        "size"       : 100,
+        "eventColor" : "purple"
+      },
+      {
+        "id"         : 1004,
+        "name"       : "Seat replacement",
+        "type"       : 2,
+        "customer"   : "Porsche",
+        "size"       : 40,
+        "eventColor" : "pink"
+      },
+      {
+        "id"         : 1005,
+        "name"       : "Battery replacement",
+        "type"       : 1,
+        "customer"   : "Tesla",
+        "size"       : 60,
+        "eventColor" : "indigo"
+      }
+    ]
+  },
+  "templates" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Space shuttle",
+        "children" : [
+          {
+            "name"       : "Weld",
+            "resourceId" : 1,
+            "duration"   : 3
+          },
+          {
+            "name"       : "Drill",
+            "resourceId" : 2,
+            "duration"   : 2
+          },
+          {
+            "name"       : "Press",
+            "resourceId" : 3,
+            "preamble"   : "25 min",
+            "postamble"  : "20 min",
+            "duration"   : 3.5
+          },
+          {
+            "name"       : "Cut",
+            "resourceId" : 4,
+            "preamble"   : "15 min",
+            "postamble"  : "30 min",
+            "duration"   : 2
+          },
+          {
+            "name"       : "Inspect",
+            "resourceId" : 5,
+            "preamble"   : "15 min",
+            "duration"   : 3
+          },
+          {
+            "name"       : "Pack",
+            "resourceId" : 6,
+            "duration"   : 3
+          }
+        ]
+      },
+      {
+        "id"       : 2,
+        "name"     : "Launch pad service structure",
+        "children" : [
+          {
+            "name"       : "Setup",
+            "resourceId" : 3,
+            "duration"   : 3
+          },
+          {
+            "name"       : "Drill",
+            "resourceId" : 2,
+            "duration"   : 2
+          },
+          {
+            "name"       : "Press",
+            "resourceId" : 3,
+            "duration"   : 3.5
+          },
+          {
+            "name"       : "Cut",
+            "resourceId" : 4,
+            "duration"   : 2
+          },
+          {
+            "name"       : "Inspect",
+            "resourceId" : 5,
+            "duration"   : 3
+          },
+          {
+            "name"       : "Pack",
+            "resourceId" : 6,
+            "duration"   : 0
+          }
+        ]
+      },
+      {
+        "id"       : 3,
+        "name"     : "Satellite parts",
+        "children" : [
+          {
+            "name"       : "Weld",
+            "resourceId" : 1,
+            "duration"   : 3
+          },
+          {
+            "name"       : "Drill",
+            "resourceId" : 2,
+            "duration"   : 2
+          },
+          {
+            "name"       : "Press",
+            "resourceId" : 3,
+            "duration"   : 3.5
+          },
+          {
+            "name"       : "Cut",
+            "resourceId" : 4,
+            "duration"   : 2
+          },
+          {
+            "name"       : "Inspect",
+            "resourceId" : 5,
+            "duration"   : 3
+          },
+          {
+            "name"       : "Pack",
+            "resourceId" : 6,
+            "duration"   : 3
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Cutting station #1",
+        "calendar" : "day",
+        "image"    : false,
+        "running"  : true,
+        "capacity" : 200,
+        "iconCls"  : "fa fa-cut"
+      },
+      {
+        "id"       : 2,
+        "name"     : "Cutting station #2",
+        "calendar" : "late",
+        "running"  : true,
+        "image"    : false,
+        "capacity" : 140,
+        "iconCls"  : "fa fa-cut"
+      },
+      {
+        "id"       : 3,
+        "name"     : "Paint",
+        "calendar" : "late",
+        "running"  : true,
+        "image"    : false,
+        "capacity" : 110,
+        "iconCls"  : "fa fa-paint-roller"
+      },
+      {
+        "id"       : 4,
+        "name"     : "Workstation F1",
+        "capacity" : 210,
+        "running"  : true,
+        "image"    : false,
+        "iconCls"  : "fa fa-tools"
+      },
+      {
+        "id"       : 5,
+        "name"     : "Workstation F2",
+        "capacity" : 150,
+        "running"  : true,
+        "image"    : false,
+        "iconCls"  : "fa fa-tools"
+      },
+      {
+        "id"            : 6,
+        "name"          : "Packing Terminal F2",
+        "capacity"      : 230,
+        "running"       : false,
+        "statusMessage" : "Power outage",
+        "image"         : false,
+        "iconCls"       : "fa fa-box"
+      },
+      {
+        "id"       : 7,
+        "name"     : "Pickup Terminal A14",
+        "capacity" : 500,
+        "running"  : true,
+        "image"    : false,
+        "iconCls"  : "fa fa-truck"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"          : 1,
+        "name"        : "Weld",
+        "orderId"     : 1001,
+        "startDate"   : "2025-04-06T06:00:00",
+        "duration"    : 2,
+        "contact"     : "Steve",
+        "percentDone" : 100
+      },
+      {
+        "id"          : 2,
+        "name"        : "Drill",
+        "orderId"     : 1001,
+        "duration"    : 2,
+        "contact"     : "Steve",
+        "preamble"    : "20 min",
+        "postamble"   : "10 min",
+        "percentDone" : 80
+      },
+      {
+        "id"       : 3,
+        "name"     : "Press",
+        "orderId"  : 1001,
+        "duration" : 2,
+        "note"     : "Go slow, high quality required",
+        "contact"  : "Steve"
+      },
+      {
+        "id"        : 4,
+        "name"      : "Cut",
+        "orderId"   : 1001,
+        "duration"  : 2,
+        "preamble"  : "25 min",
+        "postamble" : "20 min",
+        "contact"   : "Steve"
+      },
+      {
+        "id"       : 5,
+        "name"     : "Inspect",
+        "orderId"  : 1001,
+        "duration" : 2,
+        "contact"  : "Steve"
+      },
+      {
+        "id"       : 6,
+        "name"     : "Pack",
+        "orderId"  : 1001,
+        "duration" : 2,
+        "contact"  : "Steve"
+      },
+      {
+        "id"       : 61,
+        "name"     : "Pickup",
+        "orderId"  : 1001,
+        "duration" : 0,
+        "contact"  : "Steve"
+      },
+      {
+        "id"          : 7,
+        "name"        : "Weld",
+        "orderId"     : 1002,
+        "startDate"   : "2025-04-07T07:00",
+        "duration"    : 2,
+        "contact"     : "Megan",
+        "percentDone" : 90
+      },
+      {
+        "id"       : 8,
+        "name"     : "Drill",
+        "orderId"  : 1002,
+        "duration" : 2,
+        "contact"  : "Steve",
+        "phone"    : "555-451237"
+      },
+      {
+        "id"       : 9,
+        "name"     : "Press",
+        "orderId"  : 1002,
+        "duration" : 2,
+        "contact"  : "Megan"
+      },
+      {
+        "id"       : 10,
+        "name"     : "Cut",
+        "orderId"  : 1002,
+        "duration" : 2,
+        "contact"  : "Megan"
+      },
+      {
+        "id"       : 11,
+        "name"     : "Inspect",
+        "orderId"  : 1002,
+        "duration" : 2,
+        "contact"  : "Megan"
+      },
+      {
+        "id"       : 12,
+        "name"     : "Pack",
+        "orderId"  : 1002,
+        "duration" : 2,
+        "contact"  : "Steve"
+      },
+      {
+        "id"       : 13,
+        "name"     : "Pickup",
+        "orderId"  : 1002,
+        "duration" : 0,
+        "contact"  : "Steve"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 1
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 2
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 3
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 4
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 5
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 6
+      },
+      {
+        "id"       : 61,
+        "event"    : 61,
+        "resource" : 7
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 1
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 2
+      },
+      {
+        "id"       : 9,
+        "event"    : 9,
+        "resource" : 3
+      },
+      {
+        "id"       : 10,
+        "event"    : 10,
+        "resource" : 4
+      },
+      {
+        "id"       : 11,
+        "event"    : 11,
+        "resource" : 5
+      },
+      {
+        "id"       : 12,
+        "event"    : 12,
+        "resource" : 6
+      },
+      {
+        "id"       : 13,
+        "event"    : 13,
+        "resource" : 7
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "fromEvent" : 1,
+        "toEvent"   : 2,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 2,
+        "fromEvent" : 2,
+        "toEvent"   : 3,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 3,
+        "fromEvent" : 3,
+        "toEvent"   : 4,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 4,
+        "fromEvent" : 4,
+        "toEvent"   : 5,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 5,
+        "fromEvent" : 5,
+        "toEvent"   : 6,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 51,
+        "fromEvent" : 6,
+        "toEvent"   : 61,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 6,
+        "fromEvent" : 7,
+        "toEvent"   : 8,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 7,
+        "fromEvent" : 8,
+        "toEvent"   : 9,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 8,
+        "fromEvent" : 9,
+        "toEvent"   : 10,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 9,
+        "fromEvent" : 10,
+        "toEvent"   : 11,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 10,
+        "fromEvent" : 11,
+        "toEvent"   : 12,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 11,
+        "fromEvent" : 12,
+        "toEvent"   : 13,
+        "fromSide"  : "bottom"
+      }
+    ]
+  }
+}

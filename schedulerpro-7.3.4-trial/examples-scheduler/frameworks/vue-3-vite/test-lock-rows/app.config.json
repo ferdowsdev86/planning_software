@@ -1,0 +1,17 @@
+{
+  "title": "To test lock rows event rendering",
+  "description": "This example shows to test lock rows event rendering",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/main.ts",
+    "src/VueEventRenderer.vue",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "vite.config.ts"
+  ]
+}

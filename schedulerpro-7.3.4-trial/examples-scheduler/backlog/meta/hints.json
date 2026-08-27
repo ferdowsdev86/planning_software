@@ -1,0 +1,10 @@
+{
+  ".b-scheduler:nth-of-type(1) .b-sch-time-axis-cell": {
+    "title": "Top scheduler",
+    "content": "Shows a single resource from the <code>CrudManager</code>'s resource store"
+  },
+  ".b-scheduler:nth-of-type(2) .b-sch-time-axis-cell": {
+    "title": "Bottom scheduler",
+    "content": "Shows all other resources"
+  }
+}

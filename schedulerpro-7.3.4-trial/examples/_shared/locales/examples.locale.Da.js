@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Da.js';
+import '../../../lib/SchedulerPro/localization/Da.js';
+import './shared.locale.Da.js';
+
+const locale = {
+
+    localeName : 'Da',
+    localeDesc : 'Dansk',
+    localeCode : 'da',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Handlinger',
+        Active              : 'Aktiv',
+        Allocation          : 'Tildeling',
+        Calendar            : 'Kalender',
+        City                : 'By',
+        Condition           : 'Tilstand',
+        Consultant          : 'Konsulent',
+        Contractor          : 'Entreprenør',
+        Doctor              : 'Læge',
+        Driver              : 'Chauffør',
+        Expedition          : 'Ekspedition',
+        'First name'        : 'Fornavn',
+        Inspector           : 'Inspektør',
+        Lag                 : 'Forsinkelse',
+        Manager             : 'Leder',
+        Name                : 'Navn',
+        Projects            : 'Projekter',
+        Property            : 'Ejendom',
+        Rating              : 'Bedømmelse',
+        Resource            : 'Ressource',
+        Role                : 'Rolle',
+        Score               : 'Score',
+        Shift               : 'Skift',
+        'Speaker rating'    : 'Talerbedømmelse',
+        Staff               : 'Personale',
+        Station             : 'Station',
+        Surname             : 'Efternavn',
+        Tasks               : 'Opgaver',
+        Technicians         : 'Teknikere',
+        Type                : 'Type',
+        'Vehicle Condition' : 'Køretøjets tilstand',
+        'Work hours'        : 'Arbejdstimer',
+        Worker              : 'Arbejder'
+    },
+
+    Button : {
+        '10K events'                  : '10K begivenheder',
+        '1K events'                   : '1K begivenheder',
+        '5K events'                   : '5K begivenheder',
+        'Add exception'               : 'Tilføj undtagelse',
+        'Add invalid calendar'        : 'Tilføj ugyldig kalender',
+        'Add invalid dependency'      : 'Tilføj ugyldig afhængighed',
+        'Add order'                   : 'Tilføj ordre',
+        'Add task'                    : 'Tilføj opgave',
+        'Add week'                    : 'Tilføj uge',
+        Apr                           : 'Apr',
+        Aug                           : 'Aug',
+        August                        : 'August',
+        'Auto-schedule'               : 'Auto-planlæg',
+        'Bar settings'                : 'Søjleindstillinger',
+        Cancel                        : 'Annuller',
+        'Change working time'         : 'Ændr arbejdstid',
+        'City - Resource'             : 'By - Ressource',
+        Custom                        : 'Brugerdefineret',
+        Dark                          : 'Mørk',
+        Dec                           : 'Dec',
+        Default                       : 'Standard',
+        'Default layouts'             : 'Standardlayouts',
+        Delete                        : 'Slet',
+        Dependencies                  : 'Afhængigheder',
+        'Drag & resize settings'      : 'Træk & ændre størrelse indstillinger',
+        Edit                          : 'Rediger',
+        'Edit calendar'               : 'Rediger kalender',
+        'Enable mouse interaction'    : 'Aktiver museinteraktion',
+        Feb                           : 'Feb',
+        'Filter out non-working time' : 'Filtrer ikke-arbejdstid fra',
+        'Hide scheduled'              : 'Skjul planlagt',
+        'Highlight 9-10am + 2-4pm'    : 'Fremhæv 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Fremhæv under trækning',
+        'Horizontal mode'             : 'Horisontal tilstand',
+        Jan                           : 'Jan',
+        Jul                           : 'Jul',
+        Jun                           : 'Jun',
+        'Layout function'             : 'Layoutfunktion',
+        Light                         : 'Lys',
+        Login                         : 'Log ind',
+        Logout                        : 'Log ud',
+        Mar                           : 'Mar',
+        March                         : 'Marts',
+        May                           : 'Maj',
+        'New event'                   : 'Ny begivenhed',
+        'Next day'                    : 'Næste dag',
+        Nov                           : 'Nov',
+        Oct                           : 'Okt',
+        Overlap                       : 'Overlap',
+        Pack                          : 'Pak',
+        'Previous day'                : 'Forrige dag',
+        Reset                         : 'Nulstil',
+        'Reset data'                  : 'Nulstil data',
+        'Resource - City'             : 'Ressource - By',
+        'Resource ranges'             : 'Ressourceområder',
+        Save                          : 'Gem',
+        Sep                           : 'Sep',
+        'Show setup time'             : 'Vis opsætningstid',
+        Stack                         : 'Stak',
+        Sync                          : 'Synkroniser',
+        Today                         : 'I dag',
+        'Vertical mode'               : 'Vertikal tilstand',
+        'Zoom in'                     : 'Zoom ind',
+        'Zoom out'                    : 'Zoom ud'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kulturel',
+        'Draw around parents'   : 'Tegn omkring forældre',
+        'Enable bar tooltip'    : 'Aktivér værktøjstip for bjælke',
+        Music                   : 'Musik',
+        'Show bar texts'        : 'Vis søjletekster',
+        'Show max allocation'   : 'Vis maks. allokering',
+        'Show non working time' : 'Vis ikke-arbejdstid',
+        Sports                  : 'Sport',
+        Technology              : 'Teknologi'
+    },
+
+    Slider : {
+        'Max capacity' : 'Maks. kapacitet',
+        'Row height'   : 'Rækkehøjde'
+    },
+
+    Label : {
+        Days                        : 'Dage',
+        'Group by'                  : 'Grupper efter',
+        Months                      : 'Måneder',
+        Settings                    : 'Indstillinger',
+        'Viewing a repeating event' : 'Viser en gentagende begivenhed'
+    },
+
+    Combo : {
+        'Current timezone' : 'Nuværende tidszone',
+        'Group events by'  : 'Grupper begivenheder efter',
+        Parent             : 'Forælder',
+        Resources          : 'Ressourcer',
+        Show               : 'Vis'
+    },
+
+    NumberField : {
+        '% complete' : '% fuldført',
+        Events       : 'Begivenheder',
+        Every        : 'Hver',
+        Resources    : 'Ressourcer'
+    },
+
+    TextField : {
+        Doctor           : 'Læge',
+        Name             : 'Navn',
+        'Server address' : 'Serveradresse',
+        Username         : 'Brugernavn'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Marker for at vise maks. ressourceallokeringslinje',
+        'Check to show resource allocation in the bars'                                                            : 'Marker for at vise ressourceallokering i søjlerne',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Tjek for at vise tooltips, når musen bevæges over søjler',
+        'Click to group by City - Resource'                                                                        : 'Klik for at gruppere efter By - Ressource',
+        'Click to group by Resource - City'                                                                        : 'Klik for at gruppere efter Ressource - By',
+        'Collapse all groups'                                                                                      : 'Skjul alle grupper',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Deaktiver trægruppefunktionen og vend tilbage til standard Ressource - Tildeling udseende',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Indtast antal begivenheder pr. ressource for at generere og tryk [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Indtast antal ressource rækker for at generere og tryk [ENTER]',
+        'Expand all groups'                                                                                        : 'Udvid alle grupper',
+        Friday                                                                                                     : 'Fredag',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Hvis to segmenter er placeret ved siden af hinanden, kan du enten få dem til at blive slået sammen eller holde dem adskilt',
+        Monday                                                                                                     : 'Mandag',
+        Saturday                                                                                                   : 'Lørdag',
+        Sunday                                                                                                     : 'Søndag',
+        Thursday                                                                                                   : 'Torsdag',
+        'Toggle layout'                                                                                            : 'Skift layout',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Forsøger at tilpasse de uplanlagte begivenheder til den aktuelt viste tidsramme',
+        Tuesday                                                                                                    : 'Tirsdag',
+        'View next day'                                                                                            : 'Se næste dag',
+        'View previous day'                                                                                        : 'Se forrige dag',
+        'View today, to see the current time line'                                                                 : 'Se i dag, for at se den aktuelle tidslinje',
+        Wednesday                                                                                                  : 'Onsdag'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Automatisk sammensmeltning af tilstødende segmenter',
+        'Auto-send'                    : 'Automatisk afsendelse',
+        'Auto-sync'                    : 'Automatisk synkronisering',
+        'Compact mode'                 : 'Kompakt tilstand',
+        'Constrain drag to row'        : 'Begræns træk til række',
+        'Dark mode'                    : 'Mørk tilstand',
+        'Days are working by default'  : 'Dage arbejder som standard',
+        'Enable bar tooltip'           : 'Aktiver værktøjstip for bjælke',
+        'Enable highlighting'          : 'Aktivér fremhævning',
+        'Enable mouse interaction'     : 'Aktiver museinteraktion',
+        'Enable task drag drop'        : 'Aktivér opgave træk og slip',
+        'Filter out non-working time'  : 'Filtrer ikke-arbejdstid fra',
+        'Highlight 9-10am + 2-4pm'     : 'Fremhæv 9-10am + 2-4pm',
+        'Highlight while dragging'     : 'Fremhæv under trækning',
+        'Show non working time'        : 'Vis ikke-arbejdstid',
+        'Show setup time'              : 'Vis opsætningstid',
+        'Show summaries'               : 'Vis resuméer',
+        'Snap to grid'                 : 'Fastgør til gitter',
+        'View Planned dates'           : 'Vis planlagte datoer'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

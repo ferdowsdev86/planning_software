@@ -1,0 +1,10 @@
+{
+  "title": "Scheduler state demo",
+  "description": "This example demonstrates auto state handling for the Scheduler. It allows the user to store state in localStorage and restore it across page reloads",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/BackendState.js"
+  ]
+}

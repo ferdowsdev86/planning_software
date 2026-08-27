@@ -1,0 +1,16 @@
+{
+  "title": "Basic setup in TypeScript (React + Vite)",
+  "description": "This demo contains a React component that wraps Bryntum Grid using TypeScript and a small demo to showcase it.",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.ts",
+    "src/AppEventModel.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

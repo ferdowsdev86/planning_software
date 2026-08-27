@@ -1,0 +1,18 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div class = "demo-app">
+  <div class = "demo-toolbar">
+    <button
+        class = "b-button b-grey"
+        routerLinkActive = "b-pressed"
+        [routerLink] = "['/home']"
+    >Home</button>
+    <button
+        class = "b-button b-grey"
+        routerLinkActive = "b-pressed"
+        [routerLink] = "['/scheduler']"
+    >Scheduler</button>
+  </div>
+
+  <router-outlet></router-outlet>
+</div>

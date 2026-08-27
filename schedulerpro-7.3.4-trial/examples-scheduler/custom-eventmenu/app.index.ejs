@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title><%- data.title %></title>
+    <link rel="stylesheet" href="../../build/<%= data.pkg.name %>.css">
+	<link rel="stylesheet" href="../../build/material3-light.css" data-bryntum-theme>
+    <script src="../_shared/browser/helper.js"></script>
+    <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="../../resources/fontawesome/css/fontawesome.css">
+    <link rel="stylesheet" href="../../resources/fontawesome/css/solid.css">
+    <link rel="stylesheet" href="../_shared/shared.css">
+</head>
+<body>
+<div id="container"></div>
+
+<div id="customEventMenu" class="dropdown-menu">
+    <button class="dropdown-item" type="button" data-ref="edit">Edit</button>
+    <button class="dropdown-item" type="button" data-ref="remove">Remove</button>
+</div>
+
+<script src="vendor/jquery-3.5.1.slim.min.js"></script>
+<script src="vendor/popper.min.js"></script>
+<script src="vendor/bootstrap/js/bootstrap.min.js"></script>
+
+<% if (!data.bundle.es6 && !data.index.noLocales) { %>
+    <script src="../_shared/locales/examples.locales.umd.js"></script>
+<% } %>
+
+<% if (data.bundle.umd) { %>
+    <script data-default-locale="<%= data.index.locale %>" src="../../build/<%= data.pkg.name %>.umd.js"></script>
+    <script src="../_shared/shared.umd.js"></script>
+<% } %>
+
+<script <% if (data.bundle.module) { %>data-default-locale="<%= data.index.locale %>" <% } %><% if (!data.bundle.umd) { %>type="module" <% } %>src="app<%= data.bundle.suffix %>.js"></script>
+
+</body>
+</html>

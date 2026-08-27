@@ -1,0 +1,9 @@
+{
+  "title": "Print feature demo",
+  "description": "Demonstrates how to print component using browser print dialog",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ]
+}

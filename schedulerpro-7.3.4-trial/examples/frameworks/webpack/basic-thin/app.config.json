@@ -1,0 +1,12 @@
+{
+  "title": "Custom build using WebPack and thin bundles",
+  "description": "This very basic demo shows how to use SchedulerProBase and webpack to do a custom build from our thin packages",
+  "source": [
+    "package.json",
+    "src/data/data.json",
+    "src/index.html",
+    "src/index.js",
+    "src/index.scss",
+    "webpack.config.js"
+  ]
+}

@@ -1,0 +1,21 @@
+.b-settings-panel {
+
+    .b-settings-panel-content {
+        --b-panel-gap : 3em;
+
+        > .b-container:first-child {
+            gap : 3em;
+        }
+
+        .b-widget {
+            flex-direction : column;
+            display        : flex;
+            justify-items  : flex-start;
+
+            .b-label {
+                align-self  : flex-start;
+                font-weight : 600;
+            }
+        }
+    }
+}

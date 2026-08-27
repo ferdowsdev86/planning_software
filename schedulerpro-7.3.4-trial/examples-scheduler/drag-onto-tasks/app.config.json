@@ -1,0 +1,15 @@
+{
+  "title": "Drag equipment onto tasks",
+  "description": "This example shows how to drag any DOM node and drop it onto a task to update some aspect of it.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "data/equipment.json",
+    "index.html",
+    "lib/Drag.js",
+    "lib/EquipmentGrid.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ]
+}

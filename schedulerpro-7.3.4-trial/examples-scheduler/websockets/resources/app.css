@@ -1,0 +1,105 @@
+@media (max-width : 860px) and (min-height : 500px) {
+    .demo-header {
+        font-size : 12px;
+        padding   : 0.5em 0;
+    }
+}
+
+@media (max-height : 500px) {
+    .demo-header {
+        font-size : 10px;
+        padding   : 0.3em 0;
+    }
+}
+
+@media (max-width : 750px) {
+    .demo-header #title-container {
+        display : none;
+    }
+
+    #tools {
+        margin-inline-start : auto;
+    }
+}
+
+.b-remote-drag:after,
+.b-remote-resize-left:after,
+.b-remote-resize-right:after {
+    display     : block;
+    font-size   : 0.8em;
+    content     : attr(data-user-name);
+    position    : absolute;
+    text-shadow : 1px 1px 2px rgba(0, 0, 0, 0.5);
+    font-weight : bold;
+    clip-path   : none;
+    background  : none;
+}
+
+.b-remote-drag:after {
+    left      : 50%;
+    top       : 58%;
+    transform : translateX(-50%);
+}
+
+.b-remote-resize-right:after {
+    right     : 1.8em;
+    transform : translateY(-50%);
+    top       : 50%;
+}
+
+.b-remote-resize-left:after {
+    left      : 1.8em;
+    transform : translateY(-50%);
+    top       : 50%;
+}
+
+.b-remote-drag:before,
+.b-remote-resize-left:before,
+.b-remote-resize-right:before {
+    font-family : 'Font Awesome 6 Free';
+    font-weight : 900;
+    display     : block;
+    width       : 1em;
+    height      : 1em;
+    position    : absolute;
+    color       : #fff;
+    transform   : translateX(-50%);
+    text-shadow : 1px 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.b-remote-drag:before {
+    content : '\f25a';
+    left    : 50%;
+    top     : 20%;
+}
+
+.b-remote-resize-left:before {
+    content   : '\f07e';
+    left      : 2px;
+    transform : translateY(-50%);
+    top       : 50%;
+}
+
+.b-remote-resize-right:before {
+    content   : '\f07e';
+    right     : 2px;
+    transform : translateY(-50%);
+    top       : 50%;
+}
+
+.b-remote-resize-left,
+.b-remote-resize-right,
+.b-remote-drag {
+    outline        : 2px solid rgba(135, 206, 235, 0.4);
+    outline-offset : 3px;
+}
+
+#ws-online-container {
+    display     : flex !important;
+    align-items : center;
+    gap         : 0.5em;
+}
+
+.b-text-content.b-content-element {
+    flex-flow : row nowrap;
+}

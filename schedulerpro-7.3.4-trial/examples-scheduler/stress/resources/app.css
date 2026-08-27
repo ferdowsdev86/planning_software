@@ -1,0 +1,55 @@
+[data-edit-message] {
+    z-index  : 1000000000;
+    overflow : visible;
+}
+
+.b-sch-event-wrap {
+    .b-sch-event-content {
+        flex-direction  : column;
+        align-items     : flex-start;
+        justify-content : center;
+        gap             : 0;
+    }
+
+    &:after {
+        position                : absolute;
+        content                 : attr(data-edit-message);
+        top                     : -2em;
+        left                    : 1em;
+        background              : var(--b-neutral-95);
+        color                   : var(--b-neutral-50);
+        font-size               : 10px;
+        z-index                 : -1;
+        white-space             : nowrap;
+        border-top-left-radius  : .5em;
+        border-top-right-radius : .5em;
+    }
+}
+
+[data-edit-message]:after {
+    padding   : 0.3em 0.8em;
+    animation : slidein 1s, slideout 1s 2s;
+}
+
+/* Animations to fade the snackbar in and out */
+@keyframes slidein {
+    0% {
+        top : 0;
+    }
+    100% {
+        top : -2em;
+    }
+}
+
+@keyframes slideout {
+    0% {
+        top : -2em;
+    }
+    100% {
+        top : 0;
+    }
+}
+
+.b-sch-event-header {
+    font-size : .7em;
+}

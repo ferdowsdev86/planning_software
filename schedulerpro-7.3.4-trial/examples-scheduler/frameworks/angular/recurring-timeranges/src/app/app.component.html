@@ -1,0 +1,54 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div class = "demo-app">
+    <div class = "demo-toolbar">
+        <bryntum-button
+            #coffeeButton
+            ref = 'coffeeButton'
+            text = "More coffee"
+            icon = 'fa fa-coffee'
+            tooltip = 'Click to add morning coffee to Thursdays too'
+            (onClick) = "onCoffeeClick()"
+        ></bryntum-button>
+        <div class = "spacer"></div>
+        <bryntum-button
+            ref = 'prevButton'
+            icon = 'fa fa-angle-left'
+            tooltip = 'View previous day'
+            (onClick) = "onPrevClick()"
+        ></bryntum-button>
+        <bryntum-button
+            ref = 'todayButton'
+            text = 'Today'
+            tooltip = 'View today, to see the current time line'
+            (onClick) = "onTodayClick()"
+        ></bryntum-button>
+        <bryntum-button
+            ref = 'nextButton'
+            icon = 'fa fa-angle-right'
+            tooltip = 'View next day'
+            (onClick) = "onNextClick()"
+        ></bryntum-button>
+        <bryntum-button
+            ref = 'startButton'
+            text = 'Start'
+            tooltip = 'Return to initial view'
+            (onClick) = "onStartClick()"
+        ></bryntum-button>
+    </div>
+
+    <bryntum-scheduler
+        #scheduler
+        [barMargin] = "schedulerProps.barMargin"
+        [eventStyle] = "schedulerProps.eventStyle"
+        [resourceImagePath] = "schedulerProps.resourceImagePath"
+        [smoothZoom] = "schedulerProps.smoothZoom"
+        [timeRangesFeature] = "schedulerProps.timeRangesFeature"
+        [columns] = "schedulerProps.columns"
+        [project] = "schedulerProps.project"
+        [crudManager] = "schedulerProps.crudManager"
+        [startDate] = "schedulerProps.startDate"
+        [endDate] = "schedulerProps.endDate"
+        [viewPreset] = "schedulerProps.viewPreset"
+    ></bryntum-scheduler>
+</div>

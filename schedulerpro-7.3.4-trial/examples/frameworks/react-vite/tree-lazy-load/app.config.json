@@ -1,0 +1,20 @@
+{
+  "title": "Tree lazy loaded project",
+  "description": "This demo demonstrates lazy loaded resource and event stores using the requestData function with PHP backend",
+  "source": [
+    "index.html",
+    "package.json",
+    "php/data/cinema.json",
+    "php/data/events.json",
+    "php/data/genres.json",
+    "php/data/movie.json",
+    "php/data/resources.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/lib/AppResource.tsx",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "title": "Vue Scheduler + Vuex demo",
+  "description": "Shows an advanced integration of Vue Scheduler using the Vue router and Vuex state management.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "postcss.config.js",
+    "public/data/data.json",
+    "public/data/tasks.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/bootstrap-fix.css",
+    "src/components/header/ColorsCombo.vue",
+    "src/components/header/Header.vue",
+    "src/components/header/StylesCombo.vue",
+    "src/main.js",
+    "src/router.js",
+    "src/store.js",
+    "src/views/Home.vue",
+    "src/views/Tasks.vue",
+    "vue.config.js"
+  ]
+}

@@ -1,0 +1,30 @@
+.b-sch-event {
+    container-name : event;
+    container-type : size;
+
+    .b-sch-event-content {
+        transition : font-size .2s;
+    }
+}
+
+@container event (height < 25px) {
+    .b-sch-event .b-sch-event-content {
+        font-size : .75em;
+    }
+}
+
+@container event (height < 15px) {
+    .b-sch-event .b-sch-event-content {
+        font-size : .6em;
+    }
+}
+
+.layoutCellContent {
+    display         : flex;
+    flex            : 1;
+    justify-content : space-between;
+
+    i {
+        cursor : pointer;
+    }
+}

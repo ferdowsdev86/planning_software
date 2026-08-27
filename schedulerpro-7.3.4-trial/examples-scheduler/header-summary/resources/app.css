@@ -1,0 +1,52 @@
+[data-region="locked"] {
+    --b-grid-header-padding                   : 0;
+    --b-grid-header-gap                       : 0;
+    --b-text-field-input-height                : 55px;
+    --b-text-field-outlined-border-width       : 0;
+    --b-text-field-outlined-focus-border-width : 0;
+
+    .b-grid-header {
+        flex-direction : column-reverse;
+    }
+
+    .b-group-row .b-grid-cell i {
+        margin-inline-start : .5em;
+    }
+}
+
+.b-grid-header-container {
+    border-bottom : 1px solid var(--b-grid-header-border-color);
+}
+
+.b-grid-header-text-content {
+    height         : 100%;
+    align-items    : center;
+    display        : flex;
+    flex-direction : column;
+    flex           : 1 0 100%;
+}
+
+.b-grid-header-text {
+    flex    : 1;
+    margin  : 0;
+    padding : 0;
+}
+
+.b-scheduler .b-group-state-icon {
+    display : none;
+}
+
+.b-column-header-row {
+    flex                 : 1 0 2em;
+    width                : 100%;
+    display              : flex;
+    align-items          : center;
+    padding-inline-start : 1em;
+    font-size            : .85em;
+    border-top           : 1px solid var(--b-grid-header-border-color);
+    gap                  : 0.7em;
+}
+
+.b-group-header-row-text {
+    text-transform : none;
+}

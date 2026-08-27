@@ -1,0 +1,10 @@
+.b-sch-event-content {
+    text-align      : center;
+    justify-content : center;
+}
+
+.event-time {
+    font-size : 0.8em;
+    opacity   : 0.6;
+}
+

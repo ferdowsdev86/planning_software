@@ -1,0 +1,20 @@
+{
+  "title": "Lazy loaded nested events (Angular)",
+  "description": "This demo demonstrates nested events using lazy loaded stores",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/lib/Data.ts",
+    "src/assets/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

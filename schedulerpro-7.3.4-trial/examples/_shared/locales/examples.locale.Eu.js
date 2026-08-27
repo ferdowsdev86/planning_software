@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Eu.js';
+import '../../../lib/SchedulerPro/localization/Eu.js';
+import './shared.locale.Eu.js';
+
+const locale = {
+
+    localeName : 'Eu',
+    localeDesc : 'Euskara',
+    localeCode : 'eu-ES',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Ekintzak',
+        Active              : 'Aktibo',
+        Allocation          : 'Esleipena',
+        Calendar            : 'Egutegia',
+        City                : 'Hiria',
+        Condition           : 'Baldintza',
+        Consultant          : 'Kontsultorea',
+        Contractor          : 'Kontratista',
+        Doctor              : 'Medikua',
+        Driver              : 'Gidaria',
+        Expedition          : 'Espedizioa',
+        'First name'        : 'Izena',
+        Inspector           : 'Ikuskatzailea',
+        Lag                 : 'Atzerapena',
+        Manager             : 'Kudeatzailea',
+        Name                : 'Izena',
+        Projects            : 'Proiektuak',
+        Property            : 'Jabetza',
+        Rating              : 'Balorazioa',
+        Resource            : 'Baliabidea',
+        Role                : 'Rola',
+        Score               : 'Puntuazioa',
+        Shift               : 'Txanda',
+        'Speaker rating'    : 'Hizlariaren balorazioa',
+        Staff               : 'Langileak',
+        Station             : 'Estazioa',
+        Surname             : 'Abizena',
+        Tasks               : 'Zereginak',
+        Technicians         : 'Teknikariak',
+        Type                : 'Mota',
+        'Vehicle Condition' : 'Ibilgailuaren egoera',
+        'Work hours'        : 'Lan orduak',
+        Worker              : 'Langilea'
+    },
+
+    Button : {
+        '10K events'                  : '10K gertaerak',
+        '1K events'                   : '1K gertaerak',
+        '5K events'                   : '5K gertaerak',
+        'Add exception'               : 'Gehitu salbuespena',
+        'Add invalid calendar'        : 'Gehitu baliogabeko egutegia',
+        'Add invalid dependency'      : 'Gehitu baliogabeko mendekotasuna',
+        'Add order'                   : 'Gehitu eskaera',
+        'Add task'                    : 'Gehitu zeregina',
+        'Add week'                    : 'Gehitu astea',
+        Apr                           : 'Api',
+        Aug                           : 'Abu',
+        August                        : 'Abuztua',
+        'Auto-schedule'               : 'Auto-ordutegia',
+        'Bar settings'                : 'Barra ezarpenak',
+        Cancel                        : 'Utzi',
+        'Change working time'         : 'Aldatu lan-ordutegia',
+        'City - Resource'             : 'Hiria - Baliabidea',
+        Custom                        : 'Pertsonalizatua',
+        Dark                          : 'Iluna',
+        Dec                           : 'Abe',
+        Default                       : 'Lehenetsia',
+        'Default layouts'             : 'Lehenetsitako diseinuak',
+        Delete                        : 'Ezabatu',
+        Dependencies                  : 'Mendekotasunak',
+        'Drag & resize settings'      : 'Arrastatu eta tamaina aldatu ezarpenak',
+        Edit                          : 'Editatu',
+        'Edit calendar'               : 'Egutegia editatu',
+        'Enable mouse interaction'    : 'Gaitu saguaren interakzioa',
+        Feb                           : 'Ots',
+        'Filter out non-working time' : 'Iragazi lanorduak ez direnak',
+        'Hide scheduled'              : 'Ezkutatu programatua',
+        'Highlight 9-10am + 2-4pm'    : 'Nabarmendu 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Arrastatzean nabarmendu',
+        'Horizontal mode'             : 'Modu horizontala',
+        Jan                           : 'Urt',
+        Jul                           : 'Uzt',
+        Jun                           : 'Eka',
+        'Layout function'             : 'Diseinu funtzioa',
+        Light                         : 'Argia',
+        Login                         : 'Hasi saioa',
+        Logout                        : 'Amaitu saioa',
+        Mar                           : 'Mar',
+        March                         : 'Martxoa',
+        May                           : 'Mai',
+        'New event'                   : 'Gertaera berria',
+        'Next day'                    : 'Hurrengo eguna',
+        Nov                           : 'Aza',
+        Oct                           : 'Urr',
+        Overlap                       : 'Gainjartzea',
+        Pack                          : 'Paketea',
+        'Previous day'                : 'Aurreko eguna',
+        Reset                         : 'Berrezarri',
+        'Reset data'                  : 'Berrezarri datuak',
+        'Resource - City'             : 'Baliabidea - Hiria',
+        'Resource ranges'             : 'Baliabide tarteak',
+        Save                          : 'Gorde',
+        Sep                           : 'Ira',
+        'Show setup time'             : 'Erakutsi konfigurazio denbora',
+        Stack                         : 'Pila',
+        Sync                          : 'Sinkronizatu',
+        Today                         : 'Gaur',
+        'Vertical mode'               : 'Modu bertikala',
+        'Zoom in'                     : 'Handitu',
+        'Zoom out'                    : 'Txikitu'
+    },
+
+    Checkbox : {
+        Cultural                : 'Kulturala',
+        'Draw around parents'   : 'Marraztu gurasoen inguruan',
+        'Enable bar tooltip'    : 'Gaitu barra tresna-aholku',
+        Music                   : 'Musika',
+        'Show bar texts'        : 'Erakutsi barra testuak',
+        'Show max allocation'   : 'Erakutsi gehienezko esleipena',
+        'Show non working time' : 'Erakutsi lanik gabeko denbora',
+        Sports                  : 'Kirolak',
+        Technology              : 'Teknologia'
+    },
+
+    Slider : {
+        'Max capacity' : 'Gehienezko edukiera',
+        'Row height'   : 'Errenkada altuera'
+    },
+
+    Label : {
+        Days                        : 'Egunak',
+        'Group by'                  : 'Taldekatu',
+        Months                      : 'Hilabeteak',
+        Settings                    : 'Ezarpenak',
+        'Viewing a repeating event' : 'Errepikatzen den gertaera ikusten'
+    },
+
+    Combo : {
+        'Current timezone' : 'Oraingo ordu-eremua',
+        'Group events by'  : 'Gertaerak taldekatu',
+        Parent             : 'Gurasoa',
+        Resources          : 'Baliabideak',
+        Show               : 'Erakutsi'
+    },
+
+    NumberField : {
+        '% complete' : '% osatua',
+        Events       : 'Gertaerak',
+        Every        : 'Bakoitza',
+        Resources    : 'Baliabideak'
+    },
+
+    TextField : {
+        Doctor           : 'Sendagilea',
+        Name             : 'Izena',
+        'Server address' : 'Zerbitzariaren helbidea',
+        Username         : 'Erabiltzaile izena'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Markatu gehienezko baliabide esleipen lerroa erakusteko',
+        'Check to show resource allocation in the bars'                                                            : 'Markatu baliabide esleipena barratan erakusteko',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Egiaztatu saguarekin barraren gainean mugitzean tresna-aholkuak erakusteko',
+        'Click to group by City - Resource'                                                                        : 'Egin klik Hiriaren arabera taldekatzea - Baliabidea',
+        'Click to group by Resource - City'                                                                        : 'Egin klik Baliabidearen arabera taldekatzea - Hiria',
+        'Collapse all groups'                                                                                      : 'Tolestu talde guztiak',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Desgaitu zuhaitz taldearen ezaugarria eta itzuli Baliabide - Esleipen lehenetsira',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Sartu baliabide bakoitzeko sortu beharreko gertaeren kopurua eta sakatu [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Sartu sortu beharreko baliabide errenkaden kopurua eta sakatu [ENTER]',
+        'Expand all groups'                                                                                        : 'Zabaldu talde guztiak',
+        Friday                                                                                                     : 'Ostirala',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Bi segmentu elkarren ondoan kokatzen badira, batu edo bereizita mantendu ditzakezu',
+        Monday                                                                                                     : 'Astelehena',
+        Saturday                                                                                                   : 'Larunbata',
+        Sunday                                                                                                     : 'Igandea',
+        Thursday                                                                                                   : 'Osteguna',
+        'Toggle layout'                                                                                            : 'Aldatu diseinua',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Saiatu planifikatu gabeko gertaerak une honetan bistaratzen den denbora-tartean sartzen',
+        Tuesday                                                                                                    : 'Asteartea',
+        'View next day'                                                                                            : 'Ikusi hurrengo eguna',
+        'View previous day'                                                                                        : 'Ikusi aurreko eguna',
+        'View today, to see the current time line'                                                                 : 'Ikusi gaur, uneko denbora-lerroa ikusteko',
+        Wednesday                                                                                                  : 'Asteazkena'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Elkarren ondoan dauden segmentuak automatikoki batu',
+        'Auto-send'                    : 'Bidalitzea automatikoki',
+        'Auto-sync'                    : 'Auto-sinkronizazioa',
+        'Compact mode'                 : 'Modu trinkoa',
+        'Constrain drag to row'        : 'Arrastatu mugatzea errenkadara',
+        'Dark mode'                    : 'Modu iluna',
+        'Days are working by default'  : 'Egunak lehenetsita lan egiten dute',
+        'Enable bar tooltip'           : 'Aktibatu barra tresna-aholkua',
+        'Enable highlighting'          : 'Gaitu nabarmendapena',
+        'Enable mouse interaction'     : 'Aktibatu sagua interakzioa',
+        'Enable task drag drop'        : 'Gaitu zereginen arrastatzea eta jaregitea',
+        'Filter out non-working time'  : 'Iragazi lanorduak ez direnak',
+        'Highlight 9-10am + 2-4pm'     : 'Nabarmendu 9-10am + 2-4pm',
+        'Highlight while dragging'     : 'Nabarmendu arrastatzean',
+        'Show non working time'        : 'Erakutsi lanorduak ez direnak',
+        'Show setup time'              : 'Erakutsi konfigurazio denbora',
+        'Show summaries'               : 'Erakutsi laburpenak',
+        'Snap to grid'                 : 'Kokatzea sarean',
+        'View Planned dates'           : 'Ikusi Planifikatutako datak'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

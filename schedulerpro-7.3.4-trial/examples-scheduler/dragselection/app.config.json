@@ -1,0 +1,11 @@
+{
+  "title": "Drag selection mode",
+  "description": "Click and drag to select multiple events easily",
+  "source": [
+    "app.js",
+    "data/events.json",
+    "data/resources.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

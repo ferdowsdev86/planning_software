@@ -1,0 +1,285 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"    : "r1",
+        "name"  : "Mike",
+        "type"  : "Scrum Master",
+        "image" : "mike"
+      },
+      {
+        "id"    : "r2",
+        "name"  : "Linda",
+        "type"  : "Frontend Trainer",
+        "image" : "linda"
+      },
+      {
+        "id"    : "r3",
+        "name"  : "Don",
+        "type"  : "HR Onboarding",
+        "image" : "don"
+      },
+      {
+        "id"    : "r4",
+        "name"  : "Karen",
+        "type"  : "Product Manager",
+        "image" : "karen"
+      },
+      {
+        "id"    : "r5",
+        "name"  : "Doug",
+        "type"  : "Client Relations",
+        "image" : "doug"
+      },
+      {
+        "id"    : "r6",
+        "name"  : "Peter",
+        "type"  : "Executive / HR",
+        "image" : "james"
+      },
+      {
+        "id"    : "r7",
+        "name"  : "Sam",
+        "type"  : "Fitness Coach",
+        "image" : "john"
+      },
+      {
+        "id"    : "r8",
+        "name"  : "Melissa",
+        "type"  : "Health Specialist",
+        "image" : "melissa"
+      },
+      {
+        "id"    : "r9",
+        "name"  : "John",
+        "type"  : "Maintenance Crew",
+        "image" : "john"
+      },
+      {
+        "id"    : "r10",
+        "name"  : "Elle",
+        "type"  : "Executive Assistant",
+        "image" : "jenny"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "name"       : "Team Scrum",
+        "startDate"  : "2025-03-20T10:00",
+        "endDate"    : "2025-03-20T12:00",
+        "eventType"  : "Meeting",
+        "purpose"    : "p1",
+        "building"   : "b3",
+        "floor"      : "b3f1",
+        "room"       : "b3f1r1",
+        "equipment"  : "e1",
+        "iconCls"    : "fa fa-users",
+        "eventColor" : "pink"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r2",
+        "name"       : "Frontend Training",
+        "startDate"  : "2025-03-20T12:00",
+        "endDate"    : "2025-03-20T13:30",
+        "eventType"  : "Training",
+        "purpose"    : "p2",
+        "building"   : "b2",
+        "floor"      : "b2f1",
+        "room"       : "b2f1r2",
+        "equipment"  : "e2",
+        "iconCls"    : "fa fa-chalkboard-teacher"
+      },
+      {
+        "id"           : 3,
+        "resourceId"   : "r3",
+        "name"         : "Onboarding Workshop",
+        "startDate"    : "2025-03-20T14:00",
+        "duration"     : 2,
+        "durationUnit" : "h",
+        "eventType"    : "Internal",
+        "purpose"      : "p1",
+        "building"     : "b1",
+        "floor"        : "b1f1",
+        "room"         : "b1f1r2",
+        "equipment"    : "e3",
+        "iconCls"      : "fa fa-lightbulb",
+        "eventColor"   : "purple"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r4",
+        "name"       : "Product Demo",
+        "startDate"  : "2025-03-20T08:00",
+        "endDate"    : "2025-03-20T11:00",
+        "eventType"  : "Meeting",
+        "purpose"    : "p2",
+        "building"   : "b3",
+        "floor"      : "b3f2",
+        "room"       : "b3f2r1",
+        "equipment"  : "e1",
+        "iconCls"    : "fa fa-desktop"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r5",
+        "name"       : "Client Sync",
+        "startDate"  : "2025-03-20T15:00",
+        "endDate"    : "2025-03-20T17:00",
+        "eventType"  : "Meeting",
+        "purpose"    : "p3",
+        "building"   : "b2",
+        "floor"      : "b2f1",
+        "room"       : "b2f1r2",
+        "equipment"  : "e2",
+        "iconCls"    : "fa fa-handshake"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r6",
+        "name"       : "Board Review",
+        "startDate"  : "2025-03-20T16:00",
+        "endDate"    : "2025-03-20T19:00",
+        "eventType"  : "Internal",
+        "purpose"    : "p3",
+        "building"   : "b1",
+        "floor"      : "b1f2",
+        "room"       : "b1f2r2",
+        "equipment"  : "e3",
+        "readOnly"   : true,
+        "iconCls"    : "fa fa-exclamation-triangle",
+        "eventColor" : "red"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r7",
+        "name"       : "Yoga Session",
+        "startDate"  : "2025-03-20T06:00",
+        "endDate"    : "2025-03-20T08:00",
+        "eventType"  : "Workshop",
+        "purpose"    : "p2",
+        "building"   : "b3",
+        "floor"      : "b3f1",
+        "room"       : "b3f1r2",
+        "equipment"  : "e3",
+        "iconCls"    : "fa fa-dumbbell"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r7",
+        "name"       : "Birthday Celebration",
+        "startDate"  : "2025-03-20T09:00",
+        "endDate"    : "2025-03-20T11:30",
+        "eventType"  : "Meeting",
+        "purpose"    : "p1",
+        "building"   : "b2",
+        "floor"      : "b2f1",
+        "room"       : "b2f1r2",
+        "equipment"  : "e2",
+        "iconCls"    : "fa fa-cake-candles"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r8",
+        "name"       : "Health Checkup Camp",
+        "startDate"  : "2025-03-20T14:00",
+        "endDate"    : "2025-03-20T16:00",
+        "eventType"  : "Workshop",
+        "purpose"    : "p2",
+        "building"   : "b1",
+        "floor"      : "b1f1",
+        "room"       : "b1f1r2",
+        "equipment"  : "e1",
+        "iconCls"    : "fa fa-user-doctor",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "r9",
+        "name"       : "Facility Maintenance",
+        "startDate"  : "2025-03-20T10:00",
+        "endDate"    : "2025-03-20T14:00",
+        "eventType"  : "Internal",
+        "purpose"    : "p1",
+        "building"   : "b2",
+        "floor"      : "b2f3",
+        "room"       : "b2f3r2",
+        "equipment"  : "e2",
+        "iconCls"    : "fa fa-tools",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : "r10",
+        "name"       : "Monthly All-Hands",
+        "startDate"  : "2025-03-20T16:00",
+        "endDate"    : "2025-03-20T19:00",
+        "eventType"  : "Meeting",
+        "purpose"    : "p3",
+        "building"   : "b2",
+        "floor"      : "b3f1",
+        "room"       : "b3f1r1",
+        "equipment"  : "e1",
+        "iconCls"    : "fa fa-microphone",
+        "eventColor" : "purple"
+      }
+    ]
+  },
+  "buildings" : {
+    "rows" : [
+      { "id" : "b1", "text" : "Headquarters" },
+      { "id" : "b2", "text" : "Tech Park" },
+      { "id" : "b3", "text" : "Innovation Hub" }
+    ]
+  },
+  "floors" : {
+    "rows" : [
+      { "id" : "b1f1", "text" : "Floor 1", "buildingId" : "b1" },
+      { "id" : "b1f2", "text" : "Floor 2", "buildingId" : "b1" },
+
+      { "id" : "b2f1", "text" : "Ground Floor", "buildingId" : "b2" },
+      { "id" : "b2f3", "text" : "Floor 3", "buildingId" : "b2" },
+
+      { "id" : "b3f1", "text" : "Main Level", "buildingId" : "b3" },
+      { "id" : "b3f2", "text" : "Upper Level", "buildingId" : "b3" }
+    ]
+  },
+  "rooms" : {
+    "rows" : [
+      { "id" : "b1f1r1", "text" : "Room 101", "floorId" : "b1f1" },
+      { "id" : "b1f1r2", "text" : "Room 102", "floorId" : "b1f1" },
+      { "id" : "b1f2r1", "text" : "Conference A", "floorId" : "b1f2" },
+      { "id" : "b1f2r2", "text" : "Conference B", "floorId" : "b1f2" },
+
+      { "id" : "b2f1r1", "text" : "Room G1", "floorId" : "b2f1" },
+      { "id" : "b2f1r2", "text" : "Room G2", "floorId" : "b2f1" },
+      { "id" : "b2f3r1", "text" : "Board Room", "floorId" : "b2f3" },
+      { "id" : "b2f3r2", "text" : "Meeting Room 301", "floorId" : "b2f3" },
+
+      { "id" : "b3f1r1", "text" : "Studio 1", "floorId" : "b3f1" },
+      { "id" : "b3f1r2", "text" : "Studio 2", "floorId" : "b3f1" },
+      { "id" : "b3f2r1", "text" : "Lab A", "floorId" : "b3f2" },
+      { "id" : "b3f2r2", "text" : "Lab B", "floorId" : "b3f2" }
+    ]
+  },
+  "purpose" : {
+    "rows" : [
+      { "id" : "p1", "text" : "Meeting" },
+      { "id" : "p2", "text" : "Training" },
+      { "id" : "p3", "text" : "Workshop" }
+    ]
+  },
+  "equipment" : {
+    "rows" : [
+      { "id" : "e1", "text" : "Projector" },
+      { "id" : "e2", "text" : "Whiteboard" },
+      { "id" : "e3", "text" : "Video Conferencing" }
+    ]
+  }
+
+}

@@ -1,0 +1,14 @@
+{
+  "[data-ref=unplanned] .b-panel-header": {
+    "align": {
+      "align": "t-b",
+      "offset": [0, 180]
+    },
+    "title": "Unplanned tasks",
+    "content": "Drag these tasks onto the schedule to assign to a resource. <br><br><b>Note:</b> This demo uses the <a href='https://bryntum.com/products/grid'>Bryntum Grid</a> component which is licensed separately."
+  },
+  ".b-sch-event": {
+    "title": "Unassign",
+    "content": "Right click an event and select 'Unassign' to move it to unassigned tasks"
+  }
+}

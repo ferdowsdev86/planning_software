@@ -1,0 +1,203 @@
+.b-time-axis-sub-grid {
+    background                  : var(--b-neutral-93);
+
+    --b-grid-cell-background    : transparent;
+    --b-column-lines-tick-color : var(--b-neutral-85);
+}
+
+.gate {
+    display       : grid;
+    place-items   : center;
+    font-weight   : bold;
+    width         : 5em;
+    height        : 3em;
+    border-radius : .5em;
+
+    background    : var(--b-neutral-95);
+}
+
+.b-sch-event-wrap.b-style-indented:not(.b-milestone-wrap) {
+    --b-sch-event-background     : var(--b-neutral-100);
+    --b-sch-event-border-width   : 0 0 0 1em;
+    --b-sch-event-border-radius  : .5em;
+    --b-sch-event-border-color   : var(--b-primary);
+    --b-sch-event-opacity        : .9;
+    --b-sch-event-color          : var(--b-neutral-30);
+    --b-sch-event-padding-inline : 0.75em;
+
+    .b-sch-event-content {
+        width           : 100%;
+        height          : 100%;
+        flex-direction  : column;
+        justify-content : space-around;
+    }
+
+    .header,
+    .footer {
+        display     : flex;
+        align-items : center;
+        width       : 100%;
+    }
+
+    .header {
+        justify-content : space-between;
+    }
+
+    .outbound,
+    .inbound {
+        font-size   : 1.2em;
+        font-weight : 600;
+    }
+
+    .aircraft {
+        border-radius : 1em;
+        padding       : 0.2em 0.6em;
+        font-size     : .8em;
+        background    : var(--b-neutral-95);
+    }
+
+    .box {
+        height            : 1em;
+        width             : 1em;
+        border            : 1px solid var(--b-sch-event-border-color);
+        border-radius     : 4px;
+        margin-inline-end : 0.1em;
+
+        &.filled {
+            background : var(--b-sch-event-border-color);
+        }
+
+        &:not(.filled):hover {
+            background : var(--b-sch-event-border-color);
+            opacity    : .3;
+        }
+    }
+
+    .value {
+        margin-inline-start : auto;
+        opacity             : .5;
+    }
+
+    .fa-star {
+        transition        : opacity .2s;
+        margin-inline-end : .5em;
+
+        &:not(.starred) {
+            opacity : .2;
+        }
+    }
+}
+
+.b-sch-event:not(.b-milestone) .fa-plane-departure {
+    margin-inline : 0.2em 0.5em;
+    margin-block  : 0;
+    font-size     : .9em;
+}
+
+.b-departure-datetime,
+.b-arrival-datetime {
+    display        : flex;
+    flex-direction : column;
+}
+
+/* Event Tooltip */
+.b-departure-time,
+.b-arrival-time,
+.b-departure-city,
+.b-arrival-city {
+    font-size   : 1.2em;
+    font-weight : 500;
+}
+
+.b-departure-date,
+.b-arrival-date,
+.b-departure-airport,
+.b-arrival-airport,
+.b-duration {
+    color     : #999;
+    font-size : .8em;
+
+    &:not(.b-duration ) {
+        margin-top : .2em;
+    }
+}
+
+.b-duration {
+    margin-top : -2.5em;
+}
+
+.b-timing-container {
+    display         : flex;
+    flex-direction  : column;
+    height          : 14em;
+    justify-content : space-between;
+    flex            : 1;
+}
+
+.fa-plane-up {
+    position   : absolute;
+    top        : 50%;
+    margin     : -2.2em -1em;
+    background : var(--b-tooltip-rich-background);
+    padding    : 0.5em;
+    transform  : rotate(180deg);
+}
+
+.b-tooltip.b-sch-event-tooltip {
+    .b-tooltip-content {
+        flex-direction : row;
+        align-items    : center;
+        padding        : 2em;
+        flex-wrap      : nowrap;
+        height         : 15em;
+    }
+
+    .b-icons-container {
+        display        : flex;
+        flex-direction : column;
+        align-items    : center;
+        width          : 5em;
+        margin-top     : -1.1em;
+    }
+
+    .b-circle {
+        height        : .5em;
+        width         : .5em;
+        border-radius : 50%;
+        margin-bottom : .5em;
+
+        border        : 1px solid var(--b-primary-20);
+    }
+
+    .b-vertical-line {
+        display     : flex;
+        height      : 9.7em;
+        border-left : 1px dotted var(--b-neutral-50);
+    }
+
+    .fa-map-marker-alt {
+        margin-top : .5em;
+        color      : var(--b-primary-50);
+    }
+
+    .b-airports-container {
+        display         : flex;
+        flex-direction  : column;
+        justify-content : space-between;
+        flex            : 1;
+        white-space     : nowrap;
+    }
+
+    .b-departure-info,
+    .b-arrival-info {
+        display        : flex;
+        flex-direction : column;
+    }
+
+}
+
+.b-timing-container,
+.b-airports-container {
+    flex   : 1;
+    height : 100%;
+}

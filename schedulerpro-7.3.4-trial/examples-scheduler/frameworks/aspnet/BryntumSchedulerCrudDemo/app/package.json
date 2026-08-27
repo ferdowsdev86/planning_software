@@ -1,0 +1,38 @@
+{
+  "name": "aspnet",
+  "description": ".NET demo",
+  "version": "7.3.4",
+  "author": {
+    "name": "Bryntum",
+    "url": "https://bryntum.com",
+    "email": "info@bryntum.com"
+  },
+  "license": "commercial",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack --config webpack.config.js --progress"
+  },
+  "dependencies": {
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.4"
+  },
+  "devDependencies": {
+    "@babel/core": "7.26.0",
+    "@babel/plugin-transform-runtime": "7.28.3",
+    "@babel/preset-env": "7.26.0",
+    "babel-loader": "9.2.1",
+    "copy-webpack-plugin": "12.0.2",
+    "css-loader": "7.1.2",
+    "file-loader": "6.2.0",
+    "html-webpack-plugin": "5.6.3",
+    "mini-css-extract-plugin": "2.9.2",
+    "sass": "1.81.0",
+    "sass-loader": "16.0.3",
+    "webpack": "5.96.1",
+    "webpack-cli": "5.1.4",
+    "webpack-dev-server": "5.2.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

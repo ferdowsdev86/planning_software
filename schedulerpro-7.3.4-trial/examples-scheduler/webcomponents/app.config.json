@@ -1,0 +1,16 @@
+{
+  "title": "Web Components demo",
+  "description": "This example shows how to use the Custom elements version of the Scheduler",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true,
+  "index": {
+    "bundles": [
+      "es6",
+      "module"
+    ]
+  }
+}

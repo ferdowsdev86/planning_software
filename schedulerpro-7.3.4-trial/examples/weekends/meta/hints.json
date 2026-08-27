@@ -1,0 +1,10 @@
+{
+  ".b-calendar-field": {
+    "title": "Calendars defined",
+    "content": "Use this combo to change project calendars"
+  },
+  "[data-event-id='16']": {
+    "title": "Extended by calendar",
+    "content": "This event has a configured duration of 3 days, but because of the calendar it will actually take 5 days to finish"
+  }
+}

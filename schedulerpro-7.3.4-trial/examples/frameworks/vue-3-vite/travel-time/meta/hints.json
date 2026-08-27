@@ -1,0 +1,7 @@
+{
+  ".b-slide-toggle input": {
+    "title": "Toggle travel time",
+    "content": "The travel time spans can be toggled programmatically",
+    "anchorOffsetY": 10
+  }
+}

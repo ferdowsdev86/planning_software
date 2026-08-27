@@ -1,0 +1,15 @@
+{
+  "title": "Flight Dispatch Scheduling demo",
+  "description": "Shows a typical flight dispatch UI implemented with Scheduler Pro",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Aircraft.js",
+    "lib/Flight.js",
+    "lib/FlightTooltip.js",
+    "lib/Legend.js",
+    "lib/Schedule.js",
+    "resources/app.css"
+  ]
+}

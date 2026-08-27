@@ -1,0 +1,21 @@
+.b-sub-grid .b-sch-range {
+    --color-1 : color-mix(in srgb, var(--b-neutral-85), transparent 30%);
+    --color-2 : color-mix(in srgb, var(--b-neutral-90), transparent 30%);
+    background : repeating-linear-gradient(-55deg, var(--color-1), var(--color-1) 10px, var(--color-2) 5px, var(--color-2) 20px);
+    opacity    : 0.7;
+}
+
+.b-sch-event-header {
+    font-size : .8em;
+}
+
+.b-sch-event-footer {
+    font-weight : 400;
+}
+
+.color-box {
+    width             : 1em;
+    height            : 1em;
+    margin-inline-end : .5em;
+    border-radius     : 2px;
+}

@@ -1,0 +1,43 @@
+.b-sch-event-wrap .b-sch-event {
+    opacity          : .9;
+    border-radius    : 2px;
+
+    background-color : var(--b-primary-75);
+
+    .b-sch-event-content {
+        padding : 0 .3em;
+
+        color   : var(--b-neutral-30);
+
+        .desc {
+            flex          : 1;
+            text-align    : center;
+            text-overflow : ellipsis;
+            overflow      : hidden;
+        }
+    }
+}
+
+.order {
+    font-size     : .8em;
+    text-overflow : ellipsis;
+    overflow      : hidden;
+
+    color         : var(--b-neutral-40);
+}
+
+.b-task-percent-bar {
+    mix-blend-mode   : multiply;
+}
+
+.b-scheduler-pro-task-editor {
+    .b-date-time-field {
+        .b-date-field .b-field-inner {
+            border-inline-end : none;
+        }
+
+        .b-time-field {
+            display : none;
+        }
+    }
+}

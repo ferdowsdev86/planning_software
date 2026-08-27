@@ -1,0 +1,10 @@
+{
+  "title": "PHP demo",
+  "description": "Demonstrates an editable Scheduler with a simple PHP backend (only stores data in session, no database)",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

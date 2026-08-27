@@ -1,0 +1,356 @@
+{
+  "success" : true,
+  "events"  : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "name"       : "Team Meeting",
+        "resourceId" : 1,
+        "startDate"  : "2024-04-22",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-users"
+      },
+      {
+        "id"         : 2,
+        "name"       : "Client Presentation",
+        "resourceId" : 2,
+        "startDate"  : "2024-04-23",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-handshake"
+      },
+      {
+        "id"         : 3,
+        "name"       : "Project Review",
+        "resourceId" : 3,
+        "startDate"  : "2024-04-24",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-chart-bar"
+      },
+      {
+        "id"         : 4,
+        "name"       : "Training Session",
+        "resourceId" : 4,
+        "startDate"  : "2024-04-25",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-chalkboard-teacher"
+      },
+      {
+        "id"         : 5,
+        "name"       : "Company Lunch",
+        "resourceId" : 5,
+        "startDate"  : "2024-04-26",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-utensils"
+      },
+      {
+        "id"         : 6,
+        "name"       : "Sales Pitch",
+        "resourceId" : 6,
+        "startDate"  : "2024-04-22",
+        "duration"   : 4,
+        "iconCls"    : "fa fa-bullhorn"
+      },
+      {
+        "id"         : 7,
+        "name"       : "Board Meeting",
+        "resourceId" : 7,
+        "startDate"  : "2024-04-28",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-chalkboard"
+      },
+      {
+        "id"         : 8,
+        "name"       : "Product Launch",
+        "resourceId" : 8,
+        "startDate"  : "2024-04-29",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-rocket"
+      },
+      {
+        "id"         : 9,
+        "name"       : "Employee Training",
+        "resourceId" : 9,
+        "startDate"  : "2024-04-30",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-graduation-cap"
+      },
+      {
+        "id"         : 10,
+        "name"       : "Team Building Activity",
+        "resourceId" : 10,
+        "startDate"  : "2024-05-01",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-users"
+      },
+      {
+        "id"         : 11,
+        "name"       : "Marketing Strategy Meeting",
+        "resourceId" : 11,
+        "startDate"  : "2024-05-02",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-chart-line"
+      },
+      {
+        "id"         : 12,
+        "name"       : "Client Dinner",
+        "resourceId" : 12,
+        "startDate"  : "2024-05-03",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-utensils"
+      },
+      {
+        "id"         : 13,
+        "name"       : "Team Retrospective",
+        "resourceId" : 13,
+        "startDate"  : "2024-05-04",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-comment-alt"
+      },
+      {
+        "id"         : 14,
+        "name"       : "Quarterly Review",
+        "resourceId" : 14,
+        "startDate"  : "2024-04-22",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-clipboard-check"
+      },
+      {
+        "id"         : 15,
+        "name"       : "Client Workshop",
+        "resourceId" : 15,
+        "startDate"  : "2024-04-23",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-hammer"
+      },
+      {
+        "id"         : 16,
+        "name"       : "Team Outing",
+        "resourceId" : 1,
+        "startDate"  : "2024-04-24",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-map"
+      },
+      {
+        "id"         : 17,
+        "name"       : "Strategy Session",
+        "resourceId" : 2,
+        "startDate"  : "2024-04-25",
+        "duration"   : 4,
+        "iconCls"    : "fa fa-lightbulb"
+      },
+      {
+        "id"         : 18,
+        "name"       : "Client Feedback Session",
+        "resourceId" : 3,
+        "startDate"  : "2024-04-26",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-comment-alt"
+      },
+      {
+        "id"         : 19,
+        "name"       : "Team Training",
+        "resourceId" : 4,
+        "startDate"  : "2024-04-27",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-graduation-cap"
+      },
+      {
+        "id"         : 20,
+        "name"       : "Company Town Hall",
+        "resourceId" : 5,
+        "startDate"  : "2024-04-28",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-microphone"
+      },
+      {
+        "id"         : 21,
+        "name"       : "Product Strategy Meeting",
+        "resourceId" : 6,
+        "startDate"  : "2024-04-29",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-bullseye"
+      },
+      {
+        "id"         : 22,
+        "name"       : "Client Advisory Session",
+        "resourceId" : 7,
+        "startDate"  : "2024-04-30",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-comments"
+      },
+      {
+        "id"         : 23,
+        "name"       : "Company Anniversary Celebration",
+        "resourceId" : 8,
+        "startDate"  : "2024-05-01",
+        "duration"   : 4,
+        "iconCls"    : "fa fa-birthday-cake"
+      },
+      {
+        "id"         : 24,
+        "name"       : "Client Meeting",
+        "resourceId" : 9,
+        "startDate"  : "2024-05-02",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-calendar"
+      },
+      {
+        "id"         : 25,
+        "name"       : "Training Workshop",
+        "resourceId" : 10,
+        "startDate"  : "2024-05-03",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-chalkboard-teacher"
+      },
+      {
+        "id"         : 26,
+        "name"       : "Product Demo",
+        "resourceId" : 11,
+        "startDate"  : "2024-05-04",
+        "duration"   : 3,
+        "iconCls"    : "fa fa-desktop"
+      },
+      {
+        "id"         : 27,
+        "name"       : "Sales Training",
+        "resourceId" : 12,
+        "startDate"  : "2024-04-22",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-bullhorn"
+      },
+      {
+        "id"         : 28,
+        "name"       : "Team Building Exercise",
+        "resourceId" : 13,
+        "startDate"  : "2024-04-23",
+        "duration"   : 2,
+        "iconCls"    : "fa fa-users"
+      },
+      {
+        "id"         : 29,
+        "name"       : "Conference Call",
+        "resourceId" : 14,
+        "startDate"  : "2024-04-24",
+        "duration"   : 1,
+        "iconCls"    : "fa fa-phone"
+      },
+      {
+        "id"         : 30,
+        "name"       : "Business Trip",
+        "resourceId" : 15,
+        "startDate"  : "2024-04-25",
+        "duration"   : 4,
+        "iconCls"    : "fa fa-suitcase"
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "name"     : "Mike Anderson",
+        "category" : "Consultants",
+        "type"     : "Full time",
+        "image"    : "mike"
+      },
+      {
+        "id"       : 2,
+        "name"     : "Kevin Larson",
+        "category" : "Consultants",
+        "type"     : "Full time",
+        "image"    : "amit"
+      },
+      {
+        "id"       : 3,
+        "name"     : "Brett Hornbach",
+        "category" : "Consultants",
+        "type"     : "Full time",
+        "image"    : "angelo"
+      },
+      {
+        "id"       : 4,
+        "name"     : "Lars Holt",
+        "category" : "Consultants",
+        "type"     : "Full time",
+        "image"    : "arcady"
+      },
+      {
+        "id"       : 5,
+        "name"     : "Fred Arnold",
+        "category" : "Consultants",
+        "type"     : "Part time",
+        "image"    : "arnold"
+      },
+      {
+        "id"       : 6,
+        "name"     : "Matt Demon",
+        "category" : "Sales",
+        "type"     : "Full time",
+        "image"    : "dan"
+      },
+      {
+        "id"       : 7,
+        "name"     : "Karl Lager",
+        "category" : "Testers",
+        "type"     : "Part time",
+        "image"    : "henrik"
+      },
+      {
+        "id"       : 8,
+        "name"     : "Pete Wilson",
+        "category" : "Testers",
+        "type"     : "Full time",
+        "image"    : "malik"
+      },
+      {
+        "id"       : 9,
+        "name"     : "Derek Ronburg",
+        "category" : "Testers",
+        "type"     : "Full time",
+        "image"    : "jong"
+      },
+      {
+        "id"       : 10,
+        "name"     : "Alyssa Patterson",
+        "category" : "Testers",
+        "type"     : "Full time",
+        "image"    : "lola"
+      },
+      {
+        "id"       : 11,
+        "name"     : "Will Pherrel",
+        "category" : "Testers",
+        "type"     : "Part time",
+        "image"    : "lee"
+      },
+      {
+        "id"       : 12,
+        "name"     : "Ofelia Larson",
+        "category" : "Researchers",
+        "type"     : "Full time",
+        "image"    : "emilia"
+      },
+      {
+        "id"       : 13,
+        "name"     : "David Mantorp",
+        "category" : "Researchers",
+        "type"     : "Part time",
+        "image"    : "mark"
+      },
+      {
+        "id"       : 14,
+        "name"     : "Ann Withersby",
+        "category" : "Researchers",
+        "type"     : "Full time",
+        "image"    : "gloria"
+      },
+      {
+        "id"       : 15,
+        "name"     : "John Dough",
+        "category" : "Researchers",
+        "type"     : "Full time",
+        "image"    : "rob"
+      }
+    ]
+  }
+}

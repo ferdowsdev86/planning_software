@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Vi.js';
+import '../../../lib/SchedulerPro/localization/Vi.js';
+import './shared.locale.Vi.js';
+
+const locale = {
+
+    localeName : 'Vi',
+    localeDesc : 'Tiếng Việt',
+    localeCode : 'vi',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Hành động',
+        Active              : 'Hoạt động',
+        Allocation          : 'Phân bổ',
+        Calendar            : 'Lịch',
+        City                : 'Thành phố',
+        Condition           : 'Điều kiện',
+        Consultant          : 'Tư vấn viên',
+        Contractor          : 'Nhà thầu',
+        Doctor              : 'Bác sĩ',
+        Driver              : 'Tài xế',
+        Expedition          : 'Cuộc thám hiểm',
+        'First name'        : 'Tên',
+        Inspector           : 'Thanh tra',
+        Lag                 : 'Độ trễ',
+        Manager             : 'Quản lý',
+        Name                : 'Tên',
+        Projects            : 'Dự án',
+        Property            : 'Tài sản',
+        Rating              : 'Đánh giá',
+        Resource            : 'Tài nguyên',
+        Role                : 'Vai trò',
+        Score               : 'Điểm số',
+        Shift               : 'Ca làm việc',
+        'Speaker rating'    : 'Đánh giá diễn giả',
+        Staff               : 'Nhân viên',
+        Station             : 'Trạm',
+        Surname             : 'Họ',
+        Tasks               : 'Nhiệm vụ',
+        Technicians         : 'Kỹ thuật viên',
+        Type                : 'Loại',
+        'Vehicle Condition' : 'Tình trạng xe',
+        'Work hours'        : 'Giờ làm việc',
+        Worker              : 'Công nhân'
+    },
+
+    Button : {
+        '10K events'                  : '10K sự kiện',
+        '1K events'                   : '1K sự kiện',
+        '5K events'                   : '5K sự kiện',
+        'Add exception'               : 'Thêm ngoại lệ',
+        'Add invalid calendar'        : 'Thêm lịch không hợp lệ',
+        'Add invalid dependency'      : 'Thêm phụ thuộc không hợp lệ',
+        'Add order'                   : 'Thêm đơn hàng',
+        'Add task'                    : 'Thêm nhiệm vụ',
+        'Add week'                    : 'Thêm tuần',
+        Apr                           : 'Tháng 4',
+        Aug                           : 'Tháng 8',
+        August                        : 'Tháng Tám',
+        'Auto-schedule'               : 'Tự động lên lịch',
+        'Bar settings'                : 'Cài đặt thanh',
+        Cancel                        : 'Hủy',
+        'Change working time'         : 'Thay đổi thời gian làm việc',
+        'City - Resource'             : 'Thành phố - Tài nguyên',
+        Custom                        : 'Tùy chỉnh',
+        Dark                          : 'Tối',
+        Dec                           : 'Tháng 12',
+        Default                       : 'Mặc định',
+        'Default layouts'             : 'Bố cục mặc định',
+        Delete                        : 'Xóa',
+        Dependencies                  : 'Phụ thuộc',
+        'Drag & resize settings'      : 'Cài đặt kéo & thay đổi kích thước',
+        Edit                          : 'Chỉnh sửa',
+        'Edit calendar'               : 'Chỉnh sửa lịch',
+        'Enable mouse interaction'    : 'Kích hoạt tương tác chuột',
+        Feb                           : 'Tháng 2',
+        'Filter out non-working time' : 'Lọc thời gian không làm việc',
+        'Hide scheduled'              : 'Ẩn đã lên lịch',
+        'Highlight 9-10am + 2-4pm'    : 'Làm nổi bật 9-10am + 2-4pm',
+        'Highlight while dragging'    : 'Làm nổi bật khi kéo',
+        'Horizontal mode'             : 'Chế độ ngang',
+        Jan                           : 'Tháng 1',
+        Jul                           : 'Tháng 7',
+        Jun                           : 'Tháng 6',
+        'Layout function'             : 'Chức năng bố cục',
+        Light                         : 'Sáng',
+        Login                         : 'Đăng nhập',
+        Logout                        : 'Đăng xuất',
+        Mar                           : 'Tháng 3',
+        March                         : 'Tháng Ba',
+        May                           : 'Tháng 5',
+        'New event'                   : 'Sự kiện mới',
+        'Next day'                    : 'Ngày tiếp theo',
+        Nov                           : 'Tháng 11',
+        Oct                           : 'Tháng 10',
+        Overlap                       : 'Chồng chéo',
+        Pack                          : 'Đóng gói',
+        'Previous day'                : 'Ngày trước đó',
+        Reset                         : 'Đặt lại',
+        'Reset data'                  : 'Đặt lại dữ liệu',
+        'Resource - City'             : 'Tài nguyên - Thành phố',
+        'Resource ranges'             : 'Phạm vi tài nguyên',
+        Save                          : 'Lưu',
+        Sep                           : 'Tháng 9',
+        'Show setup time'             : 'Hiển thị thời gian thiết lập',
+        Stack                         : 'Xếp chồng',
+        Sync                          : 'Đồng bộ',
+        Today                         : 'Hôm nay',
+        'Vertical mode'               : 'Chế độ dọc',
+        'Zoom in'                     : 'Phóng to',
+        'Zoom out'                    : 'Thu nhỏ'
+    },
+
+    Checkbox : {
+        Cultural                : 'Văn hóa',
+        'Draw around parents'   : 'Vẽ xung quanh cha mẹ',
+        'Enable bar tooltip'    : 'Bật chú giải công cụ thanh',
+        Music                   : 'Âm nhạc',
+        'Show bar texts'        : 'Hiển thị văn bản thanh',
+        'Show max allocation'   : 'Hiển thị phân bổ tối đa',
+        'Show non working time' : 'Hiển thị thời gian không làm việc',
+        Sports                  : 'Thể thao',
+        Technology              : 'Công nghệ'
+    },
+
+    Slider : {
+        'Max capacity' : 'Dung lượng tối đa',
+        'Row height'   : 'Chiều cao hàng'
+    },
+
+    Label : {
+        Days                        : 'Ngày',
+        'Group by'                  : 'Nhóm theo',
+        Months                      : 'Tháng',
+        Settings                    : 'Cài đặt',
+        'Viewing a repeating event' : 'Xem một sự kiện lặp lại'
+    },
+
+    Combo : {
+        'Current timezone' : 'Múi giờ hiện tại',
+        'Group events by'  : 'Nhóm sự kiện theo',
+        Parent             : 'Cha mẹ',
+        Resources          : 'Tài nguyên',
+        Show               : 'Hiển thị'
+    },
+
+    NumberField : {
+        '% complete' : '% hoàn thành',
+        Events       : 'Sự kiện',
+        Every        : 'Mỗi',
+        Resources    : 'Tài nguyên'
+    },
+
+    TextField : {
+        Doctor           : 'Bác sĩ',
+        Name             : 'Tên',
+        'Server address' : 'Địa chỉ máy chủ',
+        Username         : 'Tên người dùng'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Chọn để hiển thị dòng phân bổ tài nguyên tối đa',
+        'Check to show resource allocation in the bars'                                                            : 'Chọn để hiển thị phân bổ tài nguyên trong các thanh',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Chọn để hiển thị chú giải công cụ khi di chuyển chuột qua các thanh',
+        'Click to group by City - Resource'                                                                        : 'Nhấn để nhóm theo Thành phố - Tài nguyên',
+        'Click to group by Resource - City'                                                                        : 'Nhấn để nhóm theo Tài nguyên - Thành phố',
+        'Collapse all groups'                                                                                      : 'Thu gọn tất cả nhóm',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Tắt tính năng nhóm cây và trở lại giao diện Tài nguyên - Phân công mặc định',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Nhập số lượng sự kiện trên mỗi tài nguyên để tạo và nhấn [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Nhập số lượng hàng tài nguyên để tạo và nhấn [ENTER]',
+        'Expand all groups'                                                                                        : 'Mở rộng tất cả nhóm',
+        Friday                                                                                                     : 'Thứ Sáu',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Nếu hai đoạn được đặt cạnh nhau, bạn có thể hợp nhất chúng hoặc giữ chúng tách biệt',
+        Monday                                                                                                     : 'Thứ Hai',
+        Saturday                                                                                                   : 'Thứ Bảy',
+        Sunday                                                                                                     : 'Chủ Nhật',
+        Thursday                                                                                                   : 'Thứ Năm',
+        'Toggle layout'                                                                                            : 'Chuyển đổi bố cục',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Cố gắng điều chỉnh các sự kiện chưa được lên kế hoạch vào khung thời gian hiện tại',
+        Tuesday                                                                                                    : 'Thứ Ba',
+        'View next day'                                                                                            : 'Xem ngày tiếp theo',
+        'View previous day'                                                                                        : 'Xem ngày trước',
+        'View today, to see the current time line'                                                                 : 'Xem hôm nay, để thấy dòng thời gian hiện tại',
+        Wednesday                                                                                                  : 'Thứ Tư'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Tự động hợp nhất các đoạn liền kề',
+        'Auto-send'                    : 'Tự động gửi',
+        'Auto-sync'                    : 'Tự động đồng bộ',
+        'Compact mode'                 : 'Chế độ gọn nhẹ',
+        'Constrain drag to row'        : 'Giới hạn kéo theo hàng',
+        'Dark mode'                    : 'Chế độ tối',
+        'Days are working by default'  : 'Các ngày làm việc theo mặc định',
+        'Enable bar tooltip'           : 'Bật chú giải thanh',
+        'Enable highlighting'          : 'Bật tô sáng',
+        'Enable mouse interaction'     : 'Bật tương tác chuột',
+        'Enable task drag drop'        : 'Bật kéo thả công việc',
+        'Filter out non-working time'  : 'Lọc thời gian không làm việc',
+        'Highlight 9-10am + 2-4pm'     : 'Làm nổi bật 9-10 giờ sáng + 2-4 giờ chiều',
+        'Highlight while dragging'     : 'Làm nổi bật khi kéo',
+        'Show non working time'        : 'Hiển thị thời gian không làm việc',
+        'Show setup time'              : 'Hiển thị thời gian thiết lập',
+        'Show summaries'               : 'Hiển thị tóm tắt',
+        'Snap to grid'                 : 'Căn lưới',
+        'View Planned dates'           : 'Xem ngày dự kiến'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

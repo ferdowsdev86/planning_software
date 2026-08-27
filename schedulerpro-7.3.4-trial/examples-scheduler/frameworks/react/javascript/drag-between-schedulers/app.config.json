@@ -1,0 +1,14 @@
+{
+  "title": "Drag between schedulers demo (React)",
+  "description": "This demo contains two React Scheduler component instances and lets you drag tasks between them.",
+  "source": [
+    "package.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/components/Content.js",
+    "src/index.js"
+  ]
+}

@@ -1,0 +1,143 @@
+.b-tiny-mce-field {
+    /* row-gap : 0; */
+
+    /* Float above event editor popup */
+    .tox.tox-tinymce {
+        width         : 100%;
+        z-index       : 100000;
+
+        border-radius : var(--b-text-field-outlined-border-radius);
+
+        &:not(.tox-tinymce-inline) {
+            border : var(--b-text-field-outlined-border-width) solid var(--b-text-field-outlined-border-color);
+        }
+
+        &.tox-tinymce-inline {
+            margin-top          : -2px;
+            margin-inline-start : -1px;
+        }
+
+        &.tox-edit-focus {
+            border-color : var(--b-text-field-focus-border-color);
+        }
+
+        .tox-edit-area::before {
+            border : none;
+        }
+    }
+
+    .tox-tinymce-aux {
+        width   : 0 !important;
+        z-index : 100000;
+    }
+
+    .tox .tox-tooltip {
+        /* positioning does not work seamlessly, so better no tooltips at all than clipped ones */
+        display : none;
+    }
+
+    .tox .tox-collection__item {
+        /* prevent line wrap in dropdown menus */
+        white-space : nowrap;
+    }
+
+    .b-field-inner {
+        border : none;
+        width  : 100%;
+
+        .b-cell-editor & {
+            width  : 100%;
+
+            border : var(--b-text-field-outlined-border-width) solid var(--b-text-field-focus-border-color);
+
+            .b-rich-text-field-container {
+                padding-block  : calc(var(--b-grid-cell-padding-block) - 1px);
+                padding-inline : calc(var(--b-grid-cell-padding-inline) - 1px);
+            }
+        }
+    }
+}
+
+/* Firefox-only inline-mode fallback (#13291): lays the docked toolbar + content out as one outlined
+   flex column with a single frame/focus ring. Scoped to FF, so other browsers are unaffected. */
+.b-tiny-mce-field-ff-inline {
+
+    /* flex column (toolbar above content) plus the outlined frame + focus ring drawn as an inset
+       `::before` overlay, so focusing never shifts layout */
+    .b-field-inner {
+        display        : flex;
+        flex-direction : column;
+        align-self     : stretch;
+        position       : relative;
+        overflow       : hidden;
+        border-radius  : var(--b-text-field-outlined-border-radius);
+
+        &::before {
+            content        : '';
+            position       : absolute;
+            inset          : 0;
+            /* above the docked inline toolbar (`.tox-tinymce` is z-index 100000) so the ring overlays
+               the editor; `.tox-tinymce-aux` menus are raised above this ring below */
+            z-index        : 100001;
+            box-sizing     : border-box;
+            pointer-events : none;
+
+            border        : var(--b-text-field-outlined-border-width) solid var(--b-text-field-outlined-border-color);
+            border-radius : var(--b-text-field-outlined-border-radius);
+        }
+
+        /* inline-mode editable is a contenteditable div in the same document, so `:focus-within` works */
+        &:focus-within::before {
+            border-color : var(--b-text-field-focus-border-color);
+            border-width : var(--b-text-field-outlined-focus-border-width);
+        }
+    }
+
+    /* keep dropdown/overflow menus above the raised focus ring so they are not covered */
+    .tox-tinymce-aux {
+        z-index : 100002;
+    }
+
+    /* docked toolbar host: full-width row above the content */
+    .b-tiny-mce-field-ff-toolbar {
+        flex  : none;
+        width : 100%;
+    }
+
+    /* docked toolbar: strip standalone box chrome so it merges into the frame */
+    .tox.tox-tinymce.tox-tinymce-inline {
+        width         : 100%;
+        margin        : 0;
+        box-shadow    : none;
+        border        : none;
+        border-radius : 0;
+    }
+
+    /* oxide skin draws the toolbar's own border on this inner header (not on .tox-tinymce); selector
+       matches oxide's own `.tox.tox-tinymce-inline .tox-editor-header` to win specificity */
+    .tox.tox-tinymce-inline .tox-editor-header {
+        border        : none;
+        border-radius : 0;
+        box-shadow    : none;
+    }
+
+    /* editable region fills the remaining height and scrolls its own content */
+    .mce-content-body {
+        flex       : 1;
+        min-height : 0;
+        overflow   : auto;
+        box-sizing : border-box;
+        width      : 100%;
+        padding    : var(--b-text-field-outlined-input-padding);
+        background : var(--b-popup-background);
+        color      : var(--b-widget-color);
+
+        /* soft inset shadow so content reads as recessed below the toolbar, replacing the hard divider */
+        box-shadow : inset 0 6px 6px -6px rgba(0, 0, 0, 0.18);
+
+        &:focus,
+        &:focus-visible {
+            outline : none;
+        }
+    }
+}

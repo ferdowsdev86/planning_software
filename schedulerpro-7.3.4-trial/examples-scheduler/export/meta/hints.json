@@ -1,0 +1,6 @@
+{
+  "[data-ref=exportButton]": {
+    "title": "Click to export",
+    "content": "Open dialog to export content to PDF/PNG. See README.md for instructions"
+  }
+}

@@ -1,0 +1,122 @@
+body, .b-panel {
+    --main-border-color : #d8d9da;
+}
+
+.b-scheduler.b-bryntum {
+    --b-grid-header-color             : #222;
+    --b-percent-column-bar-max-height : .5em;
+}
+
+.b-style-outlined {
+    --b-sch-event-border-width : 3px 1px 1px 1px;
+}
+
+.b-tree-parent-row .b-time-axis-cell {
+    align-items : flex-start;
+}
+
+.b-tree-summary-cell {
+    position : relative;
+}
+
+.b-tree-cell-value .b-resource-avatar {
+    margin-inline-end : .6em;
+}
+
+.b-icon-tree-leaf {
+    display : none;
+}
+
+.b-grid-headers-locked,
+.b-grid-sub-grid-locked {
+    .b-grid-header,
+    .b-grid-cell:not(.b-tree-cell) {
+        padding-inline : 1.2em;
+    }
+}
+
+.b-horizontal-time-axis .b-sch-header-row-0 {
+    flex : 1 0 3em;
+
+    .b-sch-header-time-axis-cell {
+        font-size     : 1.2em;
+        padding-block : 1em;
+    }
+}
+
+.b-time-ranges-header-canvas {
+    .b-sch-time-range {
+        height : calc(80% / var(--bi-header-levels));
+    }
+}
+
+.b-used-capacity,
+.b-available-capacity {
+    position          : absolute;
+    display           : flex;
+    top               : 0;
+    height            : 0;
+    transition        : height .2s, width .2s, inset-inline-start .2s !important;
+    border-inline-end : 1px solid var(--panel-background-color);
+
+    .b-capacity-indicators & {
+        height : 6px;
+    }
+}
+
+.b-sch-event-content {
+    display     : flex;
+    flex        : 1;
+    height      : 100%;
+    align-items : center;
+
+    .b-event-capacity {
+        position         : absolute;
+        top              : .2em;
+        inset-inline-end : 0;
+        font-size        : .8em;
+    }
+}
+
+.b-used-capacity,
+.b-available-capacity,
+.b-over-scheduled {
+    background : var(--b-primary);
+}
+
+.b-used-capacity {
+    /* --b-primary        : var(--b-color-blue); */
+    inset-inline-start : 0;
+}
+
+.b-available-capacity {
+    --b-primary : var(--b-color-green);
+}
+
+.b-over-scheduled {
+    --b-primary : var(--b-color-red);
+}
+
+.b-tree-icon, .b-icon-tree-leaf, .b-icon-tree-folder, .b-icon-tree-folder-open, .b-icon-tree-expand, .b-icon-tree-collapse {
+    color : inherit;
+}
+
+.b-column-lines-canvas,
+.b-sch-non-working-time {
+    z-index : 0;
+}
+
+.b-tree-cell-inner .fa {
+    font-size         : .8em;
+}
+
+.b-sch-day-header-cell-6,
+.b-sch-day-header-cell-0 {
+    opacity : 0.5;
+}
+
+.b-event-name {
+    overflow      : clip;
+    text-overflow : ellipsis;
+    max-width     : 90%; /* force ellipsis */
+}

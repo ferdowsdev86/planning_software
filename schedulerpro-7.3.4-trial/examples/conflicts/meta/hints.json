@@ -1,0 +1,17 @@
+{
+  "[data-event-id='1']": {
+    "title": "Drag this event to the right to see a conflict",
+    "content": "Dragging this event affects \"Critical Unload\" event which has a constraint set",
+    "align": "b50-t0"
+  },
+  ".b-invalid-dependency-button": {
+    "title": "Click this button to see an invalid dependency reaction",
+    "content": "Clicking the button adds an invalid dependency and the system reacts and shows a special popup to handle the case",
+    "align": "t80-b0"
+  },
+  ".b-invalid-calendar-button": {
+    "title": "Click this button to see an invalid calendar reaction",
+    "content": "Clicking the button adds an invalid calendar and the system reacts and shows a special popup to handle the case",
+    "align": "t0-b0"
+  }
+}

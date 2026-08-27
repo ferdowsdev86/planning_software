@@ -1,0 +1,18 @@
+{
+  "title": "Drag onto tasks demo (React)",
+  "description": "This demo contains a React Scheduler component and you can drag and drop external DOM nodes onto the tasks to add equipment.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/data/equipment.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/components/Scheduler.js",
+    "src/index.js",
+    "src/lib/Drag.js",
+    "src/lib/EquipmentGrid.js",
+    "src/lib/Task.js"
+  ]
+}

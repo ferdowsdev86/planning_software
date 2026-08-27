@@ -1,0 +1,372 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Red"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Pink"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Magenta"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Purple"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Violet"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Indigo"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Blue"
+      },
+      {
+        "id"   : "r8",
+        "name" : "Light-Blue"
+      },
+      {
+        "id"   : "r9",
+        "name" : "Cyan"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Teal"
+      },
+      {
+        "id"   : "r11",
+        "name" : "Green"
+      },
+      {
+        "id"   : "r12",
+        "name" : "Light-Green"
+      },
+      {
+        "id"   : "r13",
+        "name" : "Lime"
+      },
+      {
+        "id"   : "r14",
+        "name" : "Yellow"
+      },
+      {
+        "id"   : "r15",
+        "name" : "Amber"
+      },
+      {
+        "id"   : "r16",
+        "name" : "Orange"
+      },
+      {
+        "id"   : "r17",
+        "name" : "Deep-Orange"
+      },
+      {
+        "id"   : "r18",
+        "name" : "Light-Gray"
+      },
+      {
+        "id"   : "r19",
+        "name" : "Gray"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId" : "r1",
+        "startDate"  : "2017-01-01T10:00:00",
+        "endDate"    : "2017-01-01T12:00:00",
+        "eventStyle" : "filled",
+        "eventColor" : "red"
+      },
+      {
+        "resourceId"     : "r1",
+        "startDate"      : "2017-01-01T15:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "filled",
+        "eventColor"     : "red",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r2",
+        "startDate"  : "2017-01-01T12:00:00",
+        "endDate"    : "2017-01-01T13:00:00",
+        "eventStyle" : "bordered",
+        "eventColor" : "pink"
+      },
+      {
+        "resourceId"     : "r2",
+        "startDate"      : "2017-01-01T16:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "bordered",
+        "eventColor"     : "pink",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r3",
+        "startDate"  : "2017-01-01T14:00:00",
+        "endDate"    : "2017-01-01T16:00:00",
+        "eventStyle" : "traced",
+        "eventColor" : "magenta"
+      },
+      {
+        "resourceId"     : "r3",
+        "startDate"      : "2017-01-01T18:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "traced",
+        "eventColor"     : "magenta",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r4",
+        "startDate"  : "2017-01-01T08:00:00",
+        "endDate"    : "2017-01-01T11:00:00",
+        "eventStyle" : "outlined",
+        "eventColor" : "purple"
+      },
+      {
+        "resourceId"     : "r4",
+        "startDate"      : "2017-01-01T13:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "outlined",
+        "eventColor"     : "purple",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r5",
+        "startDate"  : "2017-01-01T15:00:00",
+        "endDate"    : "2017-01-01T17:00:00",
+        "eventStyle" : "tonal",
+        "eventColor" : "violet"
+      },
+      {
+        "resourceId"     : "r5",
+        "startDate"      : "2017-01-01T12:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "tonal",
+        "eventColor"     : "violet",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2017-01-01T16:00:00",
+        "endDate"    : "2017-01-01T18:00:00",
+        "eventStyle" : "indented",
+        "eventColor" : "indigo"
+      },
+      {
+        "resourceId"     : "r6",
+        "startDate"      : "2017-01-01T13:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "indented",
+        "eventColor"     : "indigo",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r7",
+        "startDate"  : "2017-01-01T7:00:00",
+        "endDate"    : "2017-01-01T9:00:00",
+        "eventStyle" : "rounded",
+        "eventColor" : "blue"
+      },
+      {
+        "resourceId"     : "r7",
+        "startDate"      : "2017-01-01T11:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "rounded",
+        "eventColor"     : "blue",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r8",
+        "startDate"  : "2017-01-01T9:00:00",
+        "endDate"    : "2017-01-01T11:00:00",
+        "eventStyle" : "line",
+        "eventColor" : "light-blue"
+      },
+      {
+        "resourceId"     : "r8",
+        "startDate"      : "2017-01-01T14:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "line",
+        "eventColor"     : "light-blue",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r9",
+        "startDate"  : "2017-01-01T12:00:00",
+        "endDate"    : "2017-01-01T13:00:00",
+        "eventStyle" : "dashed",
+        "eventColor" : "cyan"
+      },
+      {
+        "resourceId"     : "r9",
+        "startDate"      : "2017-01-01T17:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "dashed",
+        "eventColor"     : "cyan",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r10",
+        "startDate"  : "2017-01-01T14:00:00",
+        "endDate"    : "2017-01-01T16:00:00",
+        "eventStyle" : "minimal",
+        "eventColor" : "teal"
+      },
+      {
+        "resourceId"     : "r10",
+        "startDate"      : "2017-01-01T11:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "minimal",
+        "eventColor"     : "teal",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r11",
+        "startDate"  : "2017-01-01T08:00:00",
+        "endDate"    : "2017-01-01T11:00:00",
+        "eventStyle" : "filled",
+        "eventColor" : "green"
+      },
+      {
+        "resourceId"     : "r11",
+        "startDate"      : "2017-01-01T15:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "filled",
+        "eventColor"     : "green",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r12",
+        "startDate"  : "2017-01-01T15:00:00",
+        "endDate"    : "2017-01-01T18:00:00",
+        "eventStyle" : "bordered",
+        "eventColor" : "light-green"
+      },
+      {
+        "resourceId"     : "r12",
+        "startDate"      : "2017-01-01T11:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "bordered",
+        "eventColor"     : "light-green",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r13",
+        "startDate"  : "2017-01-01T16:00:00",
+        "endDate"    : "2017-01-01T19:00:00",
+        "eventStyle" : "traced",
+        "eventColor" : "lime"
+      },
+      {
+        "resourceId"     : "r13",
+        "startDate"      : "2017-01-01T12:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "traced",
+        "eventColor"     : "lime",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r14",
+        "startDate"  : "2017-01-01T11:00:00",
+        "endDate"    : "2017-01-01T16:00:00",
+        "eventStyle" : "outlined",
+        "eventColor" : "yellow"
+      },
+      {
+        "resourceId"     : "r14",
+        "startDate"      : "2017-01-01T18:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "outlined",
+        "eventColor"     : "yellow",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r15",
+        "startDate"  : "2017-01-01T13:00:00",
+        "endDate"    : "2017-01-01T15:00:00",
+        "eventStyle" : "tonal",
+        "eventColor" : "amber"
+      },
+      {
+        "resourceId"     : "r15",
+        "startDate"      : "2017-01-01T17:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "tonal",
+        "eventColor"     : "amber",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r16",
+        "startDate"  : "2017-01-01T10:00:00",
+        "endDate"    : "2017-01-01T14:00:00",
+        "eventStyle" : "indented",
+        "eventColor" : "orange"
+      },
+      {
+        "resourceId"     : "r16",
+        "startDate"      : "2017-01-01T08:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "indented",
+        "eventColor"     : "orange",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r17",
+        "startDate"  : "2017-01-01T16:00:00",
+        "endDate"    : "2017-01-01T18:00:00",
+        "eventStyle" : "rounded",
+        "eventColor" : "deep-orange"
+      },
+      {
+        "resourceId"     : "r17",
+        "startDate"      : "2017-01-01T12:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "rounded",
+        "eventColor"     : "deep-orange",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r18",
+        "startDate"  : "2017-01-01T12:00:00",
+        "endDate"    : "2017-01-01T14:00:00",
+        "eventStyle" : "line",
+        "eventColor" : "light-gray"
+      },
+      {
+        "resourceId"     : "r18",
+        "startDate"      : "2017-01-01T10:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "line",
+        "eventColor"     : "light-gray",
+        "milestoneWidth" : 190
+      },
+      {
+        "resourceId" : "r19",
+        "startDate"  : "2017-01-01T08:00:00",
+        "endDate"    : "2017-01-01T12:00:00",
+        "eventStyle" : "dashed",
+        "eventColor" : "gray"
+      },
+      {
+        "resourceId"     : "r19",
+        "startDate"      : "2017-01-01T14:00:00",
+        "duration"       : 0,
+        "eventStyle"     : "dashed",
+        "eventColor"     : "gray",
+        "milestoneWidth" : 190
+      }
+    ]
+  }
+}

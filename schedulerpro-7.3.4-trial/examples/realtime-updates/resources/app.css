@@ -1,0 +1,67 @@
+body > #container > .b-gantt:last-child {
+    margin-top : 0;
+}
+
+.edit-icon {
+    position : relative;
+    top      : 0.7em;
+    cursor   : pointer;
+}
+
+.ws-online-users {
+    transition : 0.3s;
+}
+
+.b-login-name {
+    font-size : 1.2em;
+}
+
+.ws-online-users {
+    display        : flex !important;
+    align-items    : center;
+    padding-left   : 0.5em;
+    padding-bottom : 0.3em;
+    font-size      : 1.1em;
+
+    .ws-online-user {
+        margin-inline-start : 0.5em;
+        padding             : 0.1em 0.5em;
+        /* color               : var(--b-neutral-40); */
+        border-radius       : 0.2em;
+
+        label {
+            margin-inline-start : 0.3em;
+        }
+
+        .b-resource-avatar {
+            background : var(--b-primary-85);
+            width      : 1.5em;
+            height     : 1.5em;
+        }
+    }
+}
+
+.b-text-content {
+    &.b-content-element {
+        flex-flow : row nowrap;
+    }
+}
+
+.b-loginwidget > .b-widget {
+    margin-inline-end : 1em;
+}
+
+.b-gantt .b-top-toolbar [data-ref="calendar"] {
+    width : auto;
+}
+
+body:where(:not(.b-screenshot, .b-hide-header)) {
+    .b-grid-base {
+        margin-top : 1em !important;
+        margin-bottom : 1em !important;
+
+        &:where(:not(:last-child)) {
+            margin-bottom : 0 !important;
+        }
+    }
+}

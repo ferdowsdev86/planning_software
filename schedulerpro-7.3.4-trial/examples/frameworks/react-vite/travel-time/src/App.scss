@@ -1,0 +1,114 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+@use "leaflet/dist/leaflet.css";
+
+.b-sch-horizontal .b-sch-event-wrap {
+    .b-sch-event-buffer-before:not(.b-buffer-thin) {
+        border-inline-start : 3px solid var(--b-event-buffer-color);
+    }
+
+    .b-sch-event-buffer-after:not(.b-buffer-thin) {
+        border-inline-end : 3px solid var(--b-event-buffer-color);
+    }
+}
+
+.event-duration {
+    margin-top : 0.3em;
+}
+
+.event-name {
+    font-weight : bold;
+}
+
+.congestion {
+    --b-event-buffer-color       : var(--b-color-red);
+    --b-event-buffer-label-color : var(--b-color-red);
+}
+
+/* Tooltip */
+
+.resource-image {
+    width             : 4em;
+    height            : 4em;
+    border-radius     : 100%;
+    margin-inline-end : 1em;
+    background        : var(--b-primary-90);
+}
+
+.b-sch-event-tooltip.b-tooltip {
+    min-width                  : 30em;
+
+    --b-tooltip-flex-direction : column;
+
+    header {
+        display       : flex;
+        align-items   : center;
+        width         : 100%;
+        margin-bottom : 1.5em;
+
+        .resource-info {
+            display        : flex;
+            flex-direction : column;
+        }
+
+        .resource-name {
+            font-size : 1.3em;
+        }
+
+        .resource-role {
+            color     : #bbb;
+            font-size : 0.9em;
+        }
+    }
+
+    .event-info {
+        display : flex;
+        width   : 100%;
+
+        strong {
+            margin : 0 0 0.3em 0;
+
+            &:not(:first-child) {
+                margin-top : 2em;
+            }
+        }
+    }
+
+    .event-details {
+        display        : flex;
+        flex-direction : column;
+        flex           : 1;
+    }
+
+    #eventmap {
+        flex : 1;
+
+        .leaflet-control-attribution {
+            font-size : 10px;
+        }
+    }
+
+    i.b-icon {
+        margin-inline-end : 0.5em;
+
+        &.fa-arrow-left,
+        &.fa-arrow-right {
+            margin : 0 0 0 0.5em;
+        }
+    }
+}
+
+.b-tooltip .fa-car {
+    margin-inline-end : 0.4em;
+}

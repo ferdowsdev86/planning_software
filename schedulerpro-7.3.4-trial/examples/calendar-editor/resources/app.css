@@ -1,0 +1,39 @@
+/* Icon in night shift calendar */
+.b-sch-resource-non-working-time {
+    .b-sch-event-with-icon {
+        justify-content : center;
+    }
+
+    i {
+        margin        : 0.5em;
+        font-size     : 1.2em;
+        color         : var(--b-neutral-60);
+        border        : 3px solid var(--b-neutral-60);
+        border-radius : 50%;
+        height        : 2.5em;
+        width         : 2.5em;
+        display       : grid;
+        place-items   : center;
+    }
+}
+
+.break {
+    background-image : linear-gradient(-45deg, rgba(0, 0, 0, 0) 46%, #000 22%, #000 51%, rgba(0, 0, 0, 0) 42%);
+    background-size  : 6px 6px;
+    color            : #888;
+    align-items      : center;
+
+    > div {
+        justify-content : center;
+    }
+
+    .b-sch-event-content {
+        background    : #fff;
+        padding       : 0.3em 1em;
+        border-radius : 1em;
+
+        .b-theme-classic-dark & {
+            background : #222;
+        }
+    }
+}

@@ -1,0 +1,11 @@
+{
+  ".b-sch-canvas [data-id='nonworking-1584975600000']": {
+    "title": "Non-working time",
+    "content": "The gray ranges visualize non-working time. Fetched from projects calendar",
+    "align": "t0-b40"
+  },
+  ".b-toolbar .b-button": {
+    "title": "Display only working time",
+    "content": "Click to filter non-working time out, for a more compact view"
+  }
+}

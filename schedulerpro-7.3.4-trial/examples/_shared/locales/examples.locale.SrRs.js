@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/SrRs.js';
+import '../../../lib/SchedulerPro/localization/SrRs.js';
+import './shared.locale.SrRs.js';
+
+const locale = {
+
+    localeName : 'SrRs',
+    localeDesc : 'Српски (ћирилица)',
+    localeCode : 'sr-RS',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Акције',
+        Active              : 'Активно',
+        Allocation          : 'Алокација',
+        Calendar            : 'Календар',
+        City                : 'Град',
+        Condition           : 'Стање',
+        Consultant          : 'Консултант',
+        Contractor          : 'Извођач',
+        Doctor              : 'Доктор',
+        Driver              : 'Возач',
+        Expedition          : 'Експедиција',
+        'First name'        : 'Име',
+        Inspector           : 'Инспектор',
+        Lag                 : 'Кашњење',
+        Manager             : 'Менаџер',
+        Name                : 'Име',
+        Projects            : 'Пројекти',
+        Property            : 'Својина',
+        Rating              : 'Оцена',
+        Resource            : 'Ресурс',
+        Role                : 'Улога',
+        Score               : 'Резултат',
+        Shift               : 'Смена',
+        'Speaker rating'    : 'Оцена говорника',
+        Staff               : 'Особље',
+        Station             : 'Станица',
+        Surname             : 'Презиме',
+        Tasks               : 'Задаци',
+        Technicians         : 'Техничари',
+        Type                : 'Тип',
+        'Vehicle Condition' : 'Стање возила',
+        'Work hours'        : 'Радни сати',
+        Worker              : 'Радник'
+    },
+
+    Button : {
+        '10K events'                  : '10К догађаја',
+        '1K events'                   : '1К догађаја',
+        '5K events'                   : '5К догађаја',
+        'Add exception'               : 'Додај изузетак',
+        'Add invalid calendar'        : 'Додај неважећи календар',
+        'Add invalid dependency'      : 'Додај неважећу зависност',
+        'Add order'                   : 'Додај налог',
+        'Add task'                    : 'Додај задатак',
+        'Add week'                    : 'Додај недељу',
+        Apr                           : 'Апр',
+        Aug                           : 'Авг',
+        August                        : 'Август',
+        'Auto-schedule'               : 'Ауто-распоред',
+        'Bar settings'                : 'Подешавања траке',
+        Cancel                        : 'Откажи',
+        'Change working time'         : 'Промени радно време',
+        'City - Resource'             : 'Град - Ресурс',
+        Custom                        : 'Прилагођено',
+        Dark                          : 'Тамно',
+        Dec                           : 'Дец',
+        Default                       : 'Подразумевано',
+        'Default layouts'             : 'Подразумевани распореди',
+        Delete                        : 'Обриши',
+        Dependencies                  : 'Зависности',
+        'Drag & resize settings'      : 'Подешавања превлачења и промене величине',
+        Edit                          : 'Уреди',
+        'Edit calendar'               : 'Измени календар',
+        'Enable mouse interaction'    : 'Омогући интеракцију мишем',
+        Feb                           : 'Феб',
+        'Filter out non-working time' : 'Филтрирај нерадно време',
+        'Hide scheduled'              : 'Сакриј заказано',
+        'Highlight 9-10am + 2-4pm'    : 'Истакни 9-10ч + 14-16ч',
+        'Highlight while dragging'    : 'Истакни током превлачења',
+        'Horizontal mode'             : 'Хоризонтални режим',
+        Jan                           : 'Јан',
+        Jul                           : 'Јул',
+        Jun                           : 'Јун',
+        'Layout function'             : 'Функција распореда',
+        Light                         : 'Светло',
+        Login                         : 'Пријава',
+        Logout                        : 'Одјава',
+        Mar                           : 'Мар',
+        March                         : 'Март',
+        May                           : 'Мај',
+        'New event'                   : 'Нови догађај',
+        'Next day'                    : 'Следећи дан',
+        Nov                           : 'Нов',
+        Oct                           : 'Окт',
+        Overlap                       : 'Преклапање',
+        Pack                          : 'Пакет',
+        'Previous day'                : 'Претходни дан',
+        Reset                         : 'Ресетуј',
+        'Reset data'                  : 'Ресетуј податке',
+        'Resource - City'             : 'Ресурс - Град',
+        'Resource ranges'             : 'Опсези ресурса',
+        Save                          : 'Сачувај',
+        Sep                           : 'Сеп',
+        'Show setup time'             : 'Прикажи време подешавања',
+        Stack                         : 'Сложи',
+        Sync                          : 'Синхронизуј',
+        Today                         : 'Данас',
+        'Vertical mode'               : 'Вертикални режим',
+        'Zoom in'                     : 'Увећај',
+        'Zoom out'                    : 'Умањи'
+    },
+
+    Checkbox : {
+        Cultural                : 'Културно',
+        'Draw around parents'   : 'Цртај око родитеља',
+        'Enable bar tooltip'    : 'Омогући алатку за траку',
+        Music                   : 'Музика',
+        'Show bar texts'        : 'Прикажи текстове на траци',
+        'Show max allocation'   : 'Прикажи максималну алокацију',
+        'Show non working time' : 'Прикажи нерадно време',
+        Sports                  : 'Спортови',
+        Technology              : 'Технологија'
+    },
+
+    Slider : {
+        'Max capacity' : 'Максимални капацитет',
+        'Row height'   : 'Висина реда'
+    },
+
+    Label : {
+        Days                        : 'Дани',
+        'Group by'                  : 'Групиши по',
+        Months                      : 'Месеци',
+        Settings                    : 'Подешавања',
+        'Viewing a repeating event' : 'Преглед понављајућег догађаја'
+    },
+
+    Combo : {
+        'Current timezone' : 'Тренутна временска зона',
+        'Group events by'  : 'Групиши догађаје по',
+        Parent             : 'Родитељ',
+        Resources          : 'Ресурси',
+        Show               : 'Прикажи'
+    },
+
+    NumberField : {
+        '% complete' : '% завршено',
+        Events       : 'Догађаји',
+        Every        : 'Сваки',
+        Resources    : 'Ресурси'
+    },
+
+    TextField : {
+        Doctor           : 'Доктор',
+        Name             : 'Име',
+        'Server address' : 'Адреса сервера',
+        Username         : 'Корисничко име'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Означите да бисте приказали линију максималне алокације ресурса',
+        'Check to show resource allocation in the bars'                                                            : 'Означите да бисте приказали алокацију ресурса у тракама',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Проверите да бисте приказали савете када померате миш преко трака',
+        'Click to group by City - Resource'                                                                        : 'Кликните да групишете по Граду - Ресурс',
+        'Click to group by Resource - City'                                                                        : 'Кликните да групишете по Ресурсу - Град',
+        'Collapse all groups'                                                                                      : 'Скупи све групе',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Онемогућите функцију груписања стабла и вратите се на подразумевани изглед Ресурс - Задатак',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Унеси број догађаја по ресурсу за генерисање и притисни [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Унеси број редова ресурса за генерисање и притисни [ENTER]',
+        'Expand all groups'                                                                                        : 'Прошири све групе',
+        Friday                                                                                                     : 'Петак',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Ако су два сегмента постављена један поред другог, можете их спојити или их држати одвојено',
+        Monday                                                                                                     : 'Понедељак',
+        Saturday                                                                                                   : 'Субота',
+        Sunday                                                                                                     : 'Недеља',
+        Thursday                                                                                                   : 'Четвртак',
+        'Toggle layout'                                                                                            : 'Промени изглед',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Покушава да уклопи непланиране догађаје у тренутно приказани временски оквир',
+        Tuesday                                                                                                    : 'Уторак',
+        'View next day'                                                                                            : 'Погледајте следећи дан',
+        'View previous day'                                                                                        : 'Погледајте претходни дан',
+        'View today, to see the current time line'                                                                 : 'Погледајте данас, да видите тренутну временску линију',
+        Wednesday                                                                                                  : 'Среда'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Аутоматско спајање суседних сегмената',
+        'Auto-send'                    : 'Аутоматско слање',
+        'Auto-sync'                    : 'Ауто-синхронизација',
+        'Compact mode'                 : 'Компактни режим',
+        'Constrain drag to row'        : 'Ограничите превлачење на ред',
+        'Dark mode'                    : 'Тамни режим',
+        'Days are working by default'  : 'Дани су подразумевано радни',
+        'Enable bar tooltip'           : 'Омогући алатку за траку',
+        'Enable highlighting'          : 'Омогући истицање',
+        'Enable mouse interaction'     : 'Омогући интеракцију мишем',
+        'Enable task drag drop'        : 'Омогући превлачење задатка',
+        'Filter out non-working time'  : 'Филтрирај време ван радног',
+        'Highlight 9-10am + 2-4pm'     : 'Истакни 9-10ч + 14-16ч',
+        'Highlight while dragging'     : 'Истакни током превлачења',
+        'Show non working time'        : 'Прикажи време ван радног',
+        'Show setup time'              : 'Прикажи време подешавања',
+        'Show summaries'               : 'Прикажи сажетке',
+        'Snap to grid'                 : 'Поравнај са мрежом',
+        'View Planned dates'           : 'Прикажи планиране датуме'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

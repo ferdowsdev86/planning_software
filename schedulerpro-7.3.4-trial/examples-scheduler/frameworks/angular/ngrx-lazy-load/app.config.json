@@ -1,0 +1,26 @@
+{
+  "title": "Lazy loading with NgRx (Angular)",
+  "description": "Resources and events are lazily loaded on demand via NgRx (Store + Effects), so the scheduler scrolls on both axes.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "proxy.conf.json",
+    "src/app/app.config.ts",
+    "src/app/app.html",
+    "src/app/app.scss",
+    "src/app/app.ts",
+    "src/app/lib/app-resource.ts",
+    "src/app/scheduler.config.ts",
+    "src/app/services/scheduler-api.ts",
+    "src/app/store/scheduler.actions.ts",
+    "src/app/store/scheduler.effects.ts",
+    "src/app/store/scheduler.reducer.ts",
+    "src/app/store/scheduler.selectors.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

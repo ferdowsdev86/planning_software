@@ -1,0 +1,12 @@
+/* You can add global styles to this file, and also import other style files */
+app-root {
+    display        : flex;
+    flex-direction : column;
+    height         : 100vh;
+}
+
+.demo-app {
+    display        : flex;
+    flex-direction : column;
+    flex           : 1;
+}

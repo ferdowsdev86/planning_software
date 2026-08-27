@@ -1,0 +1,9 @@
+{
+  "title": "Scroll Buttons demo",
+  "description": "Shows buttons at the start/end of each row to let users scroll to the next event quickly.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html"
+  ]
+}

@@ -1,0 +1,31 @@
+.color-box {
+    width         : 1em;
+    height        : 1em;
+    display       : grid;
+    place-items   : center;
+    flex-shrink   : 0;
+    color         : #fff;
+
+    background    : var(--b-primary);
+    border-radius : var(--b-widget-border-radius);
+
+    &.b-sch-mixed {
+        background : linear-gradient(red, pink, purple, indigo, blue, cyan, teal, green, yellow, orange);
+    }
+
+    &.b-color-custom::before {
+        content     : '#';
+        font-size   : .8em;
+        line-height : 1em;
+    }
+}
+
+.style-list .b-list-item {
+    height : 3em;
+
+    .b-sch-event-wrap {
+        height   : 2em;
+        width    : calc(100% - .5em);
+        position : relative;
+    }
+}

@@ -1,0 +1,18 @@
+{
+  "[data-event-id='1']": {
+    "title": "Fully assigned",
+    "content": "No more jobs can be dragged to this session"
+  },
+  "[data-event-id='5']": {
+    "title": "Partially assigned",
+    "content": "Can fit an additional two 1 day jobs or a single 2-day job"
+  },
+  "[data-event-id='4']": {
+    "title": "Unassigned",
+    "content": "Can fit 3 jobs that are no longer than 1 day"
+  },
+  "[data-id='22']": {
+    "title": "Unscheduled jobs",
+    "content": "Drag them to a session to assign and schedule. <b>Note:</b> This demo uses the <a href='https://bryntum.com/products/grid/'>Bryntum Grid</a> component which is licensed separately."
+  }
+}

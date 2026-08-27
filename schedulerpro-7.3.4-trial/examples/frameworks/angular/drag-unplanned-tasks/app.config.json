@@ -1,0 +1,23 @@
+{
+  "title": "Drag unplanned tasks from a grid (Angular)",
+  "description": "Drag unplanned tasks from a list onto the Scheduler component",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/lib/Appointment.ts",
+    "src/lib/Doctor.ts",
+    "src/lib/Drag.ts",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

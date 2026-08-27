@@ -1,0 +1,11 @@
+.b-assignment-info {
+    dt {
+        font-weight   : 400;
+        margin-bottom : 0.2em;
+    }
+
+    dd {
+        margin-inline-start : 0;
+        font-size           : 0.8em;
+    }
+}

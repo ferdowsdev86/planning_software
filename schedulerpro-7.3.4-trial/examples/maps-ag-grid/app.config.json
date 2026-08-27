@@ -1,0 +1,18 @@
+{
+  "title": "AG Grid + Maps integration",
+  "description": "This example shows how to integrate the AG Grid with Scheduler and Mapbox GL JS API.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Address.js",
+    "lib/AddressSearchField.js",
+    "lib/AgGridPanel.js",
+    "lib/Drag.js",
+    "lib/MapPanel.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

@@ -1,0 +1,52 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<div class = "demo-app">
+
+    <div class = "demo-toolbar">
+        <bryntum-button
+            text = "Max 1hr"
+            (onClick) = "onMaxHour()"
+        ></bryntum-button>
+        <bryntum-button
+            text = "After lunch"
+            (onClick) = "onAfterLunch()"
+        ></bryntum-button>
+        <bryntum-button
+            text = "Random update"
+            (onClick) = "onRandomUpdate()"
+        ></bryntum-button>
+        <bryntum-button
+            text = "Initial animation"
+            icon = "fa fa-sliders-h"
+            [toggleable] = "true"
+            (onClick) = "onInitialAnimation($event)"
+        ></bryntum-button>
+        <div class = "spacer"></div>
+        <bryntum-slider
+            text = "Animation duration"
+            [max] = 3000
+            [min] = 0
+            [step] = 200
+            [value] = 600
+            (onChange) = "onDurationChange($event)"
+        ></bryntum-slider>
+    </div>
+
+    <bryntum-scheduler
+        #scheduler
+        [barMargin] = "schedulerProps.barMargin!"
+        [columns] = "schedulerProps.columns!"
+        [crudManager] = "schedulerProps.crudManager!"
+        [endDate] = "schedulerProps.endDate!"
+        [eventColor] = "schedulerProps.eventColor!"
+        [resourceImagePath] = "schedulerProps.resourceImagePath!"
+        [rowHeight] = "schedulerProps.rowHeight!"
+        [smoothZoom] = "schedulerProps.smoothZoom!"
+        [startDate] = "schedulerProps.startDate!"
+        [timeRangesFeature] = "schedulerProps.timeRangesFeature!"
+        [useInitialAnimation] = "schedulerProps.useInitialAnimation!"
+        [viewPreset] = "schedulerProps.viewPreset!"
+    ></bryntum-scheduler>
+
+</div>

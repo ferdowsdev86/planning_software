@@ -1,0 +1,29 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+
+<div id="content" class="demo-app">
+    <bryntum-scheduler
+        #scheduler
+        [barMargin]         = "schedulerProps.barMargin"
+        [columns]           = "schedulerProps.columns"
+        [crudManager]       = "schedulerProps.crudManager"
+        [endDate]           = "schedulerProps.endDate"
+        [eventColor]        = "schedulerProps.eventColor"
+        [eventEditFeature]  = "schedulerProps.eventEditFeature"
+        [eventMenuFeature]  = "schedulerProps.eventMenuFeature"
+        [eventRenderer]     = "schedulerProps.eventRenderer"
+        [resourceImages]    = "schedulerProps.resourceImages"
+        [rowHeight]         = "schedulerProps.rowHeight"
+        [smoothZoom]        = "schedulerProps.smoothZoom"
+        [startDate]         = "schedulerProps.startDate"
+        [timeRangesFeature] = "schedulerProps.timeRangesFeature"
+        [viewPreset]        = "schedulerProps.viewPreset"
+    ></bryntum-scheduler>
+    <bryntum-grid
+        #grid
+        [columns]          = "gridProps.columns"
+        [cellEditFeature]  = "gridProps.cellEditFeature"
+        [filterBarFeature] = "gridProps.filterBarFeature"
+        [rowHeight]        = "gridProps.rowHeight"
+    ></bryntum-grid>
+</div>

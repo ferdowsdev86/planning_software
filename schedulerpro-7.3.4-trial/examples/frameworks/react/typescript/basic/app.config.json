@@ -1,0 +1,15 @@
+{
+  "title": "Basic setup with TypeScript (React)",
+  "description": "This demo contains the React SchedulerPro wrapper and the demo is written in TypeScript",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.ts",
+    "src/index.tsx",
+    "tsconfig.json"
+  ]
+}

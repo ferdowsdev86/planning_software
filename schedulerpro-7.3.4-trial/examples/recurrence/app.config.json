@@ -1,0 +1,10 @@
+{
+  "title": "Pro Recurring events demo",
+  "description": "Shows a Scheduler Pro with recurring events",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

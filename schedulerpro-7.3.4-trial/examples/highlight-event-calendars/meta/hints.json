@@ -1,0 +1,6 @@
+{
+  ".b-color-red": {
+    "title": "Drag me",
+    "content": "Task calendar availability blocks are shown while you drag (can also be done anytime programmatically)"
+  }
+}

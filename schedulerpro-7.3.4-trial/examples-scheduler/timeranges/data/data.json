@@ -1,0 +1,154 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : "a",
+        "name"       : "Rob",
+        "type"       : "Sales",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : "b",
+        "name"       : "Mike",
+        "type"       : "Sales",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : "c",
+        "name"       : "Kate",
+        "type"       : "Sales",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : "d",
+        "name"       : "Lisa",
+        "type"       : "Developer",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : "e",
+        "name"       : "Dave",
+        "type"       : "Developer",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : "f",
+        "name"       : "Arnold",
+        "type"       : "Developer",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : "g",
+        "name"       : "Lee",
+        "type"       : "Marketing",
+        "eventColor" : "violet"
+      },
+      {
+        "id"         : "h",
+        "name"       : "Jong",
+        "type"       : "Marketing",
+        "eventColor" : "violet"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "a",
+        "name"       : "Meeting #1",
+        "startDate"  : "2022-02-07 09:00",
+        "endDate"    : "2022-02-07 11:00",
+        "location"   : "Some office",
+        "eventType"  : "Meeting"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "b",
+        "name"       : "Meeting #2",
+        "startDate"  : "2022-02-07 15:00",
+        "endDate"    : "2022-02-07 16:30",
+        "location"   : "Home office",
+        "eventType"  : "Meeting"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "d",
+        "name"       : "Bike repair",
+        "startDate"  : "2022-02-07 09:00",
+        "endDate"    : "2022-02-07 13:00",
+        "eventType"  : "Repair"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "f",
+        "name"       : "Code review",
+        "startDate"  : "2022-02-07 12:00",
+        "endDate"    : "2022-02-07 14:00",
+        "eventType"  : "Work"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "h",
+        "name"       : "Meet parents",
+        "startDate"  : "2022-02-07 14:00",
+        "endDate"    : "2022-02-07 16:00",
+        "eventType"  : "Meeting"
+      }
+    ]
+  },
+  "timeRanges" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "name"      : "Coffee",
+        "cls"       : "coffee",
+        "style"     : "background : repeating-linear-gradient(135deg, rgba(155,155,155,0.3), rgba(155,155,155,0.3) 8px, transparent 8px, transparent 16px);color: #666",
+        "iconCls"   : "fa fa-mug-hot",
+        "startDate" : "2022-02-07 08:00",
+        "endDate"   : "2022-02-07 09:00"
+      },
+      {
+        "id"        : 2,
+        "cls"       : "lunch",
+        "iconCls"   : "fa fa-utensils",
+        "name"      : "Lunch",
+        "startDate" : "2022-02-07 11:00",
+        "endDate"   : "2022-02-07 12:00"
+      },
+      {
+        "id"        : 3,
+        "name"      : "Important time",
+        "startDate" : "2022-02-07 13:00"
+      },
+      {
+        "id"        : 4,
+        "name"      : "Fika",
+        "cls"       : "fika",
+        "iconCls"   : "fa fa-mug-saucer",
+        "startDate" : "2022-02-07 14:30",
+        "endDate"   : "2022-02-07 15:30"
+      },
+      {
+        "id"        : 5,
+        "iconCls"   : "fa fa-flag",
+        "name"      : "v5.0",
+        "startDate" : "2022-02-07 15:45"
+      },
+      {
+        "id"        : 6,
+        "name"      : "Icon with tooltip",
+        "startDate" : "2022-02-07 10:30",
+        "cls"       : "b-circle"
+      },
+      {
+        "id"        : 7,
+        "name"      : "Deadline",
+        "iconCls"   : "fa fa-caret-down",
+        "startDate" : "2022-02-07 16:50",
+        "cls"       : "b-triangle"
+      }
+    ]
+  }
+}

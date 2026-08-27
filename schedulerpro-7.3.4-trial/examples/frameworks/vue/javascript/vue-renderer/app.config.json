@@ -1,0 +1,16 @@
+{
+  "title": "Cell renderer demo (Vue 2)",
+  "description": "Bryntum Scheduler Pro lets you render Vue components into grid cells which makes it easy to reuse your existing Vue components",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/components/AppButton.vue",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  ".b-sch-event": {
+    "title": "Drag or resize me",
+    "content": "Changes are saved automatically when <code>autoSync</code> is enabled"
+  },
+  "[data-ref='addButton']": {
+    "title": "Add time range or resource time range",
+    "content": "Click and pick from the menu. Ranges can be edited using the custom context menu",
+    "align": "l0-r0"
+  },
+  "[data-ref='autoSyncToggle']": {
+    "title": "Automatic synchronization of changes",
+    "content": "Click to turn it off, and instead sync manually using the Sync button"
+  }
+}

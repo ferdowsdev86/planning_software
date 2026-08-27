@@ -1,0 +1,10 @@
+{
+  "title": "Rough.js demo",
+  "description": "Uses the Rough.js library to draw sketchy events.",
+  "source": [
+    "app.js",
+    "index.html",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

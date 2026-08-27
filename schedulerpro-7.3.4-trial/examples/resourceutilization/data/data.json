@@ -1,0 +1,449 @@
+{
+  "success" : true,
+  "project" : {
+    "calendar" : "workweek"
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"        : "24h",
+        "name"      : "24h",
+        "intervals" : [
+          {
+            "recurrentStartDate" : "on Sat",
+            "recurrentEndDate"   : "on Mon",
+            "isWorking"          : false
+          }
+        ]
+      },
+      {
+        "id"                       : "workweek",
+        "name"                     : "Working hours",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "every weekday at 8:00",
+            "recurrentEndDate"   : "every weekday at 17:00",
+            "isWorking"          : true
+          }
+        ]
+      },
+      {
+        "id"                       : "custom",
+        "name"                     : "Custom",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "on Mon",
+            "recurrentEndDate"   : "on Wed ",
+            "isWorking"          : true
+          },
+          {
+            "recurrentStartDate" : "on Wed at 04:00",
+            "recurrentEndDate"   : "on Wed at 20:00",
+            "isWorking"          : true
+          },
+          {
+            "recurrentStartDate" : "on Thu at 06:00",
+            "recurrentEndDate"   : "on Thu at 18:00",
+            "isWorking"          : true
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"               : "r1",
+        "name"             : "Celia's team",
+        "city"             : "Barcelona",
+        "image"            : "celia.png",
+        "maxUnits"         : 300,
+        "defaultRateTable" : "default",
+        "rateTables"       : [
+          {
+            "id"    : "default",
+            "name"  : "Default",
+            "rates" : [
+              {
+                "id"                     : 1,
+                "startDate"              : "2024-01-01",
+                "standardRate"           : 120,
+                "standardRateEffortUnit" : "hour",
+                "perUseCost"             : 15
+              }
+            ]
+          },
+          {
+            "id"    : "discount-20",
+            "name"  : "20% off",
+            "rates" : [
+              {
+                "id"                     : 1,
+                "startDate"              : "2024-01-01",
+                "standardRate"           : 96,
+                "standardRateEffortUnit" : "hour",
+                "perUseCost"             : 12
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id"               : "r2",
+        "name"             : "Lee",
+        "city"             : "London",
+        "defaultRateTable" : "default",
+        "rateTables"       : [
+          {
+            "id"    : "default",
+            "name"  : "Default",
+            "rates" : [
+              {
+                "id"                     : 1,
+                "startDate"              : "2024-01-01",
+                "standardRate"           : 40,
+                "standardRateEffortUnit" : "hour",
+                "perUseCost"             : 5
+              }
+            ]
+          },
+          {
+            "id"    : "discount-20",
+            "name"  : "20% off",
+            "rates" : [
+              {
+                "id"                     : 1,
+                "startDate"              : "2023-01-01",
+                "standardRate"           : 32,
+                "standardRateEffortUnit" : "hour",
+                "perUseCost"             : 4
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id"       : "r3",
+        "name"     : "Macy",
+        "city"     : "New York",
+        "calendar" : "custom"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Madison",
+        "city" : "Barcelona"
+      },
+      {
+        "id"       : "r5",
+        "name"     : "Rob",
+        "city"     : "Rome",
+        "calendar" : "workhours"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Dave",
+        "city" : "Barcelona"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Dan",
+        "city" : "London"
+      },
+      {
+        "id"   : "r8",
+        "name" : "George",
+        "city" : "New York"
+      },
+      {
+        "id"   : "r9",
+        "name" : "Gloria",
+        "city" : "Rome"
+      },
+      {
+        "id"   : "r10",
+        "name" : "Henrik",
+        "city" : "London"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "startDate" : "2024-04-27",
+        "duration"  : 4,
+        "name"      : "Conference",
+        "iconCls"   : "fa fa-calendar"
+      },
+      {
+        "id"         : 2,
+        "startDate"  : "2024-04-28",
+        "endDate"    : "2024-05-02",
+        "name"       : "Prototype",
+        "iconCls"    : "fa fa-pen",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 3,
+        "duration"   : 1,
+        "name"       : "Test",
+        "iconCls"    : "fa fa-search",
+        "eventColor" : "cyan"
+      },
+      {
+        "id"         : 4,
+        "duration"   : 2,
+        "name"       : "Manufacture",
+        "iconCls"    : "fa fa-hammer",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 5,
+        "startDate"  : "2024-04-29",
+        "duration"   : 3,
+        "name"       : "Brainstorm",
+        "iconCls"    : "fa fa-lightbulb",
+        "eventColor" : "violet"
+      },
+      {
+        "id"         : 6,
+        "startDate"  : "2024-04-27",
+        "duration"   : 7,
+        "name"       : "Maintenance",
+        "iconCls"    : "fa fa-tools",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 7,
+        "startDate"  : "2024-04-27",
+        "duration"   : 1,
+        "name"       : "Design",
+        "iconCls"    : "fa fa-marker",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 8,
+        "duration"   : 3,
+        "name"       : "Build",
+        "iconCls"    : "fa fa-hammer",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 9,
+        "duration"   : 2,
+        "name"       : "Sell",
+        "iconCls"    : "fa fa-coins",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 10,
+        "startDate"  : "2024-05-01",
+        "duration"   : 1,
+        "name"       : "Survey",
+        "iconCls"    : "fa fa-users",
+        "eventColor" : "green"
+      },
+      {
+        "id"        : 11,
+        "startDate" : "2024-05-12",
+        "duration"  : 4,
+        "name"      : "Conference",
+        "iconCls"   : "fa fa-calendar"
+      },
+      {
+        "id"         : 12,
+        "startDate"  : "2024-05-19",
+        "duration"   : 2,
+        "name"       : "Brainstorm",
+        "iconCls"    : "fa fa-lightbulb",
+        "eventColor" : "violet"
+      },
+      {
+        "id"         : 13,
+        "startDate"  : "2024-05-15",
+        "duration"   : 1,
+        "name"       : "Design",
+        "iconCls"    : "fa fa-marker",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 14,
+        "duration"   : 3,
+        "name"       : "Build",
+        "iconCls"    : "fa fa-hammer",
+        "eventColor" : "blue"
+      },
+      {
+        "id"         : 15,
+        "startDate"  : "2024-05-11",
+        "duration"   : 3,
+        "name"       : "Prototype",
+        "iconCls"    : "fa fa-pen",
+        "eventColor" : "indigo"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "resource"  : "r1",
+        "event"     : 1,
+        "rateTable" : "default"
+      },
+      {
+        "id"        : 2,
+        "resource"  : "r2",
+        "event"     : 1,
+        "rateTable" : "default"
+      },
+      {
+        "id"       : 3,
+        "resource" : "r8",
+        "event"    : 1
+      },
+      {
+        "id"        : 4,
+        "resource"  : "r2",
+        "event"     : 2,
+        "rateTable" : "default"
+      },
+      {
+        "id"       : 5,
+        "resource" : "r4",
+        "event"    : 3
+      },
+      {
+        "id"       : 6,
+        "resource" : "r5",
+        "event"    : 4
+      },
+      {
+        "id"       : 7,
+        "resource" : "r6",
+        "event"    : 5
+      },
+      {
+        "id"       : 8,
+        "resource" : "r7",
+        "event"    : 5
+      },
+      {
+        "id"       : 9,
+        "resource" : "r9",
+        "event"    : 5
+      },
+      {
+        "id"       : 10,
+        "resource" : "r10",
+        "event"    : 6
+      },
+      {
+        "id"       : 11,
+        "resource" : "r3",
+        "event"    : 7
+      },
+      {
+        "id"       : 12,
+        "resource" : "r3",
+        "event"    : 8
+      },
+      {
+        "id"       : 13,
+        "resource" : "r3",
+        "event"    : 9
+      },
+      {
+        "id"       : 14,
+        "resource" : "r7",
+        "event"    : 10
+      },
+      {
+        "id"       : 15,
+        "resource" : "r4",
+        "event"    : 11
+      },
+      {
+        "id"       : 16,
+        "resource" : "r6",
+        "event"    : 11
+      },
+      {
+        "id"       : 17,
+        "resource" : "r9",
+        "event"    : 11
+      },
+      {
+        "id"        : 18,
+        "resource"  : "r1",
+        "event"     : 12,
+        "rateTable" : "default"
+      },
+      {
+        "id"       : 19,
+        "resource" : "r7",
+        "event"    : 12
+      },
+      {
+        "id"       : 20,
+        "resource" : "r8",
+        "event"    : 12
+      },
+      {
+        "id"       : 21,
+        "resource" : "r7",
+        "event"    : 13
+      },
+      {
+        "id"       : 22,
+        "resource" : "r8",
+        "event"    : 14
+      },
+      {
+        "id"        : 23,
+        "resource"  : "r2",
+        "event"     : 15,
+        "rateTable" : "default"
+      }
+    ]
+  },
+  "dependencies" : {
+    "rows" : [
+      {
+        "id"        : 1,
+        "fromEvent" : 2,
+        "toEvent"   : 3,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 2,
+        "fromEvent" : 3,
+        "toEvent"   : 4,
+        "fromSide"  : "bottom"
+      },
+      {
+        "id"        : 3,
+        "fromEvent" : 7,
+        "toEvent"   : 8,
+        "lag"       : 4,
+        "lagUnit"   : "h"
+      },
+      {
+        "id"        : 4,
+        "fromEvent" : 8,
+        "toEvent"   : 9,
+        "lag"       : 4,
+        "lagUnit"   : "h"
+      },
+      {
+        "id"        : 5,
+        "fromEvent" : 13,
+        "toEvent"   : 14,
+        "lag"       : 8,
+        "lagUnit"   : "h"
+      }
+    ]
+  }
+}

@@ -1,0 +1,144 @@
+.b-date-strip {
+    gap : 0.5em;
+
+    .b-button {
+        padding-inline : 0;
+
+        &.b-date-strip-day {
+            color                                  : var(--b-text-2);
+            --b-button-group-padded-pressed-border : 0;
+
+            &.b-pressed {
+                background : var(--b-color-orange);
+                color      : var(--b-text-5);
+                box-shadow : 0 4px 12px color-mix(in srgb, var(--b-neutral-70), transparent 50%);
+            }
+        }
+
+        &:hover {
+            background : var(--b-neutral-85);
+            color      : var(--b-text-1);
+        }
+
+        &:active {
+            background : var(--b-neutral-80);
+        }
+
+        &.b-text {
+            min-width : 5em;
+        }
+
+        &:not(.b-text) {
+            min-width     : 2.5em;
+            border-radius : 50%;
+
+            &.b-pressed {
+                background : transparent;
+                border     : none;
+            }
+        }
+
+        &.b-nav-previous,
+        &.b-nav-next {
+            margin-inline-start : -.5em;
+        }
+
+        &.b-icon-previous,
+        &.b-icon-next {
+            color : var(--b-text-3);
+        }
+
+        .b-conflict-indicator {
+            position         : absolute;
+            top              : .3em;
+            inset-inline-end : 0.6em;
+            height           : 1em;
+            width            : 1em;
+            opacity          : 0;
+            transition       : opacity .3s;
+
+            .b-theme-material3-light &,
+            .b-theme-material3-dark & {
+                inset-inline-end : 1em;
+            }
+        }
+
+        &.b-date-conflicts .b-conflict-indicator {
+            opacity : 1;
+        }
+    }
+
+    .b-button-custom-content {
+        display         : flex;
+        flex-direction  : column;
+        align-items     : center;
+        justify-content : center;
+        line-height     : 1.2;
+        gap             : 0.08em;
+    }
+
+    .b-date-strip-day-label {
+        font-weight    : 500;
+        font-size      : 0.75em;
+        text-transform : uppercase;
+        letter-spacing : 0.5px;
+        opacity        : 0.8;
+    }
+
+    .b-date-strip-date {
+        font-size   : 1em;
+        font-weight : 600;
+    }
+}
+
+.b-date-strip-menu-datepicker {
+    .b-bottom-toolbar .b-toolbar-content {
+        padding-block : 0 1em;
+    }
+
+    .b-cell-events-badge {
+        font-size  : .6em;
+        width      : 2em;
+        height     : 2em;
+
+        background : var(--b-neutral-95);
+        color      : var(--b-text-3);
+    }
+
+    .b-selected-date {
+        .b-cell-events-badge {
+            background : transparent;
+        }
+    }
+
+    .b-calendar-panel-row {
+        min-height : 2.8em;
+    }
+
+    .b-weeks-container {
+        --b-calendar-panel-weeks-gap : .75em;
+    }
+
+    /* Ensure date number is always positioned at the top when cells lack a badge */
+    .b-calendar-panel-cell:not(.b-has-badge) .b-date-picker-cell-inner {
+        justify-content : flex-start;
+        padding-top     : 2px;
+    }
+}
+
+/* Theme specific adjustments */
+
+.b-theme-material3-light,
+.b-theme-material3-dark,
+.b-theme-visby-light,
+.b-theme-visby-dark {
+    .b-date-strip {
+        .b-button.b-text {
+            min-height : 2.4em;
+        }
+
+        .b-button-custom-content {
+            line-height : 1.1;
+        }
+    }
+}

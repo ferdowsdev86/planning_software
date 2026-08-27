@@ -1,0 +1,29 @@
+{
+  "title": "Redux toolkit demo (React)",
+  "description": "Demo of using the Bryntum React Scheduler component in a React application using Redux Toolkit, loading data with Redux Toolkit Query.",
+  "source": [
+    "package.json",
+    "public/data/data.json",
+    "public/data/data1.json",
+    "public/index.html",
+    "public/locales/en/translation.json",
+    "public/locales/ru/translation.json",
+    "public/locales/se/translation.json",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/components/Loading.js",
+    "src/components/Scheduler.js",
+    "src/components/Toolbar.js",
+    "src/i18n.js",
+    "src/index.js",
+    "src/locales.js",
+    "src/middleware/logger.js",
+    "src/services/data.js",
+    "src/store/index.js",
+    "src/store/localeSlice.js",
+    "src/store/schedulerDataSlice.js",
+    "src/store/uiSlice.js"
+  ]
+}

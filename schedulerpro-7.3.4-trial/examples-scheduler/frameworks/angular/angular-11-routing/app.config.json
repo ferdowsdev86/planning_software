@@ -1,0 +1,27 @@
+{
+  "title": "Routing demo (Angular View Engine)",
+  "description": "Shows how to use Angular 11 routing with the Bryntum Angular Scheduler. Angular v6+ is fully supported.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app-routing.module.ts",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.module.ts",
+    "src/app/home/home.component.html",
+    "src/app/home/home.component.scss",
+    "src/app/home/home.component.ts",
+    "src/app/scheduler/scheduler.component.html",
+    "src/app/scheduler/scheduler.component.scss",
+    "src/app/scheduler/scheduler.component.ts",
+    "src/app/scheduler/scheduler.config.ts",
+    "src/app/tooltip-renderer/tooltip-renderer.component.ts",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Animations demo (Vue 2)",
+  "description": "Shows how to configure event animations in the Vue Scheduler component. You can also disable animations completely.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

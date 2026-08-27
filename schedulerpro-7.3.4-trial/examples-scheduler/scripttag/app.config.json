@@ -1,0 +1,15 @@
+{
+  "title": "Include using a script tag demo",
+  "description": "This example shows how to include and use the grid bundle using an ordinary script tag.",
+  "source": [
+    "index.html",
+    "resources/app.css",
+    "scripts/app.js"
+  ],
+  "disableCodePen": true,
+  "index": {
+    "bundles": [
+      "es6"
+    ]
+  }
+}

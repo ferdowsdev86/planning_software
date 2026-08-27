@@ -1,0 +1,10 @@
+{
+  ".b-time-axis-cell": {
+    "title": "Mouse wheel zoom",
+    "content": "Use Ctrl + mouse wheel or pinch to smoothly zoom in and out of the schedule"
+  },
+  "[data-ref=zoomSlider]": {
+    "title": "Zoom slider",
+    "content": "Drag the slider to zoom in and out of the schedule"
+  }
+}

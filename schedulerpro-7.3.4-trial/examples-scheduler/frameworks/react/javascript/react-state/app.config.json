@@ -1,0 +1,14 @@
+{
+  "title": "Using state demo (React)",
+  "description": "This demo shows how to use React state with the React Scheduler control.",
+  "source": [
+    "package.json",
+    "public/data.json",
+    "public/index.html",
+    "public/manifest.json",
+    "src/App.js",
+    "src/App.scss",
+    "src/AppConfig.js",
+    "src/index.js"
+  ]
+}

@@ -1,0 +1,225 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"      : "r1",
+        "name"    : "Malik Johnson",
+        "subject" : "Math",
+        "role"    : "Teacher",
+        "faculty" : "Science"
+      },
+      {
+        "id"      : "r2",
+        "name"    : "Celia Hernández",
+        "subject" : "Math",
+        "role"    : "Teacher",
+        "faculty" : "Science"
+      },
+      {
+        "id"      : "r3",
+        "name"    : "Dave Adebayo",
+        "subject" : "English",
+        "role"    : "Teacher",
+        "faculty" : "Humanities"
+      },
+      {
+        "id"      : "r4",
+        "name"    : "Gloria Rogers",
+        "subject" : "English",
+        "role"    : "Teacher",
+        "faculty" : "Humanities"
+      },
+      {
+        "id"      : "r5",
+        "name"    : "Kate Smith",
+        "subject" : "Math & English",
+        "role"    : "Assistant",
+        "faculty" : "Humanities"
+      },
+      {
+        "id"      : "r6",
+        "name"    : "Linda Williams",
+        "subject" : "Chemistry & Math",
+        "role"    : "Assistant",
+        "faculty" : "Science"
+      },
+      {
+        "id"      : "r7",
+        "name"    : "Madison Jones",
+        "subject" : "Computer science",
+        "role"    : "Assistant",
+        "faculty" : "Engineering"
+      },
+      {
+        "id"      : "r8",
+        "name"    : "Desiree Brown",
+        "subject" : "Computer science",
+        "role"    : "Assistant",
+        "faculty" : "Engineering"
+      },
+      {
+        "id"      : "r9",
+        "name"    : "Joe Trout",
+        "subject" : "History",
+        "role"    : "Teacher",
+        "faculty" : "Humanities"
+      },
+      {
+        "id"      : "r10",
+        "name"    : "Madeleine Thomas",
+        "subject" : "History",
+        "role"    : "Assistant",
+        "faculty" : "Humanities"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : "r1",
+        "startDate"  : "2022-03-07T09:00:00",
+        "endDate"    : "2022-03-07T12:00:00",
+        "name"       : "Math basics",
+        "eventColor" : "lime"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : "r1",
+        "startDate"  : "2022-03-07T13:00:00",
+        "endDate"    : "2022-03-07T16:00:00",
+        "name"       : "Algebra",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : "r2",
+        "startDate"  : "2022-03-07T13:00:00",
+        "endDate"    : "2022-03-07T16:00:00",
+        "name"       : "Equations",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : "r3",
+        "startDate"  : "2022-03-07T08:00:00",
+        "endDate"    : "2022-03-07T09:00:00",
+        "name"       : "English A",
+        "eventColor" : "lime"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : "r4",
+        "startDate"  : "2022-03-07T09:30:00",
+        "endDate"    : "2022-03-07T11:00:00",
+        "name"       : "English B",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : "r3",
+        "startDate"  : "2022-03-07T12:00:00",
+        "endDate"    : "2022-03-07T14:00:00",
+        "name"       : "English exam",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : "r5",
+        "startDate"  : "2022-03-07T08:00:00",
+        "endDate"    : "2022-03-07T12:00:00",
+        "name"       : "English tutoring",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : "r5",
+        "startDate"  : "2022-03-07T08:00:00",
+        "endDate"    : "2022-03-07T12:00:00",
+        "name"       : "Math tutoring",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : "r5",
+        "startDate"  : "2022-03-07T14:00:00",
+        "endDate"    : "2022-03-07T17:00:00",
+        "name"       : "English re-exam",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : "r6",
+        "startDate"  : "2022-03-07T13:30:00",
+        "endDate"    : "2022-03-07T16:00:00",
+        "name"       : "Math re-exam",
+        "eventColor" : "orange"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : "r6",
+        "startDate"  : "2022-03-07T08:30:00",
+        "endDate"    : "2022-03-07T11:30:00",
+        "name"       : "Chemistry in action",
+        "eventColor" : "lime"
+      },
+      {
+        "id"         : 12,
+        "resourceId" : "r7",
+        "startDate"  : "2022-03-07T08:30:00",
+        "endDate"    : "2022-03-07T15:30:00",
+        "name"       : "Computer lab",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 13,
+        "resourceId" : "r8",
+        "startDate"  : "2022-03-07T08:00:00",
+        "endDate"    : "2022-03-07T11:30:00",
+        "name"       : "AI lab",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 14,
+        "resourceId" : "r8",
+        "startDate"  : "2022-03-07T12:30:00",
+        "endDate"    : "2022-03-07T17:00:00",
+        "name"       : "Computer vision lab",
+        "eventColor" : "indigo"
+      },
+      {
+        "id"         : 15,
+        "resourceId" : "r9",
+        "startDate"  : "2022-03-07T08:00:00",
+        "endDate"    : "2022-03-07T10:00:00",
+        "name"       : "Ancient Persia",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 16,
+        "resourceId" : "r9",
+        "startDate"  : "2022-03-07T12:00:00",
+        "endDate"    : "2022-03-07T14:00:00",
+        "name"       : "Ancient Egypt",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 17,
+        "resourceId" : "r9",
+        "startDate"  : "2022-03-07T14:30:00",
+        "endDate"    : "2022-03-07T16:30:00",
+        "name"       : "Kingdom of Kush",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 18,
+        "resourceId" : "r10",
+        "startDate"  : "2022-03-07T08:30:00",
+        "endDate"    : "2022-03-07T13:00:00",
+        "name"       : "History exam",
+        "eventColor" : "orange"
+      }
+    ]
+  }
+}

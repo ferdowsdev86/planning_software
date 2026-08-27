@@ -1,0 +1,10 @@
+{
+  "title": "Dependencies between nested events",
+  "description": "Shows using dependencies between nested events, that affects the scheduling",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

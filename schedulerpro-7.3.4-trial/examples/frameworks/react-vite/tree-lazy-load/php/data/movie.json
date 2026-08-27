@@ -1,0 +1,452 @@
+[
+  {
+    "id"                : 1,
+    "name"              : "Inception",
+    "genre"             : "Sci-Fi",
+    "duration"          : 148,
+    "eventColor"        : "blue",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 2,
+    "name"              : "Spirited Away",
+    "genre"             : "Animation",
+    "duration"          : 125,
+    "eventColor"        : "green",
+    "country"           : "Japan",
+    "productionCompany" : "Studio Ghibli"
+  },
+  {
+    "id"                : 3,
+    "name"              : "Amélie",
+    "genre"             : "Romance",
+    "duration"          : 122,
+    "eventColor"        : "pink",
+    "country"           : "France",
+    "productionCompany" : "Claudie Ossard Productions"
+  },
+  {
+    "id"                : 4,
+    "name"              : "Parasite",
+    "genre"             : "Thriller",
+    "duration"          : 132,
+    "eventColor"        : "red",
+    "country"           : "South Korea",
+    "productionCompany" : "Barunson E&A"
+  },
+  {
+    "id"                : 5,
+    "name"              : "The Godfather",
+    "genre"             : "Crime",
+    "duration"          : 175,
+    "eventColor"        : "amber",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  },
+  {
+    "id"                : 6,
+    "name"              : "The Dark Knight",
+    "genre"             : "Action",
+    "duration"          : 152,
+    "eventColor"        : "indigo",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 7,
+    "name"              : "The Shawshank Redemption",
+    "genre"             : "Drama",
+    "duration"          : 142,
+    "eventColor"        : "violet",
+    "country"           : "USA",
+    "productionCompany" : "Columbia Pictures"
+  },
+  {
+    "id"                : 8,
+    "name"              : "Forrest Gump",
+    "genre"             : "Drama",
+    "duration"          : 142,
+    "eventColor"        : "yellow",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  },
+  {
+    "id"                : 9,
+    "name"              : "The Matrix",
+    "genre"             : "Sci-Fi",
+    "duration"          : 136,
+    "eventColor"        : "cyan",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 10,
+    "name"              : "Pulp Fiction",
+    "genre"             : "Crime",
+    "duration"          : 154,
+    "eventColor"        : "deep-orange",
+    "country"           : "USA",
+    "productionCompany" : "Miramax Films"
+  },
+  {
+    "id"                : 11,
+    "name"              : "Fight Club",
+    "genre"             : "Drama",
+    "duration"          : 139,
+    "eventColor"        : "teal",
+    "country"           : "USA",
+    "productionCompany" : "20th Century Fox"
+  },
+  {
+    "id"                : 12,
+    "name"              : "Interstellar",
+    "genre"             : "Sci-Fi",
+    "duration"          : 169,
+    "eventColor"        : "blue",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  },
+  {
+    "id"                : 13,
+    "name"              : "Gladiator",
+    "genre"             : "Action",
+    "duration"          : 155,
+    "eventColor"        : "purple",
+    "country"           : "USA",
+    "productionCompany" : "DreamWorks Pictures"
+  },
+  {
+    "id"                : 14,
+    "name"              : "The Lion King",
+    "genre"             : "Animation",
+    "duration"          : 88,
+    "eventColor"        : "orange",
+    "country"           : "USA",
+    "productionCompany" : "Walt Disney Feature Animation"
+  },
+  {
+    "id"                : 15,
+    "name"              : "The Prestige",
+    "genre"             : "Drama",
+    "duration"          : 130,
+    "eventColor"        : "magenta",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 16,
+    "name"              : "Whiplash",
+    "genre"             : "Drama",
+    "duration"          : 107,
+    "eventColor"        : "pink",
+    "country"           : "USA",
+    "productionCompany" : "Blumhouse Productions"
+  },
+  {
+    "id"                : 17,
+    "name"              : "Her",
+    "genre"             : "Romance",
+    "duration"          : 126,
+    "eventColor"        : "red",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 18,
+    "name"              : "The Revenant",
+    "genre"             : "Adventure",
+    "duration"          : 156,
+    "eventColor"        : "deep-purple",
+    "country"           : "USA",
+    "productionCompany" : "20th Century Fox"
+  },
+  {
+    "id"                : 19,
+    "name"              : "The Social Network",
+    "genre"             : "Drama",
+    "duration"          : 120,
+    "eventColor"        : "yellow",
+    "country"           : "USA",
+    "productionCompany" : "Columbia Pictures"
+  },
+  {
+    "id"                : 20,
+    "name"              : "12 Angry Men",
+    "genre"             : "Drama",
+    "duration"          : 96,
+    "eventColor"        : "gantt-green",
+    "country"           : "USA",
+    "productionCompany" : "United Artists"
+  },
+  {
+    "id"                : 21,
+    "name"              : "Inglourious Basterds",
+    "genre"             : "War",
+    "duration"          : 153,
+    "eventColor"        : "orange",
+    "country"           : "USA",
+    "productionCompany" : "The Weinstein Company"
+  },
+  {
+    "id"                : 22,
+    "name"              : "The Grand Budapest Hotel",
+    "genre"             : "Comedy",
+    "duration"          : 99,
+    "eventColor"        : "light-blue",
+    "country"           : "USA",
+    "productionCompany" : "Fox Searchlight Pictures"
+  },
+  {
+    "id"                : 23,
+    "name"              : "The Godfather: Part II",
+    "genre"             : "Crime",
+    "duration"          : 202,
+    "eventColor"        : "lime",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  },
+  {
+    "id"                : 24,
+    "name"              : "Schindler's List",
+    "genre"             : "History",
+    "duration"          : 195,
+    "eventColor"        : "teal",
+    "country"           : "USA",
+    "productionCompany" : "Universal Pictures"
+  },
+  {
+    "id"                : 25,
+    "name"              : "Memento",
+    "genre"             : "Mystery",
+    "duration"          : 113,
+    "eventColor"        : "purple",
+    "country"           : "USA",
+    "productionCompany" : "Newmarket Films"
+  },
+  {
+    "id"                : 26,
+    "name"              : "The Dark Knight Rises",
+    "genre"             : "Action",
+    "duration"          : 164,
+    "eventColor"        : "blue",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 27,
+    "name"              : "Avatar",
+    "genre"             : "Sci-Fi",
+    "duration"          : 162,
+    "eventColor"        : "light-green",
+    "country"           : "USA",
+    "productionCompany" : "20th Century Fox"
+  },
+  {
+    "id"                : 28,
+    "name"              : "The Silence of the Lambs",
+    "genre"             : "Thriller",
+    "duration"          : 118,
+    "eventColor"        : "deep-orange",
+    "country"           : "USA",
+    "productionCompany" : "Orion Pictures"
+  },
+  {
+    "id"                : 29,
+    "name"              : "Blade Runner 2049",
+    "genre"             : "Sci-Fi",
+    "duration"          : 164,
+    "eventColor"        : "cyan",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 30,
+    "name"              : "Goodfellas",
+    "genre"             : "Crime",
+    "duration"          : 146,
+    "eventColor"        : "yellow",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 31,
+    "name"              : "The Wolf of Wall Street",
+    "genre"             : "Comedy",
+    "duration"          : 180,
+    "eventColor"        : "green",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  },
+  {
+    "id"                : 32,
+    "name"              : "The Big Lebowski",
+    "genre"             : "Comedy",
+    "duration"          : 117,
+    "eventColor"        : "indigo",
+    "country"           : "USA",
+    "productionCompany" : "Gramercy Pictures"
+  },
+  {
+    "id"                : 33,
+    "name"              : "Back to the Future",
+    "genre"             : "Sci-Fi",
+    "duration"          : 116,
+    "eventColor"        : "red",
+    "country"           : "USA",
+    "productionCompany" : "Universal Pictures"
+  },
+  {
+    "id"                : 34,
+    "name"              : "The Wizard of Oz",
+    "genre"             : "Fantasy",
+    "duration"          : 102,
+    "eventColor"        : "pink",
+    "country"           : "USA",
+    "productionCompany" : "Metro-Goldwyn-Mayer"
+  },
+  {
+    "id"                : 35,
+    "name"              : "The Terminator",
+    "genre"             : "Sci-Fi",
+    "duration"          : 107,
+    "eventColor"        : "violet",
+    "country"           : "USA",
+    "productionCompany" : "Orion Pictures"
+  },
+  {
+    "id"                : 36,
+    "name"              : "Eternal Sunshine of the Spotless Mind",
+    "genre"             : "Drama",
+    "duration"          : 108,
+    "eventColor"        : "light-blue",
+    "country"           : "USA",
+    "productionCompany" : "Focus Features"
+  },
+  {
+    "id"                : 37,
+    "name"              : "Jaws",
+    "genre"             : "Thriller",
+    "duration"          : 124,
+    "eventColor"        : "gantt-green",
+    "country"           : "USA",
+    "productionCompany" : "Universal Pictures"
+  },
+  {
+    "id"                : 38,
+    "name"              : "A Clockwork Orange",
+    "genre"             : "Crime",
+    "duration"          : 136,
+    "eventColor"        : "amber",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 39,
+    "name"              : "The Shining",
+    "genre"             : "Horror",
+    "duration"          : 146,
+    "eventColor"        : "light-green",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 40,
+    "name"              : "The Exorcist",
+    "genre"             : "Horror",
+    "duration"          : 122,
+    "eventColor"        : "deep-purple",
+    "country"           : "USA",
+    "productionCompany" : "Warner Bros."
+  },
+  {
+    "id"                : 41,
+    "name"              : "Citizen Kane",
+    "genre"             : "Drama",
+    "duration"          : 119,
+    "eventColor"        : "orange",
+    "country"           : "USA",
+    "productionCompany" : "RKO Pictures"
+  },
+  {
+    "id"                : 42,
+    "name"              : "The Breakfast Club",
+    "genre"             : "Comedy",
+    "duration"          : 97,
+    "eventColor"        : "gantt-green",
+    "country"           : "USA",
+    "productionCompany" : "Universal Pictures"
+  },
+  {
+    "id"                : 43,
+    "name"              : "The Notebook",
+    "genre"             : "Romance",
+    "duration"          : 124,
+    "eventColor"        : "teal",
+    "country"           : "USA",
+    "productionCompany" : "New Line Cinema"
+  },
+  {
+    "id"                : 44,
+    "name"              : "Taxi Driver",
+    "genre"             : "Drama",
+    "duration"          : 114,
+    "eventColor"        : "violet",
+    "country"           : "USA",
+    "productionCompany" : "Columbia Pictures"
+  },
+  {
+    "id"                : 45,
+    "name"              : "The Usual Suspects",
+    "genre"             : "Crime",
+    "duration"          : 106,
+    "eventColor"        : "blue",
+    "country"           : "USA",
+    "productionCompany" : "Gramercy Pictures"
+  },
+  {
+    "id"                : 46,
+    "name"              : "Moulin Rouge!",
+    "genre"             : "Musical",
+    "duration"          : 127,
+    "eventColor"        : "pink",
+    "country"           : "Australia",
+    "productionCompany" : "20th Century Fox"
+  },
+  {
+    "id"                : 47,
+    "name"              : "The Princess Bride",
+    "genre"             : "Fantasy",
+    "duration"          : 98,
+    "eventColor"        : "light-blue",
+    "country"           : "USA",
+    "productionCompany" : "20th Century Fox"
+  },
+  {
+    "id"                : 48,
+    "name"              : "A Beautiful Mind",
+    "genre"             : "Drama",
+    "duration"          : 135,
+    "eventColor"        : "green",
+    "country"           : "USA",
+    "productionCompany" : "Universal Pictures"
+  },
+  {
+    "id"                : 49,
+    "name"              : "The Hateful Eight",
+    "genre"             : "Western",
+    "duration"          : 168,
+    "eventColor"        : "magenta",
+    "country"           : "USA",
+    "productionCompany" : "The Weinstein Company"
+  },
+  {
+    "id"                : 50,
+    "name"              : "The Big Short",
+    "genre"             : "Drama",
+    "duration"          : 130,
+    "eventColor"        : "yellow",
+    "country"           : "USA",
+    "productionCompany" : "Paramount Pictures"
+  }
+]

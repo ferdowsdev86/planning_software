@@ -1,0 +1,10 @@
+{
+  "title": "Pro Dependencies demo",
+  "description": "Shows a basic Scheduler Pro setup with dependencies affecting scheduling",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

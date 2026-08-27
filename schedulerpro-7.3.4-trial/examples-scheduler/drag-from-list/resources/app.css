@@ -1,0 +1,121 @@
+.b-sch-event-wrap {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+
+    .b-sch-event-content {
+        padding         : 0.5em 0;
+        flex-direction  : column;
+        align-items     : flex-start;
+        justify-content : space-around;
+    }
+}
+
+#bodycontainer {
+    flex           : 1 1 0;
+    display        : flex;
+    flex-direction : row;
+    align-items    : stretch;
+
+    > * {
+        height : auto;
+    }
+
+    [data-ref=schedule] {
+        flex : 1;
+    }
+}
+
+i.b-equipment-icon {
+    color : var(--b-primary-50);
+
+    &.b-dragging {
+        position        : absolute;
+
+        &:not(.b-drag-final-transition) {
+            width      : 3em;
+            height     : 3em;
+            font-size  : 1.2em;
+            background : var(--b-neutral-100);
+
+            box-shadow : var(--b-elevation-2);
+
+            &:not(.b-drag-invalid) {
+                color : var(--b-color-green);
+            }
+        }
+
+        display         : flex;
+        align-items     : center;
+        justify-content : center;
+        border-radius   : 50%;
+        opacity         : 1;
+    }
+
+    &.b-drag-final-transition {
+        transition-property : transform, font-size, padding, width, height;
+        transition-duration : .5s;
+        font-size           : 0.9em;
+
+        color               : var(--b-primary-40);
+    }
+}
+
+.b-sch-event-name {
+    font-size : 1.2em;
+}
+
+.b-sch-event-startdate {
+    color     : var(--b-neutral-40);
+    font-size : .9em;
+}
+
+.b-sch-event-equipment-wrap {
+    display     : flex;
+    align-items : center;
+}
+
+.b-sch-event .b-sch-event-equipment-wrap {
+    padding : 0;
+    margin  : 0;
+
+    li.fa {
+        margin-inline-end : 0.7em;
+    }
+}
+
+.b-panel.equipmentpanel {
+    flex                : 0 0 16em;
+    border-inline-start : 2px solid var(--b-grid-header-border-color);
+
+    --b-panel-with-header-padding : 0
+}
+
+.b-grid-header-container,
+.b-panel-header.b-panel-ui-toolbar.b-dock-top {
+    height     : 4em;
+    min-height : 4em;
+}
+
+.b-list[data-ref=equipment] {
+    flex-flow : row wrap;
+    font-size : 0.9em;
+
+    .b-list-item {
+        min-width    : 0;
+        width        : 50%;
+        aspect-ratio : 1 / 1;
+
+        &:hover:not(.b-selected) {
+            --b-list-item-background : var(--b-primary-95);
+        }
+    }
+
+    .b-list-item-content {
+        flex-direction  : column;
+        text-align      : center;
+        justify-content : space-evenly;
+    }
+
+    i {
+        font-size : 1.5em;
+    }
+}

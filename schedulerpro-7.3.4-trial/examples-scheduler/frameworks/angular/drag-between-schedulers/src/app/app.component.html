@@ -1,0 +1,47 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div class = "demo-app">
+    <div class = "demo-toolbar">
+        <bryntum-button
+            icon = "b-icon b-icon-search-plus"
+            text = "Zoom in"
+            (onClick) = "onZoomIn()"
+        ></bryntum-button>
+        <bryntum-button
+            icon = "b-icon b-icon-search-minus"
+            text = "Zoom out"
+            (onClick) = "onZoomOut()"
+        ></bryntum-button>
+    </div>
+
+    <div class = "container">
+        <bryntum-scheduler
+            #scheduler1
+            [barMargin] = "scheduler1Props.barMargin!"
+            [columns] = "scheduler1Props.columns!"
+            [endDate] = "scheduler1Props.endDate!"
+            [events] = "scheduler1Props.events!"
+            [resources] = "scheduler1Props.resources!"
+            [startDate] = "scheduler1Props.startDate!"
+            [viewPreset] = "scheduler1Props.viewPreset!"
+            [eventDragFeature] = "scheduler1Props.eventDragFeature!"
+            [sortFeature] = "scheduler1Props.sortFeature!"
+            [stripeFeature] = "scheduler1Props.stripeFeature!"
+            [resourceImages] = "scheduler1Props.resourceImages!"
+            [smoothZoom] = "scheduler1Props.smoothZoom!"
+        ></bryntum-scheduler>
+        <bryntum-splitter [showButtons]="true"></bryntum-splitter>
+        <bryntum-scheduler
+            #scheduler2
+            [barMargin] = "scheduler2Props.barMargin!"
+            [columns] = "scheduler2Props.columns!"
+            [events] = "scheduler2Props.events!"
+            [resources] = "scheduler2Props.resources!"
+            [eventDragFeature] = "scheduler2Props.eventDragFeature!"
+            [sortFeature] = "scheduler2Props.sortFeature!"
+            [stripeFeature] = "scheduler2Props.stripeFeature!"
+            [resourceImages] = "scheduler2Props.resourceImages!"
+            [smoothZoom] = "scheduler2Props.smoothZoom!"
+        ></bryntum-scheduler>
+    </div>
+</div>

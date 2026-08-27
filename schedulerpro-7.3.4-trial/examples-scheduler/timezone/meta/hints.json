@@ -1,0 +1,22 @@
+{
+  ".b-grid-sub-grid": {
+    "title": "Time zone support",
+    "content": "Set the scheduler to view a different time zone by using the timeZone config. The 'internal clock' will be set as if it would be in that time zone.<br><br>Keep in mind that JavaScript dates are technically always in current local system time zone and if local system time zone has DST those DST will have an effect on the 'converted' time zone as well. This will result in incorrect conversions when displaying date and time on local DST change.",
+    "width": 500,
+    "align": "b-b",
+    "inflate": -10
+  },
+  ".b-combo": {
+    "title": "Time zones",
+    "content": "Select time zone to switch to. The time zones that is available is those which is used by Intl.DateTimeFormat - <a href='https://www.iana.org/time-zones'>IANA time zones</a>.<br><br>Note that this time zone picker is an example only. In your implementation you could do it any other way, as long as the time zone set is an IANA time zone or a UTC offset in minutes."
+  },
+  "[data-event-id='6']": {
+    "title": "UTC dates",
+    "content": "Dates in this demo is loaded in UTC time which is also displayed in the body of each event"
+  },
+  ".b-sch-header-time-axis-cell[data-tick-index='12']": {
+    "title": "Time axis converted",
+    "content": "The time axis is also converted to new time zone",
+    "align": "b-t"
+  }
+}

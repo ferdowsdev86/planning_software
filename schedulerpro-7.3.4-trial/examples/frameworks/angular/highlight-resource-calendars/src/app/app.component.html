@@ -1,0 +1,42 @@
+<!-- BryntumDemoHeader component is used for Bryntum example styling only and can be removed -->
+<bryntum-demo-header></bryntum-demo-header>
+<div id="content" class="demo-app">
+    <bryntum-scheduler-pro
+        #schedulerPro
+        [flex]="schedulerProProps.flex!"
+        [smoothZoom]="schedulerProProps.smoothZoom!"
+        [project]="schedulerProProps.project!"
+        [startDate]="schedulerProProps.startDate!"
+        [endDate]="schedulerProProps.endDate!"
+        [rowHeight]="schedulerProProps.rowHeight!"
+        [barMargin]="schedulerProProps.barMargin!"
+        [allowOverlap]="schedulerProProps.allowOverlap!"
+        [visibleDate]="schedulerProProps.visibleDate!"
+        [snap]="schedulerProProps.snap!"
+        [tickSize]="schedulerProProps.tickSize!"
+        [viewPreset]="schedulerProProps.viewPreset!"
+        [resourceImagePath]="schedulerProProps.resourceImagePath!"
+        [eventColor]="schedulerProProps.eventColor!"
+        [eventStyle]="schedulerProProps.eventStyle!"
+        [scheduleTooltipFeature]="schedulerProProps.scheduleTooltipFeature!"
+        [dependenciesFeature]="schedulerProProps.dependenciesFeature!"
+        [calendarHighlightFeature]="schedulerProProps.calendarHighlightFeature!"
+        [eventDragFeature]="schedulerProProps.eventDragFeature!"
+        [eventTooltipFeature]="schedulerProProps.eventTooltipFeature!"
+        [filterBarFeature]="schedulerProProps.filterBarFeature!"
+        [eventRenderer]="schedulerProProps.eventRenderer!"
+        [columns]="schedulerProProps.columns!"
+        [getDateConstraints]="schedulerProProps.getDateConstraints!"
+        [listeners]="schedulerProProps.listeners!">
+    </bryntum-scheduler-pro>
+    <bryntum-splitter></bryntum-splitter>
+    <bryntum-panel
+        #panel
+        [width]="panelProps.width!"
+        [minWidth]="panelProps.minWidth!"
+        [collapsible]="panelProps.collapsible!"
+        [title]="panelProps.title!"
+        [cls]="panelProps.cls!"
+        [items]="panelProps.items!">
+    </bryntum-panel>
+</div>

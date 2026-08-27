@@ -1,0 +1,10 @@
+{
+  "title": "Drag events out of the scheduler",
+  "description": "This example shows how to drag events to an element outside the scheduler.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

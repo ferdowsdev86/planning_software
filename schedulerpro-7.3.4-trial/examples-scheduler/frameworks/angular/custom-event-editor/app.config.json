@@ -1,0 +1,26 @@
+{
+  "title": "Custom event editor (Angular)",
+  "description": "Shows how to replace the default event editor with an Angular-based custom editor.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/date-time-field/date-time-field.component.html",
+    "src/app/date-time-field/date-time-field.component.scss",
+    "src/app/date-time-field/date-time-field.component.ts",
+    "src/app/event-editor/event-editor.component.html",
+    "src/app/event-editor/event-editor.component.scss",
+    "src/app/event-editor/event-editor.component.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

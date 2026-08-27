@@ -1,0 +1,73 @@
+.b-sch-event .part {
+    opacity : .6;
+}
+
+.b-time-axis-group-summary {
+    .b-time-axis-summary-value:last-child {
+        display : none;
+    }
+
+    .b-time-axis-summary-value {
+        position        : relative;
+        display         : flex;
+        flex            : 1;
+        justify-content : center;
+        align-items     : center;
+
+        .histogram-summary & {
+            display : none;
+
+            &:last-child {
+                display     : flex;
+                align-items : stretch;
+            }
+        }
+    }
+
+    .bar-outer {
+        flex            : 1;
+        display         : flex;
+        flex-direction  : column;
+        justify-content : flex-end;
+        position        : relative;
+    }
+
+    .bar-inner {
+        position         : relative;
+        width            : 100%;
+        transition       : height 0.3s;
+        min-height       : 1px;
+        display          : flex;
+        justify-content  : center;
+
+        background-color : var(--b-primary);
+
+        label {
+            position  : absolute;
+            top       : -13px;
+            font-size : .7em;
+        }
+
+        label.b-summary-bar-label-inside {
+            top : 3px;
+        }
+    }
+}
+
+.b-time-axis-summary-tip {
+    .tip-item {
+        display         : flex;
+        justify-content : space-between;
+        border-bottom   : 1px solid #ddd;
+        padding         : 0.3em;
+    }
+
+    .tip-item:last-child {
+        border-bottom : none;
+    }
+
+    .label {
+        font-weight       : bold;
+        margin-inline-end : 1.5em;
+    }
+}

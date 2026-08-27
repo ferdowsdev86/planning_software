@@ -1,0 +1,12 @@
+.b-sch-event-wrap {
+    .b-nested-events-container {
+        background-image : repeating-linear-gradient(135deg, var(--b-neutral-95), var(--b-neutral-95) 3px, var(--b-neutral-100) 3px, var(--b-neutral-100) 6px);
+    }
+
+    &.b-selected,
+    &:hover {
+        .b-nested-events-container {
+            background-image : repeating-linear-gradient(135deg, var(--b-neutral-90), var(--b-neutral-90) 3px, var(--b-neutral-100) 3px, var(--b-neutral-100) 6px);
+        }
+    }
+}

@@ -1,0 +1,90 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : "r1",
+        "name" : "Mike"
+      },
+      {
+        "id"   : "r2",
+        "name" : "Linda"
+      },
+      {
+        "id"   : "r3",
+        "name" : "Don"
+      },
+      {
+        "id"   : "r4",
+        "name" : "Karen"
+      },
+      {
+        "id"   : "r5",
+        "name" : "Doug"
+      },
+      {
+        "id"   : "r6",
+        "name" : "Peter"
+      },
+      {
+        "id"   : "r7",
+        "name" : "Sam"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "resourceId" : "r1",
+        "startDate"  : "2025-01-01T05:00:00.000Z",
+        "endDate"    : "2025-01-01T07:00:00.000Z",
+        "name"       : "Click me"
+      },
+      {
+        "resourceId" : "r2",
+        "startDate"  : "2025-01-01T07:00:00.000Z",
+        "endDate"    : "2025-01-01T08:00:00.000Z",
+        "name"       : "Drag me"
+      },
+      {
+        "resourceId" : "r3",
+        "startDate"  : "2025-01-01T09:00:00.000Z",
+        "endDate"    : "2025-01-01T11:00:00.000Z",
+        "name"       : "Double click me"
+      },
+      {
+        "resourceId" : "r4",
+        "startDate"  : "2025-01-01T03:00:00.000Z",
+        "endDate"    : "2025-01-01T06:00:00.000Z",
+        "name"       : "Right click me",
+        "eventColor" : "red"
+      },
+      {
+        "resourceId" : "r5",
+        "startDate"  : "2025-01-01T10:00:00.000Z",
+        "endDate"    : "2025-01-01T12:00:00.000Z",
+        "name"       : "Resize me"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2025-01-01T11:00:00.000Z",
+        "endDate"    : "2025-01-01T13:00:00.000Z",
+        "name"       : "Important meeting"
+      },
+      {
+        "resourceId" : "r6",
+        "startDate"  : "2025-01-01T01:00:00.000Z",
+        "endDate"    : "2025-01-01T03:00:00.000Z",
+        "name"       : "Sports event"
+      },
+      {
+        "resourceId" : "r7",
+        "startDate"  : "2025-01-01T04:00:00.000Z",
+        "endDate"    : "2025-01-01T07:00:00.000Z",
+        "name"       : "Dad's birthday",
+        "eventStyle" : "line",
+        "eventColor" : "blue"
+      }
+    ]
+  }
+}

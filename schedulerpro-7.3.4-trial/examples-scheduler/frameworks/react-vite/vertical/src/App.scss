@@ -1,0 +1,54 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+/* Hide empty text element in vertical timeaxis header, to give filtering field more space */
+.b-grid-headers-locked .b-grid-header {
+    .b-grid-header-text {
+        display : none;
+    }
+
+    .b-filter-bar-field {
+        margin : .5em 0;
+    }
+}
+
+.b-sch-event {
+    flex-wrap     : wrap;
+    align-content : flex-start;
+
+    i {
+        margin-bottom : .4em;
+    }
+
+    .time {
+        font-size   : .9em;
+        white-space : nowrap;
+    }
+
+    .name {
+        font-weight : 600;
+    }
+    &:not(.b-sch-event-narrow) {
+        .name {
+            margin-top : .4em;
+        }
+    }
+}
+
+.b-grid > .b-toolbar > .b-content-element > .b-button.b-text {
+    width : 7em;
+}
+
+.b-milestone .time {
+    text-align : center;
+}

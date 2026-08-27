@@ -1,0 +1,212 @@
+import LocaleHelper from '../../../lib/Core/localization/LocaleHelper.js';
+import '../../../lib/Chart/localization/Id.js';
+import '../../../lib/SchedulerPro/localization/Id.js';
+import './shared.locale.Id.js';
+
+const locale = {
+
+    localeName : 'Id',
+    localeDesc : 'Bahasa Indonesia',
+    localeCode : 'id',
+    localeRtl  : false,
+
+    Column : {
+        Actions             : 'Tindakan',
+        Active              : 'Aktif',
+        Allocation          : 'Alokasi',
+        Calendar            : 'Kalender',
+        City                : 'Kota',
+        Condition           : 'Kondisi',
+        Consultant          : 'Konsultan',
+        Contractor          : 'Kontraktor',
+        Doctor              : 'Dokter',
+        Driver              : 'Pengemudi',
+        Expedition          : 'Ekspedisi',
+        'First name'        : 'Nama depan',
+        Inspector           : 'Inspektur',
+        Lag                 : 'Keterlambatan',
+        Manager             : 'Manajer',
+        Name                : 'Nama',
+        Projects            : 'Proyek',
+        Property            : 'Properti',
+        Rating              : 'Penilaian',
+        Resource            : 'Sumber daya',
+        Role                : 'Peran',
+        Score               : 'Skor',
+        Shift               : 'Shift',
+        'Speaker rating'    : 'Peringkat pembicara',
+        Staff               : 'Staf',
+        Station             : 'Stasiun',
+        Surname             : 'Nama belakang',
+        Tasks               : 'Tugas',
+        Technicians         : 'Teknisi',
+        Type                : 'Tipe',
+        'Vehicle Condition' : 'Kondisi Kendaraan',
+        'Work hours'        : 'Jam kerja',
+        Worker              : 'Pekerja'
+    },
+
+    Button : {
+        '10K events'                  : '10K acara',
+        '1K events'                   : '1K acara',
+        '5K events'                   : '5K acara',
+        'Add exception'               : 'Tambahkan pengecualian',
+        'Add invalid calendar'        : 'Tambahkan kalender tidak valid',
+        'Add invalid dependency'      : 'Tambahkan ketergantungan tidak valid',
+        'Add order'                   : 'Tambahkan pesanan',
+        'Add task'                    : 'Tambahkan tugas',
+        'Add week'                    : 'Tambahkan minggu',
+        Apr                           : 'Apr',
+        Aug                           : 'Agu',
+        August                        : 'Agustus',
+        'Auto-schedule'               : 'Jadwal otomatis',
+        'Bar settings'                : 'Pengaturan bar',
+        Cancel                        : 'Batal',
+        'Change working time'         : 'Ubah waktu kerja',
+        'City - Resource'             : 'Kota - Sumber daya',
+        Custom                        : 'Kustom',
+        Dark                          : 'Gelap',
+        Dec                           : 'Des',
+        Default                       : 'Default',
+        'Default layouts'             : 'Tata letak default',
+        Delete                        : 'Hapus',
+        Dependencies                  : 'Ketergantungan',
+        'Drag & resize settings'      : 'Pengaturan seret & ubah ukuran',
+        Edit                          : 'Edit',
+        'Edit calendar'               : 'Edit kalender',
+        'Enable mouse interaction'    : 'Aktifkan interaksi mouse',
+        Feb                           : 'Feb',
+        'Filter out non-working time' : 'Saring waktu tidak bekerja',
+        'Hide scheduled'              : 'Sembunyikan yang dijadwalkan',
+        'Highlight 9-10am + 2-4pm'    : 'Sorot 9-10 pagi + 2-4 sore',
+        'Highlight while dragging'    : 'Sorot saat menyeret',
+        'Horizontal mode'             : 'Mode horizontal',
+        Jan                           : 'Jan',
+        Jul                           : 'Jul',
+        Jun                           : 'Jun',
+        'Layout function'             : 'Fungsi tata letak',
+        Light                         : 'Terang',
+        Login                         : 'Masuk',
+        Logout                        : 'Keluar',
+        Mar                           : 'Mar',
+        March                         : 'Maret',
+        May                           : 'Mei',
+        'New event'                   : 'Acara baru',
+        'Next day'                    : 'Hari berikutnya',
+        Nov                           : 'Nov',
+        Oct                           : 'Okt',
+        Overlap                       : 'Tumpang tindih',
+        Pack                          : 'Kemasan',
+        'Previous day'                : 'Hari sebelumnya',
+        Reset                         : 'Atur Ulang',
+        'Reset data'                  : 'Reset data',
+        'Resource - City'             : 'Sumber daya - Kota',
+        'Resource ranges'             : 'Rentang sumber daya',
+        Save                          : 'Simpan',
+        Sep                           : 'Sep',
+        'Show setup time'             : 'Tampilkan waktu pengaturan',
+        Stack                         : 'Tumpukan',
+        Sync                          : 'Sinkronkan',
+        Today                         : 'Hari ini',
+        'Vertical mode'               : 'Mode vertikal',
+        'Zoom in'                     : 'Perbesar',
+        'Zoom out'                    : 'Perkecil'
+    },
+
+    Checkbox : {
+        Cultural                : 'Budaya',
+        'Draw around parents'   : 'Gambar di sekitar orang tua',
+        'Enable bar tooltip'    : 'Aktifkan tooltip bilah',
+        Music                   : 'Musik',
+        'Show bar texts'        : 'Tampilkan teks bar',
+        'Show max allocation'   : 'Tampilkan alokasi maksimum',
+        'Show non working time' : 'Tampilkan waktu tidak bekerja',
+        Sports                  : 'Olahraga',
+        Technology              : 'Teknologi'
+    },
+
+    Slider : {
+        'Max capacity' : 'Kapasitas maksimum',
+        'Row height'   : 'Tinggi baris'
+    },
+
+    Label : {
+        Days                        : 'Hari',
+        'Group by'                  : 'Kelompokkan berdasarkan',
+        Months                      : 'Bulan',
+        Settings                    : 'Pengaturan',
+        'Viewing a repeating event' : 'Melihat acara berulang'
+    },
+
+    Combo : {
+        'Current timezone' : 'Zona waktu saat ini',
+        'Group events by'  : 'Kelompokkan acara berdasarkan',
+        Parent             : 'Induk',
+        Resources          : 'Sumber daya',
+        Show               : 'Tampilkan'
+    },
+
+    NumberField : {
+        '% complete' : '% selesai',
+        Events       : 'Acara',
+        Every        : 'Setiap',
+        Resources    : 'Sumber Daya'
+    },
+
+    TextField : {
+        Doctor           : 'Dokter',
+        Name             : 'Nama',
+        'Server address' : 'Alamat server',
+        Username         : 'Nama pengguna'
+    },
+
+    Tooltip : {
+        'Check to display max resource allocation line'                                                            : 'Centang untuk menampilkan garis alokasi sumber daya maksimum',
+        'Check to show resource allocation in the bars'                                                            : 'Centang untuk menampilkan alokasi sumber daya di dalam bar',
+        'Check to show tooltips when moving mouse over bars'                                                       : 'Centang untuk menampilkan tooltip saat menggerakkan mouse di atas batang',
+        'Click to group by City - Resource'                                                                        : 'Klik untuk mengelompokkan berdasarkan Kota - Sumber Daya',
+        'Click to group by Resource - City'                                                                        : 'Klik untuk mengelompokkan berdasarkan Sumber Daya - Kota',
+        'Collapse all groups'                                                                                      : 'Tutup semua grup',
+        'Disable tree group feature and back to default Resource - Assignment look'                                : 'Nonaktifkan fitur grup pohon dan kembali ke tampilan default Sumber Daya - Penugasan',
+        'Enter number of events per resource to generate and press [ENTER]'                                        : 'Masukkan jumlah acara per sumber daya untuk menghasilkan dan tekan [ENTER]',
+        'Enter number of resource rows to generate and press [ENTER]'                                              : 'Masukkan jumlah baris sumber daya untuk menghasilkan dan tekan [ENTER]',
+        'Expand all groups'                                                                                        : 'Perluas semua grup',
+        Friday                                                                                                     : 'Jumat',
+        'If two segments are placed next to each other, you can either have them be merged or keep them separated' : 'Jika dua segmen ditempatkan bersebelahan, Anda dapat menggabungkannya atau membiarkannya terpisah',
+        Monday                                                                                                     : 'Senin',
+        Saturday                                                                                                   : 'Sabtu',
+        Sunday                                                                                                     : 'Minggu',
+        Thursday                                                                                                   : 'Kamis',
+        'Toggle layout'                                                                                            : 'Beralih tata letak',
+        'Tries to fit the unplanned events into the currently displayed timeframe'                                 : 'Mencoba menyesuaikan acara yang tidak direncanakan ke dalam kerangka waktu yang saat ini ditampilkan',
+        Tuesday                                                                                                    : 'Selasa',
+        'View next day'                                                                                            : 'Lihat hari berikutnya',
+        'View previous day'                                                                                        : 'Lihat hari sebelumnya',
+        'View today, to see the current time line'                                                                 : 'Lihat hari ini, untuk melihat garis waktu saat ini',
+        Wednesday                                                                                                  : 'Rabu'
+    },
+
+    SlideToggle : {
+        'Auto-merge adjacent segments' : 'Gabungkan otomatis segmen yang berdekatan',
+        'Auto-send'                    : 'Kirim otomatis',
+        'Auto-sync'                    : 'Sinkronisasi otomatis',
+        'Compact mode'                 : 'Mode kompak',
+        'Constrain drag to row'        : 'Batasi seret ke baris',
+        'Dark mode'                    : 'Mode gelap',
+        'Days are working by default'  : 'Hari bekerja secara default',
+        'Enable bar tooltip'           : 'Aktifkan tooltip bilah',
+        'Enable highlighting'          : 'Aktifkan penyorotan',
+        'Enable mouse interaction'     : 'Aktifkan interaksi mouse',
+        'Enable task drag drop'        : 'Aktifkan seret dan lepas tugas',
+        'Filter out non-working time'  : 'Saring waktu tidak bekerja',
+        'Highlight 9-10am + 2-4pm'     : 'Sorot 9-10 pagi + 2-4 sore',
+        'Highlight while dragging'     : 'Sorot saat menyeret',
+        'Show non working time'        : 'Tampilkan waktu tidak bekerja',
+        'Show setup time'              : 'Tampilkan waktu pengaturan',
+        'Show summaries'               : 'Tampilkan ringkasan',
+        'Snap to grid'                 : 'Sesuaikan dengan grid',
+        'View Planned dates'           : 'Lihat tanggal yang direncanakan'
+    }
+};
+
+export default LocaleHelper.publishLocale(locale);

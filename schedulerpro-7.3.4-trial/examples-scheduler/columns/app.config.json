@@ -1,0 +1,12 @@
+{
+  "title": "Columns demo",
+  "description": "Displays columns of different types on left and right sides of the schedule",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/RoomThemeColumn.js",
+    "lib/RoomThemeCombo.js",
+    "resources/app.css"
+  ]
+}

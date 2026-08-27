@@ -1,0 +1,10 @@
+{
+  "[data-event-id='16']": {
+    "title": "Repeating forever",
+    "content": "This event repeats every 4th day, forever"
+  },
+  "[data-event-id='29']": {
+    "title": "Limited repetition",
+    "content": "This event repeats weekly, but only 3 times"
+  }
+}

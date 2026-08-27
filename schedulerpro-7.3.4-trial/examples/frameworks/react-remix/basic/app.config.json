@@ -1,0 +1,5 @@
+{
+  "title": "Basic setup with Remix (Typescript)",
+  "description": "This demo contains the React Gantt chart wrapper and the demo is written in Remix using Typescript.",
+  "skipCache": true
+}

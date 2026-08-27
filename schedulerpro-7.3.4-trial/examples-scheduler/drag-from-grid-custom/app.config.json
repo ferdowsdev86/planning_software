@@ -1,0 +1,17 @@
+{
+  "title": "Drag from a grid demo",
+  "description": "This example shows how easy it is to drag tasks from a separate list or grid onto the schedule.",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "data/unplanned.json",
+    "index.html",
+    "lib/CustomResource.js",
+    "lib/Drag.js",
+    "lib/IconCombo.js",
+    "lib/Schedule.js",
+    "lib/Task.js",
+    "lib/UnplannedGrid.js",
+    "resources/app.css"
+  ]
+}

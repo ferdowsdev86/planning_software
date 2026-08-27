@@ -1,0 +1,14 @@
+{
+  ".b-color-red": {
+    "title": "Must start/end on",
+    "content": "Red events have a \"must start on\" or \"must end on\" constraint"
+  },
+  ".b-color-orange": {
+    "title": "Start/finish no earlier than",
+    "content": "Orange events have a \"start no earlier than\" or \"finish no earlier than\" constraint"
+  },
+  "[data-event-id='5']": {
+    "title": "Try dragging",
+    "content": "Dragging an event sets a \"start no earlier than\" constraint"
+  }
+}

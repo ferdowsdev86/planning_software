@@ -1,0 +1,31 @@
+/* Styling of cells in the lab column */
+.b-lab-cell {
+    flex-direction      : column;
+    align-items         : flex-start;
+
+    --b-label-font-size : 0.8em;
+    padding-bottom      : 1em;
+
+    /* Show widgets only when row is expanded */
+    .b-slide-toggle,
+    .b-slider {
+        display : none;
+
+        .b-row-expanded & {
+            display : grid;
+        }
+    }
+
+    > :first-child {
+        margin-top : 1.85em;
+    }
+}
+
+
+.b-grid-row .b-grid-cell .b-name {
+    display       : flex;
+    align-items   : center;
+    flex-shrink   : 0;
+    margin-bottom : auto;
+    gap           : .8em;
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Tree demo",
+  "description": "This demo visualizes hierarchical data in the form of a tree",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "title": "Highlighting Event Calendars (Vue 3 + Vite)",
+  "description": "Help end users understand the scheduling logic by visualizing event calendars",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.ts",
+    "src/lib/TaskWithCalendar.ts",
+    "src/main.ts",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

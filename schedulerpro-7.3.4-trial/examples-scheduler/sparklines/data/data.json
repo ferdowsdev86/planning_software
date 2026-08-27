@@ -1,0 +1,609 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"     : 1,
+        "name"   : "Premium Laptop",
+        "jan"    : 42,
+        "feb"    : 56,
+        "mar"    : 38,
+        "apr"    : 65,
+        "may"    : 73,
+        "rating" : 3
+      },
+      {
+        "id"     : 2,
+        "name"   : "Wireless Headphones",
+        "jan"    : 28,
+        "feb"    : 35,
+        "mar"    : 42,
+        "apr"    : 38,
+        "may"    : 46,
+        "rating" : 4
+      },
+      {
+        "id"     : 3,
+        "name"   : "Smart Watch",
+        "jan"    : 63,
+        "feb"    : 52,
+        "mar"    : 59,
+        "apr"    : 48,
+        "may"    : 65,
+        "rating" : 5
+      },
+      {
+        "id"     : 4,
+        "name"   : "Bluetooth Speaker",
+        "jan"    : 18,
+        "feb"    : 26,
+        "mar"    : 35,
+        "apr"    : 42,
+        "may"    : 58,
+        "rating" : 2
+      },
+      {
+        "id"     : 5,
+        "name"   : "4K Smart TV",
+        "jan"    : 80,
+        "feb"    : 75,
+        "mar"    : 68,
+        "apr"    : 72,
+        "may"    : 85,
+        "rating" : 5
+      },
+      {
+        "id"     : 6,
+        "name"   : "Digital Camera",
+        "jan"    : 45,
+        "feb"    : 52,
+        "mar"    : 47,
+        "apr"    : 53,
+        "may"    : 56,
+        "rating" : 3
+      },
+      {
+        "id"     : 7,
+        "name"   : "Gaming Console",
+        "jan"    : 32,
+        "feb"    : 38,
+        "mar"    : 45,
+        "apr"    : 40,
+        "may"    : 48,
+        "rating" : 4
+      },
+      {
+        "id"     : 8,
+        "name"   : "Tablet Device",
+        "jan"    : 70,
+        "feb"    : 65,
+        "mar"    : 72,
+        "apr"    : 68,
+        "may"    : 75,
+        "rating" : 4
+      },
+      {
+        "id"     : 9,
+        "name"   : "Wireless Earbuds",
+        "jan"    : 55,
+        "feb"    : 62,
+        "mar"    : 58,
+        "apr"    : 67,
+        "may"    : 78,
+        "rating" : 5
+      },
+      {
+        "id"     : 10,
+        "name"   : "External SSD Drive",
+        "jan"    : 40,
+        "feb"    : 45,
+        "mar"    : 52,
+        "apr"    : 60,
+        "may"    : 65,
+        "rating" : 4
+      },
+      {
+        "id"     : 11,
+        "name"   : "Mechanical Keyboard",
+        "jan"    : 25,
+        "feb"    : 30,
+        "mar"    : 42,
+        "apr"    : 48,
+        "may"    : 55,
+        "rating" : 3
+      },
+      {
+        "id"     : 12,
+        "name"   : "Gaming Mouse",
+        "jan"    : 35,
+        "feb"    : 42,
+        "mar"    : 38,
+        "apr"    : 45,
+        "may"    : 52,
+        "rating" : 4
+      },
+      {
+        "id"     : 13,
+        "name"   : "Ultrawide Monitor",
+        "jan"    : 48,
+        "feb"    : 55,
+        "mar"    : 62,
+        "apr"    : 58,
+        "may"    : 70,
+        "rating" : 4
+      },
+      {
+        "id"     : 14,
+        "name"   : "Portable Charger",
+        "jan"    : 85,
+        "feb"    : 92,
+        "mar"    : 78,
+        "apr"    : 88,
+        "may"    : 95,
+        "rating" : 5
+      },
+      {
+        "id"     : 15,
+        "name"   : "Graphic Tablet",
+        "jan"    : 30,
+        "feb"    : 38,
+        "mar"    : 45,
+        "apr"    : 52,
+        "may"    : 60,
+        "rating" : 4
+      },
+      {
+        "id"     : 16,
+        "name"   : "Ergonomic Chair",
+        "jan"    : 22,
+        "feb"    : 28,
+        "mar"    : 35,
+        "apr"    : 42,
+        "may"    : 48,
+        "rating" : 3
+      },
+      {
+        "id"     : 17,
+        "name"   : "Noise-Cancelling Microphone",
+        "jan"    : 50,
+        "feb"    : 58,
+        "mar"    : 65,
+        "apr"    : 72,
+        "may"    : 80,
+        "rating" : 4
+      },
+      {
+        "id"     : 18,
+        "name"   : "Smartphone Gimbal",
+        "jan"    : 38,
+        "feb"    : 45,
+        "mar"    : 52,
+        "apr"    : 48,
+        "may"    : 55,
+        "rating" : 3
+      },
+      {
+        "id"     : 19,
+        "name"   : "VR Headset",
+        "jan"    : 25,
+        "feb"    : 32,
+        "mar"    : 40,
+        "apr"    : 48,
+        "may"    : 55,
+        "rating" : 4
+      },
+      {
+        "id"     : 20,
+        "name"   : "Wireless Charging Pad",
+        "jan"    : 60,
+        "feb"    : 68,
+        "mar"    : 75,
+        "apr"    : 82,
+        "may"    : 90,
+        "rating" : 5
+      },
+      {
+        "id"     : 21,
+        "name"   : "Smart Home Hub",
+        "jan"    : 42,
+        "feb"    : 48,
+        "mar"    : 55,
+        "apr"    : 62,
+        "may"    : 70,
+        "rating" : 4
+      },
+      {
+        "id"     : 22,
+        "name"   : "Fitness Tracker",
+        "jan"    : 75,
+        "feb"    : 82,
+        "mar"    : 78,
+        "apr"    : 85,
+        "may"    : 92,
+        "rating" : 5
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "resourceId" : 1,
+        "name"       : "Marketing Campaign",
+        "startDate"  : "2025-01-15T08:00",
+        "endDate"    : "2025-01-30T17:00"
+      },
+      {
+        "id"         : 2,
+        "resourceId" : 2,
+        "name"       : "Product Launch",
+        "startDate"  : "2025-02-10T09:00",
+        "endDate"    : "2025-02-15T18:00"
+      },
+      {
+        "id"         : 3,
+        "resourceId" : 3,
+        "name"       : "Sales Promotion",
+        "startDate"  : "2025-03-05T10:00",
+        "endDate"    : "2025-03-20T16:00"
+      },
+      {
+        "id"         : 4,
+        "resourceId" : 4,
+        "name"       : "Rebranding",
+        "startDate"  : "2025-04-01T08:30",
+        "endDate"    : "2025-04-15T17:30"
+      },
+      {
+        "id"         : 5,
+        "resourceId" : 5,
+        "name"       : "Trade Show",
+        "startDate"  : "2025-02-20T09:00",
+        "endDate"    : "2025-02-25T18:00"
+      },
+      {
+        "id"         : 6,
+        "resourceId" : 6,
+        "name"       : "Seasonal Discount",
+        "startDate"  : "2025-05-01T08:00",
+        "endDate"    : "2025-05-15T17:00"
+      },
+      {
+        "id"         : 7,
+        "resourceId" : 7,
+        "name"       : "Market Research",
+        "startDate"  : "2025-03-15T09:30",
+        "endDate"    : "2025-03-30T16:30"
+      },
+      {
+        "id"         : 8,
+        "resourceId" : 8,
+        "name"       : "Product Improvement",
+        "startDate"  : "2025-04-10T10:00",
+        "endDate"    : "2025-04-25T18:00"
+      },
+      {
+        "id"         : 9,
+        "resourceId" : 1,
+        "name"       : "Customer Feedback",
+        "startDate"  : "2025-05-05T09:00",
+        "endDate"    : "2025-05-10T17:00"
+      },
+      {
+        "id"         : 10,
+        "resourceId" : 3,
+        "name"       : "Inventory Restock",
+        "startDate"  : "2025-01-05T08:00",
+        "endDate"    : "2025-01-10T16:00"
+      },
+      {
+        "id"         : 11,
+        "resourceId" : 9,
+        "name"       : "Online Promotion",
+        "startDate"  : "2025-02-05T09:00",
+        "endDate"    : "2025-02-20T17:00"
+      },
+      {
+        "id"         : 12,
+        "resourceId" : 10,
+        "name"       : "Tech Expo",
+        "startDate"  : "2025-03-10T08:30",
+        "endDate"    : "2025-03-15T16:30"
+      },
+      {
+        "id"         : 13,
+        "resourceId" : 11,
+        "name"       : "Holiday Sale",
+        "startDate"  : "2025-04-20T09:00",
+        "endDate"    : "2025-04-30T18:00"
+      },
+      {
+        "id"         : 14,
+        "resourceId" : 12,
+        "name"       : "Gaming Tournament",
+        "startDate"  : "2025-05-15T10:00",
+        "endDate"    : "2025-05-20T19:00"
+      },
+      {
+        "id"         : 15,
+        "resourceId" : 9,
+        "name"       : "Product Review",
+        "startDate"  : "2025-01-20T08:00",
+        "endDate"    : "2025-01-25T16:00"
+      },
+      {
+        "id"         : 16,
+        "resourceId" : 10,
+        "name"       : "Warehouse Restock",
+        "startDate"  : "2025-04-05T09:00",
+        "endDate"    : "2025-04-10T17:00"
+      },
+      {
+        "id"         : 17,
+        "resourceId" : 13,
+        "name"       : "Display Showcase",
+        "startDate"  : "2025-01-12T08:30",
+        "endDate"    : "2025-01-18T16:30"
+      },
+      {
+        "id"         : 18,
+        "resourceId" : 14,
+        "name"       : "Power Week Sale",
+        "startDate"  : "2025-02-15T09:00",
+        "endDate"    : "2025-02-22T17:00"
+      },
+      {
+        "id"         : 19,
+        "resourceId" : 15,
+        "name"       : "Design Workshop",
+        "startDate"  : "2025-03-08T10:00",
+        "endDate"    : "2025-03-12T18:00"
+      },
+      {
+        "id"         : 20,
+        "resourceId" : 16,
+        "name"       : "Ergonomics Seminar",
+        "startDate"  : "2025-04-15T09:30",
+        "endDate"    : "2025-04-18T17:30"
+      },
+      {
+        "id"         : 21,
+        "resourceId" : 17,
+        "name"       : "Audio Testing",
+        "startDate"  : "2025-05-02T08:00",
+        "endDate"    : "2025-05-06T16:00"
+      },
+      {
+        "id"         : 22,
+        "resourceId" : 18,
+        "name"       : "Content Creator Day",
+        "startDate"  : "2025-01-25T09:00",
+        "endDate"    : "2025-01-28T17:00"
+      },
+      {
+        "id"         : 23,
+        "resourceId" : 19,
+        "name"       : "VR Experience Demo",
+        "startDate"  : "2025-02-08T10:30",
+        "endDate"    : "2025-02-12T18:30"
+      },
+      {
+        "id"         : 24,
+        "resourceId" : 20,
+        "name"       : "Wireless Tech Expo",
+        "startDate"  : "2025-03-20T09:00",
+        "endDate"    : "2025-03-25T17:00"
+      },
+      {
+        "id"         : 25,
+        "resourceId" : 21,
+        "name"       : "Smart Home Conference",
+        "startDate"  : "2025-04-22T08:30",
+        "endDate"    : "2025-04-26T16:30"
+      },
+      {
+        "id"         : 26,
+        "resourceId" : 22,
+        "name"       : "Fitness Challenge",
+        "startDate"  : "2025-05-10T09:00",
+        "endDate"    : "2025-05-15T17:00"
+      },
+      {
+        "id"         : 27,
+        "resourceId" : 13,
+        "name"       : "Monitor Calibration",
+        "startDate"  : "2025-03-01T10:00",
+        "endDate"    : "2025-03-05T16:00"
+      },
+      {
+        "id"         : 28,
+        "resourceId" : 15,
+        "name"       : "Digital Art Exhibition",
+        "startDate"  : "2025-04-08T09:30",
+        "endDate"    : "2025-04-12T17:30"
+      },
+      {
+        "id"         : 29,
+        "resourceId" : 17,
+        "name"       : "Podcast Recording",
+        "startDate"  : "2025-02-18T08:00",
+        "endDate"    : "2025-02-22T16:00"
+      },
+      {
+        "id"         : 30,
+        "resourceId" : 19,
+        "name"       : "Gaming Tournament",
+        "startDate"  : "2025-05-18T10:00",
+        "endDate"    : "2025-05-22T18:00"
+      },
+      {
+        "id"         : 31,
+        "resourceId" : 21,
+        "name"       : "IoT Workshop",
+        "startDate"  : "2025-01-15T09:00",
+        "endDate"    : "2025-01-19T17:00"
+      },
+      {
+        "id"         : 32,
+        "resourceId" : 22,
+        "name"       : "Health Tech Summit",
+        "startDate"  : "2025-03-15T08:30",
+        "endDate"    : "2025-03-19T16:30"
+      },
+      {
+        "id"         : 33,
+        "resourceId" : 1,
+        "name"       : "Laptop Tech Conference",
+        "startDate"  : "2025-03-05T09:00",
+        "endDate"    : "2025-03-10T17:00"
+      },
+      {
+        "id"         : 34,
+        "resourceId" : 2,
+        "name"       : "Audio Showcase Event",
+        "startDate"  : "2025-04-12T10:00",
+        "endDate"    : "2025-04-16T18:00"
+      },
+      {
+        "id"         : 35,
+        "resourceId" : 3,
+        "name"       : "Wearable Tech Expo",
+        "startDate"  : "2025-02-08T09:30",
+        "endDate"    : "2025-02-12T17:30"
+      },
+      {
+        "id"         : 36,
+        "resourceId" : 4,
+        "name"       : "Sound System Demo",
+        "startDate"  : "2025-03-18T10:00",
+        "endDate"    : "2025-03-22T16:00"
+      },
+      {
+        "id"         : 37,
+        "resourceId" : 5,
+        "name"       : "Home Entertainment Show",
+        "startDate"  : "2025-04-05T08:30",
+        "endDate"    : "2025-04-10T17:30"
+      },
+      {
+        "id"         : 38,
+        "resourceId" : 6,
+        "name"       : "Photography Workshop",
+        "startDate"  : "2025-02-15T09:00",
+        "endDate"    : "2025-02-20T16:00"
+      },
+      {
+        "id"         : 39,
+        "resourceId" : 7,
+        "name"       : "Gaming Competition",
+        "startDate"  : "2025-05-08T10:30",
+        "endDate"    : "2025-05-12T18:30"
+      },
+      {
+        "id"         : 40,
+        "resourceId" : 8,
+        "name"       : "Mobile Tech Showcase",
+        "startDate"  : "2025-01-22T08:00",
+        "endDate"    : "2025-01-26T16:00"
+      },
+      {
+        "id"         : 41,
+        "resourceId" : 9,
+        "name"       : "Audio Accessories Fair",
+        "startDate"  : "2025-03-25T09:30",
+        "endDate"    : "2025-03-30T17:30"
+      },
+      {
+        "id"         : 42,
+        "resourceId" : 10,
+        "name"       : "Storage Solutions Expo",
+        "startDate"  : "2025-01-15T10:00",
+        "endDate"    : "2025-01-20T18:00"
+      },
+      {
+        "id"         : 43,
+        "resourceId" : 11,
+        "name"       : "PC Peripherals Show",
+        "startDate"  : "2025-02-25T09:00",
+        "endDate"    : "2025-03-02T17:00"
+      },
+      {
+        "id"         : 44,
+        "resourceId" : 12,
+        "name"       : "E-Sports Event",
+        "startDate"  : "2025-01-08T10:30",
+        "endDate"    : "2025-01-12T18:30"
+      },
+      {
+        "id"         : 45,
+        "resourceId" : 13,
+        "name"       : "Display Technology Conference",
+        "startDate"  : "2025-04-18T09:00",
+        "endDate"    : "2025-04-22T17:00"
+      },
+      {
+        "id"         : 46,
+        "resourceId" : 14,
+        "name"       : "Mobile Accessories Fair",
+        "startDate"  : "2025-03-12T08:30",
+        "endDate"    : "2025-03-16T16:30"
+      },
+      {
+        "id"         : 47,
+        "resourceId" : 15,
+        "name"       : "Creative Tech Workshop",
+        "startDate"  : "2025-01-28T10:00",
+        "endDate"    : "2025-02-02T18:00"
+      },
+      {
+        "id"         : 48,
+        "resourceId" : 16,
+        "name"       : "Office Equipment Expo",
+        "startDate"  : "2025-05-15T09:30",
+        "endDate"    : "2025-05-20T17:30"
+      },
+      {
+        "id"         : 49,
+        "resourceId" : 17,
+        "name"       : "Sound Engineering Workshop",
+        "startDate"  : "2025-04-08T10:00",
+        "endDate"    : "2025-04-12T18:00"
+      },
+      {
+        "id"         : 50,
+        "resourceId" : 18,
+        "name"       : "Video Production Fair",
+        "startDate"  : "2025-03-05T09:00",
+        "endDate"    : "2025-03-10T17:00"
+      },
+      {
+        "id"         : 51,
+        "resourceId" : 19,
+        "name"       : "Immersive Technology Show",
+        "startDate"  : "2025-04-15T08:30",
+        "endDate"    : "2025-04-20T16:30"
+      },
+      {
+        "id"         : 52,
+        "resourceId" : 20,
+        "name"       : "Wireless Technology Conference",
+        "startDate"  : "2025-02-10T10:30",
+        "endDate"    : "2025-02-15T18:30"
+      },
+      {
+        "id"         : 53,
+        "resourceId" : 21,
+        "name"       : "Connected Home Exhibition",
+        "startDate"  : "2025-03-22T09:00",
+        "endDate"    : "2025-03-27T17:00"
+      },
+      {
+        "id"         : 54,
+        "resourceId" : 22,
+        "name"       : "Wearable Fitness Tech Show",
+        "startDate"  : "2025-01-18T08:00",
+        "endDate"    : "2025-01-23T16:00"
+      }
+    ]
+  }
+}

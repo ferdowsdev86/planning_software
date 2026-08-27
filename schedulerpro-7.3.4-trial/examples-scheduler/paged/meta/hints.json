@@ -1,0 +1,6 @@
+{
+  "[data-ref='nextPageButton']": {
+    "title": "Paging toolbar",
+    "content": "Use the paging toolbar to navigate through pages of resources. The events will also be loaded along with the assigned resources"
+  }
+}

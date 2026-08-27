@@ -1,0 +1,10 @@
+{
+  ".b-sch-time-range": {
+    "title": "Drag the reference date",
+    "content": "This is the reference date indicator for the timeline. You can drag it to change the current time."
+  },
+  "[data-ref=\"toggleShowConflicts\"]": {
+    "title": "Click to toggle conflict highlighting",
+    "content": "This button toggles the highlighting of conflicting bookings in the scheduler. See Friday 14th for an example of conflicting bookings."
+  }
+}

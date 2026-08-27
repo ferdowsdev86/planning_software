@@ -1,0 +1,33 @@
+/* Avatars normally gets their color from the resource eventColor, */
+/* but in this demo we want to override that to color by team */
+.b-resource-info-cell .b-resource-info {
+    --b-primary : inherit;
+}
+
+.b-resource-avatar {
+    --b-resource-info-column-avatar-background-color : var(--b-primary-95);
+
+    border                                           : 1px solid var(--b-primary-80);
+}
+
+.b-grid-merged-cells[data-column=team] {
+    background                   : color-mix(in oklab, var(--b-primary), var(--b-mix) 90%);
+
+    --b-grid-cell-padding-inline : 0;
+    --b-grid-cell-color          : color-mix(in oklab, var(--b-primary), var(--b-opposite) 40%);
+    --b-grid-cell-font-weight    : 500;
+
+    .b-grid-cell {
+        /* Rotate text */
+        writing-mode : vertical-lr;
+        /* Move text down a bit */
+        padding-top  : 1em;
+    }
+}
+
+.hide-header-text {
+    /* Used for narrow teams column, you cant read much of the title so it looks better hidden */
+    .b-grid-header-text-content {
+        display : none;
+    }
+}

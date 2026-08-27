@@ -1,0 +1,18 @@
+{
+  "title": "Pro Event effort demo (React + Vite)",
+  "description": "Show events that distribute their effort across their duration. Scheduler Pro and a Resource Utilization visualize effort allocation in sync",
+  "source": [
+    "index.html",
+    "package.json",
+    "public/data/data.json",
+    "src/App.scss",
+    "src/App.tsx",
+    "src/AppConfig.tsx",
+    "src/components/ResourceUtilizationToolbar.tsx",
+    "src/components/SchedulerToolbar.tsx",
+    "src/lib/FixedDurationEvent.ts",
+    "src/main.tsx",
+    "tsconfig.json",
+    "vite.config.mts"
+  ]
+}

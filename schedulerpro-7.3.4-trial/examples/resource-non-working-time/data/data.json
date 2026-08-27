@@ -1,0 +1,440 @@
+{
+  "project" : {
+    "hoursPerDay"  : 8,
+    "daysPerWeek"  : 5,
+    "daysPerMonth" : 20
+  },
+  "calendars" : {
+    "rows" : [
+      {
+        "id"                       : "day",
+        "name"                     : "Day shift",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 8:00",
+            "recurrentEndDate"   : "at 17:00",
+            "isWorking"          : true
+          }
+        ]
+      },
+      {
+        "id"                       : "early",
+        "name"                     : "Early shift",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 6:00",
+            "recurrentEndDate"   : "at 14:00",
+            "isWorking"          : true
+          },
+          {
+            "name"               : "Break",
+            "type"               : "Exception",
+            "cls"                : "break",
+            "recurrentStartDate" : "on Mon",
+            "recurrentEndDate"   : null,
+            "isWorking"          : true,
+            "availability"       : [
+              { "startDate" : "06:00", "endDate" : "10:00" },
+              { "startDate" : "11:00", "endDate" : "14:00" }
+            ]
+          }
+        ]
+      },
+      {
+        "id"                       : "late",
+        "name"                     : "Late shift",
+        "unspecifiedTimeIsWorking" : false,
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 14:00",
+            "recurrentEndDate"   : "at 22:00",
+            "isWorking"          : true
+          }
+        ]
+      },
+      {
+        "id"                       : "night",
+        "name"                     : "Night shift",
+        "unspecifiedTimeIsWorking" : false,
+        "cls"                      : "nightShift",
+        "iconCls"                  : "fa fa-moon",
+        "intervals"                : [
+          {
+            "recurrentStartDate" : "at 22:00",
+            "recurrentEndDate"   : "at 6:00",
+            "isWorking"          : true
+          }
+        ]
+      }
+    ]
+  },
+  "resources" : {
+    "rows" : [
+      {
+        "id"         : 1,
+        "name"       : "George",
+        "calendar"   : "day",
+        "role"       : "Office",
+        "eventColor" : "green"
+      },
+      {
+        "id"         : 2,
+        "name"       : "Rob",
+        "calendar"   : "day",
+        "role"       : "Office",
+        "eventColor" : "green"
+      },
+      {
+        "id"       : 3,
+        "name"     : "Mike",
+        "calendar" : "early",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 4,
+        "name"     : "Celia",
+        "calendar" : "early",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 5,
+        "name"     : "Kate",
+        "calendar" : "late",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 6,
+        "name"     : "Gloria",
+        "calendar" : "late",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 7,
+        "name"     : "Steve",
+        "calendar" : "night",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 8,
+        "name"     : "Arcady",
+        "calendar" : "night",
+        "role"     : "Operator"
+      },
+      {
+        "id"       : 9,
+        "name"     : "Malik",
+        "calendar" : "late",
+        "role"     : "Operator"
+      },
+      {
+        "id"         : 10,
+        "name"       : "Angelo",
+        "calendar"   : "late",
+        "role"       : "Manager",
+        "eventColor" : "lime"
+      },
+      {
+        "id"       : 11,
+        "name"     : "Emilia",
+        "calendar" : "early",
+        "role"     : "Operator"
+      },
+      {
+        "id"         : 12,
+        "name"       : "Chang",
+        "calendar"   : "early",
+        "role"       : "Manager",
+        "eventColor" : "lime"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"           : 1,
+        "name"         : "Meeting",
+        "startDate"    : "2020-03-23T07:00",
+        "duration"     : 4,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 2,
+        "name"         : "Meeting",
+        "startDate"    : "2020-03-23T13:00",
+        "duration"     : 4,
+        "durationUnit" : "hour",
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 3,
+        "name"         : "Bookkeeping",
+        "startDate"    : "2020-03-24T07:00",
+        "durationUnit" : "hour",
+        "duration"     : 4,
+        "iconCls"      : "fa fa-receipt"
+      },
+      {
+        "id"           : 4,
+        "name"         : "Meeting",
+        "startDate"    : "2020-03-27T07:00",
+        "durationUnit" : "hour",
+        "duration"     : 3,
+        "iconCls"      : "fa fa-calendar"
+      },
+      {
+        "id"           : 5,
+        "name"         : "Introduction",
+        "startDate"    : "2020-03-23T07:00",
+        "durationUnit" : "hour",
+        "duration"     : 2,
+        "iconCls"      : "fa fa-question-circle"
+      },
+      {
+        "id"           : 6,
+        "name"         : "Setting up",
+        "startDate"    : "2020-03-24T13:00",
+        "durationUnit" : "hour",
+        "duration"     : 1,
+        "iconCls"      : "fa fa-desktop"
+      },
+      {
+        "id"           : 7,
+        "name"         : "Initial project",
+        "startDate"    : "2020-03-26T07:00",
+        "durationUnit" : "hour",
+        "duration"     : 2,
+        "iconCls"      : "fa fa-school"
+      },
+      {
+        "id"           : 8,
+        "name"         : "Batch 1",
+        "startDate"    : "2020-03-23T08:00",
+        "durationUnit" : "hour",
+        "duration"     : 2,
+        "iconCls"      : "fa fa-box"
+      },
+      {
+        "id"           : 9,
+        "name"         : "Batch 2",
+        "startDate"    : "2020-03-23T11:00",
+        "durationUnit" : "hour",
+        "duration"     : 2,
+        "iconCls"      : "fa fa-box"
+      },
+      {
+        "id"           : 10,
+        "name"         : "Batch 3",
+        "startDate"    : "2020-03-24T11:00",
+        "durationUnit" : "hour",
+        "duration"     : 2,
+        "iconCls"      : "fa fa-box"
+      },
+      {
+        "id"           : 11,
+        "name"         : "Batch 4",
+        "startDate"    : "2020-03-26T07:30",
+        "durationUnit" : "hour",
+        "duration"     : 6,
+        "iconCls"      : "fa fa-box"
+      },
+      {
+        "id"           : 12,
+        "name"         : "Batch 5",
+        "startDate"    : "2020-03-27T06:00",
+        "durationUnit" : "hour",
+        "duration"     : 6,
+        "iconCls"      : "fa fa-box"
+      },
+      {
+        "id"           : 13,
+        "name"         : "Large batch",
+        "startDate"    : "2020-03-23T14:00",
+        "durationUnit" : "hour",
+        "duration"     : 4,
+        "iconCls"      : "fa fa-boxes"
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      {
+        "id"       : 1,
+        "event"    : 1,
+        "resource" : 1
+      },
+      {
+        "id"       : 2,
+        "event"    : 2,
+        "resource" : 1
+      },
+      {
+        "id"       : 3,
+        "event"    : 3,
+        "resource" : 1
+      },
+      {
+        "id"       : 4,
+        "event"    : 4,
+        "resource" : 1
+      },
+      {
+        "id"       : 5,
+        "event"    : 5,
+        "resource" : 2
+      },
+      {
+        "id"       : 6,
+        "event"    : 6,
+        "resource" : 2
+      },
+      {
+        "id"       : 7,
+        "event"    : 7,
+        "resource" : 2
+      },
+      {
+        "id"       : 8,
+        "event"    : 8,
+        "resource" : 3
+      },
+      {
+        "id"       : 9,
+        "event"    : 8,
+        "resource" : 4
+      },
+      {
+        "id"       : 10,
+        "event"    : 8,
+        "resource" : 11
+      },
+      {
+        "id"       : 11,
+        "event"    : 8,
+        "resource" : 12
+      },
+      {
+        "id"       : 12,
+        "event"    : 9,
+        "resource" : 3
+      },
+      {
+        "id"       : 13,
+        "event"    : 9,
+        "resource" : 4
+      },
+      {
+        "id"       : 14,
+        "event"    : 9,
+        "resource" : 11
+      },
+      {
+        "id"       : 15,
+        "event"    : 9,
+        "resource" : 12
+      },
+      {
+        "id"       : 16,
+        "event"    : 10,
+        "resource" : 3
+      },
+      {
+        "id"       : 17,
+        "event"    : 10,
+        "resource" : 4
+      },
+      {
+        "id"       : 18,
+        "event"    : 10,
+        "resource" : 11
+      },
+      {
+        "id"       : 19,
+        "event"    : 10,
+        "resource" : 12
+      },
+      {
+        "id"       : 20,
+        "event"    : 11,
+        "resource" : 3
+      },
+      {
+        "id"       : 21,
+        "event"    : 11,
+        "resource" : 4
+      },
+      {
+        "id"       : 22,
+        "event"    : 11,
+        "resource" : 11
+      },
+      {
+        "id"       : 23,
+        "event"    : 11,
+        "resource" : 12
+      },
+      {
+        "id"       : 24,
+        "event"    : 12,
+        "resource" : 3
+      },
+      {
+        "id"       : 25,
+        "event"    : 12,
+        "resource" : 4
+      },
+      {
+        "id"       : 26,
+        "event"    : 12,
+        "resource" : 11
+      },
+      {
+        "id"       : 27,
+        "event"    : 12,
+        "resource" : 12
+      },
+      {
+        "id"       : 28,
+        "event"    : 13,
+        "resource" : 5
+      },
+      {
+        "id"       : 29,
+        "event"    : 13,
+        "resource" : 6
+      },
+      {
+        "id"       : 30,
+        "event"    : 13,
+        "resource" : 9
+      },
+      {
+        "id"       : 31,
+        "event"    : 13,
+        "resource" : 10
+      }
+    ]
+  },
+  "resourceTimeRanges" : {
+    "rows" : [
+      {
+        "id"             : 1,
+        "resourceId"     : 7,
+        "name"           : "Canceled",
+        "startDate"      : "2020-03-23",
+        "endDate"        : "2020-03-28",
+        "timeRangeColor" : "red"
+      },
+      {
+        "id"             : 2,
+        "resourceId"     : 8,
+        "name"           : "Canceled",
+        "startDate"      : "2020-03-23",
+        "endDate"        : "2020-03-28",
+        "timeRangeColor" : "red"
+      }
+    ]
+  }
+}

@@ -1,0 +1,275 @@
+{
+  "success"   : true,
+  "resources" : {
+    "rows" : [
+      {
+        "id"   : 1,
+        "name" : "Drilling station"
+      },
+      {
+        "id"   : 2,
+        "name" : "Assembly station"
+      },
+      {
+        "id"   : 3,
+        "name" : "Weighing station"
+      },
+      {
+        "id"   : 4,
+        "name" : "Measuring station"
+      },
+      {
+        "id"   : 5,
+        "name" : "Painting station"
+      },
+      {
+        "id"   : 6,
+        "name" : "Inspection station"
+      }
+    ]
+  },
+  "events" : {
+    "rows" : [
+      {
+        "id"                : 1,
+        "name"              : "Drilling, large dimensions",
+        "startDate"         : "2022-01-03",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : [
+          {
+            "id"        : 11,
+            "name"      : "Metallic compounds",
+            "startDate" : "2022-01-03",
+            "duration"  : 1
+          },
+          {
+            "id"        : 12,
+            "name"      : "OEM batch",
+            "startDate" : "2022-01-03",
+            "duration"  : 1
+          },
+          {
+            "id"        : 13,
+            "name"      : "Prototype kit",
+            "startDate" : "2022-01-03",
+            "duration"  : 1
+          }
+        ]
+      },
+      {
+        "id"                : 2,
+        "name"              : "Drilling, small dimensions",
+        "startDate"         : "2022-01-05",
+        "duration"          : 2,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 3,
+        "name"              : "Manual assembly",
+        "startDate"         : "2022-01-03",
+        "duration"          : 2,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 4,
+        "name"              : "Automatized assembly",
+        "startDate"         : "2022-01-06",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 5,
+        "name"              : "Maintenance",
+        "startDate"         : "2022-01-04",
+        "duration"          : 2,
+        "manuallyScheduled" : true,
+        "children"          : [
+          {
+            "id"        : 51,
+            "name"      : "Cleaning",
+            "startDate" : "2022-01-04",
+            "duration"  : 2
+          },
+          {
+            "id"        : 52,
+            "name"      : "Lubrication",
+            "startDate" : "2022-01-04",
+            "duration"  : 2
+          }
+        ]
+      },
+      {
+        "id"                : 6,
+        "name"              : "Pre production",
+        "startDate"         : "2022-01-03",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 7,
+        "name"              : "Spec compliance",
+        "startDate"         : "2022-01-05",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 8,
+        "name"              : "Quality control",
+        "startDate"         : "2022-01-07",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : [
+          {
+            "id"        : 81,
+            "name"      : "Prefab model",
+            "startDate" : "2022-01-07",
+            "duration"  : 1
+          }
+        ]
+      },
+      {
+        "id"                : 9,
+        "name"              : "Primer",
+        "startDate"         : "2022-01-03",
+        "duration"          : 2,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 10,
+        "name"              : "Varnish",
+        "startDate"         : "2022-01-06",
+        "duration"          : 2,
+        "manuallyScheduled" : true,
+        "children"          : []
+      },
+      {
+        "id"                : 20,
+        "name"              : "Delivery inspection",
+        "startDate"         : "2022-01-07",
+        "duration"          : 1,
+        "manuallyScheduled" : true,
+        "children"          : [
+          {
+            "id"        : 201,
+            "name"      : "Project Banjo",
+            "startDate" : "2022-01-07",
+            "duration"  : 1
+          }
+        ]
+      },
+      {
+        "id"        : 33,
+        "name"      : "James project",
+        "startDate" : "2022-01-04",
+        "duration"  : 2
+      },
+      {
+        "id"        : 34,
+        "name"      : "Extra order",
+        "startDate" : "2022-01-04",
+        "duration"  : 1
+      },
+      {
+        "id"        : 21,
+        "name"      : "Circuit boards",
+        "startDate" : "2022-01-06",
+        "duration"  : 1
+      },
+      {
+        "id"        : 22,
+        "name"      : "Wooden assemblies",
+        "startDate" : "2022-01-06",
+        "duration"  : 1
+      },
+      {
+        "id"        : 23,
+        "name"      : "Plastic prototypes",
+        "startDate" : "2022-01-06",
+        "duration"  : 1
+      },
+      {
+        "id"        : 24,
+        "name"      : "Bakelite boxes",
+        "startDate" : "2022-01-06",
+        "duration"  : 1
+      },
+      {
+        "id"        : 25,
+        "name"      : "Lead shielding",
+        "startDate" : "2022-01-03",
+        "duration"  : 1
+      },
+      {
+        "id"        : 26,
+        "name"      : "Alloy constructions",
+        "startDate" : "2022-01-03",
+        "duration"  : 1
+      },
+      {
+        "id"        : 53,
+        "name"      : "Calibration",
+        "startDate" : "2022-01-05",
+        "duration"  : 2
+      },
+      {
+        "id"        : 54,
+        "name"      : "Test run",
+        "startDate" : "2022-01-06",
+        "duration"  : 1
+      },
+      {
+        "id"        : 71,
+        "name"      : "Reruns",
+        "startDate" : "2022-01-05",
+        "duration"  : 1
+      },
+      {
+        "id"        : 91,
+        "name"      : "Polycarbonate housings",
+        "startDate" : "2022-01-04",
+        "duration"  : 1
+      },
+      {
+        "id"        : 92,
+        "name"      : "Semi-soft shelling",
+        "startDate" : "2022-01-04",
+        "duration"  : 1
+      },
+      {
+        "id"        : 93,
+        "name"      : "Chassis",
+        "startDate" : "2022-01-04",
+        "duration"  : 1
+      }
+    ]
+  },
+  "assignments" : {
+    "rows" : [
+      { "id" : 1, "event" : 1, "resource" : 1 },
+      { "id" : 11, "event" : 11, "resource" : 1 },
+      { "id" : 12, "event" : 12, "resource" : 1 },
+      { "id" : 13, "event" : 13, "resource" : 1 },
+      { "id" : 2, "event" : 2, "resource" : 1 },
+      { "id" : 3, "event" : 3, "resource" : 2 },
+      { "id" : 4, "event" : 4, "resource" : 2 },
+      { "id" : 5, "event" : 5, "resource" : 3 },
+      { "id" : 51, "event" : 51, "resource" : 3 },
+      { "id" : 52, "event" : 52, "resource" : 3 },
+      { "id" : 6, "event" : 6, "resource" : 4 },
+      { "id" : 7, "event" : 7, "resource" : 4 },
+      { "id" : 8, "event" : 8, "resource" : 4 },
+      { "id" : 81, "event" : 81, "resource" : 4 },
+      { "id" : 9, "event" : 9, "resource" : 5 },
+      { "id" : 10, "event" : 10, "resource" : 5 },
+      { "id" : 20, "event" : 20, "resource" : 6 },
+      { "id" : 201, "event" : 201, "resource" : 6 }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Deeper nesting of events",
+  "description": "A demo that shows how to handle two levels of nesting of events",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}

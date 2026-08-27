@@ -1,0 +1,14 @@
+{
+  "title": "WebSockets demo",
+  "description": "A demo that comes with a WebSocket server for multi-user realtime' interaction with the Schedule, see README.md for details on how to get it started",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/WebSocketHelper.js",
+    "resources/app.css",
+    "server/data/data.json",
+    "server/package.json",
+    "server/server.js"
+  ],
+  "disableCodePen": true
+}

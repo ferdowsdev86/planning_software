@@ -1,0 +1,334 @@
+.b-app-container {
+    gap : 0;
+
+    &, > .b-toolbar {
+        background : var(--b-neutral-96) !important;
+    }
+
+    > .b-toolbar {
+        padding-inline : 3em;
+    }
+}
+
+.widget-grid {
+    display               : grid !important;
+    grid-auto-flow        : dense;
+    grid-auto-rows        : 350px;
+    gap                   : 3em;
+    padding               : 2em 3em 3em 3em;
+    grid-template-columns : repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+}
+
+.widget-card {
+    height   : 100%;
+    overflow : hidden;
+}
+
+/* Card header title link styling */
+a.widget-card-header-title {
+    color           : inherit;
+    text-decoration : none;
+
+    &:hover {
+        color           : var(--b-primary);
+        text-decoration : underline;
+    }
+}
+
+.widget-card-content.centered {
+    display         : flex;
+    justify-content : center;
+    align-items     : center;
+
+    > .b-container {
+        display         : flex;
+        justify-content : center;
+        align-items     : center;
+    }
+}
+
+.column-span-2 {
+    grid-column : span 2;
+}
+
+.row-span-2 {
+    grid-row : span 2;
+}
+
+@media (max-width : 953px) {
+    .column-span-2 {
+        grid-column : span 1;
+    }
+
+    .row-span-2 {
+        grid-row : span 1;
+    }
+}
+
+.b-chart {
+    border-radius : var(--b-widget-border-radius);
+}
+
+.b-sch-vertical {
+    .b-sch-time-axis-column {
+        min-height : 6em;
+    }
+}
+
+.b-scheduler {
+    b-sch-header-row[data-header-position="0"] {
+        display : none;
+    }
+}
+
+.b-task-board-tags {
+    margin-inline-start : auto;
+}
+
+/* DatePicker card */
+[data-name="datepicker"] {
+    .b-date-picker-cell-inner {
+        min-width : 3em;
+    }
+
+    .b-date-picker-cell-payload {
+        bottom : 4px;
+
+        .b-event-dot {
+            width         : .4em;
+            height        : .4em;
+            border-radius : 50%;
+            background    : var(--b-primary);
+        }
+    }
+}
+
+.b-cal-event-icon.fa-circle {
+    font-size : .7em;
+}
+
+img[src*="transparent-users/"] {
+    border-radius : 50%;
+    background    : var(--b-primary-90);
+}
+
+/* Timeline Histogram card */
+.b-timeline-histogram {
+    .b-histogram rect.b-series-work {
+        fill         : color-mix(in srgb, var(--b-color-green) 25%, transparent);
+        stroke       : var(--b-color-green);
+        stroke-width : 1px;
+    }
+}
+
+/* DayButtons card */
+[data-type="daybuttons"] {
+    .b-day-buttons:first-child {
+        margin-bottom : 1em;
+    }
+}
+
+/* Checkbox card */
+[data-type="checkbox"] {
+    .b-checkbox {
+        margin-bottom : 0.5em;
+    }
+}
+
+/* Combo, DateTimeField, NumberField, Slider cards - form container gap */
+[data-type="combo"],
+[data-type="datetimefield"],
+[data-type="numberfield"],
+[data-type="slider"] {
+    > .b-container {
+        gap : 0.75em;
+    }
+}
+
+[data-type="slider"] {
+    .b-field-inner {
+        max-width : 30em;
+    }
+}
+
+/* ChipView card */
+[data-type="chipview"] {
+    .b-chip-view {
+        gap : 0.75em;
+    }
+}
+
+/* List card */
+[data-type="list"] {
+
+    .b-multi-select {
+        .b-list-item:is(.b-selected,.b-active) {
+            background : transparent;
+        }
+    }
+
+    .list-toggles {
+        gap            : 1.5em;
+        padding-bottom : 0.75em;
+        border-bottom  : 1px solid var(--b-neutral-90);
+        margin-bottom  : 0.5em;
+    }
+
+    .integration-item {
+        display     : flex;
+        flex        : 1;
+        align-items : center;
+        gap         : 0.75em;
+    }
+
+    .integration-icon {
+        width           : 2.5em;
+        height          : 2.5em;
+        border-radius   : 0.5em;
+        display         : flex;
+        align-items     : center;
+        justify-content : center;
+        font-size       : 1.5em;
+        flex-shrink     : 0;
+        border          : 1px solid var(--b-neutral-85);
+        background      : var(--b-neutral-100);
+
+        i {
+            font-size : 1.25em;
+        }
+    }
+
+    .integration-info {
+        flex      : 1;
+        min-width : 0;
+    }
+
+    .integration-name {
+        font-weight : 600;
+    }
+
+    .integration-version {
+        font-size : 0.85em;
+        color     : var(--b-neutral-60);
+    }
+
+    .integration-status {
+        font-size         : 0.9em;
+        padding           : 0.4em 0.75em;
+        border-radius     : 1em;
+        font-weight       : 500;
+        text-transform    : capitalize;
+        flex-shrink       : 0;
+        margin-inline-end : auto;
+        display           : flex;
+        align-items       : center;
+        gap               : 0.5em;
+        border            : 1px solid var(--b-neutral-90);
+        background        : var(--b-neutral-100);
+    }
+
+    .status-connected {
+        color : var(--b-color-green);
+    }
+
+    .status-importing {
+        color : var(--b-color-orange-dark);
+    }
+
+    .status-pending {
+        color : var(--b-neutral-50);
+    }
+}
+
+/* TextField card */
+[data-type="textfield"] {
+    .b-text-field:first-child {
+        margin-bottom : 0.5em;
+    }
+}
+
+/* DisplayField card */
+[data-type="displayfield"] {
+    .b-display-field {
+        color       : #27ae60;
+        font-weight : 600;
+    }
+}
+
+/* TabPanel card */
+[data-type="tabpanel"] {
+    .b-fieldset {
+        margin : 1em;
+    }
+
+    .activity-list {
+        list-style : none;
+        padding    : 0 1em;
+
+        li {
+            padding       : 0.5em;
+            border-bottom : 1px solid var(--b-neutral-90);
+
+            &:last-child {
+                border-bottom : none;
+            }
+        }
+
+        .fa-check {
+            color             : var(--b-color-green);
+            margin-inline-end : 0.5em;
+        }
+    }
+}
+
+/* Refresh data button in card header */
+.refresh-button {
+    margin-inline : 0.5em;
+    border        : none;
+}
+
+/* Panel card stats styling */
+[data-type="panel"] {
+    .stats-card {
+        align-items     : center;
+        justify-content : space-between;
+        padding         : 1em;
+        background      : var(--b-neutral-95);
+        border-radius   : 0.5em;
+    }
+
+    .stats-total {
+        font-size   : 2em;
+        font-weight : bold;
+    }
+
+    .stats-row {
+        align-items   : center;
+        padding       : 1em;
+        background    : var(--b-neutral-95);
+        border-radius : 0.5em;
+    }
+
+    .stats-icon {
+        width           : 3em;
+        height          : 3em;
+        background      : var(--b-neutral-90);
+        border-radius   : 50%;
+        display         : flex;
+        align-items     : center;
+        justify-content : center;
+
+        i {
+            font-size : 1.2em;
+        }
+    }
+
+    .stats-amount {
+        font-weight : 700;
+        font-size   : 1.1em;
+    }
+}
+
+.b-task-board-resource-avatars {
+    align-items : center;
+}

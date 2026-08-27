@@ -1,0 +1,24 @@
+{
+  "title": "Drag equipment onto tasks (Angular)",
+  "description": "This example lets you drag external DOM nodes and drop them onto tasks to update some aspect of them, such as scheduling the use of equipment.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/app.types.ts",
+    "src/assets/data/data.json",
+    "src/assets/data/equipment.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "src/tsconfig.app.json",
+    "src/tsconfig.spec.json",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

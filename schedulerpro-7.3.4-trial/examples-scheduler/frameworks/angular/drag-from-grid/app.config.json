@@ -1,0 +1,24 @@
+{
+  "title": "Drag tasks from grid (Angular)",
+  "description": "The example shows how easy it is to allow end users to drag unplanned tasks from an external grid to the Angular Scheduler component.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/app/lib/Drag.ts",
+    "src/app/lib/Task.ts",
+    "src/app/lib/TaskStore.ts",
+    "src/assets/data/data.json",
+    "src/assets/data/unplanned.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

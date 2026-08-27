@@ -1,0 +1,14 @@
+.b-time-ranges-header-canvas {
+  .b-sch-range,
+  .b-sch-line label {
+    display : none;
+  }
+
+  i {
+    margin-inline-end : 0;
+  }
+}
+
+.b-time-ranges-body-canvas .b-sch-time-range {
+  z-index : 10;
+}

@@ -1,0 +1,12 @@
+{
+  "title": "Highlighting Resource Calendars",
+  "description": "Help end users understand the scheduling logic by visualizing resource calendars",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "lib/Appointment.js",
+    "lib/ConfigPanel.js",
+    "resources/app.css"
+  ]
+}

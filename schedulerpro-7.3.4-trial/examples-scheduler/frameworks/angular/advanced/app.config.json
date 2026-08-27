@@ -1,0 +1,29 @@
+{
+  "title": "Routing + NgRx demo (Angular)",
+  "description": "This example shows how to use Bryntum Angular Scheduler component in an Angular application with routing and with state managed by NgRx.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app-routing.module.ts",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.module.ts",
+    "src/app/router/my-reuse-strategy.ts",
+    "src/app/scheduler1/scheduler1.component.html",
+    "src/app/scheduler1/scheduler1.component.ts",
+    "src/app/scheduler1/scheduler1.config.ts",
+    "src/app/scheduler2/scheduler2.component.html",
+    "src/app/scheduler2/scheduler2.component.ts",
+    "src/app/scheduler2/scheduler2.config.ts",
+    "src/app/store/app.actions.ts",
+    "src/app/store/app.reducer.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "src/tsconfig.app.json",
+    "src/tsconfig.spec.json",
+    "tsconfig.json"
+  ]
+}

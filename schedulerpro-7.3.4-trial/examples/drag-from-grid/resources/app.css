@@ -1,0 +1,43 @@
+#main {
+    display        : flex;
+    flex-direction : row;
+    flex           : 1 1 100%;
+}
+
+.b-grid-header {
+    height : 57px;
+}
+
+.b-unplanned-grid {
+    .fa-clock {
+        margin-inline-end : 0 !important;
+    }
+}
+
+.b-unassigned-class.b-drag-invalid {
+    --b-primary : var(--b-color-red);
+}
+
+.b-sch-event {
+    --b-sch-event-box-shadow : var(--b-elevation-1);
+}
+
+.b-sch-event-content {
+    i {
+        order : 1;
+    }
+
+    .b-event-text-wrap {
+        flex : 1;
+
+        > div {
+            font-size   : 1.1em;
+            font-weight : 500;
+        }
+
+        span {
+            font-size   : .8em;
+            font-weight : normal;
+        }
+    }
+}

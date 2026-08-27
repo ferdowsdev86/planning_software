@@ -1,0 +1,15 @@
+{
+  "title": "Resource histogram demo (Vue 2)",
+  "description": "The example shows how to configure the Vue Scheduler Pro partnered with the Resource Histogram.",
+  "source": [
+    "babel.config.js",
+    "package.json",
+    "public/data/data.json",
+    "public/index.html",
+    "src/App.scss",
+    "src/App.vue",
+    "src/AppConfig.js",
+    "src/main.js",
+    "vue.config.js"
+  ]
+}

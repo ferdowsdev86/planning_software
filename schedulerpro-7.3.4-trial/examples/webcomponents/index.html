@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta name="description" content="This example shows how to use the Custom elements version of the Scheduler Pro."/>
+	<meta charset="UTF-8">
+	<title>Bryntum Scheduler Pro - Web Components demo</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+	<!-- These stylesheets are not needed for the actual webcomponent to work, it includes its own style -->
+	<link rel="stylesheet" href="../../resources/fontawesome/css/fontawesome.css">
+	<link rel="stylesheet" href="../../resources/fontawesome/css/solid.css">
+	<link rel="stylesheet" href="../../build/schedulerpro.css">
+	<link rel="stylesheet" href="../../build/svalbard-light.css" data-bryntum-theme>
+	<link rel="stylesheet" href="../_shared/shared.css">
+	<link rel="stylesheet" href="resources/app.css">
+</head>
+
+<body>
+	<div id="container">
+		<bryntum-schedulerpro
+				class="demo-app"
+				theme="../../build/svalbard-light.css"
+				stylesheet="../../build/schedulerpro.css"
+				fa-path="../../build/fontawesome/webfonts"
+				data-min-height="20em"
+				data-view-preset="hourAndDay"
+				data-start-date="2020-03-23"
+				data-end-date="2020-03-24"
+		>
+			<column data-field="name" data-width="120">Name</column>
+			<project data-load-url="data/data.json"></project>
+			<feature data-name="timeRanges" data-show-current-timeline="true"></feature>
+		</bryntum-schedulerpro>
+	</div>
+	<script src="../_shared/locales/examples.locales.umd.js"></script>
+	<script data-default-locale="En" type="module" src="app.module.js"></script>
+</body>
+
+</html>

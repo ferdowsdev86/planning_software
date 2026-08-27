@@ -1,0 +1,48 @@
+/* FontAwesome is not built-in, but used for icons */
+@use "@bryntum/schedulerpro/fontawesome/css/fontawesome.css";
+@use "@bryntum/schedulerpro/fontawesome/css/solid.css";
+
+/* Bryntum structural CSS */
+@use "@bryntum/schedulerpro/schedulerpro.css";
+
+/* Bryntum theme is included in index.html to enable runtime theme switching, but it could instead be included here if you want to use a single theme */
+/* @use "@bryntum/schedulerpro/svalbard-light.css"; */
+
+/* Bryntum shared demo styling, not needed in your app */
+@use "@bryntum/demo-resources/scss/example.scss";
+
+// These rules apply only when the `eventStyle : 'traced'` is set on the Scheduler.
+.b-style-traced {
+    // This class is used to style events with a less prominent border.
+    // It reduces the visual emphasis of event borders, making them blend
+    // more subtly into the surrounding design.
+    .b-sch-event {
+        --b-sch-event-border-color : color-mix(in srgb, var(--b-primary) 20%, var(--b-opposite) 10%);
+    }
+
+    // This variable adjusts the font weight of events, making the text less prominent.
+    --b-sch-event-font-weight : 500;
+}
+
+.selected-event {
+    margin-inline-end : 1em;
+    text-transform    : uppercase;
+    text-align        : right;
+    white-space       : nowrap;
+    text-overflow     : ellipsis;
+}
+
+.selected-event span {
+    font-weight : 800;
+}
+
+.small-text {
+    font-size : 0.7em;
+}
+
+.yes-button,
+.no-button {
+    flex    : 1;
+    border  : none;
+    outline : none;
+}

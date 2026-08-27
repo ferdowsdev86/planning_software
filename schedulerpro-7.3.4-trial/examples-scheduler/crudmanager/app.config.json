@@ -1,0 +1,11 @@
+{
+  "title": "CrudManager PHP & MySQL demo",
+  "description": "Scheduler with a CrudManager using a backend built on PHP & MySQL",
+  "source": [
+    "app.js",
+    "index.html",
+    "lib/TimeRangeEditor.js",
+    "resources/app.css"
+  ],
+  "disableCodePen": true
+}

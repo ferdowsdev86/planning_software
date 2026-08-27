@@ -1,0 +1,20 @@
+{
+  "title": "Recurring events (Angular)",
+  "description": "Shows how to use recurring events feature in Angular Scheduler. You can use any recurrence pattern to control the event scheduling.",
+  "source": [
+    "angular.json",
+    "package.json",
+    "src/app/app.component.html",
+    "src/app/app.component.scss",
+    "src/app/app.component.ts",
+    "src/app/app.config.ts",
+    "src/app/app.module.ts",
+    "src/assets/data/data.json",
+    "src/index.html",
+    "src/main.ts",
+    "src/styles.scss",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.spec.json"
+  ]
+}

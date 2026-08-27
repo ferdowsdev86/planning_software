@@ -1,0 +1,10 @@
+{
+  "title": "Pro Weekends demo",
+  "description": "Shows a Scheduler Pro with a weekend calendar, visualized in the UI and respected when scheduling",
+  "source": [
+    "app.js",
+    "data/data.json",
+    "index.html",
+    "resources/app.css"
+  ]
+}
