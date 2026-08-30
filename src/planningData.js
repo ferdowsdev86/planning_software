@@ -4,6 +4,38 @@
 // ---------------------------------------------------------------------------
 
 export const WORK_MIN_PER_DAY = 600; // 10 working hours
+export const WORK_SNAP_MIN = 15;
+
+// Working days = (Quantity × SMV) ÷ (Manpower × Daily minutes × Efficiency)
+// Fractional — leftover pcs only occupy that many minutes, not a full day.
+export function formulaWorkingDays(qty, smv, manpower, efficiencyPct, dailyMinutes = WORK_MIN_PER_DAY) {
+    const reqMin = Math.max(0, Number(qty) || 0) * Math.max(0.1, Number(smv) || 0);
+    const mins   = Number(dailyMinutes) > 0 ? Number(dailyMinutes) : WORK_MIN_PER_DAY;
+    const avail  = Math.max(1,
+        (Number(manpower) || 0) * mins * (Math.max(0.01, Number(efficiencyPct) || 0) / 100)
+    );
+    const days = reqMin / avail;
+    return Math.max(WORK_SNAP_MIN / mins, days);
+}
+
+export function snapWorkMinutes(clockMin, dailyMinutes = WORK_MIN_PER_DAY) {
+    const mins = Number(dailyMinutes) > 0 ? Number(dailyMinutes) : WORK_MIN_PER_DAY;
+    const raw  = Math.max(WORK_SNAP_MIN, Number(clockMin) || 0);
+    return Math.ceil(raw / WORK_SNAP_MIN) * WORK_SNAP_MIN;
+}
+
+export function applyFormulaToRaw(raw, manpower, efficiencyPct, dailyMinutes = WORK_MIN_PER_DAY) {
+    if (!raw) return WORK_SNAP_MIN / WORK_MIN_PER_DAY;
+    const qty  = Number(raw.qty ?? raw.orderQty) || 0;
+    const smv  = Math.max(0.1, Number(raw.smv) || 0);
+    const mins = Number(dailyMinutes) > 0 ? Number(dailyMinutes) : WORK_MIN_PER_DAY;
+    raw.smv     = smv;
+    raw.reqMin  = Math.round(qty * smv);
+    const clock = snapWorkMinutes(formulaWorkingDays(qty, smv, manpower, efficiencyPct, mins) * mins, mins);
+    raw.workMin = clock;
+    raw.dur     = clock / mins;
+    return raw.dur;
+}
 
 const AUG = n => new Date(2026, 7, n);
 export const PLAN_START = AUG(1);
@@ -58,7 +90,7 @@ export function addWorkDays(start, days) {
 // Elapsed calendar days between two dates, fractional (the engine treats
 // day-durations as 24h blocks, so bars store this while raw.dur keeps
 // working days; fractional because days end at work-end, e.g. 20:00)
-export const elapsedDays = (start, end) => Math.max(0.25, (end - start) / 86400000);
+export const elapsedDays = (start, end) => Math.max(1 / 1440, (end - start) / 86400000);
 
 // First working hour of a day per the configured calendar (e.g. 08:00)
 export function startOfWorkDay(date) {
@@ -91,17 +123,58 @@ export function endOfWorkDay(date) {
     return d;
 }
 
-// A bar's end: its LAST working day finishes at that day's end-of-work time
-export function endOfWork(start, dur) {
-    const last = dur <= 1 ? new Date(start) : addWorkDays(start, dur - 1);
-    return endOfWorkDay(last);
+// Paid shift end (10h) — leftover capacity for the next order sits after this
+export function workEndOfDay(date) {
+    const d   = new Date(date);
+    const cfg = calendarState.days[d.getDay()] || {};
+    const mins = Math.round((hmToHours(cfg.start || '08:00') +
+                             hmToHours(cfg.hours || '10:00')) * 60);
+    d.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
+    return d;
 }
 
-// First free slot after an end: the next working day's first hour
+function startOfNextWorkDay(date) {
+    const n = new Date(date);
+    n.setDate(n.getDate() + 1);
+    n.setHours(0, 0, 0, 0);
+    return startOfWorkDay(nextWorkingDay(n));
+}
+
+export function clampIntoWorkWindow(date) {
+    const t = new Date(date);
+    if (isOffDay(t)) return startOfWorkDay(nextWorkingDay(t));
+    const ws = startOfWorkDay(t);
+    const we = endOfWorkDay(t);
+    if (t < ws) return ws;
+    if (t >= we) return startOfNextWorkDay(t);
+    return t;
+}
+
+export function addWorkingMinutes(start, clockMinutes) {
+    let remaining = Math.max(1, Number(clockMinutes) || 0);
+    let t = clampIntoWorkWindow(start);
+    let guard = 0;
+    while (remaining > 0 && guard++ < 4000) {
+        const avail = Math.max(0, (workEndOfDay(t) - t) / 60000);
+        if (avail <= 0) {
+            t = startOfNextWorkDay(t);
+            continue;
+        }
+        if (remaining <= avail) return new Date(t.getTime() + remaining * 60000);
+        remaining -= avail;
+        t = startOfNextWorkDay(t);
+    }
+    return t;
+}
+
+// Bar end from exact working days (fractional last day = leftover minutes)
+export function endOfWork(start, dur) {
+    return addWorkingMinutes(start, Math.max(1, Number(dur) * WORK_MIN_PER_DAY));
+}
+
+// Next bar starts at this end if the shift still has time; otherwise next day
 export function nextStartAfter(end) {
-    const d = new Date(end);
-    d.setDate(d.getDate() + 1);
-    return startOfWorkDay(nextWorkingDay(new Date(d.getFullYear(), d.getMonth(), d.getDate())));
+    return clampIntoWorkWindow(end);
 }
 
 export function workDaysBetween(a, b) {
@@ -115,9 +188,23 @@ export function workDaysBetween(a, b) {
 }
 
 export const fmtQty  = n => Number(n).toLocaleString('en-US');
-export const fmtDate = d => d
-    ? `${String(d.getDate()).padStart(2, '0')}-${d.toLocaleString('en-US', { month : 'short' })}`
-    : '';
+
+/** Production end is after the delivery / shipment date (calendar day). */
+export function isLateVsDelivery(end, ship) {
+    if (!end || !ship) return false;
+    const e = new Date(end);
+    const s = new Date(ship);
+    if (Number.isNaN(e.getTime()) || Number.isNaN(s.getTime())) return false;
+    e.setHours(0, 0, 0, 0);
+    s.setHours(0, 0, 0, 0);
+    return e > s;
+}
+export const fmtDate = d => {
+    if (!d) return '';
+    const x = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(x.getTime())) return '';
+    return `${String(x.getDate()).padStart(2, '0')}-${x.toLocaleString('en-US', { month : 'short' })}`;
+};
 
 const MON_RR = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -243,8 +330,23 @@ export function mbmOrderNo(po, orderCode) {
     return `MBM-${digits}`;
 }
 
-export function orderTypeOf(po) {
+export function orderTypeOf(po, explicit) {
+    if (explicit === 'projection' || explicit === 'confirm') return explicit;
+    if (po && typeof po === 'object') {
+        if (po.orderType === 'projection' || po.orderType === 'confirm') return po.orderType;
+        po = po.po;
+    }
     return hashKey(String(po) + ':type') % 2 === 0 ? 'projection' : 'confirm';
+}
+
+// Same buyer + style + MBM order: the projection and its later confirm
+export function orderFamilyKey(o) {
+    if (!o) return '';
+    const mbm = String(o.mbmOrder || o.order_code || '').trim().toLowerCase();
+    const style = String(o.style || o.style_no || '').trim().toLowerCase();
+    const buyer = String(o.buyer || o.buyer_name || '').trim().toLowerCase();
+    if (mbm && mbm !== 'mbm-0') return `${buyer}|${style}|${mbm}`;
+    return `${buyer}|${style}|${String(o.po || o.po_number || '').trim().toLowerCase()}`;
 }
 
 export function poDeliveryOf(ship) {
@@ -265,7 +367,7 @@ export function barDisplayLine(raw, compact = false) {
     const mbm   = mbmOrderNo(raw.po, raw.mbmOrder);
     const buyer = raw.buyer || '—';
     if (compact) return `${buyer}:${mbm}`;
-    const type = orderTypeOf(raw.po);
+    const type = orderTypeOf(raw.po, raw.orderType);
     if (type === 'projection') {
         return `${buyer} : ${raw.style || '—'} : ${mbm} : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
     }
@@ -339,7 +441,7 @@ function mkOrder(o) {
     const smv    = randSmv(o.po);
     const pcd    = addCalDays(o.ship, -30);
     const reqMin = Math.round(o.qty * smv);
-    const dur    = Math.max(1, Math.ceil(reqMin / line.availMin));
+    const dur    = formulaWorkingDays(o.qty, smv, line.manpower, line.eff);
     const start  = startOfWorkDay(AUG(o.startDay));
     const end    = endOfWork(start, dur);
     return {

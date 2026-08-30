@@ -6,8 +6,9 @@
 import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
-    addCalDays, randSmv, productTypeFor
+    addCalDays, randSmv, productTypeFor, LINES, STAGE_RESOURCES, clampIntoWorkWindow
 } from './planningData.js';
+import { lineIdOf } from './AppConfig.js';
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
 
@@ -22,7 +23,134 @@ const STAGE_NAME = {
     packing : 'Packing', inspection : 'Inspection', shipment : 'Shipment'
 };
 
+const UNIT_NAMES = { 1 : 'AQL', 2 : 'MBM', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
+const unitLabel = id => UNIT_NAMES[Number(id)] || (id ? `Unit ${id}` : 'AQL');
+
 const asDate = v => (v ? new Date(String(v).replace(' ', 'T')) : null);
+
+function buildBoardResources(sewing, stages, effUnitId, effUnitName) {
+    const firstLine = sewing[0];
+    const unit = firstLine?.unit || effUnitName || unitLabel(effUnitId) || 'AQL';
+    const floor = firstLine?.floor || 'F1';
+    return [
+        {
+            id : 'hold', name : 'Holding Row',
+            unit, floor,
+            manpower : 0, machines : 0, eff : 0, availMin : 0,
+            holdingRow : true, cls : 'mb-hold-row'
+        },
+        ...sewing,
+        {
+            id : 'subtot', name : 'Subtotal Row',
+            unit, floor : firstLine?.floor || floor,
+            manpower : sewing.reduce((a, l) => a + Number(l.manpower || 0), 0),
+            machines : sewing.reduce((a, l) => a + Number(l.machines || 0), 0),
+            eff : 0, availMin : 0,
+            subtotalRow : true, cls : 'mb-subtotal-row'
+        },
+        ...stages
+    ];
+}
+
+function fallbackSewingLines(effUnitId, effUnitName) {
+    const unit = effUnitName || unitLabel(effUnitId) || 'AQL';
+    return LINES.map(l => ({
+        id : l.id, dbId : null, name : l.name,
+        unit : l.unit || unit, unitId : effUnitId, floor : l.floor,
+        manpower : l.manpower, machines : l.machines, eff : l.eff,
+        availMin : l.availMin, utilization : 0, lineRow : true
+    }));
+}
+
+function parseEventNotes(notes) {
+    if (!notes) return {};
+    try {
+        const n = typeof notes === 'string' ? JSON.parse(notes) : notes;
+        return n && typeof n === 'object' ? n : {};
+    }
+    catch { return {}; }
+}
+
+function eventParked(notes) {
+    return !!parseEventNotes(notes).parked;
+}
+
+function eventNotesPayload(raw, onHold) {
+    const notes = {
+        parked     : !!(onHold || raw.parked),
+        userPinned : !!raw.userPinned,
+        manualGap  : !!raw.manualGap
+    };
+    return JSON.stringify(notes);
+}
+
+function hasClockTime(d) {
+    return !!(d && (d.getHours() || d.getMinutes() || d.getSeconds()));
+}
+
+function boardSpanFromDb(e) {
+    const pinned = !!parseEventNotes(e.notes).userPinned || !!parseEventNotes(e.notes).manualGap;
+    const rawStart = asDate(e.start_date);
+    const rawEnd   = asDate(e.end_date);
+    const dur      = Number(e.duration) || 1;
+    let start;
+    if (rawStart && (pinned || hasClockTime(rawStart))) {
+        start = clampIntoWorkWindow(rawStart);
+    }
+    else {
+        start = startOfWorkDay(nextWorkingDay(rawStart || new Date()));
+    }
+    let end;
+    if (rawEnd && rawEnd > start && (pinned || hasClockTime(rawEnd))) {
+        end = rawEnd;
+    }
+    else {
+        end = endOfWork(start, dur);
+    }
+    return { start, end, dur, pinned };
+}
+
+function orderRowId(planningOrderId) {
+    return planningOrderId ? `dbo-${planningOrderId}` : null;
+}
+
+function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, status) {
+    const orderId = e.planning_order_id || null;
+    return {
+        id       : orderRowId(orderId),
+        buyer    : e.buyer_name || '',
+        style    : e.style_no || '',
+        po       : e.po_number || '',
+        mbmOrder : e.order_code || '',
+        eventCode : e.event_code || null,
+        productType : productTypeFor(e.po_number, e.product_category),
+        qty, orderQty : orderQty || qty, smv,
+        reqMin   : Math.round(qty * smv),
+        dur, start, end,
+        pcd      : asDate(e.pcd) || (ship ? addCalDays(ship, -30) : null),
+        ship,
+        matReady : asDate(e.material_ready_date),
+        progress : Number(e.percent_done) || 0,
+        status,
+        // Sewing that runs past the shipment date is a late plan (yellow strip)
+        latePlan : !!(ship && end && end > ship),
+        userPinned : !!parseEventNotes(e.notes).userPinned,
+        manualGap  : !!parseEventNotes(e.notes).manualGap,
+        dbId     : orderId,
+        unitId   : e.order_unit_id != null ? Number(e.order_unit_id) : effUnitId,
+        unitName : unitLabel(e.order_unit_id ?? effUnitId),
+        risk     : { score : 0, level : 'low', label : 'On track', reasons : [] }
+    };
+}
+
+function fallbackStageLines(effUnitId, effUnitName) {
+    const unit = effUnitName || unitLabel(effUnitId) || 'AQL';
+    return STAGE_RESOURCES.map(s => ({
+        id : s.id, dbId : null, name : s.name,
+        unit : s.unit || unit, unitId : effUnitId, floor : s.floor,
+        stageRow : true, cls : 'mb-stage-row'
+    }));
+}
 
 async function get(path, timeoutMs = 4000) {
     const ctrl = new AbortController();
@@ -102,7 +230,9 @@ function mapUnplannedRow(o) {
         matReady : asDate(o.material_ready_date),
         ship,
         priority : o.priority,
-        suitable
+        suitable,
+        unitId   : o.unit_id != null ? Number(o.unit_id) : null,
+        unitName : o.unit_name || unitLabel(o.unit_id)
     };
 }
 
@@ -140,14 +270,16 @@ export async function loadUnplannedDbPaged(firstLimit, onBatch, unitId = null) {
 
 // Load scheduler data + unplanned orders and map them to the shapes the
 // board uses (see AppConfig.js / planningData.js)
-export async function loadFromApi() {
-    // First load project to get unit_id, then load unplanned filtered by that unit
-    const data = await get('/projects/1/scheduler-data');
+// unitId — when set, only resources/events/orders for that unit are returned
+export async function loadFromApi(unitId = null) {
+    const unitQ = unitId ? `?unit_id=${unitId}` : '';
+    const data = await get(`/projects/1/scheduler-data${unitQ}`);
     if (!data.success) throw new Error(data.error || 'load failed');
 
-    const unitId = data.project?.unitId || null;
-    const unitQ  = unitId ? `?unit_id=${unitId}` : '';
-    const unp    = await get(`/unplanned-orders${unitQ}`);
+    const effUnitId = unitId || data.project?.unitId || null;
+    const effUnitName = data.project?.unitName || unitLabel(effUnitId);
+    const unpQ  = effUnitId ? `?unit_id=${effUnitId}` : '';
+    const unp    = await get(`/unplanned-orders${unpQ}`);
 
     const dbIdToBoardId = {};
     const mapped = data.resources.rows.map(r => {
@@ -157,7 +289,7 @@ export async function loadFromApi() {
         return isLine
             ? {
                 id : boardId, dbId : r.id, name : r.resource_name,
-                unit : 'AQL', floor : `F${r.floor_id}`,
+                unit : effUnitName, unitId : r.unit_id, floor : `F${r.floor_id}`,
                 manpower : r.manpower, machines : r.machine_count,
                 eff : Number(r.default_efficiency),
                 availMin : Number(r.capacity_minutes_per_day) ||
@@ -166,32 +298,23 @@ export async function loadFromApi() {
             }
             : {
                 id : boardId, dbId : r.id, name : r.resource_name,
-                unit : 'AQL', floor : `F${r.floor_id}`,
+                unit : effUnitName, unitId : r.unit_id, floor : `F${r.floor_id}`,
                 stageRow : true, cls : 'mb-stage-row'
             };
     });
 
     const firstLine = mapped.find(r => r.lineRow);
-    const sewing = mapped.filter(r => r.lineRow);
-    const stages = mapped.filter(r => !r.lineRow);
-    const resources = [
-        {
-            id : 'hold', name : 'Holding Row',
-            unit : firstLine?.unit || 'AQL', floor : firstLine?.floor || 'F1',
-            manpower : 0, machines : 0, eff : 0, availMin : 0,
-            holdingRow : true, cls : 'mb-hold-row'
-        },
-        ...sewing,
-        {
-            id : 'subtot', name : 'Subtotal Row',
-            unit : firstLine?.unit || 'AQL', floor : firstLine?.floor || 'F1',
-            manpower : sewing.reduce((a, l) => a + Number(l.manpower || 0), 0),
-            machines : sewing.reduce((a, l) => a + Number(l.machines || 0), 0),
-            eff : 0, availMin : 0,
-            subtotalRow : true, cls : 'mb-subtotal-row'
-        },
-        ...stages
-    ];
+    let sewing = mapped.filter(r => r.lineRow);
+    let stages = mapped.filter(r => !r.lineRow);
+    if (!sewing.length) {
+        sewing = fallbackSewingLines(effUnitId, effUnitName);
+        if (!stages.length) stages = fallbackStageLines(effUnitId, effUnitName);
+    }
+    const resources = buildBoardResources(sewing, stages, effUnitId, effUnitName);
+
+    setLineResourceDbMap(Object.fromEntries(
+        sewing.filter(l => l.dbId != null).map(l => [l.id, l.dbId])
+    ));
 
     const lineById = Object.fromEntries(resources.filter(r => r.lineRow).map(l => [l.id, l]));
 
@@ -209,35 +332,36 @@ export async function loadFromApi() {
         const known = mappedId && resources.some(r => r.id === mappedId && r.id !== 'hold');
         const orderQty = Number(e.order_quantity) || Number(e.planned_quantity) || 0;
         const qty   = Number(e.planned_quantity ?? e.order_quantity) || 0;
-        const smv   = randSmv(e.po_number);
-        const dur   = Number(e.duration) || 1;
+        const smv   = Number(e.smv) > 0 ? Number(e.smv) : randSmv(e.po_number);
+        const { start, end, dur } = boardSpanFromDb(e);
         const status = e.event_status === 'completed' ? 'completed' : e.event_status;
-        const start = startOfWorkDay(nextWorkingDay(asDate(e.start_date)));
-        const end   = endOfWork(start, dur);
         const ship  = asDate(e.shipment_date);
         const hasBuyer = String(e.buyer_name || '').trim();
 
         // Sewing orders with no buyer stay off the list and off the board
         if (!isStage && !hasBuyer) continue;
 
-        // Unassigned sewing stays off the board (unplanned). Holding Row is
-        // only for bars the planner parks there on purpose.
-        if (!isStage && !known) {
-            extraUnplanned.push({
-                id       : `dbo-ev-${e.id}`,
-                dbId     : e.id,
-                buyer    : e.buyer_name || '',
-                style    : e.style_no || '',
-                po       : e.po_number || '',
-                mbmOrder : e.order_code || '',
-                productType : productTypeFor(e.po_number, e.product_category),
-                qty, orderQty, smv,
-                pcd      : asDate(e.pcd) || (ship ? addCalDays(ship, -30) : null),
-                matReady : asDate(e.material_ready_date),
-                ship,
-                priority : 2,
-                suitable : []
+        const parked = eventParked(e.notes);
+        const unassigned = !known;
+
+        // Parked (saved hold) or unassigned sewing events → Holding Row
+        if (!isStage && (parked || unassigned)) {
+            events.push({
+                id         : `db-${e.id}`,
+                dbId       : e.id,
+                resourceId : 'hold',
+                startDate  : start,
+                endDate    : end,
+                duration   : elapsedDays(start, end),
+                durationUnit : 'day',
+                manuallyScheduled : !!e.manually_scheduled,
+                name       : e.event_name,
+                percentDone : Number(e.percent_done) || 0,
+                draggable  : status !== 'completed',
+                resizable  : status !== 'completed',
+                raw        : buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, parked ? 'unplanned' : status)
             });
+            if (parked) events[events.length - 1].raw.parked = true;
             continue;
         }
 
@@ -254,22 +378,9 @@ export async function loadFromApi() {
             percentDone : Number(e.percent_done) || 0,
             draggable  : status !== 'completed',
             resizable  : status !== 'completed',
-            raw : {
-                buyer    : e.buyer_name || '',
-                style    : e.style_no || '',
-                po       : e.po_number || '',
-                mbmOrder : e.order_code || '',
-                productType : productTypeFor(e.po_number, e.product_category),
-                qty, orderQty : orderQty || qty, smv,
-                reqMin   : Math.round(qty * smv),
-                dur, start, end,
-                pcd      : asDate(e.pcd) || (ship ? addCalDays(ship, -30) : null),
-                ship,
-                matReady : asDate(e.material_ready_date),
-                progress : Number(e.percent_done) || 0,
-                status,
-                stage    : isStage ? STAGE_NAME[e.production_stage] : undefined,
-                risk     : { score : 0, level : 'low', label : 'On track', reasons : [] }
+            raw        : {
+                ...buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, status),
+                stage : isStage ? STAGE_NAME[e.production_stage] : undefined
             }
         });
     }
@@ -300,6 +411,8 @@ export async function loadFromApi() {
     }));
 
     const unplannedPos = new Set();
+    const onBoardPo = new Set(events.map(ev => ev.raw?.po).filter(Boolean).map(String));
+    const onBoardOrderIds = new Set(events.map(ev => ev.raw?.dbId).filter(Boolean));
     const unplanned = [
         ...(unp.rows || []).map(o => {
         const ship = asDate(o.shipment_date);
@@ -320,11 +433,18 @@ export async function loadFromApi() {
             ship,
             priority : o.priority,
             suitable : (typeof o.suitable_lines === 'string' ? JSON.parse(o.suitable_lines) : o.suitable_lines || [])
-                .map(code => CODE_TO_ID[code] || code)
+                .map(code => CODE_TO_ID[code] || code),
+            unitId   : o.unit_id != null ? Number(o.unit_id) : null,
+            unitName : o.unit_name || unitLabel(o.unit_id)
         };
     }),
         ...extraUnplanned.filter(u => !unplannedPos.has(String(u.po || '')))
-    ].filter(u => String(u.buyer || '').trim());
+    ].filter(u => String(u.buyer || '').trim())
+        .filter(u => !onBoardPo.has(String(u.po || '')) && !onBoardOrderIds.has(Number(u.dbId)));
+
+    const assignments = events
+        .filter(ev => ev.resourceId)
+        .map(ev => ({ id : `asgn-${ev.id}`, eventId : ev.id, resourceId : ev.resourceId }));
 
     const resourceTimeRanges = buildManpowerRanges(resources.filter(r => r.lineRow));
 
@@ -351,45 +471,107 @@ export async function loadFromApi() {
     }
 
     return {
-        project : data.project, resources, events, dependencies, resourceTimeRanges,
+        project : data.project, resources, events, assignments, dependencies, resourceTimeRanges,
         unplanned, lineById,
         calendarDays : Object.keys(calendarDays).length ? calendarDays : null,
         calendarName,
-        unitId
+        unitId   : effUnitId,
+        unitName : effUnitName
     };
 }
 
+let lineResourceDbMap = {};
+
+export function setLineResourceDbMap(map) {
+    lineResourceDbMap = { ...map };
+}
+
+export function resolveResourceDbId(scheduler, boardLineId) {
+    if (!boardLineId || boardLineId === 'hold') return null;
+    const res = scheduler.resourceStore?.getById(boardLineId);
+    const fromRec = res?.data?.dbId ?? res?.get?.('dbId');
+    if (fromRec != null) return Number(fromRec);
+    const mapped = lineResourceDbMap[boardLineId];
+    return mapped != null ? Number(mapped) : null;
+}
+
+export function poBaseEventCode(po) {
+    return `EV-${String(po || 'NEW').replace(/[^A-Za-z0-9]/g, '')}-SEW`;
+}
+
+function eventCodeOf(ev, raw) {
+    if (raw?.eventCode) return raw.eventCode;
+    return poBaseEventCode(raw?.po);
+}
+
+function resolveEventDbId(ev) {
+    const d = ev.data || {};
+    let id = ev.get?.('dbId') ?? d.dbId ?? null;
+    if (!id) {
+        const sid = String(ev.id ?? '');
+        if (sid.startsWith('db-')) id = Number(sid.slice(3));
+    }
+    return id && !Number.isNaN(Number(id)) ? Number(id) : null;
+}
+
 // Persist current board state (dates / line moves / new events)
-export async function syncToApi(scheduler) {
+export async function syncToApi(scheduler, { eventIds = null } = {}) {
     const updated = [];
     const added   = [];
+    const idFilter = eventIds ? new Set(eventIds.map(String)) : null;
     for (const ev of scheduler.eventStore.records) {
+        if (idFilter && !idFilter.has(String(ev.id))) continue;
         const d = ev.data;
+        const raw = d.raw;
+        if (!raw || raw.stage) continue;
+
         const pad = n => String(n).padStart(2, '0');
-        const fmt = x => x
-            ? `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())} 00:00:00`
-            : null;
-        const resourceDbId = ev.resource?.data?.dbId;
-        if (d.dbId) {
-            updated.push({
-                id         : d.dbId,
-                startDate  : fmt(ev.startDate),
-                endDate    : fmt(ev.endDate),
-                duration   : ev.duration,
-                percentDone : ev.percentDone,
-                resourceId : resourceDbId
-            });
+        const fmt = x => {
+            if (!x) return null;
+            const d = x instanceof Date ? x : new Date(x);
+            if (Number.isNaN(d.getTime())) return null;
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+        };
+
+        const rid = lineIdOf(scheduler, ev);
+        const onHold = rid === 'hold';
+        if (!onHold) raw.parked = false;
+        const resourceDbId = resolveResourceDbId(scheduler, rid);
+        const eventCode = eventCodeOf(ev, raw);
+        if (!raw.eventCode) raw.eventCode = eventCode;
+
+        const eventDbId = resolveEventDbId(ev);
+
+        const status = onHold
+            ? 'draft'
+            : raw.status === 'completed'
+                ? 'completed'
+                : raw.status === 'planned'
+                    ? 'planned'
+                    : 'draft';
+
+        const payload = {
+            startDate       : fmt(ev.startDate),
+            endDate         : fmt(ev.endDate),
+            duration        : ev.duration,
+            percentDone     : ev.percentDone,
+            plannedQuantity : Number(raw.qty) || 0,
+            resourceId      : resourceDbId,
+            onHold,
+            orderId         : raw.dbId ?? null,
+            eventCode,
+            status,
+            notes           : eventNotesPayload(raw, onHold)
+        };
+
+        if (eventDbId) {
+            updated.push({ id : eventDbId, ...payload });
         }
-        else if (d.raw && !d.raw.stage) {
+        else {
             added.push({
-                orderId        : d.raw.dbId,
-                eventCode      : `EV-${(d.raw.po || 'NEW').replace(/[^A-Za-z0-9]/g, '')}-SEW`,
-                name           : ev.name,
-                startDate      : fmt(ev.startDate),
-                endDate        : fmt(ev.endDate),
-                duration       : ev.duration,
-                plannedQuantity : d.raw.qty,
-                resourceId     : resourceDbId
+                orderId         : raw.dbId,
+                name            : ev.name,
+                ...payload
             });
         }
     }

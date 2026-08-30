@@ -389,8 +389,8 @@ export function sequenceOptions(blocks, ctx) {
 //   6. No overlap — each line's cursor advances to the next free working day
 // ---------------------------------------------------------------------------
 export function sewingDurationDays(qty, smv, availMin) {
-    const daily = Math.max(1, Math.floor((availMin || 1) / Math.max(0.1, smv)));
-    return Math.max(1, Math.ceil(Math.max(1, qty) / daily));
+    const reqMin = Math.max(0, Number(qty) || 0) * Math.max(0.1, Number(smv) || 0);
+    return Math.max(15 / 600, reqMin / Math.max(1, Number(availMin) || 1));
 }
 
 export function autoPlanOrders(orders, lineStates, ctx) {
@@ -420,18 +420,27 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         return { ...o, ship, pcd, smv, qty };
     }).filter(o => o.qty > 0);
 
-    // EDD (earliest delivery) then club same MBM order / colour / style
+    // PCD first so same-PCD orders stay together, then delivery / style / colour
     prepared.sort((a, b) => {
+        const dp = a.pcd - b.pcd;
+        if (dp) return dp;
         const ds = a.ship - b.ship;
         if (ds) return ds;
+        const pt = String(a.productType || '').localeCompare(String(b.productType || ''));
+        if (pt) return pt;
         const mo = String(a.mbmOrder || '').localeCompare(String(b.mbmOrder || ''));
         if (mo) return mo;
         const st = String(a.style || '').localeCompare(String(b.style || ''));
         if (st) return st;
-        const col = String(a.color || a.productType || '').localeCompare(String(b.color || b.productType || ''));
+        const col = String(a.color || '').localeCompare(String(b.color || ''));
         if (col) return col;
         return String(a.po || '').localeCompare(String(b.po || ''));
     });
+
+    const sameDay = (a, b) => a && b
+        && a.getFullYear() === b.getFullYear()
+        && a.getMonth() === b.getMonth()
+        && a.getDate() === b.getDate();
 
     const placements = [];
     for (const o of prepared) {
@@ -447,15 +456,28 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             if (o.matReady && new Date(o.matReady) > start) start = new Date(o.matReady);
             if (start < todayStart) start = new Date(todayStart);
             if (snapStart) start = snapStart(start);
+            // Same PCD as the last bar on this line: sit flush after it
+            if (line.lastEnd && sameDay(line.lastPcd, o.pcd) && start < line.freeFrom) {
+                start = snapStart ? snapStart(line.freeFrom) : new Date(line.freeFrom);
+            }
 
             const endDate = addWorkingDays(start, dur, isWorking);
             const back = backwardPass(o.ship, dur, o.qty, isWorking, masters);
             const feas = feasibility(back.latestSewStart, start, isWorking, masters);
             const lateness = workingDaysBetween(back.latestSewEnd, endDate, isWorking);
-            return { line, start, endDate, dur, availMin, planEff, fwd, back, feas, lateness };
+            const typeFit = ctx.lineHasProductType?.(line.id, o.productType) ? 0 : 1;
+            const clubPcd = line.lastPcd && sameDay(line.lastPcd, o.pcd) ? 0 : 1;
+            const clubType = line.lastProductType && line.lastProductType === o.productType ? 0 : 1;
+            return {
+                line, start, endDate, dur, availMin, planEff, fwd, back, feas, lateness,
+                typeFit, clubPcd, clubType
+            };
         });
 
         candidates.sort((a, b) => {
+            if (a.clubPcd !== b.clubPcd) return a.clubPcd - b.clubPcd;
+            if (a.clubType !== b.clubType) return a.clubType - b.clubType;
+            if (a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;
             const aOk = a.lateness <= 0 ? 0 : 1;
             const bOk = b.lateness <= 0 ? 0 : 1;
             if (aOk !== bOk) return aOk - bOk;
@@ -467,10 +489,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         const best = candidates[0];
         if (!best) continue;
 
-        let free = addDays(best.endDate, 1);
-        let guard = 0;
-        while (!isWorking(free) && guard++ < 60) free = addDays(free, 1);
-        best.line.freeFrom = free;
+        best.line.freeFrom = best.endDate;
+        best.line.lastEnd = best.endDate;
+        best.line.lastPcd = o.pcd;
+        best.line.lastProductType = o.productType;
 
         placements.push({ order : o, ...best });
     }

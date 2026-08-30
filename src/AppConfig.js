@@ -4,9 +4,11 @@ import {
     PLAN_START, PLAN_END, VIEW_START, VIEW_END, TOTAL_AVAIL_MIN,
     computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, fmtQty, fmtDate,
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
-    startOfWorkDay, endOfWork, endOfWorkDay, nextStartAfter, workDaysBetween,
+    startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
+    clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, addCalDays, randSmv, productTypeFor,
-    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency
+    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
+    formulaWorkingDays, applyFormulaToRaw, WORK_MIN_PER_DAY, isLateVsDelivery
 } from './planningData.js';
 
 // ---------------------------------------------------------------------------
@@ -24,17 +26,40 @@ function tooltipProductType(po, lineId, preferred) {
     return productTypeFor(po, preferred);
 }
 
-function tooltipEfficiency(lineId, productType) {
+function tooltipEfficiency(lineId, productType, fallbackEff) {
+    const fb = Number(fallbackEff) || LINE_BY_ID[lineId]?.eff || 50;
     try {
         const map = JSON.parse(localStorage.getItem('mbm-line-prof') || '{}');
         const list = JSON.parse(localStorage.getItem('mbm-eff-list') || '[]');
         const pid = lineId ? map[lineId] : null;
         const profile = (pid && list.find(p => p.id === pid)) || list[0];
-        const v = resolveProfileEfficiency(profile?.values, productType, LINE_BY_ID[lineId]?.eff);
+        const v = resolveProfileEfficiency(profile?.values, productType, fb);
         if (v > 0) return v;
     }
     catch { /* ignore */ }
-    return LINE_BY_ID[lineId]?.eff;
+    return fb;
+}
+
+// (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
+export function applyLineFormulaDuration(scheduler, raw, lineId) {
+    if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
+    const res = scheduler?.resourceStore?.getById(lineId);
+    const manpower = Number(res?.data?.manpower ?? LINE_BY_ID[lineId]?.manpower) || 50;
+    const lineEff  = Number(res?.data?.eff ?? LINE_BY_ID[lineId]?.eff) || 50;
+    const profileEff = tooltipEfficiency(lineId, raw.productType, lineEff);
+    const baseEff = Number(raw.planEff) > 0
+        ? Number(raw.planEff)
+        : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
+    const strip = Math.max(1, Number(raw.stripEff) || 100);
+    applyFormulaToRaw(raw, manpower, baseEff * strip / 100, WORK_MIN_PER_DAY);
+    return raw.dur;
+}
+
+function setBarTooltipEnabled(scheduler, on) {
+    const tip = scheduler?.features?.eventTooltip;
+    if (!tip) return;
+    tip.disabled = !on;
+    if (!on) tip.hide?.();
 }
 
 const PALETTE = [
@@ -59,7 +84,10 @@ export const uiHooks = {
     instance         : null,
     onOrderSelect    : null,
     onSelectionClear : null,
-    onToast          : null
+    onToast          : null,
+    onBoardEdited    : null,
+    onOpenProps      : null,
+    onOpenSchedule   : null
 };
 
 // ---------------------------------------------------------------------------
@@ -99,10 +127,109 @@ const ymdKeyOf = d =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 let gtCache = { at : 0, plan : {}, made : {} };
+let barsByLineCache = null;
+let interactionDepth = 0;
+let interactionMode = null;
+
+export function isBoardInteracting() {
+    return interactionDepth > 0;
+}
+
+function invalidateBarsCache() {
+    barsByLineCache = null;
+}
+
+function rebuildBarsCache(scheduler) {
+    const byLine = {};
+    for (const ev of scheduler.eventStore.records) {
+        const raw = ev.data.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(scheduler, ev);
+        (byLine[lid] ||= []).push(ev);
+    }
+    barsByLineCache = byLine;
+    return byLine;
+}
+
+function barsOnLine(scheduler, lineId, excludeId = null) {
+    const byLine = barsByLineCache || rebuildBarsCache(scheduler);
+    const list = byLine[lineId] || [];
+    return excludeId ? list.filter(ev => ev.id !== excludeId) : list;
+}
+
+function isPinnedBar(ev) {
+    const raw = ev?.data?.raw;
+    return !!(raw?.userPinned || raw?.manualGap);
+}
+
+function isFixedBar(ev) {
+    return ev.draggable === false || ev.data?.raw?.status === 'completed' || isPinnedBar(ev);
+}
+
+// Suspend Bryntum refresh / STM while many strips move at once (drag-drop,
+// push followers). Without this the main thread repaints once per bar.
+// mode 'light' = single pick-and-place move — no full row/grand-total repaint.
+let gtRefreshTimer = null;
+function scheduleGrandTotalsRefresh(scheduler) {
+    clearTimeout(gtRefreshTimer);
+    gtRefreshTimer = setTimeout(() => {
+        if (isBoardInteracting()) return;
+        refreshGrandTotals(scheduler);
+    }, 400);
+}
+
+export function beginBoardInteraction(scheduler, mode = 'batch') {
+    if (!scheduler) return;
+    if (interactionDepth === 0) {
+        interactionMode = mode;
+        scheduler.suspendRefresh?.();
+        if (mode === 'batch' || mode === 'light') {
+            rebuildBarsCache(scheduler);
+            scheduler.eventStore.suspendEvents?.();
+        }
+        if (mode === 'batch') {
+            try { scheduler.project?.stm?.disable?.(); }
+            catch { /* STM optional */ }
+        }
+    }
+    interactionDepth++;
+}
+
+export function endBoardInteraction(scheduler) {
+    if (!scheduler) return;
+    interactionDepth = Math.max(0, interactionDepth - 1);
+    if (interactionDepth > 0) return;
+
+    const wasLight = interactionMode === 'light';
+    if (interactionMode === 'batch' || interactionMode === 'light') {
+        scheduler.eventStore.resumeEvents?.();
+        if (interactionMode === 'batch') {
+            try { scheduler.project?.stm?.enable?.(); }
+            catch { /* STM optional */ }
+        }
+    }
+    interactionMode = null;
+    invalidateBarsCache();
+    if (!wasLight) gtCache.at = 0;
+    scheduler.resumeRefresh?.(true);
+    if (scheduler.eventStore.count > 80 && !wasLight) {
+        try { scheduler.project.stm.disabled = true; }
+        catch { /* STM optional */ }
+    }
+    recalcCapacity(scheduler);
+    if (wasLight) {
+        scheduleGrandTotalsRefresh(scheduler);
+    }
+    else {
+        refreshGrandTotals(scheduler);
+        scheduler.refreshRows?.();
+    }
+}
 
 function grandTotalMaps() {
     const now = Date.now();
-    if (now - gtCache.at < 1000) return gtCache;
+    if (isBoardInteracting() && gtCache.at) return gtCache;
+    if (now - gtCache.at < 5000) return gtCache;
     const s = uiHooks.instance;
     const plan = {}, made = {};
     let prodStore = {};
@@ -193,18 +320,15 @@ export function recalcCapacity(scheduler) {
 //   the span, cannot move: the inserted bar attaches exactly at its end
 // ---------------------------------------------------------------------------
 export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
-    const isFixed = ev => ev.draggable === false || ev.data.raw?.status === 'completed';
-    const bars = scheduler.eventStore.records.filter(ev =>
-        ev.id !== excludeId && ev.data.raw && !ev.data.raw.stage &&
-        lineIdOf(scheduler, ev) === lineId);
+    const isFixed = isFixedBar;
+    const bars = barsOnLine(scheduler, lineId, excludeId);
     let start = new Date(desired);
     let snapped = false, blockedBy = null;
     if (isOffDay(start)) {
         start   = startOfWorkDay(nextWorkingDay(start));
         snapped = true;
     }
-    else if (start > endOfWorkDay(start)) {
-        // Inside the hidden night window after work-end -> next day's first hour
+    else if (start >= endOfWorkDay(start)) {
         start = nextStartAfter(endOfWorkDay(start));
     }
     else if (start < startOfWorkDay(start)) {
@@ -221,6 +345,24 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
         start = nextStartAfter(obst.endDate);
     }
     return { start, end : endOfWork(start, dur), snapped, blockedBy };
+}
+
+const MANUAL_GAP_MS = 20 * 60 * 1000;
+
+export function noteManualGap(scheduler, lineId, rec, start) {
+    const raw = rec?.data?.raw;
+    if (!raw) return false;
+    const bars = barsOnLine(scheduler, lineId, rec.id)
+        .filter(ev => ev.startDate < start)
+        .sort((a, b) => a.endDate - b.endDate);
+    const last = bars[bars.length - 1];
+    if (!last) {
+        raw.manualGap = false;
+        return false;
+    }
+    const flush = nextStartAfter(last.endDate);
+    raw.manualGap = start.getTime() - flush.getTime() > MANUAL_GAP_MS;
+    return raw.manualGap;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,10 +392,8 @@ export function isSewingRes(res) {
 // Returns the number of bars that were shifted.
 // ---------------------------------------------------------------------------
 export function pushFollowers(scheduler, lineId, placed) {
-    const isFixed = ev => ev.draggable === false || ev.data.raw?.status === 'completed';
-    const bars = scheduler.eventStore.records.filter(ev =>
-        ev.id !== placed.id && ev.data.raw && !ev.data.raw.stage &&
-        lineIdOf(scheduler, ev) === lineId);
+    const isFixed = isFixedBar;
+    const bars = barsOnLine(scheduler, lineId, placed.id);
     const followers = bars
         .filter(ev => ev.startDate >= placed.startDate)
         .sort((a, b) => a.startDate - b.startDate);
@@ -264,26 +404,87 @@ export function pushFollowers(scheduler, lineId, placed) {
             if (ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
             continue;
         }
-        if (ev.startDate < prevEnd) {
-            let ns = nextStartAfter(prevEnd);
-            for (let guard = 0; guard < 10; guard++) {
-                const ne   = endOfWork(ns, ev.data.raw.dur);
-                const obst = bars.find(o => o !== ev && isFixed(o) && o.startDate < ne && o.endDate > ns);
-                if (!obst) break;
-                ns = nextStartAfter(obst.endDate);
-            }
-            const ne = endOfWork(ns, ev.data.raw.dur);
+        applyLineFormulaDuration(scheduler, ev.data.raw, lineId);
+        let ns = nextStartAfter(prevEnd);
+        if (ev.data.raw.manualGap && ev.startDate > ns) {
+            ns = clampIntoWorkWindow(ev.startDate);
+        }
+        for (let guard = 0; guard < 10; guard++) {
+            const ne   = endOfWork(ns, ev.data.raw.dur);
+            const obst = bars.find(o => o !== ev && isFixed(o) && o.startDate < ne && o.endDate > ns);
+            if (!obst) break;
+            ns = nextStartAfter(obst.endDate);
+        }
+        const ne = endOfWork(ns, ev.data.raw.dur);
+        if (ev.startDate?.getTime() !== ns.getTime() || ev.endDate?.getTime() !== ne.getTime()) {
             ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
             ev.data.raw.start = ns;
             ev.data.raw.end   = ne;
-            prevEnd = ne;
             pushed++;
         }
-        else if (ev.endDate > prevEnd) {
-            prevEnd = new Date(ev.endDate);
-        }
+        prevEnd = ne;
     }
     return pushed;
+}
+
+// Close empty time between sewing bars on every line. The next order starts
+// at the previous end (same shift if minutes remain). Completed bars stay put.
+export function packBoardGaps(scheduler) {
+    if (!scheduler) return 0;
+    invalidateBarsCache();
+    rebuildBarsCache(scheduler);
+    let moved = 0;
+    for (const res of scheduler.resourceStore.records) {
+        if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+        moved += packLineNoGaps(scheduler, res.id);
+    }
+    invalidateBarsCache();
+    return moved;
+}
+
+function packLineNoGaps(scheduler, lineId) {
+    const isFixed = isFixedBar;
+    const bars = barsOnLine(scheduler, lineId)
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage)
+        .sort((a, b) => {
+            const ds = a.startDate - b.startDate;
+            if (ds) return ds;
+            return String(a.id).localeCompare(String(b.id));
+        });
+    let prevEnd = null;
+    let moved = 0;
+    for (const ev of bars) {
+        const raw = ev.data.raw;
+        if (isFixed(ev)) {
+            if (!prevEnd || ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
+            continue;
+        }
+        applyLineFormulaDuration(scheduler, raw, lineId);
+        const dur = raw.dur || 1;
+        const flush = prevEnd ? nextStartAfter(prevEnd) : clampIntoWorkWindow(ev.startDate);
+        let start = flush;
+        const wall = bars.find(b => isPinnedBar(b) && b.startDate > (prevEnd || ev.startDate));
+        if (wall && flush < wall.startDate) {
+            const trial = endOfWork(flush, dur);
+            if (trial > wall.startDate) {
+                start = clampIntoWorkWindow(ev.startDate);
+            }
+        }
+        const end = endOfWork(start, dur);
+        if (wall && start < wall.startDate && end > wall.startDate) {
+            prevEnd = ev.endDate > prevEnd ? new Date(ev.endDate) : prevEnd;
+            continue;
+        }
+        if (ev.startDate?.getTime() !== start.getTime() || ev.endDate?.getTime() !== end.getTime()) {
+            ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+            raw.start = start;
+            raw.end   = end;
+            moved++;
+        }
+        raw.latePlan = !!(raw.pcd && startOfWorkDay(start) > startOfWorkDay(new Date(raw.pcd)));
+        prevEnd = end;
+    }
+    return moved;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,14 +494,44 @@ export function pushFollowers(scheduler, lineId, placed) {
 // ---------------------------------------------------------------------------
 let splitSeq = 0;
 
+function poBaseEventCode(po) {
+    return `EV-${String(po || 'NEW').replace(/[^A-Za-z0-9]/g, '')}-SEW`;
+}
+
+function nextStripEventCode(scheduler, po) {
+    const base = poBaseEventCode(po);
+    let maxSuffix = 1;
+    for (const ev of scheduler.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.po !== po) continue;
+        const code = r.eventCode || poBaseEventCode(po);
+        if (code === base) {
+            maxSuffix = Math.max(maxSuffix, 1);
+            continue;
+        }
+        const m = code.match(/-SEW-(\d+)$/);
+        if (m) maxSuffix = Math.max(maxSuffix, Number(m[1]));
+    }
+    return maxSuffix <= 1 ? `${base}-2` : `${base}-${maxSuffix + 1}`;
+}
+
 export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const raw  = rec.data.raw;
-    const line = LINE_BY_ID[rec.resourceId ?? rec.data.resourceId];
+    const rid  = rec.resourceId ?? rec.data.resourceId;
+    const res  = scheduler.resourceStore.getById(rid);
+    const line = LINE_BY_ID[rid] || (res?.data?.lineRow ? { id : rid, ...res.data } : null);
     if (!raw || raw.stage) return { ok : false, msg : 'Only production bars can be split' };
     if (raw.status === 'completed') return { ok : false, msg : 'Completed orders cannot be split' };
     if (!line) return { ok : false, msg : 'Only sewing-line bars can be split' };
 
     const orig = { ...raw };
+    const manpower = Number(res?.data?.manpower ?? line.manpower) || 50;
+    const lineEff  = Number(res?.data?.eff ?? line.eff) || 50;
+    const profileEff = tooltipEfficiency(rid, orig.productType, lineEff);
+    const baseEff = Number(orig.planEff) > 0
+        ? Number(orig.planEff)
+        : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
+    const usedEff = baseEff * (Math.max(1, Number(orig.stripEff) || 100) / 100);
     let q1, q2, d1, d2;
 
     if (qty2 !== null) {
@@ -309,8 +540,8 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
             return { ok : false, msg : `Quantity must be between 1 and ${fmtQty(orig.qty - 1)}` };
         }
         q1 = orig.qty - q2;
-        d1 = Math.max(1, Math.ceil(q1 * orig.smv / line.availMin));
-        d2 = Math.max(1, Math.ceil(q2 * orig.smv / line.availMin));
+        d1 = formulaWorkingDays(q1, orig.smv, manpower, usedEff);
+        d2 = formulaWorkingDays(q2, orig.smv, manpower, usedEff);
     }
     else {
         if (orig.dur < 2) return { ok : false, msg : 'Bar is only one working day — nothing to split' };
@@ -334,10 +565,13 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     rec.set({ endDate : end1, duration : elapsedDays(start1, end1) });
 
     // Part 2: a new bar attached right after part 1
+    if (!raw.eventCode) raw.eventCode = poBaseEventCode(raw.po);
     const raw2 = {
         ...orig,
         qty : q2, reqMin : Math.round(q2 * orig.smv), dur : d2,
-        start : start2, end : end2, progress : 0, status : 'draft'
+        start : start2, end : end2, progress : 0, status : 'draft',
+        eventCode : nextStripEventCode(scheduler, raw.po),
+        keepSeparate : !!orig.keepSeparate
     };
     const id = `${rec.id}-sp${++splitSeq}`;
     scheduler.eventStore.add({
@@ -362,6 +596,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     raw.risk  = riskOf(start1, end1, raw.status);
     raw2.risk = riskOf(start2, end2, 'draft');
 
+    uiHooks.onBoardEdited?.();
     return { ok : true, q1, q2, d1, d2, pushed, rec2 };
 }
 
@@ -375,9 +610,7 @@ export function tryMergeAdjacent(scheduler, rec, targetLineId = null) {
     if (!raw || raw.stage) return null;
     // Strictly same line (assignment-based, never stale) AND same order/PO
     const lineId = targetLineId ?? lineIdOf(scheduler, rec);
-    const same = scheduler.eventStore.records.filter(ev =>
-        ev.id !== rec.id && ev.data.raw && !ev.data.raw.stage &&
-        lineIdOf(scheduler, ev) === lineId &&
+    const same = barsOnLine(scheduler, lineId, rec.id).filter(ev =>
         ev.data.raw.po === raw.po);
     let merged = null;
     for (const other of same) {
@@ -448,8 +681,13 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
         warnings.push(`${resourceRecord.name} is not the usual line for ${order.po} — placed anyway`);
     }
     const hint = line || LINE_BY_ID[order.suitable?.[0]] || LINES[0];
+    const manpower = Number(resourceRecord.data?.manpower ?? hint?.manpower) || 50;
+    const lineEff  = Number(resourceRecord.data?.eff ?? hint?.eff) || 50;
+    const profileEff = tooltipEfficiency(resourceRecord.id, order.productType, lineEff);
     const reqMin = Math.round(order.qty * order.smv);
-    const dur    = Math.max(1, Math.ceil(reqMin / (hint?.availMin || 600)));
+    const dur    = parkHold
+        ? Math.max(1, order.dur || formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff))
+        : formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff);
 
     const dropped = startOfWorkDay(DateHelper.clearTime(date));
     let startFinal, end, snapped, blockedBy;
@@ -638,7 +876,7 @@ export const schedulerProConfig = {
     ],
 
     // Features (document 9)
-    dependenciesFeature       : true,
+    dependenciesFeature       : { allowCreate : false },
     resourceTimeRangesFeature : true,
     timeRangesFeature         : { showCurrentTimeLine : true, showHeaderElements : false },
     nonWorkingTimeFeature     : true,
@@ -659,14 +897,16 @@ export const schedulerProConfig = {
                 text   : 'Split strip',
                 icon   : 'b-fa b-fa-scissors',
                 weight : 100,
-                onItem() {
-                    const c = menuSplitCtx;
-                    if (!c) return;
-                    const d1  = Math.max(1, Math.min(c.raw.dur - 1, workDaysBetween(c.rec.startDate, c.date)));
-                    const res = splitBar(uiHooks.instance, c.rec, { dur1 : d1 });
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    const raw = rec?.data?.raw || rec?.raw || menuSplitCtx?.raw;
+                    if (!rec || !raw) return;
+                    const date = menuSplitCtx?.rec === rec ? menuSplitCtx.date : rec.startDate;
+                    const d1  = Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date)));
+                    const res = splitBar(uiHooks.instance, rec, { dur1 : d1 });
                     uiHooks.onToast?.(
                         res.ok
-                            ? `${c.raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
+                            ? `${raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
                             : res.msg,
                         res.ok ? 'ok' : 'error');
                     if (res.ok && res.rec2) uiHooks.onCarryNew?.(res.rec2);
@@ -676,35 +916,36 @@ export const schedulerProConfig = {
                 text   : 'Properties',
                 icon   : 'b-fa b-fa-compass',
                 weight : 200,
-                onItem() {
-                    const c = menuSplitCtx;
-                    if (c) uiHooks.onOpenProps?.(c.rec);
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenProps?.(rec);
                 }
             },
             planSchedule : {
                 text   : 'Planned schedule',
                 icon   : 'b-fa b-fa-table-list',
                 weight : 210,
-                onItem() {
-                    const c = menuSplitCtx;
-                    if (c) uiHooks.onOpenSchedule?.(c.rec);
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenSchedule?.(rec);
                 }
             },
             splitQtyItem : {
                 text   : 'Specify quantity to split',
                 icon   : 'b-fa b-fa-scissors',
                 weight : 110,
-                onItem() {
-                    const c = menuSplitCtx;
-                    if (!c) return;
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    const raw = rec?.data?.raw || rec?.raw || menuSplitCtx?.raw;
+                    if (!rec || !raw) return;
                     const v = window.prompt(
-                        `${c.raw.po}: quantity for the NEW bar (1 – ${fmtQty(c.raw.qty - 1)} pcs)`,
-                        String(Math.round(c.raw.qty / 2)));
+                        `${raw.po}: quantity for the NEW bar (1 – ${fmtQty(raw.qty - 1)} pcs)`,
+                        String(Math.round(raw.qty / 2)));
                     if (v === null) return;
-                    const res = splitBar(uiHooks.instance, c.rec, { qty2 : Number(String(v).replace(/[^0-9]/g, '')) });
+                    const res = splitBar(uiHooks.instance, rec, { qty2 : Number(String(v).replace(/[^0-9]/g, '')) });
                     uiHooks.onToast?.(
                         res.ok
-                            ? `${c.raw.po} split: ${fmtQty(res.q1)} pcs kept, new bar ${fmtQty(res.q2)} pcs — click where it should go`
+                            ? `${raw.po} split: ${fmtQty(res.q1)} pcs kept, new bar ${fmtQty(res.q2)} pcs — click where it should go`
                             : res.msg,
                         res.ok ? 'ok' : 'error');
                     if (res.ok && res.rec2) uiHooks.onCarryNew?.(res.rec2);
@@ -712,44 +953,48 @@ export const schedulerProConfig = {
             }
         },
         processItems(context) {
+            const items = context.items || context;
             const rec = context.eventRecord;
-            const raw = rec?.data?.raw;
+            const raw = rec?.data?.raw || rec?.raw;
             const s   = uiHooks.instance;
-            if (!raw || raw.stage || !s) {
-                context.items.splitAtCursor = false;
-                context.items.splitQtyItem  = false;
-                context.items.stripProps    = false;
-                menuSplitCtx = null;
+            if (!raw || raw.stage) {
+                items.splitAtCursor = false;
+                items.splitQtyItem  = false;
+                items.stripProps    = false;
+                items.planSchedule  = false;
                 return;
             }
             let date = null;
             try {
-                date = s.getDateFromDomEvent(context.domEvent || context.event);
+                date = s?.getDateFromDomEvent(context.domEvent || context.event);
             }
             catch { /* outside axis */ }
             if (!date) date = new Date(rec.startDate);
             menuSplitCtx = { rec, raw, date };
 
-            // Split items only for editable, multi-day strips
             if (raw.status === 'completed') {
-                context.items.splitAtCursor = false;
-                context.items.splitQtyItem  = false;
+                items.splitAtCursor = false;
+                items.splitQtyItem  = false;
                 return;
             }
             if (raw.dur < 2) {
-                context.items.splitAtCursor = false;
+                items.splitAtCursor = false;
             }
-            else {
+            else if (items.splitAtCursor) {
                 const d1 = Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date)));
                 const q1 = Math.round(raw.qty * d1 / raw.dur);
                 const q2 = raw.qty - q1;
-                context.items.splitAtCursor.text = `Split strip at ${fmtQty(q1)} + ${fmtQty(q2)}`;
+                items.splitAtCursor.text = `Split strip at ${fmtQty(q1)} + ${fmtQty(q2)}`;
             }
         }
     },
 
     eventTooltipFeature : {
-        cls : 'mb-fr-tip',
+        cls                  : 'mb-fr-tip',
+        hoverDelay           : 500,
+        hideOnDelegateChange : true,
+        hideOnScroll         : true,
+        allowOver            : false,
         template({ eventRecord : e }) {
             const r = e.data.raw;
             if (!r) return StringHelper.encodeHtml(e.name);
@@ -759,6 +1004,13 @@ export const schedulerProConfig = {
                 if (Number.isNaN(x.getTime())) return '';
                 const p = n => String(n).padStart(2, '0');
                 return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+            };
+            const ymdHm = d => {
+                const day = ymd(d);
+                if (!day || !d) return day;
+                const x = new Date(d);
+                const p = n => String(n).padStart(2, '0');
+                return `${day} ${p(x.getHours())}:${p(x.getMinutes())}`;
             };
             const lid   = e.resourceId ?? e.data.resourceId;
             const ptype = tooltipProductType(r.po, lid, r.productType);
@@ -786,18 +1038,20 @@ export const schedulerProConfig = {
                         : ''}
                     ${row('SMV', String(smv))}
                     ${row('Efficiency', `${tooltipEfficiency(lid, ptype) ?? '—'}%`)}
-                    ${row('Order type', orderTypeOf(r.po))}
+                    ${row('Order type', orderTypeOf(r.po, r.orderType))}
                     ${row('PCD', fmtDateDdMonRr(pcd) || ymd(pcd))}
-                    ${row('Start date', ymd(start))}
-                    ${row('End date', ymd(end))}
+                    ${row('Start date', ymdHm(start))}
+                    ${row('End date', ymdHm(end))}
                     ${row('Delivery', fmtDateDdMonRr(deliv) || ymd(deliv))}
                 </div>`;
         }
     },
 
-    // Drag validation (document 11)
+    // Pick-and-place uses click, not native drag — drag caused blank flashes
     eventDragFeature : {
+        disabled                : true,
         constrainDragToResource : false,
+        showTooltip             : false,
         validatorFn(context) {
             const recs  = context.eventRecords || context.draggedRecords || [];
             const rec   = recs[0];
@@ -851,8 +1105,12 @@ export const schedulerProConfig = {
         const r = e.data.raw;
         if (!r) return StringHelper.encodeHtml(e.name || '');
 
+        const pastDelivery = r.status !== 'completed'
+            && isLateVsDelivery(e.endDate || r.end, r.ship);
         const colorKey =
             r.status === 'completed' ? 'grey'
+          : pastDelivery ? 'late'
+          : r.latePlan ? 'yellow'
           : r.risk.level === 'draft' || r.status === 'draft' ? 'blue'
           : { low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[r.risk.level] || 'green';
 
@@ -862,12 +1120,15 @@ export const schedulerProConfig = {
         if (q) {
             const hay = [
                 r.buyer, r.po, r.style, r.status, r.productType,
-                orderTypeOf(r.po), barDisplayLine(r), e.name
+                orderTypeOf(r.po, r.orderType), barDisplayLine(r), e.name
             ].join(' ').toLowerCase();
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
         }
 
-        if (colorState.mode === 'buyer') {
+        if (pastDelivery) {
+            renderData.style = 'background-color:#d40000;border-color:#7a0000;color:#ffe600';
+        }
+        else if (colorState.mode === 'buyer') {
             renderData.style = `background-color:${hashColor(r.buyer)};border-color:#222;color:#fff`;
         }
         else if (colorState.mode === 'status') {
@@ -884,71 +1145,136 @@ export const schedulerProConfig = {
         return `
             <div class="mb-bar">
                 <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
-                ${compact ? '' : `<div class="mb-bar-l2">${orderTypeOf(r.po)}${Number(r.made) > 0 ? ` · ${fmtQty(Math.max(0, r.qty - r.made))} left` : ''}</div>`}
+                ${compact ? '' : `<div class="mb-bar-l2">${orderTypeOf(r.po, r.orderType)}${Number(r.made) > 0 ? ` · ${fmtQty(Math.max(0, r.qty - r.made))} left` : ''}</div>`}
             </div>`;
     },
 
     onEventClick(ev) {
+        const dom = ev?.domEvent || ev?.event;
+        if (dom?.button === 2) return;
+        if (dom?.target?.closest?.('.b-menu, .b-popup')) return;
+        setBarTooltipEnabled(uiHooks.instance, false);
         uiHooks.onOrderSelect?.(ev.eventRecord);
         uiHooks.onBarClick?.(ev);
+        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
+    },
+
+    onEventMenuItem({ item, eventRecord }) {
+        const rec = eventRecord || menuSplitCtx?.rec;
+        if (!rec) return;
+        const key = item?.ref || item?.id || item;
+        if (key === 'stripProps') uiHooks.onOpenProps?.(rec);
+        else if (key === 'planSchedule') uiHooks.onOpenSchedule?.(rec);
     },
 
     onScheduleClick(ev) {
+        setBarTooltipEnabled(uiHooks.instance, false);
         uiHooks.onScheduleClick?.(ev);
+        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
     },
 
     // After a drag-drop: snap the start off 0-hour days, keep the sequential
     // rule, and recompute the end so off days are never counted (FastReact)
-    onEventDrop({ eventRecords }) {
+    onEventDragStart() {
         const s = uiHooks.instance;
-        if (!s) return;
-        for (const rec of eventRecords) {
-            const raw = rec.data.raw;
-            if (!raw || raw.stage) continue;
-            const origStart = startOfWorkDay(DateHelper.clearTime(rec.startDate));
-            const rid = lineIdOf(s, rec);
-            if (rid === 'hold' || !LINE_BY_ID[rid]) {
-                raw.start = rec.startDate;
-                raw.end   = rec.endDate;
-                if (raw.status === 'planned' || raw.status === 'draft') {
-                    raw.status = 'unplanned';
-                }
-                continue;
-            }
-            if (raw.status === 'unplanned') raw.status = 'draft';
-            const { start : sd, end, snapped, blockedBy } =
-                computeInsertStart(s, rid, origStart, raw.dur, rec.id);
-            const moved = snapped || !!blockedBy || sd.getTime() !== origStart.getTime();
-            rec.set({ startDate : sd, endDate : end, duration : elapsedDays(sd, end) });
-            // FastReact insertion: following bars shift later to make room
-            const pushedCnt = pushFollowers(s, rid, rec);
-            if (pushedCnt) {
-                uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
-            }
-            // Same PO strips that now sit flush merge back into one
-            const mergedInfo = tryMergeAdjacent(s, rec, rid);
-            if (mergedInfo) {
-                uiHooks.onToast?.(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
-            }
-            raw.start = sd;
-            raw.end   = end;
-            const util = recalcCapacity(s) || {};
-            raw.risk = calcRisk({
-                start    : sd,
-                end,
-                ship     : raw.ship,
-                matReady : raw.matReady,
-                lineUtil : util[rec.resourceId ?? rec.data.resourceId] ?? 0,
-                status   : raw.status
-            });
-            if (moved) {
-                uiHooks.onToast?.(`${rec.name}: adjusted to the next working day (starts ${fmtDate(sd)})`, 'warn');
-            }
-        }
-        s.refreshWithTransition?.();
+        setBarTooltipEnabled(s, false);
+        uiHooks.boardUserActive = true;
+        s?.suspendRefresh?.();
     },
 
-    // After a resize: recompute duration in working days only, and shift
+    onEventDrag() {
+        uiHooks.instance?.features?.eventTooltip?.hide?.();
+    },
+
+    onEventDragReset() {
+        const s = uiHooks.instance;
+        setBarTooltipEnabled(s, true);
+        uiHooks.boardUserActive = false;
+        s?.resumeRefresh?.(false);
+    },
+
+    onEventDrop({ eventRecords }) {
+        const s = uiHooks.instance;
+        setBarTooltipEnabled(s, false);
+        if (!s) return;
+        beginBoardInteraction(s);
+        try {
+            for (const rec of eventRecords) {
+                const raw = rec.data.raw;
+                if (!raw || raw.stage) continue;
+                const origStart = startOfWorkDay(DateHelper.clearTime(rec.startDate));
+                const rid = lineIdOf(s, rec);
+                if (rid === 'hold' || !LINE_BY_ID[rid]) {
+                    const targetId = rid === 'hold' ? 'hold' : rid;
+                    const start = startOfWorkDay(DateHelper.clearTime(rec.startDate));
+                    const end   = endOfWork(start, raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1);
+                    const a = s.assignmentStore.records.find(x =>
+                        (x.eventId ?? x.data?.eventId ?? x.data?.event) === rec.id);
+                    if (a) a.set('resourceId', targetId);
+                    else s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
+                    rec.data.resourceId = targetId;
+                    rec.set({
+                        resourceId : targetId,
+                        startDate  : start,
+                        endDate    : end,
+                        duration   : elapsedDays(start, end)
+                    });
+                    raw.start = start;
+                    raw.end   = end;
+                    if (rid === 'hold' && (raw.status === 'planned' || raw.status === 'draft')) {
+                        raw.status = 'unplanned';
+                    }
+                    continue;
+                }
+                if (raw.status === 'unplanned') raw.status = 'draft';
+                const { start : sd, end, snapped, blockedBy } =
+                    computeInsertStart(s, rid, origStart, raw.dur, rec.id);
+                const moved = snapped || !!blockedBy || sd.getTime() !== origStart.getTime();
+                rec.set({ startDate : sd, endDate : end, duration : elapsedDays(sd, end) });
+                const pushedCnt = pushFollowers(s, rid, rec);
+                if (pushedCnt) {
+                    uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+                }
+                const mergedInfo = tryMergeAdjacent(s, rec, rid);
+                if (mergedInfo) {
+                    uiHooks.onToast?.(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
+                }
+                raw.start = sd;
+                raw.end   = end;
+                raw.risk = calcRisk({
+                    start    : sd,
+                    end,
+                    ship     : raw.ship,
+                    matReady : raw.matReady,
+                    lineUtil : 0,
+                    status   : raw.status
+                });
+                if (moved) {
+                    uiHooks.onToast?.(`${rec.name}: adjusted to the next working day (starts ${fmtDate(sd)})`, 'warn');
+                }
+            }
+        }
+        finally {
+            endBoardInteraction(s);
+            const util = computeLineUtil(s.eventStore.records);
+            for (const rec of eventRecords) {
+                const raw = rec.data?.raw;
+                if (!raw || raw.stage) continue;
+                const rid = lineIdOf(s, rec);
+                raw.risk = calcRisk({
+                    start    : raw.start,
+                    end      : raw.end,
+                    ship     : raw.ship,
+                    matReady : raw.matReady,
+                    lineUtil : util[rid] ?? 0,
+                    status   : raw.status
+                });
+            }
+            setBarTooltipEnabled(s, true);
+            uiHooks.boardUserActive = false;
+            uiHooks.onBoardEdited?.();
+        }
+    },
     // following bars so the resized bar never overlaps the next one
     onEventResizeEnd({ eventRecord : rec }) {
         const raw = rec.data.raw;
@@ -957,13 +1283,17 @@ export const schedulerProConfig = {
         raw.start = rec.startDate;
         raw.end   = rec.endDate;
         const s = uiHooks.instance;
-        if (s) {
+        if (!s) return;
+        beginBoardInteraction(s);
+        try {
             const pushedCnt = pushFollowers(s, rec.resourceId ?? rec.data.resourceId, rec);
             if (pushedCnt) {
                 uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
             }
         }
-        recalcCapacity(uiHooks.instance);
+        finally {
+            endBoardInteraction(s);
+        }
     },
 
     onEventSelectionChange({ selection }) {

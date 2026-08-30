@@ -3,19 +3,22 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, computeInsertStart, tryMergeAdjacent, lineIdOf, isHoldingRes, isSewingRes,
-    refreshGrandTotals
+    pushFollowers, packBoardGaps, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes,
+    refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
+    applyLineFormulaDuration
 } from './AppConfig.js';
 import {
     UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, buildManpowerRanges,
     buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay,
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
-    addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, VIEW_START, VIEW_END,
-    nextStartAfter, WORK_MIN_PER_DAY, resolveProfileType, resolveProfileEfficiency
+    addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
+    nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
+    computeLineUtil, formulaWorkingDays, isLateVsDelivery
 } from './planningData.js';
 import {
     loadFromApi, syncToApi, loadProdUpdatesDb, saveProdUpdatesDb,
-    saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE
+    saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
+    resolveResourceDbId, poBaseEventCode
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -25,11 +28,231 @@ import {
 const schedRef = ref(null);
 const order = ref(null);
 const unplanned = ref([...UNPLANNED_INIT]);
+const replacedOrders = ref([]);
 const toasts = ref([]);
 const colorMenuOpen = ref(false);
 const colorMode = ref('risk');
 const dataSource = ref('demo');
 const planMeta = ref({ name : 'AQL August Sewing Plan', status : 'Draft', version : 3 });
+const apiReady = ref(false);
+const boardLoading = ref(false);
+const boardLoadMsg = ref('');
+const boardLoadPct = ref(0);
+const boardPlanProgress = ref({ active : false, msg : '', pct : 0 });
+let boardHydratePromise = null;
+let planInFlight = null;
+/** In-memory board session — avoids API reload wiping user edits */
+const boardUnitCache = {}; // unitId -> { apiData, unplanned, ready }
+
+function cloneData(o) {
+    return JSON.parse(JSON.stringify(o));
+}
+
+function serializeBoardEvents(s) {
+    if (!s) return [];
+    const out = [];
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw) continue;
+        out.push({
+            id         : ev.id,
+            resourceId : lineIdOf(s, ev),
+            startDate  : ev.startDate,
+            endDate    : ev.endDate,
+            duration   : ev.duration,
+            durationUnit : ev.durationUnit || 'day',
+            manuallyScheduled : !!ev.manuallyScheduled,
+            name       : ev.name,
+            percentDone : ev.percentDone ?? 0,
+            draggable  : ev.draggable !== false,
+            resizable  : ev.resizable !== false,
+            raw        : { ...raw }
+        });
+    }
+    return out;
+}
+
+function cacheHasLines(cache) {
+    return (cache?.apiData?.resources || []).some(r => r.lineRow);
+}
+
+function markBoardDirty() {
+    const uid = currentUnitId.value;
+    if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = true;
+}
+
+function markBoardSaved() {
+    const uid = currentUnitId.value;
+    if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = false;
+}
+
+let boardBaseline = null;
+
+function lineLabel(s, lid) {
+    if (lid === 'hold') return 'Holding Row';
+    return s.resourceStore.getById(lid)?.name || lid || '—';
+}
+
+function snapshotBoardState(s) {
+    const out = {};
+    if (!s) return out;
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(s, ev);
+        out[String(ev.id)] = {
+            id       : ev.id,
+            po       : raw.po || '',
+            name     : ev.name,
+            qty      : Number(raw.qty) || 0,
+            line     : lid,
+            lineName : lineLabel(s, lid),
+            start    : ev.startDate?.getTime?.() ?? null,
+            end      : ev.endDate?.getTime?.() ?? null
+        };
+    }
+    return out;
+}
+
+function setBoardBaseline(s) {
+    boardBaseline = snapshotBoardState(s);
+}
+
+function collectPendingChanges(s) {
+    if (!s) return [];
+    const current = snapshotBoardState(s);
+    if (!boardBaseline) {
+        return Object.values(current).map(now => ({
+            eventId  : now.id,
+            type     : 'new',
+            po       : now.po,
+            name     : now.name,
+            fromLine : '—',
+            toLine   : now.lineName
+        }));
+    }
+    const changes = [];
+    const ids = new Set([...Object.keys(boardBaseline), ...Object.keys(current)]);
+    for (const id of ids) {
+        const was = boardBaseline[id];
+        const now = current[id];
+        if (!was && now) {
+            changes.push({ eventId : id, type : 'new', po : now.po, name : now.name, fromLine : '—', toLine : now.lineName });
+            continue;
+        }
+        if (was && !now) {
+            changes.push({ eventId : id, type : 'removed', po : was.po, name : was.name, fromLine : was.lineName, toLine : '—' });
+            continue;
+        }
+        if (!was || !now) continue;
+        if (was.line !== now.line) {
+            changes.push({
+                eventId  : id,
+                type     : 'moved',
+                po       : now.po,
+                name     : now.name,
+                fromLine : was.lineName,
+                toLine   : now.lineName
+            });
+        }
+        else if (was.start !== now.start || was.end !== now.end) {
+            changes.push({
+                eventId  : id,
+                type     : 'rescheduled',
+                po       : now.po,
+                name     : now.name,
+                fromLine : now.lineName,
+                toLine   : now.lineName
+            });
+        }
+        else if (was.qty !== now.qty) {
+            changes.push({
+                eventId  : id,
+                type     : 'split',
+                po       : now.po,
+                name     : now.name,
+                fromLine : now.lineName,
+                toLine   : now.lineName,
+                qty      : now.qty
+            });
+        }
+    }
+    return changes;
+}
+
+function formatSaveConfirm(changes) {
+    const lines = changes.map(ch => {
+        const label = ch.po || ch.name || 'Order';
+        if (ch.type === 'removed') return `• ${label}: removed from ${ch.fromLine}`;
+        if (ch.type === 'new') return `• ${label}: placed on ${ch.toLine}`;
+        if (ch.type === 'rescheduled') return `• ${label}: rescheduled on ${ch.toLine}`;
+        if (ch.type === 'split') return `• ${label}: qty split (${fmtQty(ch.qty)} pcs on ${ch.toLine})`;
+        return `• ${label}: ${ch.fromLine} → ${ch.toLine}`;
+    });
+    const head = changes.length === 1
+        ? 'Save this change to the planning board?'
+        : `Save ${changes.length} changes to the planning board?`;
+    return `${head}\n\n${lines.join('\n')}`;
+}
+
+function orderBoardKeys(raw, evId) {
+    const keys = new Set();
+    if (raw?.id) keys.add(String(raw.id));
+    if (raw?.dbId) keys.add(`dbo-${raw.dbId}`);
+    if (raw?.po) keys.add(`po:${String(raw.po)}`);
+    keys.add(String(evId));
+    return keys;
+}
+
+function orderKeysOf(u) {
+    const keys = [];
+    if (u.id) keys.push(String(u.id));
+    if (u.dbId) keys.push(`dbo-${u.dbId}`);
+    if (u.po) keys.push(`po:${String(u.po)}`);
+    return keys;
+}
+
+function touchBoardCache(s) {
+    const uid = currentUnitId.value;
+    if (!uid || !boardUnitCache[uid] || !s) return;
+    if (!boardUnitCache[uid].dirty) return;
+    boardUnitCache[uid].apiData.events = serializeBoardEvents(s);
+    boardUnitCache[uid].apiData.assignments = serializeBoardAssignments(s);
+    boardUnitCache[uid].unplanned = cloneData(unplanned.value);
+}
+
+function serializeBoardAssignments(s) {
+    if (!s?.assignmentStore) return [];
+    return s.assignmentStore.records.map(a => ({
+        id         : a.id,
+        eventId    : a.eventId ?? a.data?.eventId ?? a.data?.event,
+        resourceId : a.resourceId ?? a.data?.resourceId
+    }));
+}
+
+function countSewingEvents(data) {
+    return (data?.events || []).filter(e => e.raw && !e.raw.stage).length;
+}
+
+function finishBoardLoad(uid, data, s) {
+    if (countSewingEvents(data) > 0) {
+        boardUnitCache[uid].ready = true;
+        boardUnitCache[uid].dirty = false;
+        setBoardBaseline(s);
+    }
+    else if (!boardUnitCache[uid]?.ready) {
+        scheduleBackgroundPlan(s);
+    }
+}
+
+function storeUnitCache(unitId, apiData) {
+    boardUnitCache[unitId] = {
+        apiData : cloneData(apiData),
+        unplanned : cloneData(apiData.unplanned || []),
+        ready   : false,
+        dirty   : false
+    };
+}
 
 // ---------------------------------------------------------------------------
 // FastReact-style shell: main menu, multiple planning boards, permissions
@@ -39,6 +262,8 @@ const currentBoard = ref(null);
 const boardMin     = ref(false);    // board minimized to the taskbar
 const openMenu     = ref(null);
 const settingsOpen = ref(false);
+const rolesOpen    = ref(false);
+const newRoleName  = ref('');
 
 // Board view survives a reload until the user closes or minimizes it
 function saveBoardView() {
@@ -55,6 +280,7 @@ function saveBoardView() {
 // ---------------------------------------------------------------------------
 const ordersMin   = ref(false);
 const settingsMin = ref(false);
+const rolesMin    = ref(false);
 const effMin      = ref(false);
 const calMin      = ref(false);
 
@@ -65,6 +291,7 @@ const openWindows = computed(() => [
     { id : 'dayplan',  icon : '📄', title : 'Day Plan Report',     open : dpOpen.value,       min : dpMin.value },
     { id : 'produpd',  icon : '🏭', title : 'Production update',   open : puOpen.value,       min : puMin.value },
     { id : 'settings', icon : '⚙️', title : 'Settings',            open : settingsOpen.value, min : settingsMin.value },
+    { id : 'roles',    icon : '👤', title : 'Planning roles',      open : rolesOpen.value,    min : rolesMin.value },
     { id : 'eff',      icon : '📊', title : 'Efficiency profiles', open : effOpen.value,      min : effMin.value },
     { id : 'cal',      icon : '📅', title : 'Calendars',           open : calOpen.value,      min : calMin.value },
     { id : 'bc',       icon : '📈', title : 'Build up curves',     open : bcOpen.value,       min : bcMin.value },
@@ -79,6 +306,7 @@ function restoreWin(id) {
     if (id === 'dayplan')  dpMin.value = false;
     if (id === 'produpd')  puMin.value = false;
     if (id === 'settings') settingsMin.value = false;
+    if (id === 'roles')    rolesMin.value = false;
     if (id === 'eff')      effMin.value = false;
     if (id === 'cal')      calMin.value = false;
     if (id === 'bc')       bcMin.value = false;
@@ -93,6 +321,7 @@ function closeWin(id) {
     if (id === 'dayplan')  dpOpen.value = false;
     if (id === 'produpd')  puOpen.value = false;
     if (id === 'settings') settingsOpen.value = false;
+    if (id === 'roles')    rolesOpen.value = false;
     if (id === 'eff')      effOpen.value = false;
     if (id === 'cal')      calOpen.value = false;
     if (id === 'bc')       bcOpen.value = false;
@@ -207,9 +436,11 @@ function pgCommit(opt) {
         if (!m) continue;
         const [, colour, qtyS, po] = m;
         const qty = Number(qtyS.replace(/,/g, ''));
-        const reqMin = Math.round(qty * Number(f.smv));
-        const line = LINES.find(l => l.id === lineRes.id);
-        const dur = Math.max(1, Math.ceil(reqMin / (line?.availMin || 12000)));
+        const smv = Number(f.smv);
+        const manpower = Number(lineRes.data?.manpower ?? LINE_BY_ID[lineRes.id]?.manpower) || 50;
+        const lineEff  = Number(lineRes.data?.eff ?? LINE_BY_ID[lineRes.id]?.eff) || 50;
+        const reqMin = Math.round(qty * smv);
+        const dur = formulaWorkingDays(qty, smv, manpower, lineEff);
         const start = new Date(cursor);
         const end   = endOfWork(start, dur);
         const raw = {
@@ -246,31 +477,45 @@ function lineEfficiencyOf(lineId, productType) {
 }
 
 function snapToWorkStart(d) {
-    return startOfWorkDay(nextWorkingDay(new Date(d)));
+    return clampIntoWorkWindow(new Date(d));
 }
 
 // Re-plan the live order list onto sewing lines using PCD, delivery date
 // and the critical-path (forward + backward) rules from planningEngine.js
-function planLiveOrders() {
-    const s = getInstance();
-    if (!s) {
-        toast('Open a planning board first', 'warn');
-        return;
+async function runLiveOrderPlan(s, {
+    showToasts = true,
+    onProgress = null,
+    mode = 'incremental',
+    orderTypes = null
+} = {}) {
+    const typeFilter = orderTypes?.length ? new Set(orderTypes) : null;
+    if (!s) return { planned : 0, late : 0, tight : 0, skipped : true };
+    if (uiHooks.boardUserActive || isBoardInteracting()) {
+        return { planned : 0, late : 0, tight : 0, skipped : true };
     }
-    openMenu.value = null;
 
-    const keep = [];
-    const drop = [];
+    let recycledOrders = [];
+    if (mode === 'full') {
+        const keep = [];
+        const drop = [];
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data.raw;
+            if (!raw || raw.stage) continue;
+            const lid = lineIdOf(s, ev);
+            if (raw.status === 'completed' || Number(raw.made) > 0 || lid === 'hold'
+                || raw.userPinned || raw.manualGap) keep.push(ev);
+            else drop.push(ev);
+        }
+        recycledOrders = drop.map(ev => ev.data.raw).filter(Boolean);
+        if (drop.length) withBoardBatch(s, () => s.eventStore.remove(drop));
+    }
+
+    const onBoard = new Set();
     for (const ev of s.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
-        if (raw.status === 'completed' || Number(raw.made) > 0) keep.push(ev);
-        else drop.push(ev);
+        for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
     }
-    const recycled = drop.map(ev => ev.data.raw).filter(Boolean);
-    if (drop.length) s.eventStore.remove(drop);
-
-    const onBoard = new Set(keep.map(ev => String(ev.data.raw?.id || ev.id)));
 
     const today = snapToWorkStart(new Date());
     const lineStates = s.resourceStore.records
@@ -286,26 +531,36 @@ function planLiveOrders() {
             };
         });
     if (!lineStates.length) {
-        toast('No sewing lines on this board', 'error');
-        return;
+        if (showToasts) toast('No sewing lines on this board', 'error');
+        return { planned : 0, late : 0, tight : 0, skipped : true };
     }
 
-    for (const ev of keep) {
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data.raw;
+        if (!raw || raw.stage) continue;
         const lid = lineIdOf(s, ev);
+        if (!LINE_BY_ID[lid]) continue;
         const line = lineStates.find(l => l.id === lid);
         if (!line) continue;
         const nxt = nextStartAfter(ev.endDate);
         if (nxt > line.freeFrom) line.freeFrom = nxt;
     }
 
-    const source = [...unplanned.value, ...recycled];
+    const source = [...unplanned.value, ...recycledOrders];
     const seen = new Set(onBoard);
     const orders = [];
     for (const u of source) {
-        const key = String(u.id || `${u.mbmOrder || ''}:${u.po || ''}:${u.style || ''}`);
+        const keys = orderKeysOf(u);
+        if (keys.some(k => seen.has(k))) continue;
+        const key = keys[0] || String(u.id || `${u.mbmOrder || ''}:${u.po || ''}:${u.style || ''}`);
         if (seen.has(key)) continue;
         seen.add(key);
+        for (const k of keys) seen.add(k);
+        if (u.status === 'completed') continue;
+        if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
         if (!String(u.buyer || '').trim()) continue;
+        if (u.replaced || u.status === 'replaced') continue;
+        if (typeFilter && !typeFilter.has(orderTypeOf(u.po, u.orderType))) continue;
         const qty = Number(u.qty ?? u.orderQty) || 0;
         if (qty <= 0) continue;
         const lidHint = u.suitable?.[0] || lineStates[0].id;
@@ -318,18 +573,48 @@ function planLiveOrders() {
     }
 
     if (!orders.length) {
-        toast('No live orders left to plan', 'warn');
-        return;
+        if (showToasts && mode === 'full') toast('No live orders left to plan', 'warn');
+        touchBoardCache(s);
+        return { planned : 0, late : 0, tight : 0, skipped : true };
     }
 
+    onProgress?.({
+        phase   : 'calc',
+        done    : 0,
+        total   : orders.length,
+        message : `Calculating plan for ${orders.length} order(s)…`
+    });
+    await yieldUi();
+
     const isWorking = d => !isOffDay(d);
-    const { placements } = autoPlanOrders(orders, lineStates, {
+    const planCtx = {
         isWorking,
         today,
         efficiencyOf : lineEfficiencyOf,
+        lineHasProductType : (lineId, productType) => {
+            const profile = profileOfLine(lineId);
+            return Number(profile?.values?.[productType]) > 0;
+        },
         workMinPerDay : WORK_MIN_PER_DAY,
         snapStart : snapToWorkStart
-    });
+    };
+
+    // Calculate in small slices so the main thread stays responsive
+    const placements = [];
+    const CALC_CHUNK = 25;
+    for (let i = 0; i < orders.length; i += CALC_CHUNK) {
+        const chunk = orders.slice(i, i + CALC_CHUNK);
+        const done  = Math.min(i + CALC_CHUNK, orders.length);
+        onProgress?.({
+            phase   : 'calc',
+            done,
+            total   : orders.length,
+            message : `Calculating plan… ${done} / ${orders.length}`
+        });
+        await yieldUi();
+        const { placements : part } = autoPlanOrders(chunk, lineStates, planCtx);
+        placements.push(...part);
+    }
 
     const events = [];
     let late = 0, tight = 0;
@@ -339,7 +624,11 @@ function planLiveOrders() {
         const end   = endOfWork(start, p.dur);
         const reqMin = Math.round(o.qty * o.smv);
         const verdict = p.feas?.verdict;
-        if (verdict === 'INFEASIBLE' || p.lateness > 0) late++;
+        // No slot met the criteria, so the order was appended after the line's
+        // last bar — flag it so the strip renders yellow
+        const latePlan = startOfWorkDay(start) > startOfWorkDay(o.pcd || start)
+            || verdict === 'INFEASIBLE' || p.lateness > 0;
+        if (latePlan) late++;
         else if (verdict === 'TIGHT' || verdict === 'NO_BUFFER') tight++;
 
         const raw = {
@@ -348,6 +637,9 @@ function planLiveOrders() {
             orderQty : o.orderQty ?? o.qty,
             progress : 0,
             status   : 'draft',
+            latePlan,
+            userPinned : false,
+            manualGap  : false,
             smv      : o.smv,
             pcd      : o.pcd,
             ship     : o.ship,
@@ -392,7 +684,28 @@ function planLiveOrders() {
     }
 
     if (events.length) {
-        s.eventStore.add(events);
+        if (showToasts) toast(`Planning ${events.length} order(s)...`, 'ok');
+        const CHUNK = 40;
+        s.eventStore.suspendEvents?.();
+        s.suspendRefresh?.();
+        try {
+            for (let i = 0; i < events.length; i += CHUNK) {
+                s.eventStore.add(events.slice(i, i + CHUNK));
+                const done = Math.min(i + CHUNK, events.length);
+                onProgress?.({
+                    phase   : 'add',
+                    done,
+                    total   : events.length,
+                    message : `Placing orders on board… ${done} / ${events.length}`
+                });
+                if (i + CHUNK < events.length) await yieldUi();
+            }
+        }
+        finally {
+            s.eventStore.resumeEvents?.();
+            s.resumeRefresh?.(true);
+        }
+
         const minS = events.reduce((a, e) => e.startDate < a ? e.startDate : a, events[0].startDate);
         const maxE = events.reduce((a, e) => e.endDate > a ? e.endDate : a, events[0].endDate);
         const from = new Date(minS.getFullYear(), minS.getMonth(), 1);
@@ -404,19 +717,309 @@ function planLiveOrders() {
     const plannedIds = new Set(placements.map(p => String(p.order.id)));
     unplanned.value = unplanned.value.filter(u => !plannedIds.has(String(u.id)));
 
+    onProgress?.({
+        phase   : 'finish',
+        done    : events.length,
+        total   : events.length,
+        message : 'Refreshing board…'
+    });
+    beginBoardInteraction(s, 'batch');
+    try {
+        replaceProjectionsWithConfirms(s);
+        packBoardGaps(s);
+    }
+    finally { endBoardInteraction(s); }
     recalcCapacity(s);
     refreshGrandTotals(s);
-    s.refreshWithTransition?.();
+    s.refreshRows?.();
+    disableStmIfLarge(s);
     scrollBoardToToday(s);
+    touchBoardCache(s);
 
-    toast(
-        `Planned ${placements.length} order(s) from the live list — ${tight} tight, ${late} past critical path`,
-        late ? 'warn' : 'ok'
-    );
+    return { planned : placements.length, late, tight, skipped : false };
+}
+
+function disableStmIfLarge(s) {
+    if (!s?.eventStore || s.eventStore.count <= 80) return;
+    try { s.project.stm.disabled = true; }
+    catch { /* STM optional */ }
+}
+
+function setBoardLoad(on, msg = '', pct = 0) {
+    boardLoading.value = on;
+    boardLoadMsg.value = msg;
+    boardLoadPct.value = pct;
+}
+
+function planProgress({ message, done, total }) {
+    boardLoadMsg.value = message;
+    boardLoadPct.value = total ? Math.round((done / total) * 100) : 0;
+}
+
+// Projection orders are planned by the board itself: every new one that shows
+// up in the order list is placed automatically, confirm orders are left alone
+async function ensureBoardPlanned(s) {
+    if (!s || dataSource.value !== 'db') return;
+    const unitId = currentUnitId.value;
+    if (uiHooks.boardUserActive || isBoardInteracting()) return;
+    replaceProjectionsWithConfirms(s);
+    const onBoard = new Set();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data.raw;
+        if (!raw || raw.stage) continue;
+        for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
+    }
+    const liveCount = unplanned.value.filter(u =>
+        u.status !== 'completed'
+        && String(u.buyer || '').trim()
+        && (Number(u.qty ?? u.orderQty) || 0) > 0
+        && (!unitId || !u.unitId || u.unitId === unitId)
+        && !u.replaced && u.status !== 'replaced'
+        && orderTypeOf(u.po, u.orderType) === 'projection'
+        && !orderKeysOf(u).some(k => onBoard.has(k))
+    ).length;
+    if (!liveCount) return;
+    if (planInFlight) return planInFlight;
+
+    planInFlight = (async () => {
+        boardPlanProgress.value = { active : true, msg : `Planning ${liveCount} projection order(s)…`, pct : 0 };
+        try {
+            const r = await runLiveOrderPlan(s, {
+                showToasts : false,
+                mode       : 'incremental',
+                orderTypes : ['projection'],
+                onProgress : ({ message, done, total }) => {
+                    boardPlanProgress.value = {
+                        active : true,
+                        msg    : message,
+                        pct    : total ? Math.round((done / total) * 100) : 0
+                    };
+                }
+            });
+            if (r.planned > 0) {
+                toast(
+                    `${currentBoard.value?.unitName || 'Unit'} board — ${r.planned} projection order(s) planned (${r.tight} tight, ${r.late} late)`,
+                    r.late ? 'warn' : 'ok'
+                );
+            }
+        }
+        finally {
+            boardPlanProgress.value = { active : false, msg : '', pct : 0 };
+            planInFlight = null;
+            if (unitId && s.resourceStore.records.some(r => r.data?.lineRow)) {
+                boardUnitCache[unitId] = boardUnitCache[unitId] || {};
+                boardUnitCache[unitId].ready = true;
+            }
+        }
+    })();
+    return planInFlight;
+}
+
+async function planLiveOrders() {
+    const s = getInstance();
+    if (!s) {
+        toast('Open a planning board first', 'warn');
+        return;
+    }
+    openMenu.value = null;
+    setBoardLoad(true, 'Planning live orders…', 0);
+    try {
+        const r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress });
+        if (!r.skipped) {
+            toast(
+                `Planned ${r.planned} order(s) from the live list — ${r.tight} tight, ${r.late} past critical path`,
+                r.late ? 'warn' : 'ok'
+            );
+        }
+    }
+    finally {
+        setBoardLoad(false);
+    }
     if (view.value !== 'board') {
         const b = currentBoard.value || permittedBoards.value[0];
         if (b) openBoard(b);
     }
+}
+
+function tuneBoardPerformance(s) {
+    if (!s) return;
+    const n = s.eventStore?.count || 0;
+    if (s.features?.summary) s.features.summary.disabled = n > 120;
+    disableStmIfLarge(s);
+}
+
+// Saved orders can be scheduled years ahead of the default Jul 2026 - Feb 2027
+// window. Bars outside the time axis are never drawn, so widen it to whatever
+// the loaded data actually spans.
+function expandTimeAxisForEvents(s) {
+    if (!s?.eventStore?.count) return;
+    let minStart = null, maxEnd = null;
+    for (const ev of s.eventStore.records) {
+        const st = ev.startDate;
+        const en = ev.endDate;
+        if (st && (!minStart || st < minStart)) minStart = st;
+        if (en && (!maxEnd || en > maxEnd)) maxEnd = en;
+    }
+    if (!minStart || !maxEnd) return;
+    const from = new Date(minStart.getFullYear(), minStart.getMonth(), 1);
+    const to   = new Date(maxEnd.getFullYear(), maxEnd.getMonth() + 2, 1);
+    if (from < s.startDate) s.startDate = from;
+    if (to > s.endDate) s.endDate = to;
+}
+
+function applyApiBoardData(s, data) {
+    withBoardBatch(s, () => {
+        s.project.loadInlineData({
+            resources          : data.resources,
+            events             : data.events,
+            assignments        : data.assignments || [],
+            dependencies       : data.dependencies,
+            resourceTimeRanges : data.resourceTimeRanges
+        });
+    });
+    unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
+    currentUnitId.value = data.unitId || currentBoard.value?.unitId || null;
+    planMeta.value = {
+        name    : data.project.name,
+        status  : data.project.status,
+        version : data.project.version
+    };
+    dataSource.value = 'db';
+    if (data.calendarDays) {
+        Object.assign(calendarState.days, data.calendarDays);
+        if (data.calendarName) calendarState.name = data.calendarName;
+        applyCalendarToBoard();
+    }
+    removeOrdersWithoutBuyer(s);
+    expandTimeAxisForEvents(s);
+    beginBoardInteraction(s, 'batch');
+    try {
+        replaceProjectionsWithConfirms(s);
+        packBoardGaps(s);
+    }
+    finally { endBoardInteraction(s); }
+    if (ordersOpen.value) ordersRows.value = collectOrders();
+    applyProdUpdates(s);
+    recalcCapacity(s);
+    scrollBoardToToday(s);
+    installFrVScroll(s);
+    tuneBoardPerformance(s);
+}
+
+function scheduleBackgroundPlan(s) {
+    requestAnimationFrame(() => ensureBoardPlanned(s));
+}
+
+async function reloadBoardForUnit(b, { force = false } = {}) {
+    const s = getInstance();
+    if (!s || !b) return;
+    const uid = b.unitId ?? 3;
+
+    if (!force && boardUnitCache[uid]?.ready && !boardUnitCache[uid]?.dirty && cacheHasLines(boardUnitCache[uid])) {
+        applyApiBoardData(s, boardUnitCache[uid].apiData);
+        unplanned.value = cloneData(boardUnitCache[uid].unplanned);
+        setBoardBaseline(s);
+        applyBoardFilter();
+        return;
+    }
+    if (boardUnitCache[uid] && !cacheHasLines(boardUnitCache[uid])) {
+        boardUnitCache[uid].ready = false;
+    }
+
+    setBoardLoad(true, `Loading ${b.unitName || 'unit'} orders…`, 15);
+    try {
+        const data = await loadFromApi(uid);
+        storeUnitCache(uid, {
+            resources          : data.resources,
+            events             : data.events,
+            assignments        : data.assignments,
+            dependencies       : data.dependencies,
+            resourceTimeRanges : data.resourceTimeRanges,
+            unplanned          : data.unplanned,
+            project            : data.project,
+            calendarDays       : data.calendarDays,
+            calendarName       : data.calendarName,
+            unitId             : data.unitId,
+            unitName           : data.unitName
+        });
+        applyApiBoardData(s, boardUnitCache[uid].apiData);
+        apiReady.value = true;
+        applyBoardFilter();
+        finishBoardLoad(uid, data, s);
+    }
+    catch (err) {
+        toast(`Unit load failed (${err.message})`, 'error');
+    }
+    finally {
+        setBoardLoad(false);
+    }
+}
+
+async function hydrateBoardFromApi() {
+    if (boardHydratePromise) return boardHydratePromise;
+
+    boardHydratePromise = (async () => {
+        const s = getInstance();
+        const unitId = currentBoard.value?.unitId || 3;
+        setBoardLoad(true, 'Connecting to planning database…', 0);
+        try {
+            const data = await loadFromApi(unitId);
+            if (!s) return;
+            setBoardLoad(true, 'Loading board layout…', 20);
+            storeUnitCache(unitId, {
+                resources          : data.resources,
+                events             : data.events,
+                assignments        : data.assignments,
+                dependencies       : data.dependencies,
+                resourceTimeRanges : data.resourceTimeRanges,
+                unplanned          : data.unplanned,
+                project            : data.project,
+                calendarDays       : data.calendarDays,
+                calendarName       : data.calendarName,
+                unitId             : data.unitId,
+                unitName           : data.unitName
+            });
+            applyApiBoardData(s, boardUnitCache[unitId].apiData);
+            apiReady.value = true;
+            setBoardLoad(false);
+            finishBoardLoad(unitId, data, s);
+            setTimeout(() => syncMasterData(s), 3000);
+            toast(`Connected: ${data.project.name} (${data.unitName || 'unit'})`, 'ok');
+
+            loadProdUpdatesDb().then(rows => {
+                const store = loadProdStore();
+                for (const r of rows) {
+                    const key  = String(r.event_ref);
+                    const date = String(r.save_date).slice(0, 10);
+                    if (!store[key]) store[key] = {};
+                    store[key][date] = Number(r.prod_qty) || 0;
+                }
+                localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+                applyProdUpdates(s);
+                recalcCapacity(s);
+            }).catch(() => { /* endpoint offline - local data stays */ });
+        }
+        catch (err) {
+            dataSource.value = 'demo';
+            apiReady.value = true;
+            toast(`Planning API/DB offline (${err.message}) — showing local demo data`, 'warn');
+        }
+        finally {
+            if (!planInFlight) setBoardLoad(false);
+        }
+    })();
+    return boardHydratePromise;
+}
+
+function eventRawOf(rec) {
+    if (!rec) return null;
+    return rec.data?.raw || rec.raw || rec.get?.('raw') || null;
+}
+
+function asViewDate(d) {
+    if (!d) return null;
+    const x = d instanceof Date ? d : new Date(d);
+    return Number.isNaN(x.getTime()) ? null : x;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,17 +1030,18 @@ const propsMin  = ref(false);
 const propsRec  = shallowRef(null);
 const propsForm = ref({ stripEff : 100, keepSeparate : false, profileEff : 55 });
 
-const propsRaw = computed(() => propsRec.value?.data?.raw || null);
+const propsRaw = computed(() => eventRawOf(propsRec.value));
 
 const propsLine = computed(() => {
     const s = getInstance();
     const rec = propsRec.value;
     if (!s || !rec) return null;
     const lid = lineIdOf(s, rec);
+    const res = s.resourceStore.getById(lid);
     return {
         id   : lid,
-        name : s.resourceStore.getById(lid)?.name || lid,
-        line : LINES.find(l => l.id === lid) || null
+        name : res?.name || lid,
+        line : LINES.find(l => l.id === lid) || res?.data || null
     };
 });
 
@@ -473,14 +1077,15 @@ const propsRouteName = computed(() => {
 const propsKeyDates = computed(() => {
     const r = propsRaw.value;
     if (!r) return [];
-    const despatch = r.end ? new Date(r.end.getTime() + 2 * 86400000) : null;
+    const end = asViewDate(r.end);
+    const despatch = end ? new Date(end.getTime() + 2 * 86400000) : null;
     return [
-        ['Preparation start',         r.matReady],
-        ['Load into production',      r.start],
-        ['Production start',          r.start],
-        ['First complete in section', r.end],
+        ['Preparation start',         asViewDate(r.matReady)],
+        ['Load into production',      asViewDate(r.start)],
+        ['Production start',          asViewDate(r.start)],
+        ['First complete in section', end],
         ['First despatch from Factory', despatch],
-        ['First arrive at customer',  r.ship]
+        ['First arrive at customer',  asViewDate(r.ship)]
     ];
 });
 
@@ -488,6 +1093,36 @@ const propsQtyWeek = computed(() => {
     const r = propsRaw.value;
     return r && r.dur ? fmtQty(Math.round(r.qty * 6 / r.dur)) : '—';
 });
+
+function openStripProps(rec) {
+    const raw = eventRawOf(rec);
+    if (!raw) {
+        toast('Could not open properties for this strip', 'error');
+        return;
+    }
+    propsRec.value = rec;
+    propsForm.value = {
+        stripEff     : raw.stripEff || 100,
+        keepSeparate : !!raw.keepSeparate,
+        profileEff   : readProfileEff(raw, lineIdOf(getInstance(), rec))
+    };
+    propsOpen.value = true;
+    propsMin.value = false;
+}
+
+function openPlannedSchedule(rec) {
+    if (!eventRawOf(rec)) {
+        toast('Could not open planned schedule for this strip', 'error');
+        return;
+    }
+    plRec.value = rec;
+    plPeriod.value = 'daily';
+    plOpen.value = true;
+    plMin.value = false;
+}
+
+uiHooks.onOpenProps = openStripProps;
+uiHooks.onOpenSchedule = openPlannedSchedule;
 
 // ---------------------------------------------------------------------------
 // Planned schedule (right-click -> Planned schedule): day-wise quantity,
@@ -498,17 +1133,18 @@ const plMin    = ref(false);
 const plRec    = shallowRef(null);
 const plPeriod = ref('daily');   // daily | weekly | monthly
 
-const plRaw = computed(() => plRec.value?.data?.raw || null);
+const plRaw = computed(() => eventRawOf(plRec.value));
 
 const plLine = computed(() => {
     const s = getInstance();
     const rec = plRec.value;
     if (!s || !rec) return null;
     const lid = lineIdOf(s, rec);
+    const res = s.resourceStore.getById(lid);
     return {
         id   : lid,
-        name : s.resourceStore.getById(lid)?.name || lid,
-        line : LINES.find(l => l.id === lid) || null
+        name : res?.name || lid,
+        line : LINES.find(l => l.id === lid) || res?.data || null
     };
 });
 
@@ -548,6 +1184,11 @@ const plDailyRows = computed(() => {
             q = Math.min(dailyTarget, remaining);
             remaining -= q;
         }
+        let hours = off || !q ? '0:00' : (cfg.hours || '10:00');
+        if (!off && q > 0 && q < dailyTarget) {
+            const clock = Math.max(1, Math.round((q / dailyTarget) * WORK_MIN_PER_DAY));
+            hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
+        }
         rows.push({
             day   : DAY_ABBR[d.getDay()],
             date  : fmtDate(new Date(d)),
@@ -555,7 +1196,7 @@ const plDailyRows = computed(() => {
             mName : d.toLocaleString('en-US', { month : 'short' }) + ' ' + d.getFullYear(),
             qty   : q,
             eff   : off || !q ? 0 : Math.round((line?.eff || 0) * (raw.stripEff || 100) / 100),
-            hours : off ? '0:00' : (cfg.hours || '10:00'),
+            hours,
             off
         });
         d.setDate(d.getDate() + 1);
@@ -637,15 +1278,8 @@ function propsUpdate() {
         saveEffState();
     }
 
-    const line = propsLine.value?.line || LINE_BY_ID[lid];
-    if (line && raw.status !== 'completed') {
-        const manpower = Number(line.manpower) || 50;
-        const availMin = Math.round(manpower * WORK_MIN_PER_DAY * pe / 100) * se / 100;
-        const smv = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
-        const reqMin = Math.round((Number(raw.qty) || 0) * smv);
-        raw.smv = smv;
-        raw.reqMin = reqMin;
-        raw.dur = Math.max(1, Math.ceil(reqMin / Math.max(1, availMin)));
+    if (lid && lid !== 'hold' && raw.status !== 'completed') {
+        applyLineFormulaDuration(s, raw, lid);
         const start = new Date(rec.startDate);
         const end   = endOfWork(start, raw.dur);
         rec.set({ endDate : end, duration : elapsedDays(start, end) });
@@ -665,17 +1299,69 @@ function openSettings() {
     openMenu.value = null;
 }
 
+function openPlanningRoles() {
+    rolesOpen.value = true;
+    rolesMin.value = false;
+    openMenu.value = null;
+}
+
+function savePlanningRoles() {
+    localStorage.setItem('mbm-planning-roles', JSON.stringify(planningRoles.value));
+}
+
+function addPlanningRole() {
+    const name = newRoleName.value.trim();
+    if (!name) {
+        toast('Enter a planning role name', 'warn');
+        return;
+    }
+    if (planningRoles.value.some(r => r.toLowerCase() === name.toLowerCase())) {
+        toast(`Role "${name}" already exists`, 'warn');
+        return;
+    }
+    planningRoles.value.push(name);
+    newRoleName.value = '';
+    savePlanningRoles();
+    toast(`Role "${name}" added`, 'ok');
+}
+
+function removePlanningRole(name) {
+    if (users.value.some(u => u.role === name)) {
+        toast(`"${name}" is assigned to a user — change their role first`, 'warn');
+        return;
+    }
+    if (planningRoles.value.length <= 1) {
+        toast('At least one planning role is required', 'warn');
+        return;
+    }
+    planningRoles.value = planningRoles.value.filter(r => r !== name);
+    savePlanningRoles();
+}
+
 const DEFAULT_BOARDS = [
-    { id : 'b1', name : 'AQL Sewing Board — All Floors', floors : ['F1', 'F2'], stages : true },
-    { id : 'b2', name : 'AQL Floor 1 Board',             floors : ['F1'],       stages : false },
-    { id : 'b3', name : 'AQL Floor 2 Board',             floors : ['F2'],       stages : false }
+    { id : 'b1', name : 'AQL Sewing Board — All Floors', floors : ['F1', 'F2'], stages : true, unitId : 3, unitName : 'AQL' },
+    { id : 'b2', name : 'AQL Floor 1 Board',             floors : ['F1'],       stages : false, unitId : 3, unitName : 'AQL' },
+    { id : 'b3', name : 'AQL Floor 2 Board',             floors : ['F2'],       stages : false, unitId : 3, unitName : 'AQL' }
 ];
 const DEFAULT_USERS = [
     { id : 'u1', name : 'Ferdows',           role : 'Planner',    boards : ['b1', 'b2', 'b3'] },
     { id : 'u2', name : 'Unit Head — F1',    role : 'Unit Head',  boards : ['b2'] },
     { id : 'u3', name : 'Management Viewer', role : 'Management', boards : ['b1'] }
 ];
-const ROLES = ['Planner', 'Planning Manager', 'Unit Head', 'Management'];
+const DEFAULT_ROLES = ['Planner', 'Planning Manager', 'Unit Head', 'Management'];
+const PLAN_CRITERIA = [
+    'Only projection orders from the order list are auto-planned. When a confirm exists for the same MBM order / style, it replaces that projection on the board and the projection is flagged Replaced.',
+    'Only the open board’s unit is planned (AQL orders stay on the AQL board).',
+    'Orders without a buyer, with quantity 0, or marked completed are skipped.',
+    'Orders are sorted by PCD first, then delivery date, product type, style and colour.',
+    'A line that already has the same PCD (and the same product type) is preferred, so those orders stay together.',
+    'A line whose efficiency profile lists that product type is preferred. If no line matches, the order still goes on the best available line.',
+    'Sewing cannot start before PCD + 5 pre-production working days, or before the material-ready date, or before today.',
+    'Duration is qty × SMV ÷ (manpower × shift minutes × line / product-type efficiency).',
+    'If no line can finish before delivery, the order is still placed — immediately after the last bar on the chosen line.',
+    'On the same line, bars sit flush: one ends, the next starts on the following working day. Off days (e.g. Friday) are skipped.',
+    'Blue bar = started on or before PCD (on time). Yellow bar = started after PCD or misses delivery (late plan). Completed bars stay grey and never move.'
+];
 
 const loadLS = (k, d) => {
     try {
@@ -687,7 +1373,13 @@ const loadLS = (k, d) => {
     }
 };
 
-const boards        = ref(loadLS('mbm-boards', DEFAULT_BOARDS));
+const planningRoles = ref(loadLS('mbm-planning-roles', DEFAULT_ROLES));
+
+const boards = ref(loadLS('mbm-boards', DEFAULT_BOARDS).map(b => ({
+    ...b,
+    unitId   : b.unitId ?? 3,
+    unitName : b.unitName ?? 'AQL'
+})));
 const users         = ref(loadLS('mbm-users', DEFAULT_USERS));
 const currentUserId = ref(localStorage.getItem('mbm-current-user') || 'u1');
 
@@ -734,14 +1426,22 @@ function applyBoardFilter() {
 
 function openBoard(b) {
     currentBoard.value = b;
+    currentUnitId.value = b.unitId ?? 3;
     view.value = 'board';
     boardMin.value = false;
     openMenu.value = null;
     saveBoardView();
-    setTimeout(() => {
+    if (dataSource.value === 'db') {
+        reloadBoardForUnit(b); // uses cache when ready — no API wipe
+    }
+    else if (!apiReady.value) {
+        setBoardLoad(true, 'Loading planning board…', 0);
+        hydrateBoardFromApi();
+    }
+    requestAnimationFrame(() => {
         const s = getInstance();
-        // Restore the locked grid if a hidden mount ever collapsed it
-        if (s?.subGrids?.locked && (s.subGrids.locked.width || 0) < 100) {
+        if (!s) return;
+        if (s.subGrids?.locked && (s.subGrids.locked.width || 0) < 100) {
             s.subGrids.locked.width = 248;
         }
         setClock(CLOCK_DEFAULT());
@@ -749,7 +1449,7 @@ function openBoard(b) {
         applyBoardFilter();
         removeOrdersWithoutBuyer(s);
         installFrVScroll(s);
-    }, 150);
+    });
 }
 
 function closeBoard() {
@@ -1017,9 +1717,15 @@ function effUpdate() {
         applied.push(line.name);
     }
     recalcCapacity(s);
+    s.refreshWithTransition?.();
     toast(applied.length
         ? `"${p.name}" saved — applied to ${applied.join(', ')} (default ${p.values['_Default']}%)`
         : `"${p.name}" saved — কোনো line-এ assign করা নেই`, 'ok');
+    if (s) {
+        beginBoardInteraction(s, 'batch');
+        try { packBoardGaps(s); }
+        finally { endBoardInteraction(s); }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1259,12 +1965,12 @@ const currentUnitId = ref(null);  // unit_id of the active planning board
 
 // Per-column filters (case-insensitive substring match on displayed text)
 const ORDER_COLS = [
-    'buyer', 'style', 'productType', 'mbmOrder', 'orderDelivery', 'orderQty',
+    'unit', 'buyer', 'style', 'productType', 'mbmOrder', 'orderDelivery', 'orderQty',
     'po', 'color', 'pcd', 'poDelivery', 'orderType', 'status',
     'qty', 'smv', 'reqMin', 'line', 'start', 'end', 'progress'
 ];
 const ORDER_COL_LABELS = {
-    buyer : 'Buyer', style : 'Style', productType : 'Product',
+    unit : 'Unit', buyer : 'Buyer', style : 'Style', productType : 'Product',
     mbmOrder : 'MBM order', orderDelivery : 'Order delivery',
     orderQty : 'Order qty',
     po : 'PO', color : 'Color', pcd : 'PCD', poDelivery : 'PO delivery',
@@ -1304,9 +2010,118 @@ function clearOrderFilters() {
 }
 
 function listStatus(raw, planned) {
+    if (raw?.replaced || raw?.status === 'replaced') return 'replaced';
     if (!planned || raw?.status === 'unplanned') return 'unplanned';
     if (raw?.status === 'completed') return 'completed';
     return 'planned';
+}
+
+function rememberReplaced(raw, confirm) {
+    const id = String(raw.id || raw.dbId || raw.po || '');
+    if (!id || replacedOrders.value.some(r => String(r.id) === id)) return;
+    replacedOrders.value.push({
+        id,
+        dbId       : raw.dbId,
+        buyer      : raw.buyer,
+        style      : raw.style,
+        po         : raw.po,
+        mbmOrder   : raw.mbmOrder || mbmOrderNo(raw.po, raw.mbmOrder),
+        productType : raw.productType,
+        color      : raw.color,
+        qty        : raw.qty,
+        orderQty   : raw.orderQty ?? raw.qty,
+        smv        : raw.smv,
+        pcd        : raw.pcd,
+        ship       : raw.ship,
+        unitId     : raw.unitId,
+        unitName   : raw.unitName,
+        orderType  : 'projection',
+        status     : 'replaced',
+        replaced   : true,
+        replacedBy : confirm?.po || confirm?.mbmOrder || '',
+        planned    : false
+    });
+}
+
+// FastReact: when a confirm exists for the same MBM order / style, it takes
+// the projection's slot on the board and the projection is flagged replaced
+function replaceProjectionsWithConfirms(s) {
+    if (!s) return 0;
+    const confirms = new Map();
+    const noteConfirm = (key, src) => {
+        if (!key || confirms.has(key)) return;
+        confirms.set(key, src);
+    };
+
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        raw.orderType = orderTypeOf(raw.po, raw.orderType);
+        if (raw.orderType === 'confirm') noteConfirm(orderFamilyKey(raw), { kind : 'event', ev, raw });
+    }
+    for (const u of unplanned.value) {
+        if (u.replaced || u.status === 'replaced') continue;
+        u.orderType = orderTypeOf(u.po, u.orderType);
+        if (u.orderType === 'confirm') noteConfirm(orderFamilyKey(u), { kind : 'unplanned', u });
+    }
+
+    if (!confirms.size) return 0;
+
+    const dropEvents = [];
+    const dropUnplanned = new Set();
+    let n = 0;
+
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || raw.orderType !== 'projection') continue;
+        const hit = confirms.get(orderFamilyKey(raw));
+        if (!hit) continue;
+        rememberReplaced(raw, hit.raw || hit.u);
+        if (hit.kind === 'event' && hit.ev !== ev) {
+            dropEvents.push(ev);
+        }
+        else if (hit.kind === 'unplanned') {
+            const c = hit.u;
+            raw.orderType = 'confirm';
+            raw.replaced  = false;
+            raw.po        = c.po || raw.po;
+            raw.mbmOrder  = c.mbmOrder || raw.mbmOrder;
+            raw.qty       = Number(c.qty ?? c.orderQty ?? raw.qty);
+            raw.orderQty  = Number(c.orderQty ?? c.qty ?? raw.orderQty);
+            raw.ship      = c.ship || raw.ship;
+            raw.pcd       = c.pcd || raw.pcd;
+            raw.smv       = Number(c.smv) > 0 ? Number(c.smv) : raw.smv;
+            raw.dbId      = c.dbId ?? raw.dbId;
+            raw.id        = c.id || raw.id;
+            raw.color     = c.color || orderColor(raw.po);
+            ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
+            dropUnplanned.add(String(c.id));
+        }
+        n++;
+    }
+
+    for (const u of unplanned.value) {
+        if (u.replaced || u.orderType !== 'projection') continue;
+        if (!confirms.has(orderFamilyKey(u))) continue;
+        u.replaced = true;
+        u.status = 'replaced';
+        u.orderType = 'projection';
+        rememberReplaced(u, confirms.get(orderFamilyKey(u)).raw || confirms.get(orderFamilyKey(u)).u);
+        n++;
+    }
+
+    if (dropEvents.length) {
+        s.eventStore.remove(dropEvents);
+    }
+    if (dropUnplanned.size) {
+        unplanned.value = unplanned.value.filter(u =>
+            !dropUnplanned.has(String(u.id)) && !u.replaced
+        );
+    }
+    else {
+        unplanned.value = unplanned.value.filter(u => !u.replaced);
+    }
+    return n;
 }
 
 function collectOrders() {
@@ -1325,6 +2140,7 @@ function collectOrders() {
             if (raw.po) onBoardPos.add(String(raw.po));
             rows.push({
                 id : ev.id, planned : !onHold,
+                unit : raw.unitName || currentBoard.value?.unitName || 'AQL',
                 po : raw.po, mbmOrder : mbmOrderNo(raw.po, raw.mbmOrder),
                 buyer : raw.buyer, style : raw.style,
                 productType : productTypeFromProfile(raw.po, onHold ? null : lid),
@@ -1334,8 +2150,9 @@ function collectOrders() {
                 pcd : raw.pcd ? new Date(raw.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
                 poDelivery : onHold ? null : poDelivery,
                 orderDelivery : poDelivery,
-                orderType : orderTypeOf(raw.po),
+                orderType : orderTypeOf(raw.po, raw.orderType),
                 status : onHold ? 'unplanned' : listStatus(raw, true),
+                replaced : !!raw.replaced,
                 line : onHold ? '—' : (s.resourceStore.getById(lid)?.name || lid),
                 start : onHold ? null : ev.startDate,
                 end : onHold ? null : ev.endDate,
@@ -1344,6 +2161,7 @@ function collectOrders() {
         }
     }
     for (const u of unplanned.value) {
+        if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
         if (u.po && onBoardPos.has(String(u.po))) continue;
         if (!String(u.buyer || '').trim()) continue;
         const poDelivery = u.ship ? new Date(u.ship) : null;
@@ -1351,6 +2169,7 @@ function collectOrders() {
         const smv  = Number(u.smv) > 0 ? Number(u.smv) : randSmv(u.po);
         rows.push({
             id : u.id, planned : false,
+            unit : u.unitName || unitLabel(u.unitId) || '—',
             po : u.po, mbmOrder : mbmOrderNo(u.po, u.mbmOrder),
             buyer : u.buyer, style : u.style,
             productType : productTypeFromProfile(u.po, u.suitable?.[0]),
@@ -1360,13 +2179,42 @@ function collectOrders() {
             pcd : u.pcd ? new Date(u.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
             poDelivery,
             orderDelivery : poDelivery,
-            orderType : orderTypeOf(u.po),
-            status : 'unplanned',
+            orderType : orderTypeOf(u.po, u.orderType),
+            status : u.replaced ? 'replaced' : 'unplanned',
+            replaced : !!u.replaced,
+            line : '—', start : null, end : null, progress : 0
+        });
+    }
+    const listed = new Set(rows.map(r => String(r.id)));
+    for (const u of replacedOrders.value) {
+        if (listed.has(String(u.id))) continue;
+        if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
+        listed.add(String(u.id));
+        rows.push({
+            id : u.id, planned : false,
+            unit : u.unitName || currentBoard.value?.unitName || 'AQL',
+            po : u.po, mbmOrder : u.mbmOrder || mbmOrderNo(u.po, u.mbmOrder),
+            buyer : u.buyer, style : u.style,
+            productType : u.productType,
+            color : u.color,
+            orderQty : u.orderQty ?? u.qty,
+            qty : u.qty, smv : u.smv, reqMin : Math.round((u.qty || 0) * (u.smv || 0)),
+            pcd : u.pcd ? new Date(u.pcd) : null,
+            poDelivery : u.ship ? new Date(u.ship) : null,
+            orderDelivery : u.ship ? new Date(u.ship) : null,
+            orderType : 'projection',
+            status : 'replaced',
+            replaced : true,
             line : '—', start : null, end : null, progress : 0
         });
     }
     rows.sort((a, b) => String(a.po).localeCompare(String(b.po)));
     return rows;
+}
+
+function unitLabel(id) {
+    const m = { 1 : 'AQL', 2 : 'MBM', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
+    return m[Number(id)] || (id ? `Unit ${id}` : '—');
 }
 
 function openOrders() {
@@ -1390,7 +2238,7 @@ function openOrders() {
             const fresh = chunk.filter(u => !existingIds.has(u.id));
             unplanned.value = [...unplanned.value, ...fresh];
         }
-        ordersRows.value = collectOrders();
+    ordersRows.value = collectOrders();
         // Hide spinner once all pages have arrived
         if (unplanned.value.length >= total) ordersLoading.value = false;
     }, unitId).catch(() => {
@@ -1821,65 +2669,64 @@ const madeOf = (store, evId) =>
 function applyProdUpdates(s) {
     if (!s) return;
     const store = loadProdStore();
-    for (const ev of s.eventStore.records) {
-        const raw = ev.data.raw;
-        if (!raw || raw.stage) continue;
-        const made = madeOf(store, String(ev.id));
-        if (!made && !raw.made) continue;
-        raw.made = made;
-        raw.progress = raw.qty ? Math.min(100, Math.round(made / raw.qty * 100)) : 0;
-        ev.set?.('percentDone', raw.progress);
+    s.eventStore.suspendEvents?.();
+    try {
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data.raw;
+            if (!raw || raw.stage) continue;
+            const made = madeOf(store, String(ev.id));
+            if (!made && !raw.made) continue;
+            raw.made = made;
+            raw.progress = raw.qty ? Math.min(100, Math.round(made / raw.qty * 100)) : 0;
+            ev.set?.('percentDone', raw.progress);
 
-        const lid  = lineIdOf(s, ev);
-        const line = LINE_BY_ID[lid];
-        if (!line || made <= 0) continue;
+            const lid  = lineIdOf(s, ev);
+            const line = LINE_BY_ID[lid];
+            if (!line || made <= 0) continue;
 
-        // The original planned start stays as the base - every apply
-        // recomputes the cut from it (never shrinks twice)
-        if (!raw.origStart) raw.origStart = new Date(ev.startDate);
+            if (!raw.origStart) raw.origStart = new Date(ev.startDate);
 
-        // Day target: same distribution the Day Plan Report uses
-        const availMin = (line.availMin || 12000) * (raw.stripEff || 100) / 100;
-        const smv      = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
-        const target   = Math.max(1, Math.floor(availMin / smv));
+            const availMin = (line.availMin || 12000) * (raw.stripEff || 100) / 100;
+            const smv      = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
+            const target   = Math.max(1, Math.floor(availMin / smv));
 
-        const end = new Date(ev.endDate);
-        let rem = made;
-        let newStart = null;
-        const d = new Date(raw.origStart);
-        let guard = 0;
-        while (rem > 0 && guard++ < 200) {
-            if (!isOffDay(d)) {
-                if (rem >= target) {
-                    rem -= target;      // whole day produced - cut the full day
+            const end = new Date(ev.endDate);
+            let rem = made;
+            let newStart = null;
+            const d = new Date(raw.origStart);
+            let guard = 0;
+            while (rem > 0 && guard++ < 200) {
+                if (!isOffDay(d)) {
+                    if (rem >= target) {
+                        rem -= target;
+                    }
+                    else {
+                        const sw = startOfWorkDay(d);
+                        const ew = endOfWorkDay(d);
+                        newStart = new Date(sw.getTime() + (rem / target) * (ew.getTime() - sw.getTime()));
+                        rem = 0;
+                        break;
+                    }
                 }
-                else {
-                    // Partial day: cut the produced fraction of the work window
-                    const sw = startOfWorkDay(d);
-                    const ew = endOfWorkDay(d);
-                    newStart = new Date(sw.getTime() + (rem / target) * (ew.getTime() - sw.getTime()));
-                    rem = 0;
-                    break;
-                }
+                d.setDate(d.getDate() + 1);
+                if (d >= end) break;
             }
-            d.setDate(d.getDate() + 1);
-            if (d >= end) break;
-        }
-        if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
-        if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
+            if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
+            if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
 
-        if (Math.abs(newStart - ev.startDate) > 60000) {
-            ev.set({
-                startDate : newStart,
-                endDate   : end,
-                duration  : elapsedDays(newStart, end)
-            });
-            raw.start = newStart;
+            if (Math.abs(newStart - ev.startDate) > 60000) {
+                ev.set({
+                    startDate : newStart,
+                    endDate   : end,
+                    duration  : elapsedDays(newStart, end)
+                });
+                raw.start = newStart;
+            }
         }
     }
-    s.refreshRows?.();
-    // Repaint the Grand totals footer with the freshly loaded data - the
-    // renderer caches its maps and would otherwise keep pre-load numbers
+    finally {
+        s.eventStore.resumeEvents?.();
+    }
     refreshGrandTotals(s);
 }
 
@@ -1976,6 +2823,10 @@ watch(puDate, () => {
 });
 
 function showOrderOnBoard(row) {
+    if (row.replaced || row.status === 'replaced') {
+        toast(`${row.mbmOrder || row.po} was replaced by its confirm order`, 'warn');
+        return;
+    }
     if (!row.planned) {
         toast(`${row.po} is unplanned — open a board and drag it from the Unplanned panel`, 'warn');
         return;
@@ -2002,18 +2853,26 @@ function showOrderOnBoard(row) {
 // shallowRef: a deep ref would wrap the Bryntum record in a reactive Proxy
 // and break identity comparisons against store records
 const carried  = shallowRef(null);
-const ghostPos = ref({ x : 0, y : 0 });
+const carryPreview = ref({ valid : false, barBox : null });
+const carryOrigin  = ref({ valid : false, left : 0, top : 0, width : 0, height : 0 });
+/** Imperative carry overlay — avoids Teleport/ref timing races on pick-up */
+let carryDom = null;
 let carriedPrevCls = '';
 let pickStamp      = 0;
+let ignorePickUntil = 0;
+const PLACE_GUARD_MS = 150;
 const lastMouse    = { x : 400, y : 300 };
+let clockRaf       = 0;
 
 const RISK_COLORS = {
     green : '#43a047', yellow : '#f9a825', orange : '#fb8c00',
-    red : '#e53935', grey : '#9e9e9e', blue : '#1e88e5'
+    red : '#e53935', grey : '#9e9e9e', blue : '#1e88e5', late : '#d40000'
 };
 
 const colorKeyOf = raw =>
     raw.status === 'completed' ? 'grey'
+  : isLateVsDelivery(raw.end, raw.ship) ? 'late'
+  : raw.latePlan ? 'yellow'
   : raw.risk?.level === 'draft' || raw.status === 'draft' ? 'blue'
   : ({ low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[raw.risk?.level] || 'green');
 
@@ -2037,14 +2896,20 @@ function setClock(html) {
 function onSchedMouseMove(e) {
     lastMouse.x = e.clientX;
     lastMouse.y = e.clientY;
+    if (carried.value) updateCarryPreview(e.clientX, e.clientY);
+    if (clockRaf) return;
+    clockRaf = requestAnimationFrame(() => {
+        clockRaf = 0;
+        updateHoverClock(lastMouse.x, lastMouse.y);
+    });
+}
+
+function updateHoverClock(clientX, clientY) {
+    if (carried.value) return;
     const s = getInstance();
     if (!s) return;
-    let date = null, res = null;
-    try {
-        date = s.getDateFromDomEvent(e);
-        res  = s.resolveResourceRecord(e);
-    }
-    catch { /* pointer outside the time axis */ }
+    const date = pointerDate(s, clientX);
+    const res  = date ? resourceFromY(s, clientY, clientX) : null;
     if (!date) {
         setClock(CLOCK_DEFAULT());
         return;
@@ -2058,12 +2923,326 @@ function onSchedMouseMove(e) {
     setClock(`${fmtClock(date)}<br>${line2}`);
 }
 
+function updateCarryClock(snap) {
+    // The bar always lands on the day's first working hour, so the header
+    // reports that time rather than the raw pointer position
+    const at = snap?.start;
+    if (!snap?.valid || !at) {
+        setClock(CLOCK_DEFAULT());
+        return;
+    }
+    const res = snap.resource;
+    let line2 = idleFormula;
+    if (res?.data?.lineRow) {
+        const r   = res.data;
+        const hrs = calendarState.days[at.getDay()]?.hours ?? '10:00';
+        line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
+    }
+    setClock(`${fmtClock(at)}<br>${line2}`);
+}
+
 function onSchedMouseLeave() {
     setClock(CLOCK_DEFAULT());
 }
 
+let ghostRaf = 0;
+let carryScrollDetach = null;
+let carryPending = null;
+
+function ensureCarryDom() {
+    if (carryDom) return carryDom;
+    const layer = document.createElement('div');
+    layer.id = 'mb-carry-layer';
+    layer.className = 'mb-carry-layer';
+    layer.style.display = 'none';
+    const vacancy = document.createElement('div');
+    vacancy.className = 'mb-carry-vacancy';
+    const bar = document.createElement('div');
+    bar.className = 'mb-carry-bar';
+    const label = document.createElement('div');
+    label.className = 'mb-carry-bar-label';
+    bar.appendChild(label);
+    layer.append(vacancy, bar);
+    document.body.appendChild(layer);
+    carryDom = { layer, vacancy, bar, label };
+    return carryDom;
+}
+
+// Painting through transform keeps the carried bar on the compositor, so it
+// tracks the pointer without a layout pass per mouse move
+function paintCarryBox(el, box) {
+    if (!el) return;
+    if (!box?.valid) {
+        if (el.style.display !== 'none') el.style.display = 'none';
+        return;
+    }
+    if (el.style.display !== 'block') el.style.display = 'block';
+    el.style.transform = `translate3d(${Math.round(box.left)}px, ${Math.round(box.top)}px, 0)`;
+    el.style.width = `${Math.round(box.width)}px`;
+    el.style.height = `${Math.round(box.height)}px`;
+}
+
+function flushCarryPreview() {
+    ghostRaf = 0;
+    const p = carryPending;
+    if (!p || !carried.value) return;
+    const s = getInstance();
+    const rec = carried.value;
+    if (!s || !rec) return;
+
+    const els = ensureCarryDom();
+    carryOrigin.value = computeCarryOrigin(s, rec);
+    const snap = computeCarryPreview(s, rec, p.clientX, p.clientY);
+    carryPreview.value = snap;
+
+    paintCarryBox(els.vacancy, carryOrigin.value);
+    paintCarryBox(els.bar, snap.barBox);
+
+    const raw = rec.data.raw;
+    const color = RISK_COLORS[colorKeyOf(raw)];
+    if (els.bar.style.background !== color) els.bar.style.background = color;
+    els.bar.style.color = colorKeyOf(raw) === 'late' ? '#ffe600' : '#fff';
+    if (els.label.textContent !== rec.name) els.label.textContent = rec.name || '';
+    els.bar.classList.toggle('mb-carry-bar-invalid', !snap.valid);
+
+    if (snap.valid) updateCarryClock(snap);
+    else setClock(CLOCK_DEFAULT());
+}
+
+function pointerDateOnTimeline(s, clientX, rounding = null) {
+    const el = timeAxisEl(s);
+    if (!el) return pointerDate(s, clientX, rounding);
+    const rect = el.getBoundingClientRect();
+    const cx = Math.max(rect.left + 4, Math.min(rect.right - 4, clientX));
+    return pointerDate(s, cx, rounding);
+}
+
+// Mirrors the first stage of computeInsertStart, so the ghost sits exactly
+// where the bar will land: any hour inside the working window is honoured,
+// only off days and the closed night window are pulled forward
+function clampToWorkWindow(date) {
+    return clampIntoWorkWindow(date);
+}
+
+// A pixel is roughly ten minutes on the day axis — quarter-hour steps keep the
+// header clock readable while still allowing any hour of the day
+const CARRY_STEP_MIN = 15;
+
+function snapToStep(date) {
+    const d = new Date(date);
+    const step = CARRY_STEP_MIN * 60000;
+    return new Date(Math.round(d.getTime() / step) * step);
+}
+
+function previewSpanAtPointer(date, dur) {
+    const start = clampToWorkWindow(snapToStep(date));
+    return { start, end : endOfWork(start, dur) };
+}
+
+function isPlannableResource(res) {
+    if (!res || res.data?.subtotalRow || res.id === 'subtot') return false;
+    return isHoldingRes(res) || isSewingRes(res) || !!res.data?.lineRow;
+}
+
+function timeAxisEl(s) {
+    return s?.timeAxisSubGridElement || s?.element?.querySelector('.b-grid-sub-grid-normal') || null;
+}
+
+// getDateFromDomEvent needs a real DOM Event, so a synthetic {clientX, clientY}
+// silently yields null. The time-axis view model maps a pixel offset directly.
+// Without a rounding method the result carries the exact hour under the pointer.
+function pointerDate(s, clientX, rounding = null) {
+    const el = timeAxisEl(s);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, clientX - rect.left) + (s.scrollLeft || 0);
+    try {
+        const d = s.timeAxisViewModel?.getDateFromPosition?.(x, rounding, true);
+        if (d) return d;
+    }
+    catch { /* fall through */ }
+    try {
+        return s.getDateFromCoordinate?.(x, rounding, true, true) || null;
+    }
+    catch { return null; }
+}
+
+function rowElementForResource(s, res, clientX, clientY) {
+    try {
+        const row = s.rowManager?.getRowFor?.(res);
+        if (row?.element) return row.element;
+    }
+    catch { /* fall through */ }
+    try {
+        const el = hitElementIgnoringCarry(clientX, clientY);
+        const rowEl = el?.closest?.('.b-grid-sub-grid-normal .b-grid-row');
+        if (rowEl) {
+            const hit = s.getRecordFromElement?.(rowEl);
+            if (hit?.id === res.id) return rowEl;
+        }
+    }
+    catch { /* fall through */ }
+    const idx = s.resourceStore.indexOf(res);
+    if (idx >= 0) {
+        return s.element?.querySelectorAll('.b-grid-sub-grid-normal .b-grid-row')?.[idx] || null;
+    }
+    return null;
+}
+
+function dateToClientX(s, date) {
+    const el = timeAxisEl(s);
+    if (!el || !date) return null;
+    const rect = el.getBoundingClientRect();
+    let pos = null;
+    try { pos = s.timeAxisViewModel?.getPositionFromDate?.(date); }
+    catch { pos = null; }
+    if (pos == null || pos < 0) {
+        try { pos = s.getCoordinateFromDate?.(date, true); }
+        catch { pos = null; }
+    }
+    if (pos == null || pos < 0 || Number.isNaN(pos)) return null;
+    return rect.left + pos - (s.scrollLeft || 0);
+}
+
+const EMPTY_BOX = { valid : false, left : 0, top : 0, width : 0, height : 0 };
+const emptyCarrySnap = () => ({ valid : false, barBox : EMPTY_BOX });
+// Last good bar size, so the ghost keeps following the pointer over rows where
+// the bar cannot land instead of blinking out of existence
+const lastCarrySize = { width : 120, height : 40 };
+
+// The ghost trails the pointer but cannot be dropped here
+function floatingCarrySnap(clientX, clientY) {
+    const { width, height } = lastCarrySize;
+    return {
+        valid  : false,
+        barBox : {
+            valid  : true,
+            left   : clientX - width / 2,
+            top    : clientY - height / 2,
+            width,
+            height
+        }
+    };
+}
+
+// The carried bar sits exactly where it would land: the hovered line, starting
+// at that day's first working hour, so days line up edge to edge
+function computeCarryPreview(s, rec, clientX, clientY) {
+    const raw = rec.data.raw;
+    if (!raw) return emptyCarrySnap();
+
+    const res = resourceFromY(s, clientY, clientX);
+    if (!isPlannableResource(res)) return floatingCarrySnap(clientX, clientY);
+
+    const pointerAt = pointerDateOnTimeline(s, clientX);
+    if (!pointerAt) return floatingCarrySnap(clientX, clientY);
+
+    const lineId = isHoldingRes(res) ? 'hold' : res.id;
+    const dur = raw.dur || 1;
+    const { start, end } = previewSpanAtPointer(pointerAt, dur);
+
+    const rowEl = rowElementForResource(s, res, clientX, clientY);
+    if (!rowEl) return floatingCarrySnap(clientX, clientY);
+    const rowRect = rowEl.getBoundingClientRect();
+    const leftX  = dateToClientX(s, start);
+    const rightX = dateToClientX(s, end);
+    if (leftX == null || rightX == null) return floatingCarrySnap(clientX, clientY);
+
+    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    const width = Math.max(32, rightX - leftX);
+    lastCarrySize.width = width;
+    lastCarrySize.height = height;
+
+    return {
+        valid       : true,
+        barBox      : { valid : true, left : leftX, top : rowRect.top + 3, width, height },
+        line        : res.name || lineId,
+        start,
+        end,
+        pointerDate : pointerAt,
+        resource    : res,
+        resourceId  : lineId
+    };
+}
+
+function computeCarryOrigin(s, rec) {
+    const empty = { valid : false, left : 0, top : 0, width : 0, height : 0 };
+    if (!rec?.startDate) return empty;
+    const lineId = lineIdOf(s, rec);
+    const res = s.resourceStore.getById(lineId);
+    if (!res) return empty;
+    let rowEl = null;
+    try {
+        rowEl = s.rowManager?.getRowFor?.(res)?.element || null;
+    }
+    catch { /* fall through */ }
+    if (!rowEl) {
+        const idx = s.resourceStore.indexOf(res);
+        rowEl = s.element?.querySelectorAll('.b-grid-sub-grid-normal .b-grid-row')?.[idx] || null;
+    }
+    if (!rowEl) return empty;
+    const rowRect = rowEl.getBoundingClientRect();
+    const leftX  = dateToClientX(s, rec.startDate);
+    const rightX = dateToClientX(s, rec.endDate);
+    if (leftX == null || rightX == null) return empty;
+    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    return {
+        valid  : true,
+        left   : leftX,
+        top    : rowRect.top + 3,
+        width  : Math.max(32, rightX - leftX),
+        height
+    };
+}
+
+function updateCarryPreview(clientX, clientY) {
+    lastMouse.x = clientX;
+    lastMouse.y = clientY;
+    if (!carried.value) return;
+    carryPending = { clientX, clientY };
+    if (ghostRaf) return;
+    ghostRaf = requestAnimationFrame(flushCarryPreview);
+}
+
+function syncCarryPreviewNow(clientX, clientY) {
+    carryPending = { clientX, clientY };
+    if (ghostRaf) {
+        cancelAnimationFrame(ghostRaf);
+        ghostRaf = 0;
+    }
+    flushCarryPreview();
+}
+
+function attachCarryScroll(s) {
+    detachCarryScroll();
+    if (!s?.scrollable?.on) return;
+    const fn = () => updateCarryPreview(lastMouse.x, lastMouse.y);
+    s.scrollable.on('scroll', fn);
+    carryScrollDetach = () => s.scrollable?.un?.('scroll', fn);
+}
+
+function detachCarryScroll() {
+    carryScrollDetach?.();
+    carryScrollDetach = null;
+}
+
 function trackGhost(e) {
-    ghostPos.value = { x : e.clientX, y : e.clientY };
+    updateCarryPreview(e.clientX, e.clientY);
+}
+
+function attachCarryListeners() {
+    detachCarryListeners();
+    document.addEventListener('mousemove', trackGhost, true);
+    document.addEventListener('pointermove', trackGhost, true);
+    document.addEventListener('pointerup', onCarryPointerUp, true);
+    document.addEventListener('keydown', escCancel, true);
+}
+
+function detachCarryListeners() {
+    document.removeEventListener('mousemove', trackGhost, true);
+    document.removeEventListener('pointermove', trackGhost, true);
+    document.removeEventListener('pointerup', onCarryPointerUp, true);
+    document.removeEventListener('keydown', escCancel, true);
 }
 
 function escCancel(e) {
@@ -2071,48 +3250,116 @@ function escCancel(e) {
 }
 
 function pickUp(rec, domEvent) {
-    const raw = rec.data.raw;
+    if (carried.value) return;
+    const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
+    const s = getInstance();
+    if (!s) return;
+
+    const els = ensureCarryDom();
+    els.layer.style.display = 'block';
+    els.label.textContent = rec.name || '';
+
     carried.value = rec;
     pickStamp     = performance.now();
+    uiHooks.boardUserActive = true;
+    document.body.classList.add('mb-carry-active');
     // The bar leaves its old place while carried - only the ghost remains
     carriedPrevCls = String(rec.data.cls || '');
+    s.suspendRefresh?.();
     rec.set('cls', `${carriedPrevCls} mb-carried-away`.trim());
-    ghostPos.value = domEvent
-        ? { x : domEvent.clientX, y : domEvent.clientY }
-        : { x : lastMouse.x, y : lastMouse.y };
-    window.addEventListener('mousemove', trackGhost);
-    window.addEventListener('keydown', escCancel);
-    toast(`${rec.name} picked up — click any line/time to place it (Esc cancels)`, 'ok');
+    s.resumeRefresh?.(false);
+    carryPreview.value = emptyCarrySnap();
+    carryOrigin.value  = computeCarryOrigin(s, rec);
+    const cx = domEvent?.clientX ?? lastMouse.x;
+    const cy = domEvent?.clientY ?? lastMouse.y;
+    lastMouse.x = cx;
+    lastMouse.y = cy;
+    attachCarryScroll(s);
+    attachCarryListeners();
+    syncCarryPreviewNow(cx, cy);
+    requestAnimationFrame(() => syncCarryPreviewNow(lastMouse.x, lastMouse.y));
 }
 
 function restoreCarriedCls() {
     const rec = carried.value;
-    if (rec) rec.set('cls', carriedPrevCls);
+    if (!rec) return;
+    const s = getInstance();
+    s?.suspendRefresh?.();
+    rec.set('cls', carriedPrevCls);
+    s?.resumeRefresh?.(false);
 }
 
 function cancelCarry() {
     restoreCarriedCls();
     carried.value = null;
-    window.removeEventListener('mousemove', trackGhost);
-    window.removeEventListener('keydown', escCancel);
+    carryPreview.value = emptyCarrySnap();
+    carryOrigin.value  = { valid : false, left : 0, top : 0, width : 0, height : 0 };
+    carryPending = null;
+    if (carryDom) {
+        paintCarryBox(carryDom.vacancy, null);
+        paintCarryBox(carryDom.bar, null);
+        carryDom.layer.style.display = 'none';
+    }
+    setClock(CLOCK_DEFAULT());
+    document.body.classList.remove('mb-carry-active');
+    uiHooks.boardUserActive = false;
+    detachCarryScroll();
+    detachCarryListeners();
 }
 
 // Fallback row resolution from the pointer Y position - guarantees the bar
 // lands on the row the cursor is over even when the click target is a range
 // or canvas element that Bryntum cannot map to a row
-function resourceFromY(s, clientY, clientX) {
-    const x = clientX ?? lastMouse.x;
+function canPlaceCarry() {
+    return carried.value && (performance.now() - pickStamp) > PLACE_GUARD_MS;
+}
+
+function hitElementIgnoringCarry(clientX, clientY) {
+    const stack = document.elementsFromPoint(clientX, clientY);
+    for (const el of stack) {
+        if (el.closest?.('.mb-carry-layer')) continue;
+        return el;
+    }
+    return null;
+}
+function asResourceRecord(s, rec) {
+    if (!rec || !s) return null;
+    if (rec.isResourceModel || rec.data?.lineRow || rec.data?.holdingRow || rec.data?.subtotalRow) {
+        return rec;
+    }
+    if (s.resourceStore.getById(rec.id) === rec) return rec;
+    return rec.resource || s.resourceStore.getById(lineIdOf(s, rec)) || null;
+}
+
+function rowResourceAt(s, clientX, clientY) {
+    const el = hitElementIgnoringCarry(clientX, clientY);
+    const rowEl = el?.closest?.('.b-grid-row');
+    if (!rowEl) return null;
     try {
-        const el = document.elementFromPoint(x, clientY);
-        const rowEl = el?.closest?.('.b-grid-row');
-        if (rowEl) {
-            const rec = s.getRecordFromElement?.(rowEl)
-                || s.resourceStore.getById(rowEl.dataset.id);
+        const rec = s.getRecordFromElement?.(rowEl) || s.resourceStore.getById(rowEl.dataset.id);
+        return asResourceRecord(s, rec);
+    }
+    catch { return null; }
+}
+
+function resourceFromY(s, clientY, clientX) {
+    if (!s) return null;
+    const x = clientX ?? lastMouse.x;
+    const hit = rowResourceAt(s, x, clientY);
+    if (hit) return hit;
+
+    // Pointer over a range/canvas element: match the row by its screen bounds
+    const rows = s.rowManager?.rows || [];
+    for (const row of rows) {
+        const el = row.element;
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (clientY >= r.top && clientY < r.bottom) {
+            const rec = s.resourceStore.getById(row.id);
             if (rec) return rec;
         }
     }
-    catch { /* fall through */ }
     const body = s.element?.querySelector('.b-grid-sub-grid-normal');
     if (!body) return null;
     const rect = body.getBoundingClientRect();
@@ -2121,23 +3368,80 @@ function resourceFromY(s, clientY, clientX) {
     return idx >= 0 ? s.resourceStore.getAt(idx) : null;
 }
 
-// Placement handled directly on the board wrapper so a click anywhere in the
-// timeline places the carried bar (Bryntum's own scheduleClick never fires on
-// manpower-band or hatched-range elements)
-function onSchedClick(e) {
-    if (!carried.value) return;
-    if (performance.now() - pickStamp < 250) return; // ignore the pick-up click itself
+function isSchedPlaceTarget(el) {
+    if (!el?.closest) return false;
+    if (el.closest('.fr-toolbar, .fr-banner, .fr-orderbar, .fr-colormenu, .fr-board-loader, .fr-toasts, .b-popup, .b-menu, .b-float-root')) {
+        return false;
+    }
+    return !!el.closest('.mb-sched-wrap');
+}
+
+// Bryntum event/schedule click, the wrapper click and the document pointerup can
+// all describe the same gesture — collapse them into a single placement
+let placeGestureAt = 0;
+
+function requestPlace(clientX, clientY, hint = {}) {
+    if (!canPlaceCarry()) return;
+    const now = performance.now();
+    if (now - placeGestureAt < 300) return;
+    placeGestureAt = now;
+
     const s = getInstance();
     if (!s) return;
-    let date = null, res = null;
-    try {
-        date = s.getDateFromDomEvent(e);
-        res  = s.resolveResourceRecord(e);
+    lastMouse.x = clientX;
+    lastMouse.y = clientY;
+    syncCarryPreviewNow(clientX, clientY);
+
+    const snap = carryPreview.value;
+    const resource = hint.resource || snap.resource || resourceFromY(s, clientY, clientX);
+    // snap.start is the previewed hour, so the bar lands exactly where it showed
+    const raw = snap.start || hint.date || pointerDateOnTimeline(s, clientX);
+
+    if (!resource || !raw) {
+        toast('Click on a sewing line in the timeline to place the bar', 'warn');
+        return;
     }
-    catch { /* outside the time axis */ }
-    const fromY = resourceFromY(s, e.clientY, e.clientX);
-    if (fromY) res = fromY;
-    placeCarried(date, res).catch(err => toast(`Placement failed: ${err.message}`, 'error'));
+    placeCarried(clampToWorkWindow(raw), resource)
+        .catch(err => toast(`Placement failed: ${err.message}`, 'error'));
+}
+
+function onCarryPointerUp(e) {
+    if (e.button !== 0 || !canPlaceCarry()) return;
+    if (!isSchedPlaceTarget(e.target)) return;
+    requestPlace(e.clientX, e.clientY);
+}
+
+function onSchedClick(e) {
+    requestPlace(e.clientX, e.clientY);
+}
+
+function domFromBryntum(ev) {
+    return ev?.domEvent || ev?.event || ev?.source?.currentEvent || null;
+}
+
+function handleBarClick(ev) {
+    if (performance.now() < ignorePickUntil) return;
+    const dom = domFromBryntum(ev);
+    if (dom?.button === 2 || dom?.which === 3) return;
+    if (dom?.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
+    if (carried.value) {
+        requestPlace(
+            dom?.clientX ?? lastMouse.x,
+            dom?.clientY ?? lastMouse.y,
+            { resource : ev.resourceRecord, date : ev.date }
+        );
+        return;
+    }
+    pickUp(ev.eventRecord, dom);
+}
+
+function handleScheduleClick(ev) {
+    const dom = domFromBryntum(ev);
+    requestPlace(
+        dom?.clientX ?? lastMouse.x,
+        dom?.clientY ?? lastMouse.y,
+        { resource : ev.resourceRecord, date : ev.date }
+    );
 }
 
 async function placeCarried(date, resourceRecord) {
@@ -2165,49 +3469,56 @@ async function placeCarried(date, resourceRecord) {
 
     const targetId = parkHold ? 'hold' : resourceRecord.id;
 
+    if (!parkHold) applyLineFormulaDuration(s, raw, targetId);
+
     let start, end, note = null;
     if (parkHold) {
         start = startOfWorkDay(date);
         end   = endOfWork(start, raw.dur || 1);
         raw.status = 'unplanned';
+        raw.parked = true;
     }
     else {
+        raw.parked = false;
         const inserted = computeInsertStart(s, targetId, date, raw.dur, rec.id);
         start = inserted.start;
         end   = inserted.end;
+        noteManualGap(s, targetId, rec, start);
         if (inserted.snapped)   note = 'off day — starts at the next working day\'s first hour';
         if (inserted.blockedBy) note = `${inserted.blockedBy} occupies that point — attached right after it`;
-        if (raw.matReady && start < raw.matReady) {
-            toast(`Material for ${raw.po} is not ready before ${fmtDate(raw.matReady)}`, 'error');
-            return;
-        }
+    if (raw.matReady && start < raw.matReady) {
+        toast(`Material for ${raw.po} is not ready before ${fmtDate(raw.matReady)}`, 'error');
+        return;
+    }
         if (raw.status === 'unplanned') raw.status = 'draft';
+        raw.userPinned = true;
     }
+    raw.latePlan = !parkHold && !!raw.ship && end > new Date(raw.ship);
 
-    const assignment = s.assignmentStore.records.find(a =>
-        (a.eventId ?? a.data.eventId ?? a.data.event) === rec.id);
-    if (assignment) {
-        assignment.set('resourceId', targetId);
-    }
-    else {
-        s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
-    }
-    rec.data.resourceId = targetId;
-    rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : targetId });
     restoreCarriedCls();
+    assignEventToLine(s, rec, targetId);
+    rec.set({
+        startDate  : start,
+        endDate    : end,
+        duration   : elapsedDays(start, end),
+        resourceId : targetId
+    });
+    rec.data.resourceId = targetId;
     raw.start = start;
     raw.end   = end;
+
     if (!parkHold) {
-        const pushedCnt = pushFollowers(s, targetId, rec);
-        if (pushedCnt) {
-            toast(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+        beginBoardInteraction(s, 'light');
+        try {
+            pushFollowers(s, targetId, rec);
+            tryMergeAdjacent(s, rec, targetId);
         }
-        const mergedInfo = tryMergeAdjacent(s, rec, targetId);
-        if (mergedInfo) {
-            toast(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
+        finally {
+            endBoardInteraction(s);
         }
     }
-    const util = recalcCapacity(s) || {};
+
+    const util = computeLineUtil(s.eventStore.records);
     raw.risk = calcRisk({
         start, end,
         ship     : raw.ship,
@@ -2215,9 +3526,43 @@ async function placeCarried(date, resourceRecord) {
         lineUtil : parkHold ? 0 : (util[targetId] ?? 0),
         status   : raw.status
     });
+    ignorePickUntil = performance.now() + 450;
     cancelCarry();
-    toast(`${rec.name} placed on ${resourceRecord.name} at ${fmtClock(start)}${note ? ' (' + note + ')' : ''}`, 'ok');
-    s.refreshWithTransition?.();
+    s.refresh?.();
+    markBoardDirty();
+    touchBoardCache(s);
+}
+
+function assignmentEventId(a) {
+    const ev = a.eventId ?? a.event ?? a.data?.eventId ?? a.data?.event;
+    return ev?.id ?? ev;
+}
+
+function findEventAssignments(s, rec) {
+    const fromRec = rec.assignments;
+    if (fromRec && typeof fromRec.forEach === 'function') {
+        const arr = [];
+        fromRec.forEach(a => arr.push(a));
+        if (arr.length) return arr;
+    }
+    const id = rec.id;
+    return s.assignmentStore.records.filter(a => {
+        const evId = assignmentEventId(a);
+        return evId === id || String(evId) === String(id);
+    });
+}
+
+function assignEventToLine(s, rec, targetId) {
+    const asns = findEventAssignments(s, rec);
+    if (asns.length) {
+        asns[0].set('resourceId', targetId);
+        for (let i = 1; i < asns.length; i++) {
+            s.assignmentStore.remove(asns[i]);
+        }
+    }
+    else {
+        s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2303,7 +3648,8 @@ function applyCalendarToBoard() {
     let reflowed = 0;
     for (const rec of s.eventStore.records) {
         const raw = rec.data.raw;
-        if (!raw || raw.stage) continue;
+        if (!raw || raw.stage || raw.userPinned || raw.manualGap) continue;
+        if (!isOffDay(rec.startDate)) continue;
         const sd  = startOfWorkDay(nextWorkingDay(rec.startDate));
         const end = endOfWork(sd, raw.dur);
         if (sd.getTime() !== rec.startDate.getTime() || end.getTime() !== rec.endDate.getTime()) {
@@ -2316,6 +3662,10 @@ function applyCalendarToBoard() {
     if (reflowed) {
         toast(`${reflowed} order bar(s) rescheduled around the off days`, 'ok');
     }
+
+    beginBoardInteraction(s, 'batch');
+    try { packBoardGaps(s); }
+    finally { endBoardInteraction(s); }
 
     recalcCapacity(s);
     s.refreshWithTransition?.();
@@ -2355,6 +3705,35 @@ const getInstance = () => {
     return i?.value ?? i ?? null;
 };
 
+// Bulk board writes (auto-plan, API load) suspend Bryntum refresh so the
+// UI thread is not repainted once per strip — that was freezing the board.
+function withBoardBatch(s, fn) {
+    if (!s) return;
+    const es = s.eventStore;
+    es.suspendEvents?.();
+    s.suspendRefresh?.();
+    try {
+        fn();
+    }
+    finally {
+        es.resumeEvents?.();
+        s.resumeRefresh?.(true);
+    }
+}
+
+const yieldUi = () => new Promise(resolve => setTimeout(resolve, 0));
+
+let capRecalcTimer = null;
+function scheduleCapacityRefresh(s) {
+    if (!s || isBoardInteracting()) return;
+    clearTimeout(capRecalcTimer);
+    capRecalcTimer = setTimeout(() => {
+        if (isBoardInteracting()) return;
+        recalcCapacity(s);
+        updateFrVScroll(s);
+    }, 250);
+}
+
 function toast(text, type = 'error') {
     const id = ++toastId;
     toasts.value.push({ id, text, type });
@@ -2364,6 +3743,7 @@ function toast(text, type = 'error') {
 }
 
 onMounted(() => {
+    ensureCarryDom();
     uiHooks.onOrderSelect = eventRecord => {
         const raw = eventRecord?.data?.raw;
         if (raw) order.value = raw;
@@ -2371,49 +3751,18 @@ onMounted(() => {
     uiHooks.onSelectionClear = () => { order.value = null; };
     uiHooks.onToast = toast;
 
-    // Right-click -> Planned schedule on a strip
-    uiHooks.onOpenSchedule = rec => {
-        plRec.value = rec;
-        plPeriod.value = 'daily';
-        plOpen.value = true;
-        plMin.value = false;
+    // Right-click -> Planned schedule / Properties on a strip
+    uiHooks.onOpenSchedule = openPlannedSchedule;
+    uiHooks.onOpenProps = openStripProps;
+
+    uiHooks.onBoardEdited = () => {
+        markBoardDirty();
+        touchBoardCache(getInstance());
     };
 
-    // Right-click -> Properties on a strip
-    uiHooks.onOpenProps = rec => {
-        propsRec.value = rec;
-        const raw = rec.data.raw;
-        propsForm.value = {
-            stripEff     : raw.stripEff || 100,
-            keepSeparate : !!raw.keepSeparate,
-            profileEff   : readProfileEff(raw, lineIdOf(getInstance(), rec))
-        };
-        propsOpen.value = true;
-        propsMin.value = false;
-    };
-
-    // FastReact pick & place wiring
-    uiHooks.onBarClick = ev => {
-        const dom = ev.event || ev.domEvent;
-        if (carried.value) {
-            const s = getInstance();
-            let date = null, res = null;
-            try {
-                date = s.getDateFromDomEvent(dom);
-                res  = s.resolveResourceRecord(dom);
-            }
-            catch { /* outside axis */ }
-            placeCarried(date, res).catch(e => toast(`Placement failed: ${e.message}`, 'error'));
-        }
-        else {
-            pickUp(ev.eventRecord, dom);
-        }
-    };
-    uiHooks.onScheduleClick = ev => {
-        if (carried.value) {
-            placeCarried(ev.date, ev.resourceRecord).catch(e => toast(`Placement failed: ${e.message}`, 'error'));
-        }
-    };
+    // FastReact pick & place: click bar to pick up, click timeline to place.
+    uiHooks.onBarClick = handleBarClick;
+    uiHooks.onScheduleClick = handleScheduleClick;
 
     // After a split, the new (split-off) bar sticks to the cursor so the
     // user can point-and-place it anywhere (FastReact behaviour)
@@ -2431,8 +3780,7 @@ onMounted(() => {
         s.scrollToDate?.(currentBoardDate(), { block : 'start' });
         s.eventStore.on({
             change() {
-                recalcCapacity(s);
-                updateFrVScroll(s);
+                scheduleCapacityRefresh(s);
             }
         });
         installFrVScroll(s);
@@ -2443,59 +3791,7 @@ onMounted(() => {
     }
 
     // Try the MySQL-backed API (172.16.101.70 / fastreact); fall back to demo
-    loadFromApi().then(data => {
-        if (!s) return;
-        s.project.loadInlineData({
-            resources          : data.resources,
-            events             : data.events,
-            dependencies       : data.dependencies,
-            resourceTimeRanges : data.resourceTimeRanges
-        });
-        unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
-        currentUnitId.value = data.unitId || null;
-        planMeta.value = {
-            name    : data.project.name,
-            status  : data.project.status,
-            version : data.project.version
-        };
-        dataSource.value = 'db';
-        if (data.calendarDays) {
-            Object.assign(calendarState.days, data.calendarDays);
-            if (data.calendarName) calendarState.name = data.calendarName;
-            applyCalendarToBoard();
-        }
-        recalcCapacity(s);
-        removeOrdersWithoutBuyer(s);
-        applyProdUpdates(s);
-        scrollBoardToToday(s);
-        installFrVScroll(s);
-        // Push today's line snapshot + efficiency profiles + learning curves
-        // into their fastreact tables (collected from the running board)
-        syncMasterData(s);
-        toast(`Connected: ${data.project.name} from fastreact DB @ 172.16.101.70`, 'ok');
-
-        const liveOnBoard = s.eventStore.records.some(ev => ev.data.raw?.mbmOrder);
-        if (!liveOnBoard && unplanned.value.length) {
-            planLiveOrders();
-        }
-
-        // Pull saved daily production from day_production_update_plan and
-        // apply it to the strips (DB is the source of truth across users)
-        loadProdUpdatesDb().then(rows => {
-            const store = loadProdStore();
-            for (const r of rows) {
-                const key  = String(r.event_ref);
-                const date = String(r.save_date).slice(0, 10);
-                if (!store[key]) store[key] = {};
-                store[key][date] = Number(r.prod_qty) || 0;
-            }
-            localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
-            applyProdUpdates(s);
-        }).catch(() => { /* endpoint offline - local data stays */ });
-    }).catch(err => {
-        dataSource.value = 'demo';
-        toast(`Planning API/DB offline (${err.message}) — showing local demo data`, 'warn');
-    });
+    hydrateBoardFromApi();
 
     // Reopen the board that was open before the reload (until the user
     // closes or minimizes it explicitly)
@@ -2522,9 +3818,56 @@ async function saveToDb() {
         toast('Not connected to the fastreact database — nothing saved', 'warn');
         return;
     }
+    const changes = collectPendingChanges(s);
+    if (!changes.length) {
+        toast('No changes to save — move an order first, then click Save', 'warn');
+        return;
+    }
+    if (!window.confirm(formatSaveConfirm(changes))) return;
+    const eventIds = changes.map(c => c.eventId).filter(Boolean);
+    for (const id of eventIds) {
+        const ev = s.eventStore.getById(id);
+        const raw = ev?.data?.raw;
+        if (raw && !raw.stage) raw.userPinned = true;
+    }
+    const missingLine = eventIds.filter(id => {
+        const ev = s.eventStore.getById(id);
+        if (!ev) return false;
+        const rid = lineIdOf(s, ev);
+        return rid !== 'hold' && !resolveResourceDbId(s, rid);
+    });
+    if (missingLine.length) {
+        toast('Cannot save — sewing line is not linked to the database. Reload the board and try again.', 'error');
+        return;
+    }
     try {
-        const res = await syncToApi(s);
-        if (res.success) toast(`Plan saved to fastreact DB (revision ${res.revision})`, 'ok');
+        const res = await syncToApi(s, { eventIds });
+        if (res.success) {
+            if (res.mapped?.length) {
+                for (const m of res.mapped) {
+                    for (const ev of s.eventStore.records) {
+                        if (eventIds.length && !eventIds.includes(String(ev.id))) continue;
+                        const raw = ev.data.raw;
+                        if (!raw || raw.stage) continue;
+                        const code = raw.eventCode || poBaseEventCode(raw.po);
+                        const matchCode = m.eventCode && m.eventCode === code;
+                        if (!matchCode) continue;
+                        ev.data.dbId = m.eventId;
+                        ev.set?.('dbId', m.eventId);
+                        raw.eventCode = m.eventCode || raw.eventCode;
+                        if (!String(ev.id).startsWith('db-')) ev.id = `db-${m.eventId}`;
+                    }
+                }
+            }
+            const uid = currentUnitId.value;
+            if (uid && boardUnitCache[uid]) {
+                boardUnitCache[uid].apiData.events = serializeBoardEvents(s);
+                boardUnitCache[uid].apiData.assignments = serializeBoardAssignments(s);
+            }
+            markBoardSaved();
+            setBoardBaseline(s);
+            toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'})`, 'ok');
+        }
         else toast(`Save failed: ${res.error}`, 'error');
     }
     catch (e) {
@@ -2978,6 +4321,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
                     <div class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
+                    <div class="fr-dd-item" @click="openPlanningRoles">👤 Planning roles &amp; plan criteria</div>
                     <div class="fr-dd-item" @click="openEffProfiles">📊 Efficiency profiles</div>
                     <div class="fr-dd-item" @click="openBuildUps">📈 Build up / Learning curves</div>
                 </div>
@@ -2994,6 +4338,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <span class="fr-status-cell">{{ permittedBoards.length }} board(s) permitted</span>
                 <span class="fr-status-cell fr-status-wide"></span>
                 <span class="fr-status-cell">{{ dataSource === 'db' ? 'DB: 172.16.101.70/fastreact' : 'demo data' }}</span>
+                <span v-if="boardPlanProgress.active" class="fr-status-cell fr-status-plan">
+                    ⏳ {{ boardPlanProgress.msg }} {{ boardPlanProgress.pct ? `(${boardPlanProgress.pct}%)` : '' }}
+                </span>
             </div>
         </div>
 
@@ -3003,8 +4350,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title">AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ currentUser?.name }})</span>
-            <span class="mb-banner-sub">{{ planMeta.name }}</span>
+            <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
             <span class="fr-banner-btns">
+                <span v-if="boardPlanProgress.active" class="fr-banner-plan">
+                    ⏳ {{ boardPlanProgress.msg }} {{ boardPlanProgress.pct ? `(${boardPlanProgress.pct}%)` : '' }}
+                </span>
                 <span class="fr-banner-btn" title="Minimize board" @click="minimizeBoard">—</span>
                 <span class="fr-banner-btn fr-banner-x" title="Close board" @click="closeBoard">✕</span>
             </span>
@@ -3049,7 +4399,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <div class="mb-main">
             <div
                 class="mb-sched-wrap"
-                :class="{ 'mb-carrying' : carried }"
+                :class="{ 'mb-carrying' : carried, 'mb-sched-loading' : boardLoading }"
                 @dragover="onSchedulerDragOver"
                 @drop="onSchedulerDrop"
                 @mousemove="onSchedMouseMove"
@@ -3057,6 +4407,17 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 @click="onSchedClick"
             >
                 <bryntum-scheduler-pro ref="schedRef" v-bind="schedulerProConfig" class="fr-sched" />
+                <div v-if="boardLoading" class="fr-board-loader" aria-live="polite" aria-busy="true">
+                    <div class="fr-board-loader-box">
+                        <div class="fr-board-spinner"></div>
+                        <div class="fr-board-loader-title">Loading planning board</div>
+                        <div class="fr-board-loader-msg">{{ boardLoadMsg || 'Please wait…' }}</div>
+                        <div v-if="boardLoadPct > 0" class="fr-board-loader-bar">
+                            <div class="fr-board-loader-fill" :style="{ width : boardLoadPct + '%' }"></div>
+            </div>
+                        <div v-if="boardLoadPct > 0" class="fr-board-loader-pct">{{ boardLoadPct }}%</div>
+                </div>
+                    </div>
             </div>
         </div>
 
@@ -3179,7 +4540,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         v-else-if="k === 'status'"
                                         class="od-status"
                                         :class="`od-${row.status}`"
-                                    >{{ row.status }}</span>
+                                    >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
                                     <template v-else>{{ orderCellText(row, k) || '—' }}</template>
                                 </td>
                             </tr>
@@ -3516,6 +4877,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Planned schedule dialog (Planned quantity, order units) -->
+        <Teleport to="body">
         <div v-if="plOpen && !plMin && plRaw" class="cal-overlay" @click.self="plOpen = false">
             <div class="cal-dialog pl-dialog">
                 <div class="cal-title">
@@ -3589,8 +4951,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
             </div>
         </div>
+        </Teleport>
 
         <!-- Strip / Order properties dialog -->
+        <Teleport to="body">
         <div v-if="propsOpen && !propsMin && propsRaw" class="cal-overlay" @click.self="propsOpen = false">
             <div class="cal-dialog pr-dialog">
                 <div class="cal-title">
@@ -3667,6 +5031,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
             </div>
         </div>
+        </Teleport>
 
         <!-- Build up (learning) curves dialog -->
         <div v-if="bcOpen && !bcMin" class="cal-overlay" @click.self="bcOpen = false">
@@ -3799,7 +5164,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td class="st-user">{{ u.name }}</td>
                                 <td>
                                     <select v-model="u.role" class="cal-in st-select">
-                                        <option v-for="r in ROLES" :key="r" :value="r">{{ r }}</option>
+                                        <option v-for="r in planningRoles" :key="r" :value="r">{{ r }}</option>
                                     </select>
                                 </td>
                                 <td v-for="b in boards" :key="b.id" class="st-check">
@@ -3816,6 +5181,52 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Setup: planning role names + the rules the board uses to auto-plan -->
+        <div v-if="rolesOpen && !rolesMin" class="cal-overlay" @click.self="rolesOpen = false">
+            <div class="cal-dialog st-dialog pr-dialog">
+                <div class="cal-title">
+                    Planning roles &amp; default plan criteria
+                    <span class="cal-title-btns">
+                        <span class="cal-x cal-minbtn" @click="rolesMin = true">—</span>
+                        <span class="cal-x" @click="rolesOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body pr-body">
+                    <div class="pr-col">
+                        <div class="pr-h">Planning role names</div>
+                        <form class="pr-form" @submit.prevent="addPlanningRole">
+                            <input
+                                v-model="newRoleName"
+                                class="cal-in pr-in"
+                                type="text"
+                                maxlength="40"
+                                placeholder="Role name (e.g. Senior Planner)"
+                            >
+                            <button type="submit" class="cal-btn cal-btn-primary st-btn">Add role</button>
+                        </form>
+                        <ul class="pr-roles">
+                            <li v-for="r in planningRoles" :key="r" class="pr-role">
+                                <span>{{ r }}</span>
+                                <button
+                                    type="button"
+                                    class="pr-del"
+                                    title="Remove role"
+                                    @click="removePlanningRole(r)"
+                                >✕</button>
+                            </li>
+                        </ul>
+                        <div class="st-hint">These names appear on the user Role list in Settings. A role in use cannot be removed.</div>
+                    </div>
+                    <div class="pr-col pr-col-wide">
+                        <div class="pr-h">Default criteria used to plan orders on the board</div>
+                        <ol class="pr-points">
+                            <li v-for="(c, i) in PLAN_CRITERIA" :key="i">{{ c }}</li>
+                        </ol>
                     </div>
                 </div>
             </div>
@@ -3875,20 +5286,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Carried bar ghost (FastReact pick & place) -->
-        <div
-            v-if="carried"
-            class="mb-ghost"
-            :style="{
-                left : ghostPos.x + 'px',
-                top : ghostPos.y + 'px',
-                background : RISK_COLORS[colorKeyOf(carried.data.raw)]
-            }"
-        >
-            <div class="mb-ghost-l1">{{ carried.name }}</div>
-            <div class="mb-ghost-l2">{{ fmtQty(carried.data.raw.qty) }} pcs · {{ carried.data.raw.dur }} working day(s)</div>
         </div>
 
         <!-- Bottom window taskbar: one icon per open window -->
@@ -3957,6 +5354,7 @@ body {
     flex       : 1 1 auto;
     min-width  : 0;
     display    : flex;
+    position   : relative;
 }
 
 .fr-sched,
@@ -4074,6 +5472,14 @@ body {
 
 .fr-status-wide { flex : 1 1 auto; }
 
+.fr-status-plan {
+    color       : #1565c0;
+    font-weight : 600;
+    max-width   : 420px;
+    overflow    : hidden;
+    text-overflow : ellipsis;
+}
+
 .fr-boardarea {
     display        : flex;
     flex-direction : column;
@@ -4092,6 +5498,78 @@ body {
     height         : calc(100vh - 34px);
     visibility     : hidden;
     pointer-events : none;
+}
+
+.mb-sched-loading {
+    pointer-events : none;
+}
+
+.fr-board-loader {
+    position        : absolute;
+    inset           : 0;
+    z-index         : 500;
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    background      : rgba(255, 255, 255, 0.82);
+    backdrop-filter : blur(2px);
+}
+
+.fr-board-loader-box {
+    min-width     : 280px;
+    max-width     : 420px;
+    padding       : 28px 32px;
+    background    : #fff;
+    border        : 1px solid #c8c4b8;
+    box-shadow    : 0 8px 32px rgba(0, 0, 0, 0.12);
+    text-align    : center;
+}
+
+.fr-board-spinner {
+    width         : 36px;
+    height        : 36px;
+    margin        : 0 auto 16px;
+    border        : 3px solid #ddd8cc;
+    border-top    : 3px solid #2e7d32;
+    border-radius : 50%;
+    animation     : fr-board-spin 0.9s linear infinite;
+}
+
+@keyframes fr-board-spin {
+    to { transform : rotate(360deg); }
+}
+
+.fr-board-loader-title {
+    font-size   : 15px;
+    font-weight : 700;
+    color       : #333;
+    margin-bottom : 6px;
+}
+
+.fr-board-loader-msg {
+    font-size   : 13px;
+    color       : #666;
+    margin-bottom : 14px;
+}
+
+.fr-board-loader-bar {
+    height        : 6px;
+    background    : #ece8df;
+    border-radius : 3px;
+    overflow      : hidden;
+    margin-bottom : 6px;
+}
+
+.fr-board-loader-fill {
+    height        : 100%;
+    background    : linear-gradient(90deg, #2e7d32, #43a047);
+    border-radius : 3px;
+    transition    : width 0.2s ease;
+}
+
+.fr-board-loader-pct {
+    font-size : 12px;
+    color     : #888;
 }
 
 /* Orders list dialog: dialog hugs the full table - no scrolling, no overflow */
@@ -4327,6 +5805,7 @@ body {
 .od-draft     { background : #1e88e5; }
 .od-completed { background : #9e9e9e; }
 .od-unplanned { background : #d40000; }
+.od-replaced  { background : #6d4c41; }
 .od-ord-proj    { background : #ef6c00; }
 .od-ord-confirm { background : #2e7d32; }
 
@@ -4641,6 +6120,77 @@ body {
 
 .st-btn { width : auto; padding : 6px 16px; }
 
+.pr-dialog { width : 920px; }
+
+.pr-body {
+    display : flex;
+    gap     : 22px;
+    align-items : flex-start;
+}
+
+.pr-col { flex : 0 0 260px; }
+.pr-col-wide { flex : 1 1 auto; min-width : 0; }
+
+.pr-h {
+    font-weight   : bold;
+    color         : #17356b;
+    margin-bottom : 8px;
+}
+
+.pr-form {
+    display : flex;
+    gap     : 6px;
+    margin-bottom : 8px;
+}
+
+.pr-in { flex : 1 1 auto; min-width : 0; }
+
+.pr-roles {
+    list-style  : none;
+    margin      : 0;
+    padding     : 0;
+    background  : #fff;
+    border      : 1px inset #999;
+    max-height  : 220px;
+    overflow-y  : auto;
+}
+
+.pr-role {
+    display     : flex;
+    align-items : center;
+    justify-content : space-between;
+    gap         : 8px;
+    padding     : 5px 8px;
+    border-bottom : 1px solid #ece8df;
+}
+
+.pr-del {
+    border     : none;
+    background : transparent;
+    cursor     : pointer;
+    color      : #888;
+    padding    : 0 4px;
+}
+
+.pr-del:hover { color : #c62828; }
+
+.pr-points {
+    margin      : 0;
+    padding-left : 22px;
+    background  : #fff;
+    border      : 1px inset #999;
+    max-height  : 360px;
+    overflow-y  : auto;
+}
+
+.pr-points li {
+    padding     : 7px 10px 7px 4px;
+    border-bottom : 1px solid #ece8df;
+    line-height : 1.4;
+}
+
+.pr-points li:last-child { border-bottom : none; }
+
 /* ------------------------------------------------------------------ */
 /* Banner + toolbar                                                   */
 /* ------------------------------------------------------------------ */
@@ -4668,6 +6218,17 @@ body {
     display     : flex;
     gap         : 4px;
     align-items : center;
+}
+
+.fr-banner-plan {
+    font-size     : 11px;
+    color         : #fff;
+    opacity       : 0.95;
+    max-width     : 340px;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    white-space   : nowrap;
+    padding-right : 6px;
 }
 
 .fr-banner-btn {
@@ -4977,6 +6538,7 @@ body {
 .b-sch-event.mb-risk-yellow { background : #f9a825; color : #222; }
 .b-sch-event.mb-risk-orange { background : #fb8c00; color : #fff; }
 .b-sch-event.mb-risk-red    { background : #e53935; color : #fff; }
+.b-sch-event.mb-risk-late   { background : #d40000; color : #ffe600; }
 .b-sch-event.mb-risk-grey   { background : #9e9e9e; color : #fff; }
 .b-sch-event.mb-risk-blue   { background : #1e88e5; color : #fff; }
 
@@ -5638,33 +7200,70 @@ body {
 .cal-hint { margin-top : 10px; color : #555; }
 
 /* ------------------------------------------------------------------ */
-/* Pick & place ghost                                                  */
+/* Pick & place (FastReact: bar follows pointer)                       */
 /* ------------------------------------------------------------------ */
 .mb-carrying,
 .mb-carrying * { cursor : grabbing !important; }
+
+body.mb-carry-active,
+body.mb-carry-active * { cursor : grabbing !important; }
+
+.mb-carry-layer,
+.mb-carry-layer * {
+    pointer-events : none !important;
+}
 
 /* Picked-up bar leaves its old position while being carried */
 .b-sch-event.mb-carried-away { display : none !important; }
 .b-sch-event-wrap:has(.mb-carried-away) { display : none !important; }
 
-.mb-ghost {
+.mb-carry-layer {
     position       : fixed;
-    z-index        : 25000;
+    inset          : 0;
     pointer-events : none;
-    transform      : translateY(-50%); /* cursor sits at the bar's start, mid-height */
-    min-width      : 170px;
-    max-width      : 300px;
-    color          : #fff;
-    border         : 1px solid rgba(0, 0, 0, 0.5);
-    box-shadow     : 3px 4px 10px rgba(0, 0, 0, 0.45);
-    padding        : 4px 8px;
-    font-size      : 10px;
-    line-height    : 1.4;
-    opacity        : 0.92;
+    z-index        : 99999;
 }
 
-.mb-ghost-l1 { font-weight : bold; white-space : nowrap; overflow : hidden; }
-.mb-ghost-l2 { white-space : nowrap; }
+.mb-carry-vacancy,
+.mb-carry-bar {
+    position    : fixed;
+    left        : 0;
+    top         : 0;
+    box-sizing  : border-box;
+    will-change : transform;
+}
+
+.mb-carry-vacancy {
+    border     : 1px dashed rgba(80, 80, 80, 0.75);
+    background : rgba(255, 255, 255, 0.65);
+    z-index    : 1;
+}
+
+.mb-carry-bar {
+    border     : 1px solid rgba(0, 0, 0, 0.55);
+    color      : #fff;
+    font-size  : 10px;
+    line-height : 1.25;
+    overflow   : hidden;
+    opacity    : 0.97;
+    z-index    : 3;
+}
+
+.mb-carry-bar-invalid {
+    opacity : 0.5;
+    filter  : grayscale(0.6);
+}
+
+.mb-carry-bar-label {
+    background    : rgba(255, 255, 255, 0.92);
+    color         : #000;
+    font-weight   : bold;
+    padding       : 1px 5px;
+    white-space   : nowrap;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    border-bottom : 1px solid rgba(0, 0, 0, 0.25);
+}
 
 /* ------------------------------------------------------------------ */
 /* Bottom window taskbar                                               */

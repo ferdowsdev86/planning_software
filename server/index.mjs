@@ -36,6 +36,16 @@ app.use(express.json({ limit : '2mb' }));
 
 const BASE = '/api/v1/planning';
 
+// ERP hr_unit_id -> display name (extend as more units are onboarded)
+const UNIT_NAMES = {
+    1 : 'AQL',
+    2 : 'MBM',
+    3 : 'AQL',
+    4 : 'Cutting',
+    5 : 'Finishing'
+};
+const unitLabel = id => UNIT_NAMES[Number(id)] || (id ? `Unit ${id}` : '—');
+
 // Simple in-memory revision counter per project (document: revision conflict check)
 const revisions = new Map();
 const bumpRev = id => {
@@ -60,29 +70,61 @@ app.get(`${BASE}/health`, async (req, res) => {
 app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
     try {
         const projectId = Number(req.params.id);
+        const unitId    = req.query.unit_id ? Number(req.query.unit_id) : null;
+
         const [[project]] = await pool.query(
-            'SELECT id, project_name, plan_status, version_no, plan_from, plan_to FROM planning_projects WHERE id = ?',
+            `SELECT id, project_name, plan_status, version_no, plan_from, plan_to, unit_id
+             FROM planning_projects WHERE id = ?`,
             [projectId]
         );
         if (!project) return res.status(404).json({ success : false, error : 'Project not found' });
 
-        const [resources] = await pool.query(
-            `SELECT id, resource_code, resource_name, resource_type, floor_id,
-                    default_efficiency, manpower, machine_count, capacity_minutes_per_day, sort_order
-             FROM planning_resources WHERE active = TRUE ORDER BY sort_order`
-        );
+        const effUnit = unitId || project.unit_id || null;
 
-        const [events] = await pool.query(
-            `SELECT e.id, e.event_code, e.event_name, e.production_stage, e.start_date, e.end_date,
+        let resourceSql = `
+            SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
+                   default_efficiency, manpower, machine_count, capacity_minutes_per_day, sort_order
+             FROM planning_resources WHERE active = TRUE`;
+        const resourceParams = [];
+        if (effUnit) {
+            resourceSql += ' AND unit_id = ?';
+            resourceParams.push(effUnit);
+        }
+        resourceSql += ' ORDER BY sort_order';
+        let [resources] = await pool.query(resourceSql, resourceParams);
+        // AQL board (unit 3) often shares lines stored under a legacy unit_id
+        if (!resources.length && effUnit) {
+            [resources] = await pool.query(
+                `SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
+                        default_efficiency, manpower, machine_count, capacity_minutes_per_day, sort_order
+                 FROM planning_resources WHERE active = TRUE ORDER BY sort_order`
+            );
+        }
+
+        let eventSql = `
+            SELECT e.id, e.planning_order_id, e.event_code, e.event_name, e.production_stage, e.start_date, e.end_date,
                     e.duration, e.duration_unit, e.planned_quantity, e.percent_done,
-                    e.manually_scheduled, e.event_status,
+                    e.manually_scheduled, e.event_status, e.notes,
                     o.buyer_name, o.style_no, o.po_number, o.order_code, o.order_quantity, o.smv,
-                    o.product_category, o.pcd, o.shipment_date, o.material_ready_date, o.priority
+                    o.product_category, o.pcd, o.shipment_date, o.material_ready_date, o.priority,
+                    o.unit_id AS order_unit_id
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
-             WHERE e.project_id = ? AND e.event_status != 'cancelled'`,
-            [projectId]
-        );
+             WHERE e.project_id = ? AND e.event_status != 'cancelled'`;
+        const eventParams = [projectId];
+        if (effUnit) {
+            eventSql += `
+               AND (
+                   o.unit_id = ?
+                   OR (o.id IS NULL AND EXISTS (
+                       SELECT 1 FROM planning_assignments a
+                       JOIN planning_resources r ON r.id = a.resource_id
+                       WHERE a.event_id = e.id AND r.unit_id = ?
+                   ))
+               )`;
+            eventParams.push(effUnit, effUnit);
+        }
+        const [events] = await pool.query(eventSql, eventParams);
 
         const [assignments] = await pool.query(
             `SELECT a.id, a.event_id, a.resource_id
@@ -113,7 +155,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                 status  : project.plan_status,
                 version : project.version_no,
                 revision : revisions.get(projectId) || 1,
-                unitId  : project.unit_id || null
+                unitId  : effUnit,
+                unitName : unitLabel(effUnit)
             },
             resources    : { rows : resources },
             events       : { rows : events },
@@ -158,7 +201,11 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
              LIMIT ? OFFSET ?`,
             [...baseParams, limit, offset]
         );
-        res.json({ success : true, rows, total, limit, offset, unitId });
+        const enriched = rows.map(r => ({
+            ...r,
+            unit_name : unitLabel(r.unit_id)
+        }));
+        res.json({ success : true, rows : enriched, total, limit, offset, unitId });
     }
     catch (e) {
         res.status(500).json({ success : false, error : e.message });
@@ -169,60 +216,158 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
 // Scheduler sync API (document 6): transactional save + change logs
 // Payload: { requestId, revision, events: { added, updated, removed } }
 // --------------------------------------------------------------------------
+async function upsertEventAssignment(conn, eventId, ev) {
+    if (!ev.onHold) {
+        await conn.query(
+            `UPDATE planning_events SET notes = ?, updated_at = NOW() WHERE id = ?`,
+            [ev.notes ?? null, eventId]
+        );
+    }
+    if (ev.onHold) {
+        await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [eventId]);
+        await conn.query(
+            `UPDATE planning_events SET notes = ?, updated_at = NOW() WHERE id = ?`,
+            [JSON.stringify({ parked : true }), eventId]
+        );
+        if (ev.orderId) {
+            await conn.query(
+                "UPDATE planning_orders SET planning_status = 'unplanned', updated_at = NOW() WHERE id = ?",
+                [ev.orderId]
+            );
+        }
+        return;
+    }
+    if (!ev.resourceId) return;
+    const [assignRows] = await conn.query(
+        'SELECT id FROM planning_assignments WHERE event_id = ? LIMIT 1',
+        [eventId]
+    );
+    if (assignRows[0]) {
+        await conn.query(
+            'UPDATE planning_assignments SET resource_id = ?, assigned_quantity = COALESCE(?, assigned_quantity), updated_at = NOW() WHERE event_id = ?',
+            [ev.resourceId, ev.plannedQuantity ?? null, eventId]
+        );
+    }
+    else {
+        await conn.query(
+            'INSERT INTO planning_assignments (event_id, resource_id, units, assigned_quantity, created_at) VALUES (?, ?, 100, ?, NOW())',
+            [eventId, ev.resourceId, ev.plannedQuantity ?? 0]
+        );
+    }
+    if (ev.orderId) {
+        await conn.query(
+            "UPDATE planning_orders SET planning_status = 'fully_planned', updated_at = NOW() WHERE id = ?",
+            [ev.orderId]
+        );
+    }
+}
+
+async function findExistingEvent(conn, projectId, ev) {
+    const code = ev.eventCode ?? null;
+    const orderId = ev.orderId ?? null;
+    if (code) {
+        const [rows] = await conn.query(
+            `SELECT id FROM planning_events
+             WHERE project_id = ? AND event_status != 'cancelled' AND event_code = ?
+             LIMIT 1`,
+            [projectId, code]
+        );
+        if (rows[0]?.id) return rows[0].id;
+    }
+    return null;
+}
+
+async function upsertPlanningEvent(conn, projectId, ev) {
+    const eventCode = ev.eventCode ?? `EV-${Date.now()}`;
+    const [result] = await conn.query(
+        `INSERT INTO planning_events
+            (project_id, planning_order_id, event_code, event_name, event_type, production_stage,
+             start_date, end_date, duration, duration_unit, planned_quantity, percent_done,
+             manually_scheduled, event_status, created_by, created_at)
+         VALUES (?, ?, ?, ?, 'production', 'sewing', ?, ?, ?, 'day', ?, 0, TRUE, ?, 1, NOW())
+         ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
+            planning_order_id = COALESCE(VALUES(planning_order_id), planning_order_id),
+            start_date = COALESCE(VALUES(start_date), start_date),
+            end_date = COALESCE(VALUES(end_date), end_date),
+            duration = COALESCE(VALUES(duration), duration),
+            event_status = COALESCE(VALUES(event_status), event_status),
+            percent_done = COALESCE(VALUES(percent_done), percent_done),
+            event_name = COALESCE(VALUES(event_name), event_name),
+            planned_quantity = COALESCE(VALUES(planned_quantity), planned_quantity),
+            updated_at = NOW()`,
+        [projectId, ev.orderId ?? null, eventCode, ev.name ?? 'New event',
+         ev.startDate, ev.endDate, ev.duration ?? null, ev.plannedQuantity ?? 0,
+         ev.status ?? 'draft']
+    );
+    const eventId = result.insertId || await findExistingEvent(conn, projectId, { ...ev, eventCode });
+    const action = result.affectedRows === 1 ? 'add' : 'update';
+    return { eventId, action, eventCode };
+}
+
 app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     const projectId = Number(req.params.id);
     const { events = {}, requestId = null } = req.body || {};
     const conn = await pool.getConnection();
+    const mapped = [];
     try {
         await conn.beginTransaction();
 
         for (const ev of events.updated || []) {
-            const [[old]] = await conn.query('SELECT start_date, end_date, duration FROM planning_events WHERE id = ?', [ev.id]);
-            await conn.query(
+            const [oldRows] = await conn.query(
+                'SELECT start_date, end_date, duration FROM planning_events WHERE id = ?',
+                [ev.id]
+            );
+            const [upd] = await conn.query(
                 `UPDATE planning_events
                  SET start_date = COALESCE(?, start_date),
                      end_date   = COALESCE(?, end_date),
                      duration   = COALESCE(?, duration),
+                     planned_quantity = COALESCE(?, planned_quantity),
                      event_status = COALESCE(?, event_status),
                      percent_done = COALESCE(?, percent_done),
+                     notes = COALESCE(?, notes),
+                     manually_scheduled = IF(? IS NOT NULL, ?, manually_scheduled),
                      updated_at = NOW()
                  WHERE id = ?`,
                 [ev.startDate ?? null, ev.endDate ?? null, ev.duration ?? null,
-                 ev.status ?? null, ev.percentDone ?? null, ev.id]
+                 ev.plannedQuantity ?? null, ev.status ?? null, ev.percentDone ?? null,
+                 ev.notes ?? null,
+                 ev.notes != null ? 1 : null, ev.notes != null ? 1 : 0,
+                 ev.id]
             );
-            if (ev.resourceId) {
-                await conn.query('UPDATE planning_assignments SET resource_id = ? WHERE event_id = ?', [ev.resourceId, ev.id]);
+            let eventId = ev.id;
+            let action = 'update';
+            if (!upd.affectedRows && ev.eventCode) {
+                const upserted = await upsertPlanningEvent(conn, projectId, ev);
+                eventId = upserted.eventId;
+                action = upserted.action;
             }
+            await upsertEventAssignment(conn, eventId, ev);
+            mapped.push({
+                orderId   : ev.orderId ?? null,
+                eventId,
+                eventCode : ev.eventCode ?? null
+            });
             await conn.query(
                 `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, new_data, changed_by, changed_at, ip_address)
-                 VALUES (?, ?, 'update', ?, ?, 1, NOW(), ?)`,
-                [projectId, ev.id, JSON.stringify(old || {}), JSON.stringify(ev), req.ip]
+                 VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)`,
+                [projectId, eventId, action, JSON.stringify(oldRows[0] || {}), JSON.stringify(ev), req.ip]
             );
         }
 
         for (const ev of events.added || []) {
-            const [r] = await conn.query(
-                `INSERT INTO planning_events
-                    (project_id, planning_order_id, event_code, event_name, event_type, production_stage,
-                     start_date, end_date, duration, duration_unit, planned_quantity, percent_done,
-                     manually_scheduled, event_status, created_by, created_at)
-                 VALUES (?, ?, ?, ?, 'production', 'sewing', ?, ?, ?, 'day', ?, 0, TRUE, 'draft', 1, NOW())`,
-                [projectId, ev.orderId ?? null, ev.eventCode ?? `EV-${Date.now()}`, ev.name ?? 'New event',
-                 ev.startDate, ev.endDate, ev.duration ?? null, ev.plannedQuantity ?? 0]
-            );
-            if (ev.resourceId) {
-                await conn.query(
-                    'INSERT INTO planning_assignments (event_id, resource_id, units, assigned_quantity) VALUES (?, ?, 100, ?)',
-                    [r.insertId, ev.resourceId, ev.plannedQuantity ?? 0]
-                );
-            }
-            if (ev.orderId) {
-                await conn.query("UPDATE planning_orders SET planning_status = 'fully_planned' WHERE id = ?", [ev.orderId]);
-            }
+            const { eventId, action, eventCode } = await upsertPlanningEvent(conn, projectId, ev);
+            await upsertEventAssignment(conn, eventId, ev);
+            mapped.push({
+                orderId   : ev.orderId ?? null,
+                eventId,
+                eventCode
+            });
             await conn.query(
                 `INSERT INTO planning_change_logs (project_id, event_id, action_type, new_data, changed_by, changed_at, ip_address)
-                 VALUES (?, ?, 'add', ?, 1, NOW(), ?)`,
-                [projectId, r.insertId, JSON.stringify(ev), req.ip]
+                 VALUES (?, ?, ?, ?, 1, NOW(), ?)`,
+                [projectId, eventId, action, JSON.stringify(ev), req.ip]
             );
         }
 
@@ -236,7 +381,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
         }
 
         await conn.commit();
-        res.json({ success : true, requestId, revision : bumpRev(projectId) });
+        res.json({ success : true, requestId, revision : bumpRev(projectId), mapped });
     }
     catch (e) {
         try {
