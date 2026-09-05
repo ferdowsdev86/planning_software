@@ -1007,7 +1007,6 @@ export const schedulerProConfig = {
             summaryRenderer : () => `<div class="fr-line-foot fr-gt-head">
                 <span class="fr-gt-title">Grand totals</span>
                 <div class="fr-gt-legend fr-gt-legend-col">
-                    <span class="fr-gt-eff">Avg eff</span>
                     <span class="fr-gt-plan">Day plan</span>
                     <span class="fr-gt-act">Production</span>
                     <span>+/-</span>
@@ -1419,18 +1418,16 @@ export const schedulerProConfig = {
     // Production (day_production_update_plan) and the +/- difference
     summaryFeature : {
         renderer({ startDate }) {
-            const { plan, made, effW } = grandTotalMaps();
+            const { plan, made } = grandTotalMaps();
             const key = ymdKeyOf(startDate);
             const p = plan[key] || 0;
             const a = made[key] || 0;
             if (!p && !a) {
-                return '<div class="fr-gt"><span class="fr-gt-eff">-</span><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
+                return '<div class="fr-gt"><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
             }
-            const dayEff = p ? Math.round((effW[key] || 0) / p) : 0;
             const diff = a - p;
             const dCls = diff < 0 ? 'fr-gt-neg' : 'fr-gt-pos';
             return `<div class="fr-gt">
-                <span class="fr-gt-eff">${dayEff}%</span>
                 <span class="fr-gt-plan">${fmtQty(p)}</span>
                 <span class="fr-gt-act">${fmtQty(a)}</span>
                 <span class="${dCls}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</span>
