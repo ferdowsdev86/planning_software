@@ -10,7 +10,19 @@ import {
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds } from './AppConfig.js';
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
+// API base resolution:
+//   1. VITE_API_URL env (baked in at build time) — but a localhost value is
+//      IGNORED on a deployed site, where the visitor's own machine is not
+//      the server
+//   2. deployed (non-localhost) page → same-origin '/api/v1/planning'
+//      (the web server must reverse-proxy this path to the Node API :4000)
+//   3. local dev → http://localhost:4000
+export const API_BASE = (() => {
+    const env = import.meta.env.VITE_API_URL;
+    const onLocalhost = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
+    if (env && (onLocalhost || !/\/\/(localhost|127\.0\.0\.1)/.test(env))) return env;
+    return onLocalhost ? 'http://localhost:4000/api/v1/planning' : '/api/v1/planning';
+})();
 
 const CODE_TO_ID = {
     L01 : 'l1', L02 : 'l2', L03 : 'l3', L04 : 'l4',
