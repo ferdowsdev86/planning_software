@@ -248,6 +248,39 @@ async function postRows(path, rows) {
 export const saveEffProfilesDb     = rows => postRows('/efficiency-profiles', rows);
 export const saveLearningCurvesDb  = rows => postRows('/learning-curves', rows);
 
+// ---------------------------------------------------------------------------
+// Authentication — planning_users table (scrypt hashes verified server-side)
+// ---------------------------------------------------------------------------
+export async function authLogin(username, password) {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Login failed');
+    return data.user; // { id, username, name, role, boards }
+}
+
+export async function loadUsersDb() {
+    const res = await fetch(`${API_BASE}/users`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'load failed');
+    return data.users || [];
+}
+
+// Upsert users; entries carrying a `password` field rotate that user's hash
+export async function saveUsersDb(users) {
+    const res = await fetch(`${API_BASE}/users`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ users })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'save failed');
+    return data.users || [];
+}
+
 // Mark orders complete — flags them completed server-side; the caller removes
 // their bars from the board and syncs the removals
 export async function completeOrdersDb(orderCodes) {

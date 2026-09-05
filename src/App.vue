@@ -18,7 +18,8 @@ import {
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
-    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb
+    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
+    authLogin, loadUsersDb, saveUsersDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1523,6 +1524,104 @@ function savePerms() {
     localStorage.setItem('mbm-current-user', currentUserId.value);
 }
 
+// ---------------------------------------------------------------------------
+// Authentication: planning_users table in the DB (scrypt, verified server-
+// side). The whole app sits behind the login overlay until authUser is set;
+// Exit in the menubar signs out. The session survives reload (localStorage).
+// ---------------------------------------------------------------------------
+const authUser = ref((() => {
+    try { return JSON.parse(localStorage.getItem('mbm-auth') || 'null'); }
+    catch { return null; }
+})());
+const loginU    = ref(localStorage.getItem('mbm-last-user') || '');
+const loginP    = ref('');
+const loginShowPw = ref(false);
+const loginBusy = ref(false);
+const loginErr  = ref('');
+const loginPwRef = ref(null);
+
+// Time-of-day greeting for the login card
+const loginGreeting = computed(() => {
+    const h = new Date().getHours();
+    if (h < 5)  return 'শুভ রাত্রি 🌙';
+    if (h < 12) return 'Good morning ☀️';
+    if (h < 17) return 'Good afternoon 🌤';
+    if (h < 21) return 'Good evening 🌆';
+    return 'Working late 🌙';
+});
+
+// User chips on the login card: DB users only (they have a username)
+const loginUserChips = computed(() =>
+    users.value.filter(u => u.username));
+
+function loginPickUser(u) {
+    loginU.value = u.username;
+    loginErr.value = '';
+    // jump straight to the password box
+    requestAnimationFrame(() => loginPwRef.value?.focus?.());
+}
+
+// Users come from planning_users when the API is up — localStorage fallback
+async function refreshUsersFromDb() {
+    try {
+        const dbUsers = await loadUsersDb();
+        if (dbUsers.length) {
+            users.value = dbUsers.map(u => ({ ...u, boards : u.boards || [] }));
+            localStorage.setItem('mbm-users', JSON.stringify(users.value));
+        }
+    }
+    catch { /* API offline — keep the local list */ }
+}
+refreshUsersFromDb();
+
+async function doLogin() {
+    const u = loginU.value.trim().toLowerCase();
+    if (!u || !loginP.value) {
+        loginErr.value = 'Username এবং password দুটোই দিন';
+        return;
+    }
+    loginBusy.value = true;
+    loginErr.value = '';
+    try {
+        const res = await authLogin(u, loginP.value);
+        authUser.value = res;
+        localStorage.setItem('mbm-auth', JSON.stringify(res));
+        localStorage.setItem('mbm-last-user', res.username);
+        // Board permissions follow the logged-in DB user
+        await refreshUsersFromDb();
+        const match = users.value.find(x => x.id === res.id || x.username === res.username);
+        if (match) {
+            currentUserId.value = match.id;
+            localStorage.setItem('mbm-current-user', match.id);
+        }
+        loginP.value = '';
+        loginShowPw.value = false;
+        toast(`Welcome, ${res.name || res.username}`, 'ok');
+    }
+    catch (e) {
+        loginErr.value = /fetch|network/i.test(e.message)
+            ? 'Server unreachable — API (port 4000) চালু আছে কিনা দেখুন'
+            : (e.message || 'Login failed');
+        loginP.value = '';
+    }
+    finally {
+        loginBusy.value = false;
+    }
+}
+
+function doLogout() {
+    authUser.value = null;
+    localStorage.removeItem('mbm-auth');
+    loginP.value = '';
+    loginErr.value = '';
+    openMenu.value = null;
+    // freshest user list for the login chips
+    refreshUsersFromDb();
+}
+
+// Per-user password rotation from Settings ('' = leave unchanged)
+const stPasswords = ref({});
+
 function removeOrdersWithoutBuyer(s) {
     if (!s) return;
     const drop = s.eventStore.records.filter(ev => {
@@ -1612,9 +1711,16 @@ function addBoard() {
 }
 
 function addUser() {
-    const name = window.prompt('New user name:');
+    const name = window.prompt('New user name (display):');
     if (!name) return;
-    users.value.push({ id : `u${Date.now()}`, name, role : 'Planner', boards : [] });
+    const username = window.prompt('Login username:', name.toLowerCase().replace(/\s+/g, ''));
+    if (!username) return;
+    const password = window.prompt('Password (blank = 1234):') || '1234';
+    users.value.push({
+        id : `new-${Date.now()}`, name,
+        username : username.trim().toLowerCase(),
+        password, role : 'Planner', boards : []
+    });
     savePerms();
 }
 
@@ -1624,8 +1730,24 @@ function toggleBoardPerm(u, boardId) {
     else u.boards.push(boardId);
 }
 
-function saveSettings() {
+async function saveSettings() {
     savePerms();
+    // Persist users (and any typed passwords) to planning_users in the DB
+    try {
+        const payload = users.value.map(u => ({
+            ...u,
+            password : stPasswords.value[u.id] || u.password || undefined
+        }));
+        const saved = await saveUsersDb(payload);
+        if (saved.length) {
+            users.value = saved.map(u => ({ ...u, boards : u.boards || [] }));
+            localStorage.setItem('mbm-users', JSON.stringify(users.value));
+        }
+        stPasswords.value = {};
+    }
+    catch (e) {
+        toast(`DB save failed (${e.message}) — saved locally only`, 'warn');
+    }
     if (currentBoard.value && !currentUser.value.boards.includes(currentBoard.value.id)) {
         closeBoard();
         toast('Access to the open board was removed — view closed', 'warn');
@@ -2207,7 +2329,9 @@ function menuClick(m) {
         return;
     }
     openMenu.value = null;
-    if (m.label === 'Exit') closeBoard();
+    // Exit = sign out: back to the login screen (the board stays cached
+    // behind the gate and continues after the next login)
+    if (m.label === 'Exit') doLogout();
     if (m.label === 'Orders') openOrders();
 }
 
@@ -5507,6 +5631,71 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
 <template>
     <div class="fr-app">
+        <!-- Login gate: everything stays behind this until a DB login succeeds -->
+        <div v-if="!authUser" class="lg-overlay">
+            <div class="lg-orbs"><i></i><i></i><i></i></div>
+            <form class="lg-card" :class="{ 'lg-shake' : loginErr }" @submit.prevent="doLogin">
+                <div class="lg-logo">📅</div>
+                <div class="lg-brand">FastReactPlan</div>
+                <div class="lg-sub">{{ loginGreeting }} — sign in to continue</div>
+
+                <div v-if="loginUserChips.length" class="lg-chips">
+                    <button
+                        v-for="u in loginUserChips"
+                        :key="u.id"
+                        type="button"
+                        class="lg-chip"
+                        :class="{ 'lg-chip-on' : loginU === u.username }"
+                        @click="loginPickUser(u)"
+                    >
+                        <span class="lg-avatar">{{ (u.name || u.username).slice(0, 1).toUpperCase() }}</span>
+                        <span class="lg-chip-txt">
+                            <b>{{ u.name }}</b>
+                            <small>{{ u.role }}</small>
+                        </span>
+                    </button>
+                </div>
+
+                <label class="lg-label">Username</label>
+                <input
+                    v-model="loginU"
+                    class="lg-in"
+                    type="text"
+                    autocomplete="username"
+                    spellcheck="false"
+                    placeholder="username"
+                    @input="loginErr = ''"
+                >
+                <label class="lg-label">Password</label>
+                <div class="lg-pwrow">
+                    <input
+                        ref="loginPwRef"
+                        v-model="loginP"
+                        class="lg-in lg-in-pw"
+                        :type="loginShowPw ? 'text' : 'password'"
+                        autocomplete="current-password"
+                        placeholder="••••••"
+                        @input="loginErr = ''"
+                    >
+                    <button
+                        type="button"
+                        class="lg-eye"
+                        :title="loginShowPw ? 'Hide password' : 'Show password'"
+                        @click="loginShowPw = !loginShowPw"
+                    >{{ loginShowPw ? '🙈' : '👁' }}</button>
+                </div>
+
+                <div v-if="loginErr" class="lg-err">⚠ {{ loginErr }}</div>
+
+                <button type="submit" class="lg-btn" :disabled="loginBusy">
+                    <span v-if="loginBusy" class="lg-spin"></span>
+                    {{ loginBusy ? 'Signing in…' : 'Sign in →' }}
+                </button>
+
+                <div class="lg-foot">🔒 planning_users · production planning</div>
+            </form>
+        </div>
+
         <!-- FastReact-style main menu (always visible) -->
         <div class="fr-menubar" @click.self="openMenu = null">
             <span v-for="m in shellMenus" :key="m.label" class="fr-menu-wrap">
@@ -5562,7 +5751,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="fr-statusbar">
                 <span class="fr-status-cell fr-status-ready">Ready</span>
                 <span class="fr-status-cell fr-status-wide"></span>
-                <span class="fr-status-cell">{{ currentUser?.name }} · {{ currentUser?.role }}</span>
+                <span class="fr-status-cell">{{ authUser?.name || currentUser?.name }} · {{ authUser?.role || currentUser?.role }}</span>
+                <span class="fr-status-cell fr-status-logout" title="Sign out" @click="doLogout">⎋ Logout</span>
                 <span class="fr-status-cell">{{ permittedBoards.length }} board(s) permitted</span>
                 <span class="fr-status-cell fr-status-wide"></span>
                 <span class="fr-status-cell">{{ dataSource === 'db' ? 'DB: 172.16.101.70/fastreact' : 'demo data' }}</span>
@@ -6641,15 +6831,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
                 <div class="st-body">
                     <div class="st-row st-current">
-                        <label>Active user (login demo):</label>
-                        <select v-model="currentUserId" class="cal-in st-select">
-                            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
-                        </select>
+                        <label>Signed in:</label>
+                        <b>{{ authUser?.name }} ({{ authUser?.username }}) · {{ authUser?.role }}</b>
                     </div>
                     <table class="st-table">
                         <thead>
                             <tr>
                                 <th>User</th>
+                                <th>Username</th>
+                                <th>Set password</th>
                                 <th>Role</th>
                                 <th v-for="b in boards" :key="b.id" class="st-board-h">{{ b.name }}</th>
                             </tr>
@@ -6657,6 +6847,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <tbody>
                             <tr v-for="u in users" :key="u.id">
                                 <td class="st-user">{{ u.name }}</td>
+                                <td>{{ u.username || '—' }}</td>
+                                <td>
+                                    <input
+                                        v-model="stPasswords[u.id]"
+                                        class="cal-in st-pw"
+                                        type="password"
+                                        placeholder="(unchanged)"
+                                        autocomplete="new-password"
+                                    >
+                                </td>
                                 <td>
                                     <select v-model="u.role" class="cal-in st-select">
                                         <option v-for="r in planningRoles" :key="r" :value="r">{{ r }}</option>
@@ -6672,7 +6872,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </tbody>
                     </table>
-                    <div class="st-hint">Planner / Planning Manager / Unit Head can edit their boards; Management sees them read-only (document §17).</div>
+                    <div class="st-hint">Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -7913,6 +8113,184 @@ body {
 
 .st-table th { background : #f4f2ec; color : #17356b; }
 .st-board-h  { font-size : 11px; max-width : 130px; }
+.st-pw { width : 110px; padding : 3px 6px; font-size : 11px; }
+
+/* ------------------------------------------------------------------ */
+/* Login gate — smart sign-in screen                                  */
+/* ------------------------------------------------------------------ */
+.lg-overlay {
+    position        : fixed;
+    inset           : 0;
+    z-index         : 20000;
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    background      : linear-gradient(135deg, #0d224a 0%, #17356b 45%, #2a5aa8 100%);
+    overflow        : hidden;
+}
+
+/* soft floating orbs behind the card */
+.lg-orbs i {
+    position      : absolute;
+    border-radius : 50%;
+    background    : radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.03));
+    animation     : lg-float 14s ease-in-out infinite;
+}
+.lg-orbs i:nth-child(1) { width : 340px; height : 340px; top : -90px;  left : -70px; }
+.lg-orbs i:nth-child(2) { width : 220px; height : 220px; bottom : -60px; right : 12%; animation-delay : -5s; }
+.lg-orbs i:nth-child(3) { width : 140px; height : 140px; top : 18%; right : -40px; animation-delay : -9s; }
+
+@keyframes lg-float {
+    0%, 100% { transform : translateY(0) translateX(0); }
+    50%      { transform : translateY(26px) translateX(-14px); }
+}
+
+.lg-card {
+    position       : relative;
+    display        : flex;
+    flex-direction : column;
+    gap            : 5px;
+    width          : 340px;
+    padding        : 28px 30px 20px;
+    background     : rgba(255,255,255,.96);
+    border-radius  : 14px;
+    box-shadow     : 0 18px 60px rgba(0,0,0,.45);
+    backdrop-filter : blur(6px);
+    animation      : lg-in .35s ease;
+}
+
+@keyframes lg-in {
+    from { opacity : 0; transform : translateY(14px) scale(.98); }
+    to   { opacity : 1; transform : none; }
+}
+
+.lg-shake { animation : lg-shake .35s; }
+@keyframes lg-shake {
+    0%, 100% { transform : translateX(0); }
+    20%      { transform : translateX(-8px); }
+    40%      { transform : translateX(7px); }
+    60%      { transform : translateX(-5px); }
+    80%      { transform : translateX(4px); }
+}
+
+.lg-logo  { font-size : 34px; text-align : center; line-height : 1; }
+.lg-brand { font-size : 23px; font-weight : bold; color : #17356b; text-align : center; letter-spacing : .5px; }
+.lg-sub   { font-size : 12px; color : #777; text-align : center; margin-bottom : 10px; }
+
+/* one-click user chips (from planning_users) */
+.lg-chips {
+    display        : flex;
+    flex-direction : column;
+    gap            : 6px;
+    margin-bottom  : 10px;
+}
+.lg-chip {
+    display       : flex;
+    align-items   : center;
+    gap           : 10px;
+    padding       : 6px 10px;
+    border        : 1px solid #d4dcea;
+    border-radius : 9px;
+    background    : #f7f9fd;
+    cursor        : pointer;
+    font-family   : inherit;
+    text-align    : left;
+    transition    : background .15s, border-color .15s;
+}
+.lg-chip:hover { background : #eaf1fb; border-color : #9db3d6; }
+.lg-chip-on    { background : #e3edfc; border-color : #17356b; box-shadow : 0 0 0 1px #17356b inset; }
+.lg-avatar {
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    width           : 30px;
+    height          : 30px;
+    border-radius   : 50%;
+    background      : linear-gradient(135deg, #2a5aa8, #17356b);
+    color           : #fff;
+    font-weight     : bold;
+    font-size       : 14px;
+    flex            : 0 0 auto;
+}
+.lg-chip-txt { display : flex; flex-direction : column; line-height : 1.15; }
+.lg-chip-txt b     { font-size : 12.5px; color : #223; }
+.lg-chip-txt small { font-size : 10.5px; color : #889; }
+
+.lg-label { font-size : 11px; font-weight : bold; color : #445; margin-top : 4px; }
+.lg-in {
+    width         : 100%;
+    box-sizing    : border-box;
+    padding       : 9px 11px;
+    font-size     : 13px;
+    font-family   : inherit;
+    border        : 1px solid #c3cede;
+    border-radius : 7px;
+    outline       : none;
+    transition    : border-color .15s, box-shadow .15s;
+}
+.lg-in:focus { border-color : #2a5aa8; box-shadow : 0 0 0 3px rgba(42,90,168,.18); }
+
+.lg-pwrow { position : relative; }
+.lg-in-pw { padding-right : 38px; }
+.lg-eye {
+    position   : absolute;
+    right      : 6px;
+    top        : 50%;
+    transform  : translateY(-50%);
+    border     : none;
+    background : none;
+    font-size  : 15px;
+    cursor     : pointer;
+    padding    : 3px 5px;
+    opacity    : .7;
+}
+.lg-eye:hover { opacity : 1; }
+
+.lg-err {
+    color         : #c62828;
+    background    : #fdecec;
+    border        : 1px solid #f2b8b8;
+    border-radius : 6px;
+    font-size     : 12px;
+    padding       : 6px 10px;
+    margin-top    : 6px;
+}
+
+.lg-btn {
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    gap             : 8px;
+    margin-top      : 12px;
+    padding         : 10px 0;
+    font-size       : 13.5px;
+    font-weight     : bold;
+    font-family     : inherit;
+    color           : #fff;
+    background      : linear-gradient(135deg, #2a5aa8, #17356b);
+    border          : none;
+    border-radius   : 8px;
+    cursor          : pointer;
+    transition      : filter .15s, transform .1s;
+}
+.lg-btn:hover:not(:disabled)  { filter : brightness(1.12); }
+.lg-btn:active:not(:disabled) { transform : translateY(1px); }
+.lg-btn:disabled { opacity : .65; cursor : default; }
+
+.lg-spin {
+    width         : 14px;
+    height        : 14px;
+    border        : 2px solid rgba(255,255,255,.4);
+    border-top-color : #fff;
+    border-radius : 50%;
+    animation     : lg-rot .7s linear infinite;
+}
+@keyframes lg-rot { to { transform : rotate(360deg); } }
+
+.lg-foot { font-size : 10.5px; color : #99a; text-align : center; margin-top : 12px; }
+
+.fr-status-logout { cursor : pointer; color : #17356b; font-weight : bold; }
+.fr-status-logout:hover { text-decoration : underline; }
 .st-user     { font-weight : bold; }
 .st-check    { text-align : center; }
 .st-check input { width : 15px; height : 15px; }
