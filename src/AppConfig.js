@@ -1233,7 +1233,7 @@ export const schedulerProConfig = {
             const washLbl = s.wash_recipe_status ? '<span class="tip-badge tip-ok">✓ Done</span>' : '<span class="tip-badge tip-pend">Pending</span>';
 
             // Image
-            const ERP_HOST = 'http://10.135.50.27';
+            const ERP_HOST = 'https://erp.mbm.group';
             const imgHtml  = s.stl_img_link
                 ? `<div class="tip-img-wrap"><img class="tip-img" src="${ERP_HOST}${enc(s.stl_img_link)}" onerror="this.style.display='none'"></div>`
                 : '';
