@@ -9093,7 +9093,8 @@ body {
 .b-grid-footer-container {
     background : #eceae6;
     border-top : 1px solid #808080;
-    min-height : 66px;
+    min-height : 44px;
+    max-height : 48px;
 }
 
 .b-grid-footer { padding : 1px 2px; }
@@ -9103,7 +9104,7 @@ body {
     flex-direction : column;
     align-items    : center;
     font-size      : 11px;
-    line-height    : 1.2;
+    line-height    : 1.15;
     font-family    : Tahoma, Arial, sans-serif;
     color          : #000;
 }
@@ -9137,7 +9138,7 @@ body {
     flex-direction : column;
     align-items    : flex-end;
     font-size      : 11px;
-    line-height    : 1.2;
+    line-height    : 1.15;
 }
 
 .fr-grand-label { font-weight : normal; color : #000; padding-left : 4px; }
