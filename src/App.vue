@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration
 } from './AppConfig.js';
@@ -16,9 +16,9 @@ import {
     computeLineUtil, formulaWorkingDays, isLateVsDelivery
 } from './planningData.js';
 import {
-    loadFromApi, syncToApi, loadProdUpdatesDb, saveProdUpdatesDb,
+    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
-    resolveResourceDbId, poBaseEventCode
+    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -118,9 +118,47 @@ function setBoardBaseline(s) {
     boardBaseline = snapshotBoardState(s);
 }
 
+// Events whose PROJECTION was replaced in place by a confirm order — the swap
+// keeps line/start/end, so the baseline diff alone cannot see it (the baseline
+// is snapshotted after the swap has already run on load)
+const pendingSwapIds = new Set();
+// Position repairs (overlap fixes > 1h) happen during load, BEFORE the
+// baseline snapshot — force-include them in the next save or they never
+// persist. Kept separate from swaps so the dialog labels them honestly.
+const pendingRepairIds = new Set();
+uiHooks.notePositionRepair = id => {
+    if (String(id).startsWith('db-')) pendingRepairIds.add(String(id));
+};
+
 function collectPendingChanges(s) {
     if (!s) return [];
     const current = snapshotBoardState(s);
+    const swapChanges = [];
+    for (const id of pendingSwapIds) {
+        const now = current[id];
+        if (!now) continue;
+        swapChanges.push({
+            eventId  : id,
+            type     : 'replaced',
+            po       : now.po,
+            name     : now.name,
+            fromLine : now.lineName,
+            toLine   : now.lineName
+        });
+    }
+    for (const id of pendingRepairIds) {
+        if (pendingSwapIds.has(id)) continue;
+        const now = current[id];
+        if (!now) continue;
+        swapChanges.push({
+            eventId  : id,
+            type     : 'repaired',
+            po       : now.po,
+            name     : now.name,
+            fromLine : now.lineName,
+            toLine   : now.lineName
+        });
+    }
     if (!boardBaseline) {
         return Object.values(current).map(now => ({
             eventId  : now.id,
@@ -131,7 +169,7 @@ function collectPendingChanges(s) {
             toLine   : now.lineName
         }));
     }
-    const changes = [];
+    const changes = [...swapChanges];
     const ids = new Set([...Object.keys(boardBaseline), ...Object.keys(current)]);
     for (const id of ids) {
         const was = boardBaseline[id];
@@ -181,14 +219,21 @@ function collectPendingChanges(s) {
 }
 
 function formatSaveConfirm(changes) {
-    const lines = changes.map(ch => {
+    // A huge change list makes the native dialog slow to paint — cap it
+    const MAX_LINES = 12;
+    const shown = changes.slice(0, MAX_LINES);
+    const rest  = changes.length - shown.length;
+    const lines = shown.map(ch => {
         const label = ch.po || ch.name || 'Order';
         if (ch.type === 'removed') return `• ${label}: removed from ${ch.fromLine}`;
         if (ch.type === 'new') return `• ${label}: placed on ${ch.toLine}`;
         if (ch.type === 'rescheduled') return `• ${label}: rescheduled on ${ch.toLine}`;
+        if (ch.type === 'replaced') return `• ${label}: confirm order replaced its projection on ${ch.toLine}`;
+        if (ch.type === 'repaired') return `• ${label}: position adjusted (overlap repair) on ${ch.toLine}`;
         if (ch.type === 'split') return `• ${label}: qty split (${fmtQty(ch.qty)} pcs on ${ch.toLine})`;
         return `• ${label}: ${ch.fromLine} → ${ch.toLine}`;
     });
+    if (rest > 0) lines.push(`… and ${rest} more change(s)`);
     const head = changes.length === 1
         ? 'Save this change to the planning board?'
         : `Save ${changes.length} changes to the planning board?`;
@@ -200,6 +245,10 @@ function orderBoardKeys(raw, evId) {
     if (raw?.id) keys.add(String(raw.id));
     if (raw?.dbId) keys.add(`dbo-${raw.dbId}`);
     if (raw?.po) keys.add(`po:${String(raw.po)}`);
+    // Composite key for consolidated bars
+    if (raw?.mbmOrder && raw?.color) keys.add(`ck:${raw.mbmOrder}:${raw.color}`);
+    // All POs in the consolidated group
+    if (Array.isArray(raw?.poList)) raw.poList.forEach(p => keys.add(`po:${String(p)}`));
     keys.add(String(evId));
     return keys;
 }
@@ -209,6 +258,10 @@ function orderKeysOf(u) {
     if (u.id) keys.push(String(u.id));
     if (u.dbId) keys.push(`dbo-${u.dbId}`);
     if (u.po) keys.push(`po:${String(u.po)}`);
+    // Composite key for consolidated bars
+    if (u.mbmOrder && u.color) keys.push(`ck:${u.mbmOrder}:${u.color}`);
+    // All POs in group
+    if (Array.isArray(u.poList)) u.poList.forEach(p => keys.push(`po:${String(p)}`));
     return keys;
 }
 
@@ -234,15 +287,21 @@ function countSewingEvents(data) {
     return (data?.events || []).filter(e => e.raw && !e.raw.stage).length;
 }
 
+// Initial projection-planning stage: on board load, auto-plan runs phase by
+// phase (chunks) over PROJECTED orders only. Replacement stage: synced confirm
+// orders automatically take their projection's slot on the board and the
+// projection is flagged replaced; projections whose confirm POs have not
+// arrived yet stay planned as projections.
+const AUTO_PLAN_ON_LOAD = true;
+const AUTO_REPLACE_WITH_CONFIRMS = true;
+
 function finishBoardLoad(uid, data, s) {
     if (countSewingEvents(data) > 0) {
         boardUnitCache[uid].ready = true;
         boardUnitCache[uid].dirty = false;
         setBoardBaseline(s);
     }
-    else if (!boardUnitCache[uid]?.ready) {
-        scheduleBackgroundPlan(s);
-    }
+    if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
 
 function storeUnitCache(unitId, apiData) {
@@ -494,21 +553,9 @@ async function runLiveOrderPlan(s, {
         return { planned : 0, late : 0, tight : 0, skipped : true };
     }
 
-    let recycledOrders = [];
-    if (mode === 'full') {
-        const keep = [];
-        const drop = [];
-        for (const ev of s.eventStore.records) {
-            const raw = ev.data.raw;
-            if (!raw || raw.stage) continue;
-            const lid = lineIdOf(s, ev);
-            if (raw.status === 'completed' || Number(raw.made) > 0 || lid === 'hold'
-                || raw.userPinned || raw.manualGap) keep.push(ev);
-            else drop.push(ev);
-        }
-        recycledOrders = drop.map(ev => ev.data.raw).filter(Boolean);
-        if (drop.length) withBoardBatch(s, () => s.eventStore.remove(drop));
-    }
+    // Bars already on the board are NEVER recycled or moved by auto-plan.
+    // 'full' mode now only means "plan all order types" (not just projections).
+    // New orders are always appended after the last bar on each line.
 
     const onBoard = new Set();
     for (const ev of s.eventStore.records) {
@@ -527,6 +574,7 @@ async function runLiveOrderPlan(s, {
                 name     : r.name,
                 manpower : Number(r.data.manpower) || base.manpower || 50,
                 eff      : Number(r.data.eff) || base.eff || 50,
+                hours    : Number(r.data.hours) || base.hours || 0,
                 freeFrom : new Date(today)
             };
         });
@@ -546,9 +594,10 @@ async function runLiveOrderPlan(s, {
         if (nxt > line.freeFrom) line.freeFrom = nxt;
     }
 
-    const source = [...unplanned.value, ...recycledOrders];
+    const source = [...unplanned.value];
     const seen = new Set(onBoard);
     const orders = [];
+    let noPcdCount = 0;
     for (const u of source) {
         const keys = orderKeysOf(u);
         if (keys.some(k => seen.has(k))) continue;
@@ -561,6 +610,9 @@ async function runLiveOrderPlan(s, {
         if (!String(u.buyer || '').trim()) continue;
         if (u.replaced || u.status === 'replaced') continue;
         if (typeFilter && !typeFilter.has(orderTypeOf(u.po, u.orderType))) continue;
+        // No invented dates: an order without a valid effective PCD stays
+        // visible in the unplanned data but is never auto-planned.
+        if (u.pcdStatus === 'missing' || u.planWarning) { noPcdCount++; continue; }
         const qty = Number(u.qty ?? u.orderQty) || 0;
         if (qty <= 0) continue;
         const lidHint = u.suitable?.[0] || lineStates[0].id;
@@ -570,6 +622,10 @@ async function runLiveOrderPlan(s, {
             color       : u.color || orderColor(u.po),
             mbmOrder    : u.mbmOrder || mbmOrderNo(u.po, u.mbmOrder)
         });
+    }
+
+    if (noPcdCount && showToasts) {
+        toast(`${noPcdCount} order(s) skipped — cannot auto-plan (missing PCD or zero order quantity)`, 'warn');
     }
 
     if (!orders.length) {
@@ -729,6 +785,8 @@ async function runLiveOrderPlan(s, {
         packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
+    // Engine-settled pass: bars must sit strictly one after another
+    await enforceSequentialLines(s);
     recalcCapacity(s);
     refreshGrandTotals(s);
     s.refreshRows?.();
@@ -815,6 +873,36 @@ async function ensureBoardPlanned(s) {
     return planInFlight;
 }
 
+// Compact every line: bars sit flush one after another — no gaps. Pins and
+// manual gaps are cleared (completed bars stay anchored; followers attach
+// after them). The user invokes this deliberately from the Planning menu.
+function compactBoardNoGaps() {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s) {
+        toast('Open a planning board first', 'warn');
+        return;
+    }
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || raw.status === 'completed') continue;
+        raw.userPinned = false;
+        raw.dbPinned   = false;
+        raw.manualGap  = false;
+    }
+    beginBoardInteraction(s, 'batch');
+    let moved = 0;
+    try { moved = packBoardGaps(s); }
+    finally { endBoardInteraction(s); }
+    recalcCapacity(s);
+    s.refreshWithTransition?.();
+    markBoardDirty();
+    touchBoardCache(s);
+    toast(moved
+        ? `Board compacted — ${moved} bar(s) pulled flush, no gaps left`
+        : 'Board already compact — no gaps found', 'ok');
+}
+
 async function planLiveOrders() {
     const s = getInstance();
     if (!s) {
@@ -843,8 +931,9 @@ async function planLiveOrders() {
 
 function tuneBoardPerformance(s) {
     if (!s) return;
-    const n = s.eventStore?.count || 0;
-    if (s.features?.summary) s.features.summary.disabled = n > 120;
+    // The per-day Grand-totals footer stays ON: its data comes from a 5s
+    // cache (frozen during drags), so even a large board renders it cheaply.
+    if (s.features?.summary) s.features.summary.disabled = false;
     disableStmIfLarge(s);
 }
 
@@ -867,7 +956,10 @@ function expandTimeAxisForEvents(s) {
     if (to > s.endDate) s.endDate = to;
 }
 
+let boardLoadedUnitId = null;
+
 function applyApiBoardData(s, data) {
+    boardLoadedUnitId = data.unitId || null;
     withBoardBatch(s, () => {
         s.project.loadInlineData({
             resources          : data.resources,
@@ -879,6 +971,7 @@ function applyApiBoardData(s, data) {
     });
     unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
     currentUnitId.value = data.unitId || currentBoard.value?.unitId || null;
+    syncProfileDefaultsFromLines(data.resources);
     planMeta.value = {
         name    : data.project.name,
         status  : data.project.status,
@@ -898,12 +991,37 @@ function applyApiBoardData(s, data) {
         packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
+    // Engine-settled pass (async): bars must sit strictly one after another
+    enforceSequentialLines(s);
     if (ordersOpen.value) ordersRows.value = collectOrders();
     applyProdUpdates(s);
     recalcCapacity(s);
     scrollBoardToToday(s);
     installFrVScroll(s);
     tuneBoardPerformance(s);
+}
+
+// _Default in each line's efficiency profile IS the line efficiency.
+// On every board load, sync it from the DB line efficiency so the profile,
+// the tooltip, the report and the planner all read the same number.
+function syncProfileDefaultsFromLines(resources) {
+    let changed = false;
+    for (const r of resources || []) {
+        if (!r.lineRow) continue;
+        const eff = Number(r.eff);
+        if (!(eff > 0)) continue;
+        if (LINE_BY_ID[r.id]) LINE_BY_ID[r.id].eff = eff;
+        const pid = lineProfileMap.value[r.id];
+        const p = pid && effList.value.find(x => x.id === pid);
+        if (p && Number(p.values?._Default) !== eff) {
+            ensureProfileValues(p);
+            p.values._Default = eff;
+            changed = true;
+        }
+    }
+    if (changed) {
+        localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
+    }
 }
 
 function scheduleBackgroundPlan(s) {
@@ -914,6 +1032,15 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
     const s = getInstance();
     if (!s || !b) return;
     const uid = b.unitId ?? 3;
+
+    // This unit's board is ALREADY live — re-opening it from the menu must
+    // not reapply cached data: that repacks the board and throws away pinned
+    // positions and any unsaved in-memory changes for no gain.
+    if (!force && boardLoadedUnitId === uid
+        && s.eventStore.records.some(e => e.data?.raw && !e.data.raw.stage)) {
+        applyBoardFilter();
+        return;
+    }
 
     if (!force && boardUnitCache[uid]?.ready && !boardUnitCache[uid]?.dirty && cacheHasLines(boardUnitCache[uid])) {
         applyApiBoardData(s, boardUnitCache[uid].apiData);
@@ -1153,7 +1280,11 @@ const plAllStrips = computed(() => {
     const s = getInstance();
     const raw = plRaw.value;
     if (!s || !raw) return { qty : 0, count : 0 };
-    const strips = s.eventStore.records.filter(e => e.data.raw && !e.data.raw.stage && e.data.raw.po === raw.po);
+    // Same PO AND same order code — projection bars have empty po, so po
+    // alone would lump every projection order together
+    const strips = s.eventStore.records.filter(e => e.data.raw && !e.data.raw.stage
+        && String(e.data.raw.po || '') === String(raw.po || '')
+        && String(e.data.raw.mbmOrder || '') === String(raw.mbmOrder || ''));
     return {
         qty   : strips.reduce((a, e) => a + e.data.raw.qty, 0),
         count : strips.length
@@ -1405,7 +1536,7 @@ function removeOrdersWithoutBuyer(s) {
 function applyBoardFilter() {
     const s = getInstance();
     const b = currentBoard.value;
-    if (!s || !b) return;
+    if (!s || !b || !s.resourceStore) return;
     s.resourceStore.clearFilters();
     s.resourceStore.filter({
         id       : 'boardFilter',
@@ -1619,6 +1750,61 @@ const effRows = computed(() => {
         .map((t, i) => ({ ...t, idx : i, eff : p.values[t.name] ?? 0 }));
 });
 
+// Products actually PLANNED on each line (from the live board): product type →
+// total planned qty, ranked by qty. Refreshed when the dialog / Lines tab opens.
+const lineBoardTop = ref({});
+
+function refreshLineBoardTop() {
+    const s = getInstance();
+    const out = {};
+    if (s) {
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data?.raw;
+            if (!raw || raw.stage) continue;
+            const lid = lineIdOf(s, ev);
+            if (lid === 'hold' || !LINE_BY_ID[lid]) continue;
+            const pType = raw.productType || productTypeFromProfile(raw.po, lid);
+            if (!pType) continue;
+            if (!out[lid]) out[lid] = {};
+            out[lid][pType] = (out[lid][pType] || 0) + (Number(raw.qty) || 0);
+        }
+    }
+    lineBoardTop.value = out;
+}
+
+// Line-wise summary: top-3 product types PLANNED on the line (from the plan
+// board, ranked by planned qty, with the line's effective efficiency for each);
+// falls back to the profile's own ranking when nothing is planned yet.
+const lineEffSummary = computed(() => {
+    return LINES.map(l => {
+        const pid     = lineProfileMap.value[l.id];
+        const profile = effList.value.find(p => p.id === pid) || effList.value[0];
+        ensureProfileValues(profile);
+        const ranked = Object.entries(profile?.values || {})
+            .filter(([name, eff]) => name !== '_Default' && Number(eff) > 0)
+            .sort((a, b) => Number(b[1]) - Number(a[1]));
+        const planned = Object.entries(lineBoardTop.value[l.id] || {})
+            .sort((a, b) => b[1] - a[1]);
+        const top3 = planned.length
+            ? planned.slice(0, 3).map(([name, qty]) => ({
+                name,
+                qty,
+                eff   : Math.round(lineEfficiencyOf(l.id, name)),
+                color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
+            }))
+            : ranked.slice(0, 3).map(([name, eff]) => ({
+                name,
+                qty   : 0,
+                eff   : Number(eff),
+                color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
+            }));
+        const canDo = ranked.length;
+        return { line : l, profileName : profile?.name || '—', top3, canDo, fromBoard : planned.length > 0 };
+    });
+});
+
+watch(effTab, v => { if (v === 'lines') refreshLineBoardTop(); });
+
 function saveEffState() {
     localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
     localStorage.setItem('mbm-line-prof', JSON.stringify(lineProfileMap.value));
@@ -1629,6 +1815,7 @@ function saveEffState() {
 
 function openEffProfiles() {
     openMenu.value = null;
+    refreshLineBoardTop();
     effTab.value = 'define';
     if (!effSelectedProfileId.value && effList.value[0]) {
         effSelectedProfileId.value = effList.value[0].id;
@@ -1699,32 +1886,103 @@ function effUpdate() {
     for (const k of Object.keys(p.values)) {
         p.values[k] = Math.max(0, Math.min(200, Number(p.values[k]) || 0));
     }
-    saveEffState();
-
-    // Apply: every line assigned to this profile takes its _Default as base
+    // Product-type efficiencies only. _Default is a READ-ONLY mirror of the
+    // line efficiency (planning_resources.default_efficiency): line capacity
+    // NEVER takes its efficiency from the profile — change line efficiency in
+    // Setup → Line eff & hours instead.
     const s = getInstance();
-    const hrs = Math.max(0, ...Object.values(calendarState.days).map(c => hmToHours(c.hours)));
-    const applied = [];
-    for (const line of LINES) {
-        if (lineProfileMap.value[line.id] !== p.id) continue;
-        line.eff = p.values['_Default'];
-        line.availMin = Math.round(line.manpower * hrs * 60 * line.eff / 100);
-        const res = s?.resourceStore.getById(line.id);
-        if (res) {
-            res.set('eff', line.eff);
-            res.set('availMin', line.availMin);
-        }
-        applied.push(line.name);
+    for (const r of s?.resourceStore.records || []) {
+        if (!r.data?.lineRow) continue;
+        if (lineProfileMap.value[r.id] !== p.id) continue;
+        if (Number(r.data.eff) > 0) p.values._Default = Number(r.data.eff);
     }
-    recalcCapacity(s);
-    s.refreshWithTransition?.();
-    toast(applied.length
-        ? `"${p.name}" saved — applied to ${applied.join(', ')} (default ${p.values['_Default']}%)`
-        : `"${p.name}" saved — কোনো line-এ assign করা নেই`, 'ok');
+    saveEffState();
+    toast(`"${p.name}" saved — product efficiency update হলো (line efficiency আলাদা: Line eff & hours form)`, 'ok');
     if (s) {
         beginBoardInteraction(s, 'batch');
         try { packBoardGaps(s); }
         finally { endBoardInteraction(s); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Line eff & hours (Setup menu): edit line efficiency + daily working hours,
+// persisted to planning_resources (default_efficiency / working_hours_per_day)
+// ---------------------------------------------------------------------------
+const lineEffOpen   = ref(false);
+const lineEffRows   = ref([]);
+const lineEffSaving = ref(false);
+
+function openLineEffForm() {
+    openMenu.value = null;
+    const s = getInstance();
+    const rows = [];
+    if (s) {
+        for (const r of s.resourceStore.records) {
+            if (!r.data?.lineRow || r.data?.dbId == null) continue;
+            rows.push({
+                dbId     : r.data.dbId,
+                boardId  : r.id,
+                name     : r.data.name || r.name,
+                manpower : Number(r.data.manpower) || 0,
+                eff      : Number(r.data.eff) || 0,
+                hours    : Number(r.data.hours) || 10
+            });
+        }
+    }
+    if (!rows.length) {
+        toast('Open a planning board first — lines load from the board', 'warn');
+        return;
+    }
+    lineEffRows.value = rows;
+    lineEffOpen.value = true;
+}
+
+async function saveLineEffForm() {
+    const s = getInstance();
+    const updates = [];
+    for (const row of lineEffRows.value) {
+        row.eff      = Math.max(1, Math.min(200, Number(row.eff) || 0));
+        row.hours    = Math.max(1, Math.min(24, Number(row.hours) || 10));
+        row.manpower = Math.max(1, Math.min(1000, Number(row.manpower) || 1));
+        updates.push({ resourceId : row.dbId, eff : row.eff, hours : row.hours, manpower : row.manpower });
+    }
+    lineEffSaving.value = true;
+    try {
+        await saveLineEfficiencyDb(updates);
+        // Apply to the live board, fallback line table and profile _Default
+        for (const row of lineEffRows.value) {
+            const availMin = Math.round(row.manpower * row.hours * 60 * row.eff / 100);
+            const res = s?.resourceStore.getById(row.boardId);
+            if (res) {
+                res.set('eff', row.eff);
+                res.set('hours', row.hours);
+                res.set('manpower', row.manpower);
+                res.set('availMin', availMin);
+            }
+            if (LINE_BY_ID[row.boardId]) {
+                LINE_BY_ID[row.boardId].eff = row.eff;
+                LINE_BY_ID[row.boardId].manpower = row.manpower;
+                LINE_BY_ID[row.boardId].availMin = availMin;
+            }
+            const pid = lineProfileMap.value[row.boardId];
+            const p = pid && effList.value.find(x => x.id === pid);
+            if (p) {
+                ensureProfileValues(p);
+                p.values._Default = row.eff;
+            }
+        }
+        localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
+        recalcCapacity(s);
+        s?.refreshWithTransition?.();
+        toast(`Line efficiency & hours saved for ${updates.length} line(s)`, 'ok');
+        lineEffOpen.value = false;
+    }
+    catch (e) {
+        toast(`Save failed: ${e.message}`, 'error');
+    }
+    finally {
+        lineEffSaving.value = false;
     }
 }
 
@@ -1958,33 +2216,55 @@ function menuClick(m) {
 // planned line and start / end dates
 // ---------------------------------------------------------------------------
 const ordersOpen    = ref(false);
+// ordersTab removed — single unified list
 const ordersRows    = ref([]);
 const ordersLoading = ref(false); // true while background pages are still loading
 const ordersTotal   = ref(0);     // total rows in DB
 const currentUnitId = ref(null);  // unit_id of the active planning board
+const erpAllOrders  = ref([]);    // full ERP order book (projected + confirm)
+const erpAllLoading = ref(false);
+const ordersGlobalSearch = ref(''); // global search across all columns
 
 // Per-column filters (case-insensitive substring match on displayed text)
 const ORDER_COLS = [
-    'unit', 'buyer', 'style', 'productType', 'mbmOrder', 'orderDelivery', 'orderQty',
-    'po', 'color', 'pcd', 'poDelivery', 'orderType', 'status',
-    'qty', 'smv', 'reqMin', 'line', 'start', 'end', 'progress'
+    'done',
+    'orderType', 'status', 'deliveryStatus',
+    'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
+    'orderQty', 'pcd', 'pcdSource', 'orderDelivery',
+    'po', 'color', 'qty', 'poDelivery', 'grouping',
+    'line', 'start', 'end'
 ];
 const ORDER_COL_LABELS = {
-    unit : 'Unit', buyer : 'Buyer', style : 'Style', productType : 'Product',
-    mbmOrder : 'MBM order', orderDelivery : 'Order delivery',
-    orderQty : 'Order qty',
-    po : 'PO', color : 'Color', pcd : 'PCD', poDelivery : 'PO delivery',
-    orderType : 'Order type', status : 'Status',
-    qty : 'Qty', smv : 'SMV', reqMin : 'Req. min',
-    line : 'Line', start : 'Start', end : 'End', progress : 'Prog.'
+    done         : '✔',
+    orderType    : 'Type',
+    status       : 'Status',
+    deliveryStatus : 'Delivery',
+    unit         : 'Unit',
+    prodUnitName : 'Prod Unit',
+    buyer        : 'Buyer',
+    style        : 'Style',
+    productType  : 'Product',
+    mbmOrder     : 'MBM Order',
+    orderQty     : 'Order Qty',
+    pcd          : 'PCD',
+    pcdSource    : 'PCD Src',
+    orderDelivery: 'Order Delivery',
+    po           : 'PO',
+    color        : 'Color',
+    qty          : 'PO Qty',
+    poDelivery   : 'PO Delivery',
+    grouping     : 'Grouping',
+    line         : 'Line',
+    start        : 'Start',
+    end          : 'End',
 };
 const orderFilters = ref(Object.fromEntries(ORDER_COLS.map(k => [k, ''])));
 
 function orderCellText(r, key) {
-    const hidePoFields = r.orderType === 'projection';
+    const hidePoFields = r.orderType === 'projection' || r.orderType === 'projected';
     switch (key) {
-        case 'po'            : return hidePoFields ? '' : String(r.po ?? '');
-        case 'color'         : return hidePoFields ? '' : String(r.color ?? '');
+        case 'po'            : return hidePoFields ? '' : (r.poCount > 1 ? `[${r.poCount} POs] ${r.po ?? ''}` : String(r.po ?? ''));
+        case 'color'         : return hidePoFields ? '' : String(r.garmentColor ?? '');
         case 'qty'           : return fmtQty(r.qty);
         case 'orderQty'      : return fmtQty(r.orderQty);
         case 'reqMin'        : return fmtQty(r.reqMin);
@@ -1994,19 +2274,384 @@ function orderCellText(r, key) {
         case 'start'         : return r.start ? fmtDate(r.start) : '—';
         case 'end'           : return r.end ? fmtDate(r.end) : '—';
         case 'progress'      : return `${r.progress}%`;
+        case 'done'          : return '';
+        case 'prodUnitName'  : return String(r.prodUnitName ?? '—');
+        case 'pcdSource'     : return r.pcdSource === 'order_pcd' ? 'ERP PCD'
+                                    : r.pcdSource === 'delivery_minus_30' ? 'Delivery-30'
+                                    : (r.pcdStatus === 'missing' ? 'missing' : '');
+        case 'deliveryStatus': return hidePoFields
+            ? (projPartialInfo(r) ? 'Partial' : '')
+            : String(r.deliveryStatus ?? '');
+        case 'grouping'      : return hidePoFields ? '' : String(r.groupingStatus === 'not_applicable' ? '' : (r.groupingStatus ?? ''));
         default              : return String(r[key] ?? '');
     }
 }
 
-const filteredOrders = computed(() =>
-    ordersRows.value.filter(r => ORDER_COLS.every(k => {
-        const q = (orderFilters.value[k] || '').trim().toLowerCase();
-        return !q || orderCellText(r, k).toLowerCase().includes(q);
-    }))
-);
+// Expanded confirm groups (show underlying POs)
+const expandedGroups = ref(new Set());
+function toggleGroupExpand(row) {
+    const s = new Set(expandedGroups.value);
+    if (s.has(row.id)) s.delete(row.id); else s.add(row.id);
+    expandedGroups.value = s;
+}
+
+// Column filter queries: quantity columns accept >N <N >=N <=N =N;
+// date columns accept the same operators with a date (2026-09-01, 01-09-26,
+// 15-SEP-26, 01/09/2026 …). Anything else falls back to text contains.
+const QTY_FILTER_COLS  = new Set(['orderQty', 'qty']);
+const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end']);
+const MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function parseQueryDate(sv) {
+    const s = String(sv).trim().replace(/\//g, '-');
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);                    // 2026-09-01
+    if (m) return new Date(+m[1], m[2] - 1, +m[3]);
+    m = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/.exec(s);                      // 01-09-26 / 01-09-2026
+    if (m) { let y = +m[3]; if (y < 100) y += 2000; return new Date(y, m[2] - 1, +m[1]); }
+    m = /^(\d{1,2})-([a-z]{3,})-?(\d{2,4})?$/i.exec(s);                 // 15-SEP-26 / 15-sep
+    if (m) {
+        const mi = MONTHS3.indexOf(m[2].slice(0, 3).toLowerCase());
+        if (mi >= 0) { let y = m[3] ? +m[3] : new Date().getFullYear(); if (y < 100) y += 2000; return new Date(y, mi, +m[1]); }
+    }
+    return null;
+}
+
+function cmpApply(op, a, b) {
+    switch (op) {
+        case '>'  : return a > b;
+        case '<'  : return a < b;
+        case '>=' : return a >= b;
+        case '<=' : return a <= b;
+        default   : return a === b;   // '='
+    }
+}
+
+function matchColFilter(r, k, q) {
+    const m = /^(>=|<=|=|>|<)\s*(.+)$/.exec(q.trim());
+    if (m) {
+        const [, op, rawVal] = m;
+        if (QTY_FILTER_COLS.has(k)) {
+            const val = Number(String(rawVal).replace(/,/g, ''));
+            if (Number.isFinite(val)) {
+                const cell = k === 'orderQty' ? (Number(r.orderQty) || 0) : (Number(r.qty) || 0);
+                return cmpApply(op, cell, val);
+            }
+        }
+        if (DATE_FILTER_COLS.has(k)) {
+            const qd = parseQueryDate(rawVal);
+            if (qd) {
+                const cell = r[k];
+                if (!(cell instanceof Date)) return false;
+                const day = new Date(cell); day.setHours(0, 0, 0, 0);
+                return cmpApply(op, day.getTime(), qd.getTime());
+            }
+        }
+        // '=text' on any other column: EXACT match ("=planned" must not also
+        // match "unplanned" the way a contains-filter would)
+        if (op === '=') {
+            return orderCellText(r, k).toLowerCase() === String(rawVal).toLowerCase();
+        }
+    }
+    return orderCellText(r, k).toLowerCase().includes(q.toLowerCase());
+}
+
+// Column sorting: click a header to cycle ascending → descending → off
+const orderSort = ref({ key : null, dir : 1 });
+
+function toggleOrderSort(k) {
+    if (k === 'done') return;
+    if (orderSort.value.key !== k) orderSort.value = { key : k, dir : 1 };
+    else if (orderSort.value.dir === 1) orderSort.value = { key : k, dir : -1 };
+    else orderSort.value = { key : null, dir : 1 };
+}
+
+function orderSortVal(r, k) {
+    if (k === 'orderQty') return Number(r.orderQty) || 0;
+    if (k === 'qty') return Number(r.qty) || 0;
+    if (DATE_FILTER_COLS.has(k)) return r[k] instanceof Date ? r[k].getTime() : 0;
+    return orderCellText(r, k).toLowerCase();
+}
+
+// Recent-arrival filter: '' = off, 'today' = orders created today,
+// 'last3' = orders created within the last 3 calendar days (incl. today)
+const ordersRecentFilter = ref('');
+
+function recentCutoff(mode) {
+    const t = new Date();
+    const startToday = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    return mode === 'today' ? startToday : new Date(+startToday - 2 * 86400000);
+}
+
+// Summary tiles are quick actions: type/status tiles filter, qty tiles sort
+function tileAction(what) {
+    if (what === 'today') { ordersRecentFilter.value = ordersRecentFilter.value === 'today' ? '' : 'today'; return; }
+    if (what === 'last3') { ordersRecentFilter.value = ordersRecentFilter.value === 'last3' ? '' : 'last3'; return; }
+    if (what === 'projected') { orderFilters.value.orderType = orderFilters.value.orderType === 'projected' ? '' : 'projected'; return; }
+    if (what === 'confirm')   { orderFilters.value.orderType = orderFilters.value.orderType === 'confirm' ? '' : 'confirm'; return; }
+    if (what === 'planned')   { orderFilters.value.status = orderFilters.value.status === '=planned' ? '' : '=planned'; return; }
+    if (what === 'unplanned') { orderFilters.value.status = orderFilters.value.status === '=unplanned' ? '' : '=unplanned'; return; }
+    if (what === 'orderQty')  { toggleOrderSort('orderQty'); return; }
+    if (what === 'poQty')     { toggleOrderSort('qty'); return; }
+}
+
+const filteredErpOrders = computed(() => {
+    // Comma-separated search: "26DROTT080, 26SUBOR150" shows rows matching ANY term
+    const terms = (ordersGlobalSearch.value || '').split(',')
+        .map(t => t.trim().toLowerCase()).filter(Boolean);
+    const hasQuery = terms.length > 0
+        || ORDER_COLS.some(k => String(orderFilters.value[k] || '').trim());
+    const recentCut = ordersRecentFilter.value ? recentCutoff(ordersRecentFilter.value) : null;
+    return erpAllOrders.value.filter(r => {
+        // Completed orders stay OUT of the default list — they only surface
+        // when the user actively searches / filters (and the row matches)
+        if (r.status === 'completed' && !hasQuery) return false;
+        // Recent-arrival tiles: only orders created today / in the last 3 days
+        if (recentCut && !(r.createdAt && r.createdAt >= recentCut)) return false;
+        // global search: any term matches any column
+        if (terms.length && !terms.some(t =>
+            ORDER_COLS.some(k => orderCellText(r, k).toLowerCase().includes(t)))) return false;
+        // per-column filters (with >, <, >=, <=, = on qty and date columns)
+        return ORDER_COLS.every(k => {
+            const q = (orderFilters.value[k] || '').trim();
+            return !q || matchColFilter(r, k, q);
+        });
+    }).sort((a, b) => {
+        const { key, dir } = orderSort.value;
+        if (!key) return 0;
+        const av = orderSortVal(a, key), bv = orderSortVal(b, key);
+        if (av < bv) return -dir;
+        if (av > bv) return dir;
+        return 0;
+    });
+});
+
 
 function clearOrderFilters() {
+    ordersGlobalSearch.value = '';
+    ordersRecentFilter.value = '';
     orderFilters.value = Object.fromEntries(ORDER_COLS.map(k => [k, '']));
+}
+
+// True while the user has text selected in the list — a select-drag must not
+// fire the row's board-navigation click, so copying works naturally
+function windowSelectionActive() {
+    return !!(window.getSelection && String(window.getSelection()).length);
+}
+
+// Instant hover tooltip over the orders table: data cells show their FULL
+// value; badge cells (Type/Status/…) show the row's note
+const odTip = ref({ show : false, text : '', x : 0, y : 0 });
+
+function odBodyOver(e) {
+    const td = e.target?.closest?.('td');
+    if (!td || !td.closest('.od-table')) {
+        if (odTip.value.show) odTip.value = { ...odTip.value, show : false };
+        return;
+    }
+    const full = td.dataset.full;
+    const note = td.parentElement?.dataset?.note;
+    const text = (full && full.trim() && full !== '—') ? full : (note || '');
+    if (!text) {
+        if (odTip.value.show) odTip.value = { ...odTip.value, show : false };
+        return;
+    }
+    odTip.value = { show : true, text, x : e.clientX + 12, y : e.clientY + 18 };
+}
+
+function odBodyMove(e) {
+    if (odTip.value.show) {
+        odTip.value = { ...odTip.value, x : e.clientX + 12, y : e.clientY + 18 };
+    }
+}
+
+function odBodyLeave() {
+    odTip.value = { ...odTip.value, show : false };
+}
+
+// Projection ↔ confirm quantity reconciliation: sum each order's confirm PO
+// qty — a projected row whose confirms don't add up to the order qty is a
+// PARTIAL order (some POs not issued yet / short-shipped)
+const confirmQtyByOrder = computed(() => {
+    const m = new Map();
+    for (const r of erpAllOrders.value) {
+        if (r.orderType !== 'confirm' || !r.mbmOrder) continue;
+        m.set(r.mbmOrder, (m.get(r.mbmOrder) || 0) + (Number(r.qty) || 0));
+    }
+    return m;
+});
+
+function projPartialInfo(r) {
+    if (r.orderType !== 'projected') return null;
+    if (!r.mbmOrder || !confirmQtyByOrder.value.has(r.mbmOrder)) return null;
+    const confQty  = confirmQtyByOrder.value.get(r.mbmOrder);
+    const orderQty = Number(r.orderQty) || 0;
+    if (!orderQty || confQty === orderQty) return null;
+    return { confQty, orderQty, diff : orderQty - confQty };
+}
+
+// Live summary over the FILTERED rows (shown above the table + qty headers)
+const ordersSummary = computed(() => {
+    let proj = 0, conf = 0, orderQty = 0, poQty = 0;
+    let plannedQty = 0, unplannedQty = 0, todayQty = 0, last3Qty = 0;
+    const cutToday = recentCutoff('today');
+    const cut3     = recentCutoff('last3');
+    const rowQty = r => Number(r.orderType === 'confirm' ? r.qty : r.orderQty) || 0;
+    for (const r of filteredErpOrders.value) {
+        if (r.orderType === 'confirm') {
+            conf++;
+            poQty += Number(r.qty) || 0;
+        }
+        else {
+            proj++;
+            orderQty += Number(r.orderQty) || 0;
+        }
+        if (r.planned || r.status === 'planned') plannedQty += rowQty(r);
+        else if (r.status === 'unplanned') unplannedQty += rowQty(r);
+        if (r.createdAt) {
+            if (r.createdAt >= cutToday) todayQty += rowQty(r);
+            if (r.createdAt >= cut3)     last3Qty += rowQty(r);
+        }
+    }
+    return { rows : filteredErpOrders.value.length, proj, conf, orderQty, poQty, plannedQty, unplannedQty, todayQty, last3Qty };
+});
+
+// ---------------------------------------------------------------------------
+// Mark complete: checkbox on PROJECTED rows. Saving removes every bar of the
+// order (projection, confirm, split pieces) from the board — the slot stays
+// EMPTY (no repacking) — and flags the order completed in the DB.
+// ---------------------------------------------------------------------------
+const markedComplete = ref(new Set());
+const markSaving     = ref(false);
+
+function toggleMarkComplete(row) {
+    const s = new Set(markedComplete.value);
+    const code = row.mbmOrder;
+    if (!code) return;
+    if (s.has(code)) s.delete(code); else s.add(code);
+    markedComplete.value = s;
+}
+
+// Header "check all": marks every checkable row in the CURRENT filter
+// (projected, not yet completed)
+const checkableFilteredOrders = computed(() =>
+    filteredErpOrders.value.filter(r =>
+        r.orderType === 'projected' && r.status !== 'completed' && r.mbmOrder));
+
+const allComplChecked = computed(() =>
+    checkableFilteredOrders.value.length > 0 &&
+    checkableFilteredOrders.value.every(r => markedComplete.value.has(r.mbmOrder)));
+
+function toggleMarkAll() {
+    const s = new Set(markedComplete.value);
+    if (allComplChecked.value) {
+        for (const r of checkableFilteredOrders.value) s.delete(r.mbmOrder);
+    }
+    else {
+        for (const r of checkableFilteredOrders.value) s.add(r.mbmOrder);
+    }
+    markedComplete.value = s;
+}
+
+async function saveMarkedComplete() {
+    const codes = [...markedComplete.value];
+    if (!codes.length) return;
+    const s = getInstance();
+    markSaving.value = true;
+    try {
+        await completeOrdersDb(codes);
+        // Remove every bar of these orders — slot stays empty, nothing repacks
+        if (s) {
+            const codeSet = new Set(codes);
+            const drop = s.eventStore.records.filter(ev => {
+                const raw = ev.data?.raw;
+                return raw && !raw.stage && codeSet.has(String(raw.mbmOrder || ''));
+            });
+            for (const ev of drop) {
+                const sid = String(ev.id);
+                if (sid.startsWith('db-') && !sid.includes('-sp')) {
+                    const dbId = Number(sid.slice(3).split('-')[0]);
+                    if (dbId) removedDbEventIds.add(dbId);
+                }
+            }
+            if (drop.length) {
+                // Plain (un-batched) removal: the batch wrapper suspends store
+                // events, so Bryntum's UI never hears the removal and the bars
+                // stay visible until reload. A direct remove repaints INSTANTLY.
+                for (const ev of drop) {
+                    const asgn = s.assignmentStore?.records?.filter(a =>
+                        String(a.eventId ?? a.event?.id) === String(ev.id)) || [];
+                    if (asgn.length) s.assignmentStore.remove(asgn);
+                }
+                s.eventStore.remove(drop);
+                s.features?.eventTooltip?.hide?.();
+                s.refreshRows?.();
+            }
+            // Persist the removals (cancels the events server-side)
+            await syncToApi(s, { eventIds : [] });
+            setBoardBaseline(s);
+            recalcCapacity(s);
+            touchBoardCache(s);
+        }
+        // Drop them from the unplanned pool too so nothing replans them
+        unplanned.value = unplanned.value.filter(u => !codes.includes(String(u.mbmOrder || '')));
+        toast(`${codes.length} order(s) marked complete — removed from the board`, 'ok');
+        markedComplete.value = new Set();
+        // Refresh the list so statuses show 'completed'
+        erpAllLoading.value = true;
+        loadErpAllOrders(currentUnitId.value || null).then(rows => {
+            erpAllOrders.value  = overlayBoardPlacements(rows);
+            erpAllLoading.value = false;
+        }).catch(() => { erpAllLoading.value = false; });
+    }
+    catch (e) {
+        toast(`Mark complete failed: ${e.message}`, 'error');
+    }
+    finally {
+        markSaving.value = false;
+    }
+}
+
+// Export the filtered rows to Excel (same .xls HTML approach as Day Plan)
+function exportOrdersExcel() {
+    const rows = filteredErpOrders.value;
+    if (!rows.length) {
+        toast('No rows to export — adjust the filters first', 'warn');
+        return;
+    }
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const th = ORDER_COLS.map(k => `<th>${esc(ORDER_COL_LABELS[k])}</th>`).join('');
+    const body = rows.map(r => ORDER_COLS.map(k => {
+        let v;
+        if (k === 'orderType')  v = r.orderType === 'confirm' ? 'Confirm' : 'Projected';
+        else if (k === 'status') v = r.replaced || r.status === 'replaced' ? 'replaced' : r.status;
+        else v = orderCellText(r, k);
+        const num = k === 'qty' || k === 'orderQty';
+        return `<td${num ? ' style="text-align:right"' : ''}>${esc(v)}</td>`;
+    }).join('')).map(cells => `<tr>${cells}</tr>`).join('');
+    const s = ordersSummary.value;
+    const summary = `<div style="margin:4px 0 8px;font-size:9pt">
+        Rows: <b>${s.rows}</b> · Projected: <b>${s.proj}</b> · Confirm: <b>${s.conf}</b> ·
+        Orders: <b>${s.orders}</b> · Order Qty: <b>${fmtQty(s.orderQty)}</b> · PO Qty: <b>${fmtQty(s.poQty)}</b></div>`;
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8">
+<style>
+  table { border-collapse: collapse; font-family: Calibri, Arial, sans-serif; font-size: 9pt; }
+  th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; }
+  th { background: #17356b; color: #fff; font-weight: bold; }
+</style>
+</head>
+<body>
+<h2 style="margin:0">All Orders</h2>
+${summary}
+<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
+</body></html>`;
+    const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `AllOrders_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${rows.length} row(s) to Excel`, 'ok');
 }
 
 function listStatus(raw, planned) {
@@ -2046,36 +2691,150 @@ function rememberReplaced(raw, confirm) {
 // FastReact: when a confirm exists for the same MBM order / style, it takes
 // the projection's slot on the board and the projection is flagged replaced
 function replaceProjectionsWithConfirms(s) {
+    if (!AUTO_REPLACE_WITH_CONFIRMS) return 0;
     if (!s) return 0;
-    const confirms = new Map();
-    const noteConfirm = (key, src) => {
-        if (!key || confirms.has(key)) return;
-        confirms.set(key, src);
+    // Match projection ↔ confirm by ORDER CODE — it is unique per order and
+    // survives bars loaded from the DB that carry no style/buyer (family key
+    // would never match those)
+    const reconKey = o => {
+        const m = String(o.mbmOrder || o.order_code || '').trim().toLowerCase();
+        return m && m !== 'mbm-0' ? m : orderFamilyKey(o);
     };
+    // Every confirm colour-group of an order gets planned — the first group
+    // replaces the projection bar in place, the remaining groups are inserted
+    // flush after it on the same line.
+    const confirmEvents  = new Map();   // key -> confirm bars already on board
+    const confirmGroups  = new Map();   // key -> unplanned confirm colour groups
 
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
         raw.orderType = orderTypeOf(raw.po, raw.orderType);
-        if (raw.orderType === 'confirm') noteConfirm(orderFamilyKey(raw), { kind : 'event', ev, raw });
+        if (raw.orderType === 'confirm') {
+            const k = reconKey(raw);
+            if (!confirmEvents.has(k)) confirmEvents.set(k, []);
+            confirmEvents.get(k).push(ev);
+        }
     }
     for (const u of unplanned.value) {
         if (u.replaced || u.status === 'replaced') continue;
         u.orderType = orderTypeOf(u.po, u.orderType);
-        if (u.orderType === 'confirm') noteConfirm(orderFamilyKey(u), { kind : 'unplanned', u });
+        if (u.orderType === 'confirm') {
+            const k = reconKey(u);
+            if (!confirmGroups.has(k)) confirmGroups.set(k, []);
+            confirmGroups.get(k).push(u);
+        }
     }
 
-    if (!confirms.size) return 0;
+    if (!confirmEvents.size && !confirmGroups.size) return 0;
+
+    const confirms = new Map();
+    for (const [k, evs] of confirmEvents) confirms.set(k, { kind : 'event', ev : evs[0], raw : evs[0].data.raw });
+    for (const [k, us] of confirmGroups) {
+        if (!confirms.has(k)) confirms.set(k, { kind : 'unplanned', u : us[0] });
+    }
+
+    // Insert one unplanned confirm group as a NEW bar right after anchorEv
+    const insertGroupAfter = (anchorEv, u) => {
+        const lid = lineIdOf(s, anchorEv);
+        if (!lid || lid === 'hold') return null;
+        const evId = `ev-${u.id}`;
+        if (s.eventStore.getById(evId)) return null;
+        const aRaw = anchorEv.data.raw;
+        const raw2 = {
+            id : u.id, dbId : u.dbId,
+            buyer : u.buyer, style : u.style, po : u.po,
+            mbmOrder : u.mbmOrder, orderType : 'confirm',
+            productType : u.productType || aRaw.productType,
+            qty : Number(u.qty ?? u.orderQty) || 0,
+            orderQty : Number(u.orderQty ?? u.qty) || 0,
+            smv : Number(u.smv) > 0 ? Number(u.smv) : aRaw.smv,
+            ship : u.ship, pcd : u.pcd, matReady : u.matReady,
+            color : u.color,
+            poList : Array.isArray(u.poList) && u.poList.length ? u.poList : (u.po ? [u.po] : []),
+            idList : Array.isArray(u.idList) && u.idList.length ? u.idList : (u.dbId ? [u.dbId] : []),
+            poCount : u.poCount || 1,
+            poDetails : Array.isArray(u.poDetails) ? u.poDetails : [],
+            progress : 0, status : 'draft',
+            eventCode : `EV-C${u.dbId}-SEW`,
+            viaReplacement : true,
+            risk : { score : 0, level : 'low', label : 'On track', reasons : [] }
+        };
+        applyLineFormulaDuration(s, raw2, lid);
+        const start = nextStartAfter(anchorEv.endDate);
+        const end   = endOfWork(start, raw2.dur || 1);
+        raw2.start = start;
+        raw2.end   = end;
+        s.eventStore.add({
+            id : evId, resourceId : lid,
+            startDate : start, endDate : end,
+            duration : elapsedDays(start, end), durationUnit : 'day',
+            manuallyScheduled : true,
+            name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
+            percentDone : 0,
+            raw : raw2
+        });
+        // Inserted before the baseline snapshot — must be force-included in
+        // the next save's change list or it silently never persists
+        pendingSwapIds.add(evId);
+        return s.eventStore.getById(evId);
+    };
 
     const dropEvents = [];
     const dropUnplanned = new Set();
     let n = 0;
 
+    // Split projection strips of one order share the full orderQty — partial
+    // shrinking can only be apportioned safely when the order has ONE strip
+    const projStrips = new Map();
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage || raw.orderType !== 'projection') continue;
-        const hit = confirms.get(orderFamilyKey(raw));
+        const k = reconKey(raw);
+        projStrips.set(k, (projStrips.get(k) || 0) + 1);
+    }
+
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || raw.orderType !== 'projection') continue;
+        const key = reconKey(raw);
+        const hit = confirms.get(key);
         if (!hit) continue;
+        // PARTIAL REPLACEMENT: confirm POs cover LESS than the full order qty —
+        // only the confirmed portion is swapped in. The projection bar shrinks
+        // to the unconfirmed remainder and STAYS on the board as a projection;
+        // later confirm arrivals shrink it further until it is fully replaced.
+        const grpList = (confirmGroups.get(key) || []).filter(g => !dropUnplanned.has(String(g.id)));
+        const evQty   = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.qty) || 0), 0);
+        const grpQty  = grpList.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0);
+        const fullQty = Number(raw.orderQty || raw.qty) || 0;
+        const remaining = fullQty - evQty - grpQty;
+        if (remaining >= 1 && (evQty + grpQty) > 0 && projStrips.get(key) === 1) {
+            const lid = lineIdOf(s, ev);
+            if (Math.abs(Number(raw.qty) - remaining) >= 1) {
+                raw.qty    = remaining;
+                raw.reqMin = Math.round(remaining * (Number(raw.smv) || 0));
+                if (lid && lid !== 'hold') {
+                    applyLineFormulaDuration(s, raw, lid);
+                    const end = endOfWork(ev.startDate, raw.dur || 1);
+                    raw.end = end;
+                    ev.set({ endDate : end, duration : elapsedDays(ev.startDate, end) });
+                }
+                pendingSwapIds.add(String(ev.id));
+                n++;
+            }
+            let anchor = ev;
+            for (const g of grpList) {
+                const added = insertGroupAfter(anchor, g);
+                if (added) {
+                    dropUnplanned.add(String(g.id));
+                    anchor = added;
+                    n++;
+                }
+            }
+            if (anchor !== ev && lid) pushFollowers(s, lid, anchor);
+            continue;
+        }
         rememberReplaced(raw, hit.raw || hit.u);
         if (hit.kind === 'event' && hit.ev !== ev) {
             dropEvents.push(ev);
@@ -2094,32 +2853,63 @@ function replaceProjectionsWithConfirms(s) {
             raw.dbId      = c.dbId ?? raw.dbId;
             raw.id        = c.id || raw.id;
             raw.color     = c.color || orderColor(raw.po);
+            // Consolidated confirm bar: carry the whole PO group so the sync
+            // marks every planning_orders row of the group as planned
+            raw.poList    = Array.isArray(c.poList) && c.poList.length ? c.poList : (raw.po ? [raw.po] : []);
+            raw.idList    = Array.isArray(c.idList) && c.idList.length ? c.idList : (raw.dbId ? [raw.dbId] : []);
+            raw.poCount   = c.poCount || raw.poList.length || 1;
+            raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
+            // The event keeps its stable 'ev-proj:' code (PO-based codes can
+            // collide when one PO number spans several orders/colours) — the
+            // confirm link is carried by planning_order_id via raw.dbId.
             ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
             dropUnplanned.add(String(c.id));
+            pendingSwapIds.add(String(ev.id));
+            // Remaining colour groups of the SAME order: insert flush after
+            // the swapped bar so the whole order is planned, not one colour
+            const rest = (confirmGroups.get(reconKey(raw)) || []).filter(g => g !== c);
+            let anchor = ev;
+            for (const g of rest) {
+                const added = insertGroupAfter(anchor, g);
+                if (added) {
+                    dropUnplanned.add(String(g.id));
+                    anchor = added;
+                }
+            }
+            if (anchor !== ev) pushFollowers(s, lineIdOf(s, ev), anchor);
         }
         n++;
     }
 
-    for (const u of unplanned.value) {
-        if (u.replaced || u.orderType !== 'projection') continue;
-        if (!confirms.has(orderFamilyKey(u))) continue;
-        u.replaced = true;
-        u.status = 'replaced';
-        u.orderType = 'projection';
-        rememberReplaced(u, confirms.get(orderFamilyKey(u)).raw || confirms.get(orderFamilyKey(u)).u);
-        n++;
+    // Second pass: orders whose confirm bar is ALREADY on the board (e.g.
+    // after a save/reload the projection is gone) but still have unplanned
+    // colour groups — insert those after the order's last bar on its line.
+    for (const [k, groups] of confirmGroups) {
+        const evs = confirmEvents.get(k);
+        if (!evs || !evs.length) continue;
+        let anchor = evs.reduce((a, b) => (b.endDate > a.endDate ? b : a));
+        const startAnchor = anchor;
+        for (const g of groups) {
+            if (dropUnplanned.has(String(g.id))) continue;
+            const added = insertGroupAfter(anchor, g);
+            if (added) {
+                dropUnplanned.add(String(g.id));
+                anchor = added;
+                n++;
+            }
+        }
+        if (anchor !== startAnchor) pushFollowers(s, lineIdOf(s, startAnchor), anchor);
     }
 
+    // Unplanned projections that merely have a linked Confirm Order are NOT
+    // flagged or purged: the projection remains the capacity-planning record
+    // until an approved replacement executes (the in-place bar swap above,
+    // which only applies to projection bars already planned on the board).
     if (dropEvents.length) {
         s.eventStore.remove(dropEvents);
     }
     if (dropUnplanned.size) {
-        unplanned.value = unplanned.value.filter(u =>
-            !dropUnplanned.has(String(u.id)) && !u.replaced
-        );
-    }
-    else {
-        unplanned.value = unplanned.value.filter(u => !u.replaced);
+        unplanned.value = unplanned.value.filter(u => !dropUnplanned.has(String(u.id)));
     }
     return n;
 }
@@ -2145,6 +2935,7 @@ function collectOrders() {
                 buyer : raw.buyer, style : raw.style,
                 productType : productTypeFromProfile(raw.po, onHold ? null : lid),
                 color : orderColor(raw.po),
+                garmentColor : raw.color || '',
                 orderQty : raw.orderQty ?? raw.qty,
                 qty : raw.qty, smv, reqMin : Math.round(raw.qty * smv),
                 pcd : raw.pcd ? new Date(raw.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
@@ -2153,10 +2944,12 @@ function collectOrders() {
                 orderType : orderTypeOf(raw.po, raw.orderType),
                 status : onHold ? 'unplanned' : listStatus(raw, true),
                 replaced : !!raw.replaced,
-                line : onHold ? '—' : (s.resourceStore.getById(lid)?.name || lid),
+                line : onHold ? '—' : (s.resourceStore?.getById(lid)?.name || lid),
                 start : onHold ? null : ev.startDate,
                 end : onHold ? null : ev.endDate,
-                progress : raw.progress
+                progress : raw.progress,
+                poCount : raw.poCount || 1,
+                poList  : raw.poList  || []
             });
         }
     }
@@ -2164,26 +2957,56 @@ function collectOrders() {
         if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
         if (u.po && onBoardPos.has(String(u.po))) continue;
         if (!String(u.buyer || '').trim()) continue;
-        const poDelivery = u.ship ? new Date(u.ship) : null;
-        // Real SMV from planning_orders when present, demo fallback otherwise
-        const smv  = Number(u.smv) > 0 ? Number(u.smv) : randSmv(u.po);
-        rows.push({
-            id : u.id, planned : false,
-            unit : u.unitName || unitLabel(u.unitId) || '—',
-            po : u.po, mbmOrder : mbmOrderNo(u.po, u.mbmOrder),
-            buyer : u.buyer, style : u.style,
-            productType : productTypeFromProfile(u.po, u.suitable?.[0]),
-            color : orderColor(u.po),
-            orderQty : u.orderQty ?? u.qty,
-            qty : u.qty, smv, reqMin : Math.round(u.qty * smv),
-            pcd : u.pcd ? new Date(u.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
-            poDelivery,
-            orderDelivery : poDelivery,
-            orderType : orderTypeOf(u.po, u.orderType),
-            status : u.replaced ? 'replaced' : 'unplanned',
-            replaced : !!u.replaced,
-            line : '—', start : null, end : null, progress : 0
-        });
+        const smv = Number(u.smv) > 0 ? Number(u.smv) : randSmv(u.po);
+        const details = u.poDetails?.length > 0 ? u.poDetails : null;
+        if (details && u.poCount > 1) {
+            // Expand grouped confirm order into individual PO rows for the All Orders list
+            for (const d of details) {
+                const dShip = d.ship ? new Date(d.ship) : (u.ship ? new Date(u.ship) : null);
+                const dQty  = Number(d.remaining ?? d.qty ?? 0);
+                const dOrdQty = Number(d.qty ?? 0);
+                rows.push({
+                    id : `${u.id}-${d.id}`, planned : false,
+                    unit : u.unitName || unitLabel(u.unitId) || '—',
+                    po : d.po, mbmOrder : mbmOrderNo(d.po, u.mbmOrder),
+                    buyer : u.buyer, style : u.style,
+                    productType : productTypeFromProfile(d.po, u.suitable?.[0]),
+                    color : orderColor(d.po),
+                    garmentColor : u.color || '',
+                    orderQty : dOrdQty,
+                    qty : dQty, smv, reqMin : Math.round(dQty * smv),
+                    pcd : u.pcd ? new Date(u.pcd) : (dShip ? addCalDays(dShip, -30) : null),
+                    poDelivery : dShip,
+                    orderDelivery : dShip,
+                    orderType : orderTypeOf(d.po, u.orderType),
+                    status : 'unplanned', replaced : false,
+                    line : '—', start : null, end : null, progress : 0,
+                    poCount : 1, poList : [d.po]
+                });
+            }
+        } else {
+            const poDelivery = u.ship ? new Date(u.ship) : null;
+            rows.push({
+                id : u.id, planned : false,
+                unit : u.unitName || unitLabel(u.unitId) || '—',
+                po : u.po, mbmOrder : mbmOrderNo(u.po, u.mbmOrder),
+                buyer : u.buyer, style : u.style,
+                productType : productTypeFromProfile(u.po, u.suitable?.[0]),
+                color : orderColor(u.po),
+                garmentColor : u.color || '',
+                orderQty : u.orderQty ?? u.qty,
+                qty : u.qty, smv, reqMin : Math.round(u.qty * smv),
+                pcd : u.pcd ? new Date(u.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
+                poDelivery,
+                orderDelivery : poDelivery,
+                orderType : orderTypeOf(u.po, u.orderType),
+                status : u.replaced ? 'replaced' : 'unplanned',
+                replaced : !!u.replaced,
+                line : '—', start : null, end : null, progress : 0,
+                poCount : u.poCount || 1,
+                poList  : u.poList  || []
+            });
+        }
     }
     const listed = new Set(rows.map(r => String(r.id)));
     for (const u of replacedOrders.value) {
@@ -2217,33 +3040,66 @@ function unitLabel(id) {
     return m[Number(id)] || (id ? `Unit ${id}` : '—');
 }
 
+// Projected rows planned on the LIVE board (not yet saved to DB) still show
+// their line / start / end in the Orders list — overlay from the scheduler.
+function overlayBoardPlacements(rows) {
+    const s = getInstance();
+    if (!s) return rows;
+    const byProj = new Map();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const pid = String(raw.id || '');
+        if (pid.startsWith('proj:')) byProj.set(pid.slice(5), ev);
+    }
+    if (!byProj.size) return rows;
+    for (const r of rows) {
+        if (r.orderType !== 'projected' || !r.mbmOrder) continue;
+        const ev = byProj.get(r.mbmOrder);
+        if (!ev) continue;
+        const lid = lineIdOf(s, ev);
+        const res = lid ? s.resourceStore.getById(lid) : null;
+        r.line  = res?.data?.name || res?.name || r.line;
+        r.start = ev.startDate ? new Date(ev.startDate) : r.start;
+        r.end   = ev.endDate   ? new Date(ev.endDate)   : r.end;
+        // The projection's own bar is live on the board — it is PLANNED, not
+        // replaced (replaced = bar gone, a planned confirm took its slot)
+        if (r.status === 'unplanned' || r.status === 'replaced' || r.replaced) {
+            r.status   = 'planned';
+            r.planned  = true;
+            r.replaced = false;
+        }
+    }
+    return rows;
+}
+
 function openOrders() {
-    // Show dialog immediately with whatever is already in memory
-    ordersRows.value  = collectOrders();
     ordersOpen.value  = true;
     ordersMin.value   = false;
+    // Load ERP all-orders (projected + confirm) for the All Orders tab
+    erpAllLoading.value = true;
+    erpAllOrders.value  = [];
+    loadErpAllOrders(currentUnitId.value || null).then(rows => {
+        erpAllOrders.value  = overlayBoardPlacements(rows);
+        erpAllLoading.value = false;
+    }).catch(() => { erpAllLoading.value = false; });
+    // Also refresh confirm groups from board + unplanned (for Confirm Orders tab)
+    ordersRows.value    = collectOrders();
     ordersLoading.value = true;
-
-    const FIRST = 100; // rows to show instantly
+    const FIRST  = 100;
     const unitId = currentUnitId.value;
     loadUnplannedDbPaged(FIRST, (chunk, total, offset) => {
         ordersTotal.value = total;
         if (offset === 0) {
-            // Replace with the fast first batch — instant display
-            unplanned.value  = chunk;
-        }
-        else {
-            // Append background chunks without replacing planned bars already on board
+            unplanned.value = chunk;
+        } else {
             const existingIds = new Set(unplanned.value.map(u => u.id));
             const fresh = chunk.filter(u => !existingIds.has(u.id));
             unplanned.value = [...unplanned.value, ...fresh];
         }
-    ordersRows.value = collectOrders();
-        // Hide spinner once all pages have arrived
+        ordersRows.value = collectOrders();
         if (unplanned.value.length >= total) ordersLoading.value = false;
-    }, unitId).catch(() => {
-        ordersLoading.value = false;
-    });
+    }, unitId).catch(() => { ordersLoading.value = false; });
 }
 
 function isoInputDate(d) {
@@ -2293,6 +3149,45 @@ function dpEachDay(from, to) {
     return out;
 }
 
+// Long ranges use one column per month instead of per day
+function dpEachMonth(from, to) {
+    const out = [];
+    const d = new Date(from.getFullYear(), from.getMonth(), 1);
+    const end = new Date(to.getFullYear(), to.getMonth(), 1);
+    let guard = 0;
+    while (d <= end && guard++ < 80) {
+        out.push(new Date(d));
+        d.setMonth(d.getMonth() + 1);
+    }
+    return out;
+}
+
+function dpMonthKey(d) {
+    const x = new Date(d);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function dpColKey(d) {
+    return dpMode.value === 'month' ? dpMonthKey(d) : dpDayKey(d);
+}
+
+const DP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function dpColLabel(d) {
+    if (dpMode.value !== 'month') return fmtDdMmYy(d);
+    const x = new Date(d);
+    return `${DP_MONTHS[x.getMonth()]}-${String(x.getFullYear()).slice(-2)}`;
+}
+
+// Collapse a daily {YYYY-MM-DD: qty} map into monthly {YYYY-MM: qty}
+function dpCollapseMonths(days) {
+    const out = {};
+    for (const [k, v] of Object.entries(days)) {
+        const mk = k.slice(0, 7);
+        out[mk] = (out[mk] || 0) + v;
+    }
+    return out;
+}
+
 function dpStripDaily(ev, line) {
     const raw = ev.data.raw;
     const map = {};
@@ -2330,6 +3225,7 @@ const DP_META = [
     { k : 'line',       label : 'Line' },
     { k : 'buyer',      label : 'Buyer' },
     { k : 'mbm',        label : 'MBM No.' },
+    { k : 'pcd',        label : 'PCD' },
     { k : 'groupQty',   label : 'Group Qty', num : true },
     { k : 'style',      label : 'Style' },
     { k : 'itemName',   label : 'Item Name' },
@@ -2359,6 +3255,9 @@ const dpGenerated   = ref(false);
 const dpFrom        = ref(isoInputDate(new Date()));
 const dpTo          = ref(isoInputDate(addCalDays(new Date(), 13)));
 const dpDates       = ref([]);
+const dpMode        = ref('day');   // 'day' (≤ 3 months) or 'month' (longer ranges)
+const dpScope       = ref('range'); // 'range' = Day Plan (date-filtered) · 'board' = whole board incl. Holding Row
+const dpReportTitle = computed(() => dpScope.value === 'board' ? 'Board Plan Report' : 'Day Plan Report');
 const dpGroups      = ref([]);
 const dpGeneratedAt = ref('');
 
@@ -2396,10 +3295,143 @@ const dpGrand = computed(() => {
     return g;
 });
 
+// ---- Summary & Floor Target views (mirror of the factory Excel reports) ----
+const dpView = ref('report');   // 'report' | 'summary' | 'floors'
+
+const dpSummary = computed(() => {
+    const lineGroups = dpGroups.value.filter(g => g.lineId !== 'hold');
+    const rows = lineGroups.flatMap(g => g.rows);
+    const planQty = rows.reduce((a, r) => a + r.planQty, 0);
+    const sah     = rows.reduce((a, r) => a + r.planQty * (Number(r.smv) || 0), 0) / 60;
+    const effW    = rows.reduce((a, r) => a + r.planEff * r.planQty, 0);
+    const buyers  = new Map();
+    for (const r of rows) buyers.set(r.buyer || '—', (buyers.get(r.buyer || '—') || 0) + r.planQty);
+    // Working days = date columns that actually carry planned quantity
+    const dayKeys = new Set();
+    for (const g of lineGroups) {
+        for (const [k, v] of Object.entries(g.totals.days)) if (v > 0) dayKeys.add(k);
+    }
+    const s = getInstance();
+    let hrsSum = 0, hrsN = 0;
+    for (const g of lineGroups) {
+        const h = Number(s?.resourceStore?.getById(g.lineId)?.data?.hours);
+        if (h > 0) { hrsSum += h; hrsN++; }
+    }
+    const floors = new Map();
+    for (const g of lineGroups) {
+        const key = g.floor || '—';
+        if (!floors.has(key)) floors.set(key, { floor : key, planQty : 0, sah : 0, effW : 0, manpower : 0, lines : 0, cm : 0 });
+        const f = floors.get(key);
+        f.lines++;
+        f.manpower += g.totals.manpower;
+        f.cm       += g.totals.totalCm;
+        for (const r of g.rows) {
+            f.planQty += r.planQty;
+            f.sah     += r.planQty * (Number(r.smv) || 0) / 60;
+            f.effW    += r.planEff * r.planQty;
+        }
+    }
+    const floorRows = [...floors.values()].map(f => ({
+        ...f,
+        sah    : Math.round(f.sah),
+        avgSmv : f.planQty ? Math.round(f.sah * 60 * 100 / f.planQty) / 100 : 0,
+        eff    : f.planQty ? Math.round(f.effW / f.planQty) : 0
+    }));
+    return {
+        planQty,
+        sah      : Math.round(sah),
+        avgSmv   : planQty ? Math.round(sah * 60 * 100 / planQty) / 100 : 0,
+        eff      : planQty ? Math.round(effW / planQty) : 0,
+        workHrs  : hrsN ? Math.round(hrsSum * 100 / hrsN) / 100 : 0,
+        days     : dayKeys.size,
+        lines    : lineGroups.length,
+        manpower : lineGroups.reduce((a, g) => a + g.totals.manpower, 0),
+        cm       : lineGroups.reduce((a, g) => a + g.totals.totalCm, 0),
+        buyers   : [...buyers.entries()].map(([buyer, qty]) => ({ buyer, qty })).sort((a, b) => b.qty - a.qty),
+        floors   : floorRows
+    };
+});
+
+const dpFloorMatrix = computed(() => {
+    const floors = new Map();
+    for (const g of dpGroups.value) {
+        if (g.lineId === 'hold') continue;
+        const key = g.floor || '—';
+        if (!floors.has(key)) floors.set(key, { floor : key, days : {}, total : 0 });
+        const f = floors.get(key);
+        for (const [k, v] of Object.entries(g.totals.days)) {
+            f.days[k] = (f.days[k] || 0) + v;
+            f.total  += v;
+        }
+    }
+    const grand = { days : {}, total : 0 };
+    for (const f of floors.values()) {
+        for (const [k, v] of Object.entries(f.days)) grand.days[k] = (grand.days[k] || 0) + v;
+        grand.total += f.total;
+    }
+    return { rows : [...floors.values()], grand };
+});
+
+// Plan Hours matrix: every sewing line × date with the line's working hours
+// (blank on calendar off-days), plus manpower and a column-average row
+const dpHoursMatrix = computed(() => {
+    const s = getInstance();
+    if (!s) return { rows : [], avg : {}, manpower : 0 };
+    const lines = s.resourceStore.records.filter(r => /^l\d+$/.test(String(r.id)));
+    const rows = lines.map(r => {
+        const hours = Number(r.data?.hours) || 11;
+        const days = {};
+        for (const d of dpDates.value) {
+            days[dpColKey(d)] = (dpMode.value !== 'month' && isOffDay(d)) ? null : hours;
+        }
+        return {
+            floor    : r.data?.unit || 'AQL',
+            line     : dpLineCode(r),
+            manpower : Number(r.data?.manpower) || 0,
+            days
+        };
+    });
+    const avg = {};
+    for (const d of dpDates.value) {
+        const k = dpColKey(d);
+        const vals = rows.map(x => x.days[k]).filter(v => v != null);
+        avg[k] = vals.length ? Math.round(vals.reduce((a, v) => a + v, 0) * 100 / vals.length) / 100 : null;
+    }
+    return { rows, avg, manpower : rows.reduce((a, x) => a + x.manpower, 0) };
+});
+
+// Click a day column (Floor Target view) → single-day Day Plan report
+function dpPickDay(d) {
+    if (dpMode.value === 'month') return;
+    dpScope.value = 'range';
+    dpFrom.value  = dpDayKey(d);
+    dpTo.value    = dpDayKey(d);
+    dpView.value  = 'report';
+    generateDayPlan();
+}
+
 function openDayPlanReport() {
     openMenu.value = null;
+    dpScope.value = 'range';
+    dpView.value = 'report';
     dpOpen.value = true;
     dpMin.value = false;
+}
+
+// Board Plan Report: everything currently ON the board, exactly as placed —
+// every line plus the Holding Row, no date-range filter
+function openBoardPlanReport() {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s) {
+        toast('Open a planning board first', 'warn');
+        return;
+    }
+    dpScope.value = 'board';
+    dpView.value = 'report';
+    dpOpen.value = true;
+    dpMin.value = false;
+    generateDayPlan();
 }
 
 function generateDayPlan() {
@@ -2408,17 +3440,40 @@ function generateDayPlan() {
         toast('Open a planning board first, then generate the report', 'warn');
         return;
     }
-    const from = new Date(dpFrom.value + 'T00:00:00');
-    const to   = new Date(dpTo.value + 'T23:59:59');
-    if (!(from instanceof Date) || Number.isNaN(+from) || Number.isNaN(+to) || from > to) {
-        toast('Select a valid date range', 'warn');
+    let from, to;
+    if (dpScope.value === 'board') {
+        // Whole board: span = earliest start … latest end of every bar
+        let min = null, max = null;
+        for (const ev of s.eventStore.records) {
+            if (!ev.data.raw || ev.data.raw.stage) continue;
+            if (!min || ev.startDate < min) min = ev.startDate;
+            if (!max || ev.endDate > max) max = ev.endDate;
+        }
+        if (!min) {
+            toast('The board is empty — nothing to report', 'warn');
+            return;
+        }
+        from = new Date(min); from.setHours(0, 0, 0, 0);
+        to   = new Date(max); to.setHours(23, 59, 59, 0);
+        dpFrom.value = dpDayKey(from);
+        dpTo.value   = dpDayKey(to);
+    }
+    else {
+        from = new Date(dpFrom.value + 'T00:00:00');
+        to   = new Date(dpTo.value + 'T23:59:59');
+        if (!(from instanceof Date) || Number.isNaN(+from) || Number.isNaN(+to) || from > to) {
+            toast('Select a valid date range', 'warn');
+            return;
+        }
+    }
+    const dayCount = Math.round((+to - +from) / 86400000) + 1;
+    if (dayCount > 1830 && dpScope.value !== 'board') {
+        toast('Date range is too long — keep it within 5 years', 'warn');
         return;
     }
-    const dates = dpEachDay(from, to);
-    if (dates.length > 92) {
-        toast('Date range is too long — keep it within 3 months', 'warn');
-        return;
-    }
+    // ≤ 3 months: one column per day; longer ranges: one column per month
+    dpMode.value = dayCount > 92 ? 'month' : 'day';
+    const dates = dpMode.value === 'month' ? dpEachMonth(from, to) : dpEachDay(from, to);
 
     const byLine = new Map();
     for (const ev of s.eventStore.records) {
@@ -2426,47 +3481,74 @@ function generateDayPlan() {
         if (!raw || raw.stage) continue;
         if (!String(raw.buyer || '').trim()) continue;
         const lid = lineIdOf(s, ev);
-        if (lid === 'hold' || !LINE_BY_ID[lid]) continue;
+        const isHold = lid === 'hold';
+        // Range report: planned line bars only. Board report: everything on
+        // the board exactly as placed — Holding Row included.
+        if (dpScope.value === 'board') {
+            if (!isHold && !LINE_BY_ID[lid] && !s.resourceStore.getById(lid)?.data?.lineRow) continue;
+        }
+        else {
+            if (isHold || !LINE_BY_ID[lid]) continue;
+        }
         const start = new Date(ev.startDate);
         const end   = new Date(ev.endDate);
-        if (end < from || start > to) continue;
+        if (dpScope.value !== 'board' && (end < from || start > to)) continue;
 
         const res  = s.resourceStore.getById(lid);
         const line = LINE_BY_ID[lid] || res?.data || {};
         const smv  = Number(raw.smv) || randSmv(raw.po);
         const qty  = Number(raw.qty) || 0;
-        const poQty = Number(raw.orderQty ?? raw.qty) || 0;
+        // Orders-list parity: a confirm bar's PO Qty is its colour-group total
+        // (the bar's own qty — raw.orderQty may hold only the anchor row's
+        // qty on consolidated bars); a projection shows the source order qty
+        const poQty = orderTypeOf(raw.po, raw.orderType) === 'confirm'
+            ? qty
+            : (Number(raw.orderQty ?? raw.qty) || 0);
         const cmPc = dpCmPerPc(raw.po);
         const pType = productTypeFromProfile(raw.po, lid);
-        const orderType = orderTypeOf(raw.po);
+        const orderType = orderTypeOf(raw.po, raw.orderType);
         const status = raw.status === 'completed' ? 'Completed'
             : orderType === 'confirm' ? 'Confirmed' : 'Provisional';
         const pid = lineProfileMap.value[lid];
         const profile = (pid && effList.value.find(p => p.id === pid)) || effList.value[0];
-        // Product type value from the profile when present (> 0), else _Default
+        // Same rule as the board: line efficiency is the floor — a product
+        // (profile) efficiency applies only when it is higher than the line's
         const typeEff = Number(profile?.values?.[pType]);
-        const baseEff = typeEff > 0
-            ? typeEff
-            : Number(profile?.values?._Default) || Number(line.eff) || 0;
+        const defEff  = Number(profile?.values?._Default);
+        const productEff = typeEff > 0 ? typeEff : (defEff > 0 ? defEff : 0);
+        const baseEff = Math.max(productEff, Number(line.eff) || 0);
         const planEff = Math.round(baseEff * (raw.stripEff || 100) / 100);
 
+        // Only the quantity actually planned INSIDE the range counts as
+        // Plan Qty for the range report; Allocated Qty stays the full bar
+        const dailyMap = dpStripDaily(ev, line);
+        let inRangeQty = 0;
+        if (dpScope.value !== 'board') {
+            const fromKey = dpDayKey(from), toKey = dpDayKey(to);
+            for (const [k, v] of Object.entries(dailyMap)) {
+                if (k >= fromKey && k <= toKey) inRangeQty += v;
+            }
+        }
+
         const row = {
+            _start      : +start,   // board plan sequence within the line
             floor       : res?.data?.unit || line.unit || 'AQL',
-            line        : dpLineCode(res),
+            line        : isHold ? 'Holding Row' : dpLineCode(res),
             buyer       : raw.buyer,
-            mbm         : mbmOrderNo(raw.po),
+            mbm         : raw.mbmOrder || mbmOrderNo(raw.po),
+            pcd         : raw.pcd ? fmtDdMmYy(raw.pcd) : '—',
             groupQty    : poQty,
             style       : raw.style || '—',
             itemName    : pType,
             code        : String(raw.po || '').replace(/\D/g, '').slice(-6) || '—',
             smv,
             description : pType,
-            po          : raw.po || '—',
-            color       : orderColor(raw.po),
+            po          : raw.poCount > 1 ? `[${raw.poCount} POs] ${raw.po}` : (raw.po || '—'),
+            color       : raw.color || orderColor(raw.po),
             status,
             exFty       : fmtDdMmYy(raw.ship),
             poQty,
-            planQty     : qty,
+            planQty     : dpScope.value === 'board' ? qty : inRangeQty,
             allocQty    : qty,
             cmPc,
             totalCm     : Math.round(qty * cmPc * 100) / 100,
@@ -2476,7 +3558,7 @@ function generateDayPlan() {
             manpower    : Number(res?.data?.manpower ?? line.manpower) || 0,
             planEff,
             metric      : 'Plan Qty',
-            days        : dpStripDaily(ev, line)
+            days        : dpMode.value === 'month' ? dpCollapseMonths(dailyMap) : dailyMap
         };
 
         if (!byLine.has(lid)) {
@@ -2484,7 +3566,7 @@ function generateDayPlan() {
                 lineId   : lid,
                 floor    : row.floor,
                 line     : row.line,
-                sort     : LINES.findIndex(l => l.id === lid),
+                sort     : isHold ? Number.MAX_SAFE_INTEGER : (LINES.findIndex(l => l.id === lid) + 1 || 999),
                 rows     : [],
                 totals   : {
                     poQty : 0, planQty : 0, allocQty : 0, totalCm : 0,
@@ -2507,11 +3589,14 @@ function generateDayPlan() {
     }
 
     dpDates.value = dates;
+    // Within each line, list orders in the same sequence they are planned on
+    // the board (by sewing start date/time)
+    for (const g of byLine.values()) g.rows.sort((a, b) => a._start - b._start);
     dpGroups.value = [...byLine.values()].sort((a, b) => a.sort - b.sort);
     dpGenerated.value = true;
     dpGeneratedAt.value = fmtClock(new Date());
     const n = dpGroups.value.reduce((a, g) => a + g.rows.length, 0);
-    toast(n ? `Day Plan Report — ${n} order(s) in range` : 'No planned orders in this date range', n ? 'ok' : 'warn');
+    toast(n ? `${dpReportTitle.value} — ${n} order(s)` : 'No planned orders found', n ? 'ok' : 'warn');
 }
 
 function dpCell(row, col) {
@@ -2524,12 +3609,12 @@ function dpCell(row, col) {
 }
 
 function dpDayVal(days, d) {
-    const v = days?.[dpDayKey(d)];
+    const v = days?.[dpColKey(d)];
     return v ? fmtQty(v) : '-';
 }
 
 function dpDayRaw(days, d) {
-    return days?.[dpDayKey(d)] || 0;
+    return days?.[dpColKey(d)] || 0;
 }
 
 function dpBuildTableHtml() {
@@ -2547,12 +3632,12 @@ function dpBuildTableHtml() {
         return `<td${c.num ? ' style="text-align:right;font-weight:bold"' : ' style="font-weight:bold"'}>${dpEsc(v)}</td>`;
     }).join('');
     const daysFor = (days, cls) => dpDates.value.map(d => {
-        const v = days[dpDayKey(d)];
+        const v = days[dpColKey(d)];
         return `<td style="text-align:right;font-weight:bold${cls || ''}">${v ? fmtQty(v) : '-'}</td>`;
     }).join('');
 
     const th = [...DP_META.map(c => `<th>${dpEsc(c.label)}</th>`),
-        ...dpDates.value.map(d => `<th>${fmtDdMmYy(d)}</th>`)].join('');
+        ...dpDates.value.map(d => `<th>${dpColLabel(d)}</th>`)].join('');
     const body = dpGroups.value.map(g => {
         const data = g.rows.map(r => {
             const meta = DP_META.map(c => `<td${c.num ? ' style="text-align:right"' : ''}>${dpEsc(dpCell(r, c))}</td>`).join('');
@@ -2578,12 +3663,77 @@ function dpBuildTableHtml() {
     };
 }
 
+// ---- Per-view export builders: Excel/PDF export whatever view is on screen
+function dpBuildSummaryHtml() {
+    const s = dpSummary.value;
+    const kv = `<table border="1" cellspacing="0" cellpadding="3">
+<thead><tr><th colspan="2">Summary — ${dpEsc(dpRangeLabel.value)}</th></tr></thead><tbody>
+<tr><td>Plan Qty in pcs</td><td style="text-align:right"><b>${fmtQty(s.planQty)}</b></td></tr>
+<tr><td>Plan SAH</td><td style="text-align:right"><b>${fmtQty(s.sah)}</b></td></tr>
+<tr><td>Avg. SMV</td><td style="text-align:right">${s.avgSmv}</td></tr>
+<tr><td>Plan Efficiency</td><td style="text-align:right">${s.eff}%</td></tr>
+<tr><td>Plan Working Hrs</td><td style="text-align:right">${s.workHrs}</td></tr>
+<tr><td>No of ${dpMode.value === 'month' ? 'Months' : 'Days'}</td><td style="text-align:right">${s.days}</td></tr>
+<tr><td>No of lines planned</td><td style="text-align:right">${s.lines}</td></tr>
+<tr><td>Man power</td><td style="text-align:right">${fmtQty(s.manpower)}</td></tr>
+<tr><td>CM Plan (Pre-costing)</td><td style="text-align:right">$ ${fmtQty(Math.round(s.cm))}</td></tr>
+</tbody></table>`;
+    const buyers = `<table border="1" cellspacing="0" cellpadding="3">
+<thead><tr><th colspan="2">BUYER WISE PLAN QTY</th></tr><tr><th>Buyer</th><th>Plan Qty</th></tr></thead><tbody>
+${s.buyers.map(b => `<tr><td>${dpEsc(b.buyer)}</td><td style="text-align:right">${fmtQty(b.qty)}</td></tr>`).join('')}
+<tr class="dp-grand"><td>Total</td><td style="text-align:right">${fmtQty(s.planQty)}</td></tr>
+</tbody></table>`;
+    const fl = s.floors;
+    const frow = (label, fn) =>
+        `<tr><td style="font-weight:bold">${label}</td>${fl.map(f => `<td style="text-align:right">${fn(f)}</td>`).join('')}<td style="text-align:right"><b>${fn(null)}</b></td></tr>`;
+    const floors = fl.length ? `<table border="1" cellspacing="0" cellpadding="3">
+<thead><tr><th></th>${fl.map(f => `<th>${dpEsc(f.floor)}</th>`).join('')}<th>Total</th></tr></thead><tbody>
+${frow('Plan Qty.', f => fmtQty(f ? f.planQty : s.planQty))}
+${frow('Plan SAH', f => fmtQty(f ? f.sah : s.sah))}
+${frow('Plan Efficiency', f => (f ? f.eff : s.eff) + '%')}
+${frow('Avg SMV/Floor', f => f ? f.avgSmv : s.avgSmv)}
+${frow('Plan Lines', f => f ? f.lines : s.lines)}
+${frow('Manpower', f => fmtQty(f ? f.manpower : s.manpower))}
+${frow('CM Plan (Pre-costing)', f => '$ ' + fmtQty(Math.round(f ? f.cm : s.cm)))}
+</tbody></table>` : '';
+    return `${kv}<br>${buyers}<br>${floors}`;
+}
+
+function dpBuildFloorsHtml() {
+    const m = dpFloorMatrix.value;
+    const th = `<tr><th>Factory</th>${dpDates.value.map(d => `<th>${dpColLabel(d)}</th>`).join('')}<th>Total</th></tr>`;
+    const rows = m.rows.map(f =>
+        `<tr><td>${dpEsc(f.floor)}</td>${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpDayVal(f.days, d))}</td>`).join('')}<td style="text-align:right"><b>${fmtQty(f.total)}</b></td></tr>`).join('');
+    const grand = `<tr class="dp-grand"><td>Total</td>${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpDayVal(m.grand.days, d))}</td>`).join('')}<td style="text-align:right">${fmtQty(m.grand.total)}</td></tr>`;
+    return `<table border="1" cellspacing="0" cellpadding="3"><thead>${th}</thead><tbody>${rows}${grand}</tbody></table>`;
+}
+
+function dpBuildHoursHtml() {
+    const m = dpHoursMatrix.value;
+    const th = `<tr><th>Factory</th><th>Line</th><th>Man Power</th>${dpDates.value.map(d => `<th>${dpColLabel(d)}</th>`).join('')}</tr>`;
+    const rows = m.rows.map(r =>
+        `<tr><td>${dpEsc(r.floor)}</td><td>${dpEsc(r.line)}</td><td style="text-align:right">${r.manpower}</td>${dpDates.value.map(d => `<td style="text-align:right">${r.days[dpColKey(d)] ?? '-'}</td>`).join('')}</tr>`).join('');
+    const avg = `<tr class="dp-grand"><td>Avg</td><td></td><td style="text-align:right">${fmtQty(m.manpower)}</td>${dpDates.value.map(d => `<td style="text-align:right">${m.avg[dpColKey(d)] ?? '-'}</td>`).join('')}</tr>`;
+    return `<table border="1" cellspacing="0" cellpadding="3"><thead>${th}</thead><tbody>${rows}${avg}</tbody></table>`;
+}
+
+const DP_VIEW_NAMES = { report : '', summary : 'Summary', floors : 'Floor Target', hours : 'Plan Hours' };
+
+function dpBuildViewHtml() {
+    const base = dpBuildTableHtml();
+    const viewName = DP_VIEW_NAMES[dpView.value] || '';
+    if (dpView.value === 'summary') return { ...base, table : dpBuildSummaryHtml(), viewName };
+    if (dpView.value === 'floors')  return { ...base, table : dpBuildFloorsHtml(),  viewName };
+    if (dpView.value === 'hours')   return { ...base, table : dpBuildHoursHtml(),   viewName };
+    return { ...base, viewName };
+}
+
 function exportDayPlanExcel() {
     if (!dpGenerated.value) {
         toast('Generate the report first', 'warn');
         return;
     }
-    const { unit, range, summary, table } = dpBuildTableHtml();
+    const { unit, range, summary, table, viewName } = dpBuildViewHtml();
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <head><meta charset="UTF-8">
 <style>
@@ -2596,14 +3746,14 @@ function exportDayPlanExcel() {
 </head>
 <body>
 <h2 style="margin:0">${dpEsc(unit)}</h2>
-<h3 style="margin:2px 0">Day Plan Report — ${dpEsc(range)}</h3>
+<h3 style="margin:2px 0">${dpEsc(dpReportTitle.value)}${viewName ? ' — ' + dpEsc(viewName) : ''} — ${dpEsc(range)}</h3>
 ${summary}
 ${table}
 </body></html>`;
     const blob = new Blob(['\uFEFF' + html], { type : 'application/vnd.ms-excel' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `DayPlanReport_${dpFrom.value}_${dpTo.value}.xls`;
+    a.download = `${dpReportTitle.value.replace(/\s+/g, '')}${viewName ? '_' + viewName.replace(/\s+/g, '') : ''}_${dpFrom.value}_${dpTo.value}.xls`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500);
     toast('Excel file downloaded', 'ok');
@@ -2614,13 +3764,13 @@ function exportDayPlanPdf() {
         toast('Generate the report first', 'warn');
         return;
     }
-    const { unit, range, summary, table } = dpBuildTableHtml();
+    const { unit, range, summary, table, viewName } = dpBuildViewHtml();
     const w = window.open('', '_blank');
     if (!w) {
         toast('Allow pop-ups to export PDF', 'warn');
         return;
     }
-    w.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>Day Plan Report — ${dpEsc(unit)}</title>
+    w.document.write(`<!doctype html><html><head><meta charset="UTF-8"><title>${dpEsc(dpReportTitle.value)}${viewName ? ' — ' + dpEsc(viewName) : ''} — ${dpEsc(unit)}</title>
 <style>
   @page { size: A3 landscape; margin: 8mm; }
   body { font-family: Arial, sans-serif; font-size: 8pt; color: #000; }
@@ -2636,7 +3786,7 @@ function exportDayPlanPdf() {
 </style></head><body>
 <div class="rep-head">
   <h2>${dpEsc(unit)}</h2>
-  <h3>Day Plan Report</h3>
+  <h3>${dpEsc(dpReportTitle.value)}${viewName ? ' — ' + dpEsc(viewName) : ''}</h3>
   <div class="rng">Date range: ${dpEsc(range)}</div>
 </div>
 ${summary}
@@ -2824,11 +3974,29 @@ watch(puDate, () => {
 
 function showOrderOnBoard(row) {
     if (row.replaced || row.status === 'replaced') {
-        toast(`${row.mbmOrder || row.po} was replaced by its confirm order`, 'warn');
+        const code = row.mbmOrder || '';
+        ordersOpen.value = false;
+        if (view.value !== 'board') {
+            openBoard(currentBoard.value || permittedBoards.value[0] || boards.value[0]);
+        }
+        if (code) boardSearch.value = code;
+        toast(`${code} projected replaced — its POs are highlighted in the Unplanned panel`, 'ok');
         return;
     }
     if (!row.planned) {
-        toast(`${row.po} is unplanned — open a board and drag it from the Unplanned panel`, 'warn');
+        if (row.orderType === 'projected') {
+            // Projected unplanned: no POs yet — cannot be planned directly
+            toast(`${row.mbmOrder} is a projected order with no POs yet — plan will be available once POs are confirmed`, 'warn');
+            return;
+        }
+        // Unplanned confirm PO: close orders panel, go to board, pre-filter unplanned panel to this order's POs
+        const code = row.mbmOrder || row.po || '';
+        ordersOpen.value = false;
+        if (view.value !== 'board') {
+            openBoard(currentBoard.value || permittedBoards.value[0] || boards.value[0]);
+        }
+        if (code) boardSearch.value = code;
+        toast(`${code} — POs highlighted in Unplanned panel, drag to board to plan`, 'warn');
         return;
     }
     ordersOpen.value = false;
@@ -2917,10 +4085,20 @@ function updateHoverClock(clientX, clientY) {
     let line2 = idleFormula;
     if (res?.data?.lineRow) {
         const r   = res.data;
-        const hrs = calendarState.days[date.getDay()]?.hours ?? '10:00';
+        const hrs = lineHoursLabel(r, date);
         line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
     }
     setClock(`${fmtClock(date)}<br>${line2}`);
+}
+
+// Line's own working hours (planning_resources.working_hours_per_day) when
+// set, otherwise the weekday calendar hours
+function lineHoursLabel(r, day) {
+    const h = Number(r.hours);
+    if (h > 0) {
+        return `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
+    }
+    return calendarState.days[day.getDay()]?.hours ?? '10:00';
 }
 
 function updateCarryClock(snap) {
@@ -2935,7 +4113,7 @@ function updateCarryClock(snap) {
     let line2 = idleFormula;
     if (res?.data?.lineRow) {
         const r   = res.data;
-        const hrs = calendarState.days[at.getDay()]?.hours ?? '10:00';
+        const hrs = lineHoursLabel(r, at);
         line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
     }
     setClock(`${fmtClock(at)}<br>${line2}`);
@@ -2995,7 +4173,9 @@ function flushCarryPreview() {
     const snap = computeCarryPreview(s, rec, p.clientX, p.clientY);
     carryPreview.value = snap;
 
-    paintCarryBox(els.vacancy, carryOrigin.value);
+    // No trace at the old spot while carrying — the bar exists only under
+    // the mouse pointer until it is placed
+    paintCarryBox(els.vacancy, null);
     paintCarryBox(els.bar, snap.barBox);
 
     const raw = rec.data.raw;
@@ -3026,7 +4206,8 @@ function clampToWorkWindow(date) {
 
 // A pixel is roughly ten minutes on the day axis — quarter-hour steps keep the
 // header clock readable while still allowing any hour of the day
-const CARRY_STEP_MIN = 15;
+// 5-minute snap grid — lets a bar land on points like 10:20, not just :00/:15
+const CARRY_STEP_MIN = 5;
 
 function snapToStep(date) {
     const d = new Date(date);
@@ -3264,11 +4445,11 @@ function pickUp(rec, domEvent) {
     pickStamp     = performance.now();
     uiHooks.boardUserActive = true;
     document.body.classList.add('mb-carry-active');
-    // The bar leaves its old place while carried - only the ghost remains
+    // The bar leaves its old place entirely while carried — it exists only
+    // under the mouse pointer. Plain set() so Bryntum repaints the event and
+    // the original really disappears (a suppressed refresh left it visible).
     carriedPrevCls = String(rec.data.cls || '');
-    s.suspendRefresh?.();
     rec.set('cls', `${carriedPrevCls} mb-carried-away`.trim());
-    s.resumeRefresh?.(false);
     carryPreview.value = emptyCarrySnap();
     carryOrigin.value  = computeCarryOrigin(s, rec);
     const cx = domEvent?.clientX ?? lastMouse.x;
@@ -3284,10 +4465,7 @@ function pickUp(rec, domEvent) {
 function restoreCarriedCls() {
     const rec = carried.value;
     if (!rec) return;
-    const s = getInstance();
-    s?.suspendRefresh?.();
     rec.set('cls', carriedPrevCls);
-    s?.resumeRefresh?.(false);
 }
 
 function cancelCarry() {
@@ -3621,14 +4799,25 @@ function applyCalendarToBoard() {
         s.workingTime = { fromHour, toHour : Math.min(24, Math.max(fromHour + 1, toHour)) };
     }
 
-    // Standard day = longest configured working day
+    // Standard day = longest configured working day; a line's own hours
+    // (planning_resources.working_hours_per_day) override the calendar.
+    // Capacity always comes from the LIVE board resource values — never from
+    // the stale demo LINES table.
     const hrs = Math.max(0, ...Object.values(calendarState.days).map(c => hmToHours(c.hours)));
-    for (const l of LINES) {
-        l.availMin = Math.round(l.manpower * hrs * 60 * l.eff / 100);
-    }
     for (const res of s.resourceStore.records) {
+        if (!res.data.lineRow) continue;
+        const mp  = Number(res.data.manpower) || 0;
+        const eff = Number(res.data.eff) || 0;
+        const lh  = Number(res.data.hours) || hrs;
+        const availMin = Math.round(mp * lh * 60 * eff / 100);
+        res.set('availMin', availMin);
         const l = LINES.find(x => x.id === res.id);
-        if (l && res.data.lineRow) res.set('availMin', l.availMin);
+        if (l) {
+            l.availMin = availMin;
+            l.manpower = mp;
+            l.eff      = eff;
+            l.hours    = lh;
+        }
     }
 
     s.project.resourceTimeRangeStore.data = buildManpowerRanges(
@@ -3811,19 +5000,46 @@ onMounted(() => {
     catch { /* corrupt saved state - stay on home */ }
 });
 
+let saveInFlight = false;
+
 async function saveToDb() {
+    // Repeated clicks while a save is preparing/running must not stack
+    if (saveInFlight) {
+        toast('Save already in progress — please wait…', 'warn');
+        return;
+    }
     const s = getInstance();
     if (!s) return;
     if (dataSource.value !== 'db') {
         toast('Not connected to the fastreact database — nothing saved', 'warn');
         return;
     }
+    saveInFlight = true;
+    try {
+        await saveToDbInner(s);
+    }
+    finally {
+        saveInFlight = false;
+    }
+}
+
+async function saveToDbInner(s) {
     const changes = collectPendingChanges(s);
     if (!changes.length) {
         toast('No changes to save — move an order first, then click Save', 'warn');
         return;
     }
+    // Connection pre-check: a dead API/DB is reported IMMEDIATELY instead of
+    // the save silently doing nothing while the user keeps clicking
+    try {
+        await pingApi(4000);
+    }
+    catch {
+        window.alert('⚠ CONNECTION ISSUE\n\nPlanning API/DB is not reachable (localhost:4000 → MySQL).\nNothing was saved. Start the API server / check the network, then try again.');
+        return;
+    }
     if (!window.confirm(formatSaveConfirm(changes))) return;
+    toast(`Saving ${changes.length} change(s)…`, 'ok');
     const eventIds = changes.map(c => c.eventId).filter(Boolean);
     for (const id of eventIds) {
         const ev = s.eventStore.getById(id);
@@ -3866,11 +5082,18 @@ async function saveToDb() {
             }
             markBoardSaved();
             setBoardBaseline(s);
+            pendingSwapIds.clear();
+            pendingRepairIds.clear();
             toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'})`, 'ok');
         }
         else toast(`Save failed: ${res.error}`, 'error');
     }
     catch (e) {
+        const connIssue = e?.name === 'AbortError'
+            || /failed to fetch|networkerror|load failed/i.test(String(e?.message || ''));
+        if (connIssue) {
+            window.alert('⚠ CONNECTION ISSUE\n\nThe save could not reach the planning API/DB.\nYour changes are still on the board (NOT saved). Check the server / network and press Save again.');
+        }
         toast(`Save failed: ${e.message}`, 'error');
     }
 }
@@ -4298,6 +5521,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openDayPlanReport">
                         <i class="fa-solid fa-file-lines fr-dd-fa" aria-hidden="true"></i> Day Plan Report
                     </div>
+                    <div class="fr-dd-item" @click="openBoardPlanReport">
+                        <i class="fa-solid fa-table-cells fr-dd-fa" aria-hidden="true"></i> Board Plan Report — full board
+                    </div>
                     <div class="fr-dd-item" @click="openProdUpdate">
                         <i class="fa-solid fa-industry fr-dd-fa" aria-hidden="true"></i> Daily production update
                     </div>
@@ -4308,6 +5534,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         Plan live orders (PCD / delivery / critical path)
                     </div>
                     <div class="fr-dd-item" @click="openPlanGenerator">🧮 Plan generator (S2)</div>
+                    <div class="fr-dd-item" @click="compactBoardNoGaps">🧹 Compact lines — remove gaps</div>
                     <div class="fr-dd-sep"></div>
                     <div
                         v-for="b in permittedBoards"
@@ -4323,6 +5550,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
                     <div class="fr-dd-item" @click="openPlanningRoles">👤 Planning roles &amp; plan criteria</div>
                     <div class="fr-dd-item" @click="openEffProfiles">📊 Efficiency profiles</div>
+                    <div class="fr-dd-item" @click="openLineEffForm">🏭 Line eff &amp; hours</div>
                     <div class="fr-dd-item" @click="openBuildUps">📈 Build up / Learning curves</div>
                 </div>
             </span>
@@ -4442,26 +5670,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <span class="fr-cell fr-link fr-wide">{{ order.risk.reasons.join(' · ') }}</span>
             </div>
         </div>
-        <div v-else class="fr-orderbar">
-            <div class="fr-order-row">
-                <span class="fr-order-label"><span class="fr-order-ico">🧵</span><span class="fr-link">Order</span></span>
-                <span class="fr-cell fr-plain">PO</span>
-                <span class="fr-cell fr-link">Buyer · Style</span>
-                <span class="fr-cell fr-plain">Quantity</span>
-                <span class="fr-cell fr-plain">SMV</span>
-                <span class="fr-cell fr-link">Required minutes</span>
-                <span class="fr-cell fr-plain">Production days</span>
-                <span class="fr-cell fr-link fr-magenta">Shipment date</span>
-            </div>
-            <div class="fr-order-row">
-                <span class="fr-order-label">Select a bar</span>
-                <span class="fr-cell fr-plain">Progress</span>
-                <span class="fr-cell fr-plain">Plan status</span>
-                <span class="fr-cell fr-plain">Material ready</span>
-                <span class="fr-cell fr-plain">Risk score</span>
-                <span class="fr-cell fr-link fr-wide">Risk reasons</span>
-            </div>
-        </div>
 
         <div class="fr-legendbar">
             <div class="fr-leg-col"><i class="fr-leg-dot fr-leg-red"></i><b>Product/Order</b><span>Qty made, Started</span></div>
@@ -4479,78 +5687,182 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
         </div><!-- /fr-boardarea -->
 
-        <!-- Orders list: all orders with documents, status, line, dates -->
+        <!-- Orders list: single unified table — projected (mr_order_entry) + confirm (mr_purchase_order) -->
         <div v-if="ordersOpen && !ordersMin" class="cal-overlay" @click.self="ordersOpen = false">
             <div class="cal-dialog od-dialog">
                 <div class="cal-title">
-                    Orders — {{ filteredOrders.length }} / {{ ordersRows.length }} order(s)
-                    <span v-if="ordersLoading" style="font-size:12px;color:#888;margin-left:10px;">
-                        ⏳ loading {{ ordersTotal > 0 ? ordersTotal : '…' }} total…
+                    All Orders
+                    <span style="font-size:12px;color:#888;font-weight:400;margin-left:10px;">
+                        {{ filteredErpOrders.length }} / {{ erpAllOrders.length }}
+                        <span v-if="erpAllLoading"> · ⏳ loading…</span>
                     </span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="ordersMin = true">—</span>
                         <span class="cal-x" @click="ordersOpen = false">✕</span>
                     </span>
                 </div>
-                <div class="st-body od-body">
+
+                <!-- Global search bar + actions -->
+                <div class="od-gsearch-bar">
+                    <input
+                        v-model="ordersGlobalSearch"
+                        class="od-gsearch"
+                        type="text"
+                        placeholder="🔍  Search orders — MBM order, buyer, style, PO, color…"
+                        @keydown.escape="clearOrderFilters"
+                    >
+                    <span v-if="ordersGlobalSearch || ORDER_COLS.some(k => orderFilters[k])" class="od-gsearch-clear" @click="clearOrderFilters">✕</span>
+                    <button v-if="markedComplete.size" class="od-done-btn" :disabled="markSaving"
+                        @click="saveMarkedComplete"
+                    >{{ markSaving ? '⏳ Saving…' : `✔ Complete (${markedComplete.size})` }}</button>
+                    <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
+                </div>
+
+                <!-- Summary of the filtered rows — tiles are quick actions -->
+                <div class="od-sum-bar">
+                    <span class="od-sum-tile"><b>{{ fmtQty(ordersSummary.rows) }}</b> rows</span>
+                    <span class="od-sum-tile od-sum-proj od-sum-click" title="Show only projected orders"
+                        @click="tileAction('projected')"><b>{{ fmtQty(ordersSummary.proj) }}</b> projected</span>
+                    <span class="od-sum-tile od-sum-conf od-sum-click" title="Show only confirm orders"
+                        @click="tileAction('confirm')"><b>{{ fmtQty(ordersSummary.conf) }}</b> confirm</span>
+                    <span class="od-sum-tile od-sum-click" title="Planned quantity — click to show only planned rows"
+                        @click="tileAction('planned')">Planned <b>{{ fmtQty(ordersSummary.plannedQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-unpl od-sum-click" title="Unplanned quantity — click to show only unplanned rows"
+                        @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-qty od-sum-click" title="Sort by Order Qty"
+                        @click="tileAction('orderQty')">Order Qty <b>{{ fmtQty(ordersSummary.orderQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-qty od-sum-click" title="Sort by PO Qty"
+                        @click="tileAction('poQty')">PO Qty <b>{{ fmtQty(ordersSummary.poQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-recent od-sum-click" :class="{ 'od-sum-on' : ordersRecentFilter === 'today' }"
+                        title="Orders created today — click to filter the list"
+                        @click="tileAction('today')">Today <b>{{ fmtQty(ordersSummary.todayQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-recent od-sum-click" :class="{ 'od-sum-on' : ordersRecentFilter === 'last3' }"
+                        title="Orders created in the last 3 days — click to filter the list"
+                        @click="tileAction('last3')">Last 3d <b>{{ fmtQty(ordersSummary.last3Qty) }}</b></span>
+                </div>
+
+                <!-- Unified orders table -->
+                <div class="st-body od-body" @mouseover="odBodyOver" @mousemove="odBodyMove" @mouseleave="odBodyLeave">
                     <table class="st-table od-table">
                         <thead>
                             <tr>
-                                <th
-                                    v-for="k in ORDER_COLS"
-                                    :key="k"
-                                    :class="{ 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv' || k === 'reqMin' || k === 'progress' }"
-                                >{{ ORDER_COL_LABELS[k] }}</th>
+                                <th v-for="k in ORDER_COLS" :key="k"
+                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
+                                    :title="k === 'done' ? '' : 'Click to sort (asc → desc → off)'"
+                                    @click="k !== 'done' && toggleOrderSort(k)"
+                                >
+                                    <input v-if="k === 'done'" type="checkbox" class="od-done-box"
+                                        :checked="allComplChecked"
+                                        :disabled="!checkableFilteredOrders.length"
+                                        title="Check ALL projected orders in the current filter"
+                                        @click.stop="toggleMarkAll"
+                                    >
+                                    <template v-else>
+                                        {{ ORDER_COL_LABELS[k] }}
+                                        <span class="od-sort-btns">
+                                            <span class="od-sort-b" :class="{ 'od-sort-on' : orderSort.key === k && orderSort.dir === 1 }"
+                                                title="Sort ascending"
+                                                @click.stop="orderSort = { key : k, dir : 1 }">▲</span>
+                                            <span class="od-sort-b" :class="{ 'od-sort-on' : orderSort.key === k && orderSort.dir === -1 }"
+                                                title="Sort descending"
+                                                @click.stop="orderSort = { key : k, dir : -1 }">▼</span>
+                                        </span>
+                                    </template>
+                                    <div v-if="k === 'orderQty'" class="od-th-sum">Σ {{ fmtQty(ordersSummary.orderQty) }}</div>
+                                    <div v-else-if="k === 'qty'" class="od-th-sum">Σ {{ fmtQty(ordersSummary.poQty) }}</div>
+                                </th>
                             </tr>
                             <tr class="od-filterrow">
-                                <th v-for="k in ORDER_COLS" :key="k">
-                                    <input
-                                        v-model="orderFilters[k]"
-                                        class="od-filter"
-                                        type="text"
-                                        placeholder="🔍"
+                                <th v-for="k in ORDER_COLS" :key="k" :class="'od-c-' + k">
+                                    <input v-model="orderFilters[k]" class="od-filter" type="text" placeholder="🔍"
+                                        :title="k === 'orderQty' || k === 'qty'
+                                            ? 'Qty query: >1000  <500  >=1  <=1  =1500  (or plain text)'
+                                            : (['pcd','orderDelivery','poDelivery','start','end'].includes(k)
+                                                ? 'Date query: >01-09-26  <=15-SEP-26  =2026-09-01  (or plain text)'
+                                                : '')"
                                     >
                                 </th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr
-                                v-for="row in filteredOrders"
-                                :key="row.id"
-                                class="od-row"
-                                :title="row.planned ? 'Click to show this order on the board' : 'Unplanned order'"
-                                @click="showOrderOnBoard(row)"
-                            >
-                                <td
-                                    v-for="k in ORDER_COLS"
-                                    :key="k"
-                                    :class="{ 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv' || k === 'reqMin' || k === 'progress', 'st-user' : k === 'po' }"
+                            <template v-for="row in filteredErpOrders" :key="row.id">
+                                <tr
+                                    class="od-row"
+                                    :class="{
+                                        'od-row-projected' : row.orderType === 'projected',
+                                        'od-row-planned'   : row.status === 'fully_planned' || row.planned,
+                                        'od-row-noconfirm' : row.orderType === 'projected' && row.confirmArrived === false && !(row.replaced || row.status === 'replaced'),
+                                        'od-row-replaced'  : row.replaced || row.status === 'replaced',
+                                        'od-row-partial'   : !!projPartialInfo(row),
+                                        'od-row-completed' : row.status === 'completed'
+                                    }"
+                                    :data-note="projPartialInfo(row)
+                                        ? `Partial: confirm POs cover ${fmtQty(projPartialInfo(row).confQty)} of ${fmtQty(projPartialInfo(row).orderQty)} pcs (${fmtQty(projPartialInfo(row).diff)} not confirmed)`
+                                        : (row.splitReason || row.validationNotes || row.boardNote || (row.planned ? 'Planned — click to highlight on board' : (row.orderType === 'projected' ? 'Projected - included in initial capacity planning.' : 'Confirm - visible for reconciliation but not included in the initial plan.')))"
+                                    @click="!windowSelectionActive() && showOrderOnBoard(row)"
                                 >
-                                    <span
-                                        v-if="k === 'color' && row.orderType !== 'projection' && row.color"
-                                        class="od-color"
-                                        :class="'od-color-' + (row.color || '').toLowerCase()"
-                                    >{{ row.color }}</span>
-                                    <span
-                                        v-else-if="k === 'orderType'"
-                                        class="od-status"
-                                        :class="row.orderType === 'confirm' ? 'od-ord-confirm' : 'od-ord-proj'"
-                                    >{{ row.orderType }}</span>
-                                    <span
-                                        v-else-if="k === 'status'"
-                                        class="od-status"
-                                        :class="`od-${row.status}`"
-                                    >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
-                                    <template v-else>{{ orderCellText(row, k) || '—' }}</template>
-                                </td>
-                            </tr>
+                                    <td v-for="k in ORDER_COLS" :key="k"
+                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'st-user' : k === 'po' }]"
+                                        :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null : (orderCellText(row, k) || null)"
+                                    >
+                                        <input v-if="k === 'done' && row.orderType === 'projected' && row.status !== 'completed'"
+                                            type="checkbox"
+                                            class="od-done-box"
+                                            :checked="markedComplete.has(row.mbmOrder)"
+                                            @click.stop="toggleMarkComplete(row)"
+                                        >
+                                        <span v-else-if="k === 'done' && row.status === 'completed'" class="od-done-mark">✔</span>
+                                        <span v-else-if="k === 'orderType'" class="od-status"
+                                            :class="row.orderType === 'confirm' ? 'od-ord-confirm' : 'od-ord-proj'"
+                                        >{{ row.orderType === 'confirm' ? 'confirm' : 'projected' }}</span>
+                                        <span v-else-if="k === 'status'" class="od-status" :class="`od-${row.status}`"
+                                        >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
+                                        <span v-else-if="k === 'deliveryStatus' && projPartialInfo(row)"
+                                            class="od-status od-ds-partial"
+                                        >Partial</span>
+                                        <span v-else-if="k === 'deliveryStatus' && row.deliveryStatus" class="od-status"
+                                            :class="'od-ds-' + row.deliveryStatus.toLowerCase().replace(/\s+/g,'-')"
+                                        >{{ row.deliveryStatus }}</span>
+                                        <span v-else-if="k === 'grouping' && row.orderType === 'confirm' && row.groupingStatus !== 'not_applicable'"
+                                            class="od-status" :class="'od-gs-' + row.groupingStatus"
+                                            :title="row.splitReason || ''"
+                                        >{{ row.groupingStatus }}</span>
+                                        <template v-else-if="k === 'po' && row.poCount > 1">
+                                            <span class="od-expand" @click.stop="toggleGroupExpand(row)"
+                                            >{{ expandedGroups.has(row.id) ? '▼' : '▶' }} [{{ row.poCount }} POs]</span>
+                                            {{ row.po }}
+                                        </template>
+                                        <span v-else-if="k === 'color' && row.garmentColor" class="od-color"
+                                            :class="'od-color-' + (row.garmentColor||'').toLowerCase().replace(/\s+/g,'-')"
+                                        >{{ row.garmentColor }}</span>
+                                        <template v-else>{{ orderCellText(row, k) || '—' }}</template>
+                                    </td>
+                                </tr>
+                                <tr v-for="pd in (expandedGroups.has(row.id) ? row.poDetails : [])"
+                                    :key="row.id + '::' + pd.po" class="od-subrow"
+                                >
+                                    <td :colspan="ORDER_COLS.indexOf('po')"></td>
+                                    <td class="st-user">↳ {{ pd.po }}</td>
+                                    <td></td>
+                                    <td class="od-num">{{ fmtQty(pd.qty) }}</td>
+                                    <td>{{ pd.delivery ? fmtDateDdMonRr(pd.delivery) : '—' }}</td>
+                                    <td>{{ pd.planned ? 'planned' : 'unplanned' }}</td>
+                                    <td>{{ pd.line || '—' }}</td>
+                                    <td>{{ pd.start ? fmtDate(new Date(pd.start)) : '—' }}</td>
+                                    <td>{{ pd.end ? fmtDate(new Date(pd.end)) : '—' }}</td>
+                                </tr>
+                            </template>
                         </tbody>
                     </table>
                     <div class="st-hint od-hintrow">
-                        <span>Planned order-এ click করলে board-এ সেই bar টা দেখাবে · unplanned order গুলো Unplanned panel থেকে drag করুন</span>
+                        <span>Projected = mr_order_entry · Confirm = mr_purchase_order · Click any row to highlight on board</span>
                         <button class="cal-btn st-btn od-clear" @click="clearOrderFilters">✕ Clear filters</button>
                     </div>
                 </div>
+                <!-- Instant hover tooltip: full cell value / row note -->
+                <div v-if="odTip.show" class="od-hovertip"
+                    :style="{ left : odTip.x + 'px', top : odTip.y + 'px' }"
+                >{{ odTip.text }}</div>
             </div>
         </div>
 
@@ -4558,22 +5870,29 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <div v-if="dpOpen && !dpMin" class="cal-overlay" @click.self="dpOpen = false">
             <div class="cal-dialog od-dialog dp-dialog">
                 <div class="cal-title">
-                    Day Plan Report
+                    {{ dpReportTitle }}
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="dpMin = true">—</span>
                         <span class="cal-x" @click="dpOpen = false">✕</span>
                     </span>
                 </div>
                 <div class="dp-toolbar">
-                    <label class="dp-range">From
+                    <label v-if="dpScope !== 'board'" class="dp-range">From
                         <input v-model="dpFrom" class="cal-in dp-date" type="date">
                     </label>
-                    <label class="dp-range">To
+                    <label v-if="dpScope !== 'board'" class="dp-range">To
                         <input v-model="dpTo" class="cal-in dp-date" type="date">
                     </label>
+                    <span v-if="dpScope === 'board'" class="dp-range">Whole board — every line + Holding Row, as placed</span>
                     <button class="dp-act dp-act-gen" @click="generateDayPlan">⚙ Generate</button>
                     <button class="dp-act dp-act-xls" :disabled="!dpGenerated" @click="exportDayPlanExcel">📊 Excel</button>
                     <button class="dp-act dp-act-pdf" :disabled="!dpGenerated" @click="exportDayPlanPdf">📄 PDF</button>
+                    <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'summary' }"
+                        @click="dpView = dpView === 'summary' ? 'report' : 'summary'">Σ Summary</button>
+                    <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'floors' }"
+                        @click="dpView = dpView === 'floors' ? 'report' : 'floors'">🏭 Floor Target</button>
+                    <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'hours' }"
+                        @click="dpView = dpView === 'hours' ? 'report' : 'hours'">🕐 Plan Hours</button>
                     <span class="dp-flex"></span>
                     <button class="dp-act dp-act-close" @click="dpOpen = false">✕ Close</button>
                 </div>
@@ -4581,7 +5900,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <template v-if="dpGenerated">
                         <div class="dp-rephead">
                             <div class="dp-rep-unit">{{ dpUnitName }}</div>
-                            <div class="dp-rep-title">Day Plan Report</div>
+                            <div class="dp-rep-title">{{ dpReportTitle }}</div>
                             <div class="dp-rep-range">{{ dpRangeLabel }} <span class="dp-rep-dim">· Generated {{ dpGeneratedAt }}</span></div>
                         </div>
                         <div class="dp-cards">
@@ -4592,11 +5911,105 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div class="dp-card"><b>{{ dpGrand.totalCm.toFixed(2) }}</b><span>Total CM</span></div>
                             <div class="dp-card dp-card-eff"><b>{{ dpGrand.avgEff }}%</b><span>Avg Eff</span></div>
                         </div>
-                        <table class="st-table dp-table">
+                        <!-- Summary view: factory-style plan summary + buyer-wise + per-floor -->
+                        <template v-if="dpView === 'summary'">
+                            <div class="dps-wrap">
+                                <table class="st-table dp-table dps-kv" style="width:340px;flex:0 0 auto">
+                                    <thead><tr><th colspan="2">Summary — {{ dpRangeLabel }}</th></tr></thead>
+                                    <tbody>
+                                        <tr><td>Plan Qty in pcs</td><td class="od-num"><b>{{ fmtQty(dpSummary.planQty) }}</b></td></tr>
+                                        <tr><td>Plan SAH</td><td class="od-num"><b>{{ fmtQty(dpSummary.sah) }}</b></td></tr>
+                                        <tr><td>Avg. SMV</td><td class="od-num">{{ dpSummary.avgSmv }}</td></tr>
+                                        <tr><td>Plan Efficiency</td><td class="od-num">{{ dpSummary.eff }}%</td></tr>
+                                        <tr><td>Plan Working Hrs</td><td class="od-num">{{ dpSummary.workHrs }}</td></tr>
+                                        <tr><td>No of {{ dpMode === 'month' ? 'Months' : 'Days' }}</td><td class="od-num">{{ dpSummary.days }}</td></tr>
+                                        <tr><td>No of lines planned</td><td class="od-num">{{ dpSummary.lines }}</td></tr>
+                                        <tr><td>Man power</td><td class="od-num">{{ fmtQty(dpSummary.manpower) }}</td></tr>
+                                        <tr><td>CM Plan (Pre-costing)</td><td class="od-num">$ {{ fmtQty(Math.round(dpSummary.cm)) }}</td></tr>
+                                    </tbody>
+                                </table>
+                                <table class="st-table dp-table dps-buyers" style="width:300px;flex:0 0 auto">
+                                    <thead>
+                                        <tr><th colspan="2">BUYER WISE PLAN QTY</th></tr>
+                                        <tr><th>Buyer</th><th class="od-num">Plan Qty</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="b in dpSummary.buyers" :key="b.buyer">
+                                            <td>{{ b.buyer }}</td><td class="od-num">{{ fmtQty(b.qty) }}</td>
+                                        </tr>
+                                        <tr class="dp-grand"><td>Total</td><td class="od-num">{{ fmtQty(dpSummary.planQty) }}</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <table v-if="dpSummary.floors.length" class="st-table dp-table dps-floors">
+                                <thead>
+                                    <tr><th></th><th v-for="f in dpSummary.floors" :key="f.floor" class="od-num">{{ f.floor }}</th><th class="od-num">Total</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>Plan Qty.</td><td v-for="f in dpSummary.floors" :key="'q'+f.floor" class="od-num">{{ fmtQty(f.planQty) }}</td><td class="od-num"><b>{{ fmtQty(dpSummary.planQty) }}</b></td></tr>
+                                    <tr><td>Plan SAH</td><td v-for="f in dpSummary.floors" :key="'s'+f.floor" class="od-num">{{ fmtQty(f.sah) }}</td><td class="od-num"><b>{{ fmtQty(dpSummary.sah) }}</b></td></tr>
+                                    <tr><td>Plan Efficiency</td><td v-for="f in dpSummary.floors" :key="'e'+f.floor" class="od-num">{{ f.eff }}%</td><td class="od-num">{{ dpSummary.eff }}%</td></tr>
+                                    <tr><td>Avg SMV/Floor</td><td v-for="f in dpSummary.floors" :key="'m'+f.floor" class="od-num">{{ f.avgSmv }}</td><td class="od-num">{{ dpSummary.avgSmv }}</td></tr>
+                                    <tr><td>Plan Lines</td><td v-for="f in dpSummary.floors" :key="'l'+f.floor" class="od-num">{{ f.lines }}</td><td class="od-num">{{ dpSummary.lines }}</td></tr>
+                                    <tr><td>Manpower</td><td v-for="f in dpSummary.floors" :key="'p'+f.floor" class="od-num">{{ fmtQty(f.manpower) }}</td><td class="od-num">{{ fmtQty(dpSummary.manpower) }}</td></tr>
+                                    <tr><td>CM Plan (Pre-costing)</td><td v-for="f in dpSummary.floors" :key="'c'+f.floor" class="od-num">$ {{ fmtQty(Math.round(f.cm)) }}</td><td class="od-num"><b>$ {{ fmtQty(Math.round(dpSummary.cm)) }}</b></td></tr>
+                                </tbody>
+                            </table>
+                        </template>
+
+                        <!-- Plan Hours view: line × day working-hours matrix -->
+                        <table v-else-if="dpView === 'hours'" class="st-table dp-table">
+                            <thead>
+                                <tr>
+                                    <th>Factory</th><th>Line</th><th class="od-num">Man Power</th>
+                                    <th v-for="d in dpDates" :key="dpDayKey(d)" class="od-num dp-dayh dp-day-click"
+                                        title="Click: Day Plan report for this day" @click="dpPickDay(d)">{{ dpColLabel(d) }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="r in dpHoursMatrix.rows" :key="r.line">
+                                    <td>{{ r.floor }}</td>
+                                    <td>{{ r.line }}</td>
+                                    <td class="od-num">{{ r.manpower }}</td>
+                                    <td v-for="d in dpDates" :key="r.line + dpDayKey(d)" class="od-num">{{ r.days[dpColKey(d)] ?? '-' }}</td>
+                                </tr>
+                                <tr class="dp-grand">
+                                    <td>Avg</td><td></td>
+                                    <td class="od-num">{{ fmtQty(dpHoursMatrix.manpower) }}</td>
+                                    <td v-for="d in dpDates" :key="'ha'+dpDayKey(d)" class="od-num">{{ dpHoursMatrix.avg[dpColKey(d)] ?? '-' }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <!-- Floor Target view: floor × day quantity matrix -->
+                        <table v-else-if="dpView === 'floors'" class="st-table dp-table">
+                            <thead>
+                                <tr>
+                                    <th>Factory</th>
+                                    <th v-for="d in dpDates" :key="dpDayKey(d)" class="od-num dp-dayh dp-day-click"
+                                        title="Click: Day Plan report for this day" @click="dpPickDay(d)">{{ dpColLabel(d) }}</th>
+                                    <th class="od-num">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="f in dpFloorMatrix.rows" :key="f.floor">
+                                    <td>{{ f.floor }}</td>
+                                    <td v-for="d in dpDates" :key="f.floor + dpDayKey(d)" class="od-num">{{ dpDayVal(f.days, d) }}</td>
+                                    <td class="od-num"><b>{{ fmtQty(f.total) }}</b></td>
+                                </tr>
+                                <tr class="dp-grand">
+                                    <td>Total</td>
+                                    <td v-for="d in dpDates" :key="'ft'+dpDayKey(d)" class="od-num">{{ dpDayVal(dpFloorMatrix.grand.days, d) }}</td>
+                                    <td class="od-num">{{ fmtQty(dpFloorMatrix.grand.total) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <table v-else class="st-table dp-table">
                         <thead>
                             <tr>
                                 <th v-for="c in DP_META" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th>
-                                <th v-for="d in dpDates" :key="dpDayKey(d)" class="od-num dp-dayh">{{ fmtDdMmYy(d) }}</th>
+                                <th v-for="d in dpDates" :key="dpDayKey(d)" class="od-num dp-dayh">{{ dpColLabel(d) }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -4608,7 +6021,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <tr class="dp-total">
                                     <td>{{ g.floor }}</td>
                                     <td>{{ g.line }} Total</td>
-                                    <td colspan="12"></td>
+                                    <td colspan="13"></td>
                                     <td class="od-num">{{ fmtQty(g.totals.poQty) }}</td>
                                     <td class="od-num">{{ fmtQty(g.totals.planQty) }}</td>
                                     <td class="od-num">{{ fmtQty(g.totals.allocQty) }}</td>
@@ -4624,7 +6037,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <tr v-if="dpGroups.length" class="dp-grand">
                                 <td>{{ dpUnitName }}</td>
                                 <td>All lines</td>
-                                <td colspan="12"></td>
+                                <td colspan="13"></td>
                                 <td class="od-num">{{ fmtQty(dpGrand.poQty) }}</td>
                                 <td class="od-num">{{ fmtQty(dpGrand.planQty) }}</td>
                                 <td class="od-num">{{ fmtQty(dpGrand.allocQty) }}</td>
@@ -4717,6 +6130,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div class="cal-tabs">
                     <span class="cal-tab" :class="{ 'cal-tab-active' : effTab === 'define' }" @click="effTab = 'define'">📊 Define</span>
                     <span class="cal-tab" :class="{ 'cal-tab-active' : effTab === 'types' }" @click="effTab = 'types'">▦ Product types</span>
+                    <span class="cal-tab" :class="{ 'cal-tab-active' : effTab === 'lines' }" @click="effTab = 'lines'">🏭 Lines</span>
                     <span class="cal-tab" @click="effOpen = false">❌ Close</span>
                 </div>
 
@@ -4741,7 +6155,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
 
                 <!-- Product types tab: the selected profile's efficiency grid -->
-                <div v-else class="st-body">
+                <div v-else-if="effTab === 'types'" class="st-body">
                     <div class="ef-row">
                         <label>Select efficiency profile</label>
                         <select v-model="effSelectedProfileId" class="cal-in st-select">
@@ -4778,6 +6192,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         type="number"
                                         min="0"
                                         max="200"
+                                        :readonly="r.name === '_Default'"
+                                        :title="r.name === '_Default' ? 'Line efficiency (planning_resources) — change in Setup → Line eff & hours' : ''"
                                     >
                                 </td>
                             </tr>
@@ -4787,7 +6203,86 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn cal-btn-primary st-btn" :disabled="!selProfile" @click="effUpdate">💾 Update</button>
                         <button class="cal-btn st-btn" :disabled="!selProfile" @click="effCopyDown">📋 Copy down</button>
                     </div>
-                    <div class="st-hint">_Default efficiency-ই assign করা line-গুলোর base capacity চালায় — Update চাপলে board recalculate হয়</div>
+                    <div class="st-hint">_Default = line efficiency (planning_resources.default_efficiency, read-only) — line capacity সবসময় এটাই ব্যবহার করে · line efficiency বদলাতে Setup → Line eff &amp; hours · এখানে শুধু product type efficiency দিন</div>
+                </div>
+
+                <!-- Lines tab: per-line top-3 product capability summary -->
+                <div v-if="effTab === 'lines'" class="st-body ls-body">
+                    <table class="st-table ls-table">
+                        <thead>
+                            <tr>
+                                <th class="ls-line">Line</th>
+                                <th class="ls-profile">Profile</th>
+                                <th class="ls-can">Can do</th>
+                                <th class="ls-top">Top 3 products (from plan board — by planned qty)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="row in lineEffSummary" :key="row.line.id">
+                                <td class="ls-line"><strong>{{ row.line.name }}</strong></td>
+                                <td class="ls-profile ls-dim">{{ row.profileName }}</td>
+                                <td class="ls-can">
+                                    <span class="ls-badge" :class="row.canDo > 0 ? 'ls-badge-ok' : 'ls-badge-none'">
+                                        {{ row.canDo }}
+                                    </span>
+                                </td>
+                                <td class="ls-top">
+                                    <span v-if="!row.top3.length" class="ls-dim">— no data —</span>
+                                    <span
+                                        v-for="(t, i) in row.top3"
+                                        :key="t.name"
+                                        class="ls-pill"
+                                        :title="t.qty ? `${t.name}: ${fmtQty(t.qty)} pcs planned · eff ${t.eff}%` : `${t.name}: ${t.eff}%`"
+                                    >
+                                        <span class="ls-dot" :style="{ background: t.color }"></span>
+                                        <span class="ls-pname">{{ t.name }}</span>
+                                        <span class="ls-peff">{{ t.eff }}%</span>
+                                        <span v-if="t.qty" class="ls-pqty">{{ fmtQty(t.qty) }}</span>
+                                        <span v-if="i === 0" class="ls-crown" :title="row.fromBoard ? 'Most planned on this line' : 'Highest'">👑</span>
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Line eff & hours (Setup): planning_resources efficiency + daily hours -->
+        <div v-if="lineEffOpen" class="cal-overlay" @click.self="lineEffOpen = false">
+            <div class="cal-dialog ef-dialog">
+                <div class="cal-title">
+                    Line eff &amp; hours
+                    <span class="cal-title-btns">
+                        <span class="cal-x" @click="lineEffOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <table class="st-table">
+                        <thead>
+                            <tr>
+                                <th>Line</th>
+                                <th class="od-num">Manpower</th>
+                                <th class="od-num">Efficiency %</th>
+                                <th class="od-num">Hours / day</th>
+                                <th class="od-num">Capacity min/day</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="row in lineEffRows" :key="row.dbId">
+                                <td>{{ row.name }}</td>
+                                <td><input v-model.number="row.manpower" type="number" min="1" max="1000" class="cal-in ef-in"></td>
+                                <td><input v-model.number="row.eff" type="number" min="1" max="200" class="cal-in ef-in"></td>
+                                <td><input v-model.number="row.hours" type="number" min="1" max="24" step="0.5" class="cal-in ef-in"></td>
+                                <td class="od-num">{{ Math.round(row.manpower * (row.hours || 0) * 60 * (row.eff || 0) / 100).toLocaleString() }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="st-actions">
+                        <button class="cal-btn st-btn" :disabled="lineEffSaving" @click="saveLineEffForm">💾 Update</button>
+                        <button class="cal-btn st-btn" @click="lineEffOpen = false">Close</button>
+                    </div>
+                    <div class="st-hint">Line efficiency = planning_resources.default_efficiency — save করলে DB, board আর profile _Default একসাথে update হয় · hours/day দিয়ে daily capacity হিসাব হয়</div>
                 </div>
             </div>
         </div>
@@ -5572,23 +7067,167 @@ body {
     color     : #888;
 }
 
-/* Orders list dialog: dialog hugs the full table - no scrolling, no overflow */
-.od-dialog {
-    width          : 98vw;
+/* Orders list dialog: full-width — the compound selector out-ranks the base
+   .cal-dialog width:700px that otherwise wins by stylesheet order */
+.cal-dialog.od-dialog {
+    width          : 90vw;
     min-width      : 960px;
-    max-width      : 98vw;
-    max-height     : 94vh;
-    height         : 94vh;
+    max-width      : 90vw;
+    max-height     : 98vh;
+    height         : 98vh;
     display        : flex;
     flex-direction : column;
+}
+
+/* Summary strip over the table (reacts to filters) */
+.od-sum-bar {
+    display     : flex;
+    gap         : 8px;
+    flex-wrap   : wrap;
+    padding     : 4px 10px 6px;
+    align-items : center;
+}
+.od-sum-tile {
+    background    : #eef2f8;
+    border        : 1px solid #d5dce8;
+    border-radius : 5px;
+    padding       : 3px 10px;
+    font-size     : 12px;
+    color         : #333;
+}
+.od-sum-tile b { color : #17356b; }
+.od-sum-proj  { background : #fff3e0; border-color : #ffcc80; }
+.od-sum-conf  { background : #e8f5e9; border-color : #a5d6a7; }
+.od-sum-qty   { background : #e3f2fd; border-color : #90caf9; }
+.od-sum-done  { background : #eceff1; border-color : #b0bec5; }
+.od-sum-unpl  { background : #ffebee; border-color : #ef9a9a; }
+.od-sum-recent { background : #e8f5e9; border-color : #81c784; }
+.od-sum-on { outline : 2px solid #1e88e5; outline-offset : 1px; }
+.od-sum-qty b { font-size : 13px; }
+
+/* Column-header running totals — dark red so they stand out on the header */
+.od-th-sum {
+    font-size   : 10px;
+    font-weight : 700;
+    color       : #c62828;
+}
+
+/* Sortable headers: always-visible asc/desc buttons on every column */
+.od-sortable { cursor : pointer; user-select : none; }
+.od-sortable:hover { background : #dde6f2; }
+.od-sorted { background : #dbe7f7; }
+.od-sort-btns {
+    display        : inline-flex;
+    flex-direction : column;
+    vertical-align : middle;
+    margin-left    : 3px;
+    line-height    : 0.85;
+}
+.od-sort-b {
+    font-size : 7.5px;
+    color     : #9fb0c8;
+    cursor    : pointer;
+}
+.od-sort-b:hover { color : #17356b; }
+.od-sort-b.od-sort-on { color : #c62828; }
+
+/* Instant hover tooltip over table cells */
+.od-hovertip {
+    position       : fixed;
+    z-index        : 100000;
+    background     : #263238;
+    color          : #fff;
+    padding        : 4px 9px;
+    border-radius  : 4px;
+    font-size      : 11.5px;
+    max-width      : 420px;
+    white-space    : pre-wrap;
+    pointer-events : none;
+    box-shadow     : 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* Clickable summary tiles */
+.od-sum-click { cursor : pointer; }
+.od-sum-click:hover { filter : brightness(0.93); box-shadow : 0 1px 3px rgba(0,0,0,0.2); }
+
+/* Mark-complete checkbox + save button */
+.od-done-box { width : 15px; height : 15px; cursor : pointer; accent-color : #2e7d32; }
+.od-done-mark { color : #9e9e9e; font-weight : bold; }
+.od-done-btn {
+    border        : 1px solid #6d4c41;
+    background    : #8d6e63;
+    color         : #fff;
+    border-radius : 6px;
+    padding       : 7px 14px;
+    font-size     : 13px;
+    cursor        : pointer;
+    white-space   : nowrap;
+}
+.od-done-btn:hover:not(:disabled) { background : #6d4c41; }
+.od-done-btn:disabled { opacity : 0.6; cursor : default; }
+
+/* Excel export button in the search bar */
+.od-xls-btn {
+    border        : 1px solid #2e7d32;
+    background    : #43a047;
+    color         : #fff;
+    border-radius : 6px;
+    padding       : 7px 14px;
+    font-size     : 13px;
+    cursor        : pointer;
+    white-space   : nowrap;
+}
+.od-xls-btn:hover:not(:disabled) { background : #2e7d32; }
+.od-xls-btn:disabled { opacity : 0.5; cursor : default; }
+
+/* Orders dialog tab bar */
+.od-tabs {
+    display        : flex;
+    gap            : 2px;
+    padding        : 4px 8px 0;
+    background     : #e8edf4;
+    border-bottom  : 1px solid #c8d2e0;
+    flex-shrink    : 0;
+}
+.od-tabs .cal-tab { font-size : 12px; padding : 4px 12px; }
+.od-tab-count {
+    display       : inline-block;
+    margin-left   : 5px;
+    padding       : 1px 6px;
+    border-radius : 10px;
+    font-size     : 10px;
+    font-weight   : bold;
+    background    : #1565c0;
+    color         : #fff;
+    vertical-align: middle;
 }
 
 .od-body {
     overflow     : auto;
     flex         : 1 1 auto;
     min-height   : 0;
-    max-height   : calc(94vh - 72px);
+    max-height   : calc(98vh - 132px);
 }
+
+/* Confirm Orders consolidated table */
+.od-cg-table th, .od-cg-table td { white-space : nowrap; }
+.od-cg-row { cursor : pointer; }
+.od-cg-row:hover { background : #eef4ff !important; }
+.od-cg-po-cell { display : flex; align-items : center; gap : 6px; }
+.od-expand-arrow { color : #888; font-size : 10px; }
+.od-po-badge {
+    display       : inline-block;
+    padding       : 1px 7px;
+    border-radius : 10px;
+    font-size     : 10px;
+    font-weight   : bold;
+    background    : #1565c0;
+    color         : #fff;
+}
+.od-cg-po-row { background : #f7f9fc; }
+.od-cg-po-row td { border-top : none; border-bottom : 1px solid #e8edf4; }
+.od-cg-indent { background : #f0f4fa; }
+.od-cg-po-num { font-family : monospace; color : #333; font-size : 11px; }
 
 .od-table {
     width     : max-content;
@@ -5615,12 +7254,82 @@ body {
 
 .od-clear { width : auto; margin : 0; padding : 4px 12px; }
 
-.od-table { font-size : 11px; }
-.od-table th, .od-table td { padding : 5px 7px; white-space : nowrap; }
+.od-table { font-size : 10.5px; }
+.od-table th, .od-table td { padding : 3px 4px; white-space : nowrap; }
+/* Cell data is selectable so it can be copied straight from the list */
+.od-table td { user-select : text; cursor : text; }
+.od-table td .od-status, .od-table td .od-color, .od-table td .od-expand { cursor : pointer; }
+
+/* Compact columns so 11+ columns fit at a glance: long text truncates with
+   an ellipsis (the row tooltip still carries the full info) */
+.od-table .od-c-buyer   { max-width : 108px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-style   { max-width : 120px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-productType { max-width : 62px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-color   { max-width : 100px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-po      { max-width : 104px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-line    { max-width : 76px;  overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-deliveryStatus { max-width : 88px; overflow : hidden; text-overflow : ellipsis; }
+.od-table .od-c-done    { width : 24px; }
+.od-filterrow .od-filter { min-width : 30px; }
+.od-c-deliveryStatus .od-status,
+.od-c-status .od-status { padding : 1px 5px; font-size : 9px; }
 .od-num { text-align : right; }
 
 .od-row { cursor : pointer; }
 .od-row:hover td { background : #eaf1fb; }
+.od-gsearch-bar {
+    display      : flex;
+    align-items  : center;
+    gap          : 6px;
+    padding      : 8px 12px 4px;
+    border-bottom: 1px solid var(--border);
+}
+.od-gsearch {
+    flex         : 1;
+    padding      : 6px 12px;
+    border       : 1px solid var(--border);
+    border-radius: 6px;
+    font-size    : 13px;
+    background   : var(--surface);
+    color        : var(--text);
+    outline      : none;
+}
+.od-gsearch:focus { border-color: #1976d2; box-shadow: 0 0 0 2px rgba(25,118,210,.15); }
+.od-gsearch-clear {
+    cursor    : pointer;
+    color     : #888;
+    font-size : 14px;
+    padding   : 2px 6px;
+    border-radius: 4px;
+}
+.od-gsearch-clear:hover { background: var(--hover); color: #333; }
+
+.od-row-projected td { background : #fffde7; }
+.od-row-projected:hover td { background : #fff9c4; }
+
+/* Completed orders: clearly highlighted, muted + struck order info.
+   Declared with higher specificity so it wins over projected/planned tints */
+.od-table tr.od-row-completed td {
+    background : #eceff1;
+    color      : #90a4ae;
+}
+.od-table tr.od-row-completed:hover td { background : #cfd8dc; }
+.od-table tr.od-row-completed td:nth-child(n+4) { text-decoration : line-through; }
+.od-table tr.od-row-completed .od-status,
+.od-table tr.od-row-completed .od-color { text-decoration : none; }
+.od-row-planned td { background : #e8f5e9; }
+.od-row-planned:hover td { background : #c8e6c9; }
+/* Projection whose confirm POs have NOT arrived yet — light blue row
+   (wins over planned green so the planner spots waiting orders) */
+.od-row-noconfirm td { background : #e3f2fd; }
+.od-row-noconfirm:hover td { background : #bbdefb; }
+/* Projection replaced by a planned confirm order — brown-tinted row */
+.od-row-replaced td { background : #efebe9; color : #5d4037; }
+.od-row-replaced:hover td { background : #d7ccc8; }
+/* Projection whose confirm POs don't cover the full order qty — after
+   od-row-replaced so the amber flag wins over the replaced tint */
+.od-table tr.od-row-partial td { background : #fff3e0; color : #6d4c00; }
+.od-table tr.od-row-partial:hover td { background : #ffe0b2; }
 
 /* Day Plan Report — spreadsheet grid */
 .dp-dialog {
@@ -5673,6 +7382,20 @@ body {
 }
 .dp-act:hover:not(:disabled) { filter : brightness(1.07); }
 .dp-act:active:not(:disabled) { transform : translateY(1px); }
+.dp-act-view { background : #6a1b9a; color : #fff; }
+.dp-act-on   { outline : 2px solid #ffb300; outline-offset : 1px; }
+.dps-wrap { display : flex; gap : 18px; align-items : flex-start; margin : 8px 0 14px; }
+/* dp-table sets min-width:100% — the compact summary tables must undo it */
+.dp-table.dps-kv     { min-width : 320px; width : 380px; }
+.dp-table.dps-buyers { min-width : 260px; width : 320px; }
+.dp-table.dps-floors { min-width : 0; width : auto; max-width : 860px; }
+.dps-kv td:first-child { font-weight : 600; }
+.dps-buyers { max-width : 300px; }
+.dps-buyers thead th { background : #cfd8ea; }
+.dps-floors { max-width : 720px; margin-bottom : 10px; }
+.dps-floors thead th { background : #a5d6a7; }
+.dp-day-click { cursor : pointer; }
+.dp-day-click:hover { background : #ffe082; }
 .dp-act:disabled { opacity : 0.45; cursor : default; }
 .dp-act-gen   { background : #1b52ad; border-color : #143d82; color : #fff; }
 .dp-act-xls   { background : #1e7e34; border-color : #145824; color : #fff; }
@@ -5795,10 +7518,24 @@ body {
     border        : 1px solid #888;
 }
 
-.od-color-red    { color : #c62828; background : #ffebee; }
-.od-color-blue   { color : #1565c0; background : #e3f2fd; }
-.od-color-yellow { color : #f9a825; background : #fffde7; }
-.od-color-black  { color : #212121; background : #f5f5f5; }
+.od-color-red          { color : #c62828; background : #ffebee; }
+.od-color-blue         { color : #1565c0; background : #e3f2fd; }
+.od-color-yellow       { color : #f57f17; background : #fffde7; }
+.od-color-black        { color : #212121; background : #f0f0f0; }
+.od-color-navy         { color : #0d2b72; background : #e8eaf6; }
+.od-color-white        { color : #555555; background : #fafafa; border-color : #ccc; }
+.od-color-green        { color : #2e7d32; background : #e8f5e9; }
+.od-color-grey,
+.od-color-gray         { color : #424242; background : #f5f5f5; }
+.od-color-brown        { color : #4e342e; background : #efebe9; }
+.od-color-orange       { color : #e65100; background : #fff3e0; }
+.od-color-purple       { color : #6a1b9a; background : #f3e5f5; }
+.od-color-pink         { color : #ad1457; background : #fce4ec; }
+.od-color-khaki        { color : #827717; background : #f9fbe7; }
+.od-color-sand         { color : #795548; background : #efebe9; }
+.od-color-bronze       { color : #6d4c41; background : #efebe9; }
+.od-color-royal-blue   { color : #1a237e; background : #e8eaf6; }
+.od-color-persian-blue { color : #1565c0; background : #e3f2fd; }
 
 .od-planned   { background : #43a047; }
 .od-confirmed { background : #7b1fa2; }
@@ -5808,6 +7545,23 @@ body {
 .od-replaced  { background : #6d4c41; }
 .od-ord-proj    { background : #ef6c00; }
 .od-ord-confirm { background : #2e7d32; }
+
+/* delivery status badges */
+.od-ds-on-time                { background : #43a047; }
+.od-ds-at-risk                { background : #f9a825; }
+.od-ds-late                   { background : #d32f2f; }
+.od-ds-partial                { background : #ef6c00; }
+.od-ds-pending-line-selection { background : #90a4ae; }
+
+/* grouping status badges */
+.od-gs-grouped     { background : #00897b; }
+.od-gs-split       { background : #e65100; }
+.od-gs-provisional { background : #78909c; }
+
+/* group expand + sub-rows */
+.od-expand { cursor : pointer; color : #1e88e5; font-weight : 600; user-select : none; }
+.od-expand:hover { text-decoration : underline; }
+.od-subrow td { background : #f4f7fb; font-size : 10.5px; color : #37474f; border-top : 1px dashed #cfd8dc; padding : 3px 7px; }
 
 /* Efficiency profiles dialog */
 .ef-dialog { width : 520px; max-width : 95vw; }
@@ -5865,6 +7619,59 @@ body {
     opacity : 0.5;
     cursor  : default;
 }
+
+/* Lines tab (line-wise efficiency summary) */
+.ef-dialog { width : 740px; }   /* widen dialog for Lines tab */
+.ls-body { padding : 0; }
+
+.ls-table { width : 100%; border-collapse : collapse; }
+.ls-table th,
+.ls-table td { padding : 6px 10px; border-bottom : 1px solid #dde3ee; vertical-align : middle; }
+.ls-table thead th { background : #17356b; color : #fff; font-size : 12px; white-space : nowrap; }
+.ls-table tbody tr:hover td { background : #f0f5ff; }
+
+.ls-line    { width : 90px; }
+.ls-profile { width : 140px; font-size : 12px; color : #666; }
+.ls-can     { width : 60px; text-align : center; }
+.ls-top     { }
+
+.ls-dim { color : #999; font-style : italic; font-size : 12px; }
+
+.ls-badge {
+    display       : inline-block;
+    min-width     : 26px;
+    padding       : 1px 5px;
+    border-radius : 10px;
+    font-size     : 12px;
+    font-weight   : bold;
+    text-align    : center;
+}
+.ls-badge-ok   { background : #d4edda; color : #155724; }
+.ls-badge-none { background : #f8d7da; color : #721c24; }
+
+.ls-pill {
+    display        : inline-flex;
+    align-items    : center;
+    gap            : 4px;
+    background     : #f0f4ff;
+    border         : 1px solid #c5d0ea;
+    border-radius  : 12px;
+    padding        : 2px 8px 2px 5px;
+    margin         : 2px 4px 2px 0;
+    font-size      : 12px;
+    white-space    : nowrap;
+}
+.ls-dot {
+    width         : 10px;
+    height        : 10px;
+    border-radius : 50%;
+    border        : 1px solid rgba(0,0,0,.25);
+    flex-shrink   : 0;
+}
+.ls-pname { font-weight : 500; max-width : 140px; overflow : hidden; text-overflow : ellipsis; }
+.ls-peff  { color : #17356b; font-weight : bold; }
+.ls-pqty  { color : #2e7d32; font-weight : 600; }
+.ls-crown { font-size : 11px; }
 
 /* Plan generator dialog */
 .pg-dialog { width : 960px; max-width : 97vw; max-height : 95vh; overflow-y : auto; }
@@ -6534,13 +8341,63 @@ body {
 .mb-bar-l1 { font-weight : bold; white-space : nowrap; }
 .mb-bar-l2 { white-space : nowrap; font-size : 9.5px; }
 
+/* Order bars: one line of buyer/order info, centred in the bar */
+.mb-bar-center {
+    height          : 100%;
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    padding         : 0 4px;
+}
+.mb-bar-center .mb-bar-l1 { text-overflow : ellipsis; overflow : hidden; }
+
 .b-sch-event.mb-risk-green  { background : #43a047; color : #fff; }
 .b-sch-event.mb-risk-yellow { background : #f9a825; color : #222; }
-.b-sch-event.mb-risk-orange { background : #fb8c00; color : #fff; }
-.b-sch-event.mb-risk-red    { background : #e53935; color : #fff; }
-.b-sch-event.mb-risk-late   { background : #d40000; color : #ffe600; }
+/* orange -> blue */
+.b-sch-event.mb-risk-orange { background : #1e88e5; color : #fff; }
+/* red -> bright FastReact red */
+.b-sch-event.mb-risk-red    { background : #ee2e24; color : #fff; }
+.b-sch-event.mb-risk-late   { background : #ee2e24; color : #fff; }
 .b-sch-event.mb-risk-grey   { background : #9e9e9e; color : #fff; }
-.b-sch-event.mb-risk-blue   { background : #1e88e5; color : #fff; }
+/* blue (draft) -> grey */
+.b-sch-event.mb-risk-blue   { background : #b8b8b8; color : #222; }
+
+/* Confirm order — red top stripe */
+.b-sch-event.mb-confirm-order {
+    box-shadow : none;
+    overflow   : visible;
+}
+.b-sch-event.mb-confirm-order::after {
+    content      : '';
+    position     : absolute;
+    top          : 0;
+    left         : 0;
+    right        : 0;
+    height       : 6px;
+    background   : #ff1744;
+    border-radius: 3px 3px 0 0;
+    pointer-events : none;
+    z-index      : 5;
+}
+
+/* Risk red/late bars — blue top stripe */
+.b-sch-event.mb-risk-red,
+.b-sch-event.mb-risk-late {
+    box-shadow : none;
+}
+.b-sch-event.mb-risk-red::after,
+.b-sch-event.mb-risk-late::after {
+    content      : '';
+    position     : absolute;
+    top          : 0;
+    left         : 0;
+    right        : 0;
+    height       : 6px;
+    background   : #3d84d6;
+    border-radius: 3px 3px 0 0;
+    pointer-events : none;
+    z-index      : 5;
+}
 
 .b-sch-event.mb-search-dim {
     opacity : 0.18;
@@ -6856,9 +8713,9 @@ body {
 /* Summary footer                                                     */
 /* ------------------------------------------------------------------ */
 .b-grid-footer-container {
-    background : #d4d0c8;
+    background : #eceae6;
     border-top : 1px solid #808080;
-    min-height : 42px;
+    min-height : 66px;
 }
 
 .b-grid-footer { padding : 1px 2px; }
@@ -6866,17 +8723,19 @@ body {
 .fr-gt {
     display        : flex;
     flex-direction : column;
-    align-items    : flex-end;
-    font-size      : 10px;
-    line-height    : 1.25;
+    align-items    : center;
+    font-size      : 11px;
+    line-height    : 1.2;
     font-family    : Tahoma, Arial, sans-serif;
     color          : #000;
 }
 .fr-gt-pos { color : #0033cc; font-weight : bold; }
 .fr-gt-neg { color : #cc0000; font-weight : bold; }
 
-/* Grand totals rows: day plan (blue) / actual production (green) / +/- */
+/* Grand totals rows: day plan (blue) / SAH / avg eff / production (green) / +/- */
 .fr-gt-plan { color : #17356b; font-weight : bold; }
+.fr-gt-sah  { color : #6a1b9a; font-weight : bold; }
+.fr-gt-eff  { color : #b45f04; font-weight : bold; }
 .fr-gt-act  { color : #0a8f3c; font-weight : bold; }
 
 .fr-gt-legend {
@@ -6886,47 +8745,293 @@ body {
     line-height : 1.2;
 }
 
+/* Grand-totals head: title left, row labels stacked on the right — each
+   label lines up horizontally with its data row in the day cells */
+.fr-gt-head {
+    display         : flex;
+    justify-content : space-between;
+    align-items     : center;
+    gap             : 8px;
+}
+.fr-gt-title { font-weight : bold; }
+.fr-gt-legend-col {
+    display        : flex;
+    flex-direction : column;
+    align-items    : flex-end;
+    font-size      : 11px;
+    line-height    : 1.2;
+}
+
 .fr-grand-label { font-weight : normal; color : #000; padding-left : 4px; }
 
 /* ------------------------------------------------------------------ */
 /* Tooltip                                                            */
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
-/* Tooltip — FastReact pale-yellow Label : Value box                  */
+/* Tooltip — 3-section compact card                                   */
 /* ------------------------------------------------------------------ */
 .b-tooltip.mb-fr-tip,
 .b-sch-event-tooltip.mb-fr-tip {
-    background    : #ffffc8;
-    border        : 1px solid #000;
-    border-radius : 0;
-    box-shadow    : none;
-    padding       : 3px 8px 5px;
-    color         : #000;
+    background    : #fff;
+    border        : none;
+    border-radius : 8px;
+    box-shadow    : 0 4px 18px rgba(0,0,0,.22), 0 1px 4px rgba(0,0,0,.12);
+    padding       : 0;
+    color         : #222;
+    max-width     : 440px;
+    min-width     : 340px;
+    z-index       : 9999 !important;
 }
 
 .b-tooltip.mb-fr-tip .b-tooltip-content,
 .b-sch-event-tooltip.mb-fr-tip .b-tooltip-content {
     background : transparent;
     padding    : 0;
-    color      : #000;
+    color      : #222;
+    min-height : 0;
 }
 
 .b-tooltip.mb-fr-tip .b-tooltip-arrow,
 .b-sch-event-tooltip.mb-fr-tip .b-tooltip-arrow { display : none; }
 
+/* ── Tooltip v4 ─────────────────────────────────────────── */
+.mb-tip4 {
+    font-size      : 12px;
+    line-height    : 1.45;
+    font-family    : 'Segoe UI', Tahoma, Arial, sans-serif;
+    border-radius  : 10px;
+    background     : #f4f6fb;
+    min-height     : 0;
+    overflow-y     : auto;
+    overflow-x     : hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #c5d4ea #f4f6fb;
+}
+
+/* Header strip */
+.tip4-hdr {
+    display         : flex;
+    align-items     : center;
+    justify-content : space-between;
+    gap             : 8px;
+    padding         : 7px 12px 6px;
+    background      : linear-gradient(135deg, #0d2b72 0%, #1565c0 100%);
+    color           : #fff;
+}
+.tip4-hdr-name {
+    font-size   : 12px;
+    font-weight : 700;
+    letter-spacing : .3px;
+    white-space : nowrap;
+    overflow    : hidden;
+    text-overflow : ellipsis;
+    max-width   : 260px;
+}
+.tip4-hdr-badges { display : flex; gap : 5px; flex-shrink : 0; }
+
+/* Cards */
+.tip4-card {
+    margin      : 6px 8px;
+    border-radius : 7px;
+    overflow    : hidden;
+    background  : #fff;
+    border      : 1px solid #e0e6f0;
+    box-shadow  : 0 1px 3px rgba(0,0,0,.06);
+}
+.tip4-card:last-child { margin-bottom : 8px; }
+
+.tip4-card-hd {
+    font-size      : 10px;
+    font-weight    : 700;
+    text-transform : uppercase;
+    letter-spacing : .5px;
+    padding        : 4px 10px;
+    background     : #f0f4fc;
+    color          : #1565c0;
+    border-bottom  : 1px solid #dde6f5;
+}
+
+.tip4-card-body {
+    padding : 5px 9px 6px;
+}
+.tip4-has-img {
+    display : flex;
+    gap     : 8px;
+    align-items : flex-start;
+}
+
+/* Style image */
+.tip-img-wrap {
+    flex          : none;
+    width         : 54px;
+    height        : 62px;
+    overflow      : hidden;
+    border        : 1px solid #d0d8ea;
+    border-radius : 4px;
+    background    : #f5f7fc;
+}
+.tip-img {
+    width      : 100%;
+    height     : 100%;
+    object-fit : cover;
+}
+
+/* Row container */
+.tip4-rows { display : flex; flex-direction : column; gap : 0; flex : 1; min-width : 0; }
+
+/* 2-column sub-grid (2 label:value pairs per row) */
+.tip4-2col {
+    display               : grid;
+    grid-template-columns : 1fr 1fr;
+    gap                   : 0 6px;
+}
+
+/* Single label:value row */
+.t4r {
+    display     : flex;
+    align-items : baseline;
+    gap         : 4px;
+    padding     : 2px 0;
+    min-width   : 0;
+    border-bottom : 1px solid #eef1f8;
+}
+.t4r:last-child { border-bottom : none; }
+.t4-full  { grid-column : span 2; }
+
+.t4l {
+    flex        : 0 0 62px;
+    font-size   : 10px;
+    font-weight : 600;
+    color       : #7a8faa;
+    white-space : nowrap;
+    line-height : 1.5;
+}
+.t4v {
+    flex       : 1;
+    font-size  : 11.5px;
+    color      : #18284a;
+    min-width  : 0;
+    overflow   : hidden;
+    text-overflow : ellipsis;
+    white-space   : nowrap;
+    line-height   : 1.5;
+}
+.t4v b  { font-weight : 700; color : #0d2b72; }
+.t4dim  { color : #aab; font-style : italic; }
+.t4-order-no { font-size : 12.5px; font-weight : 700; color : #0d2b72; }
+
+/* Badges */
+.tip4-badge {
+    display       : inline-flex;
+    align-items   : center;
+    padding       : 1px 8px;
+    border-radius : 10px;
+    font-size     : 10px;
+    font-weight   : 700;
+    white-space   : nowrap;
+}
+.tip4-confirm { background : #e8f5e9; color : #2e7d32; border : 1px solid #a5d6a7; }
+.tip4-proj    { background : #fff3e0; color : #bf6000; border : 1px solid #ffcc80; }
+.tip4-consol  { background : #e3f2fd; color : #1565c0; border : 1px solid #90caf9; }
+
+/* Wash / booking status pills */
+.tip-badge {
+    display       : inline-block;
+    padding       : 1px 7px;
+    border-radius : 10px;
+    font-size     : 11px;
+    font-weight   : bold;
+}
+.tip-ok   { background : #e8f5e9; color : #2e7d32; border : 1px solid #a5d6a7; }
+.tip-pend { background : #fff3e0; color : #e65100; border : 1px solid #ffcc80; }
+
+/* Techpack link */
+.tip-link {
+    color           : #1565c0;
+    text-decoration : underline;
+    font-size       : 11px;
+}
+
+/* Color swatch (inline) */
+.tip4-swatch {
+    display        : inline-block;
+    width          : 10px;
+    height         : 10px;
+    border-radius  : 2px;
+    vertical-align : middle;
+    margin-right   : 4px;
+    border         : 1px solid rgba(0,0,0,.15);
+}
+
+/* PO pills (when many POs shown inline) */
+.tip4-po-pill {
+    display       : inline-block;
+    margin        : 1px 2px 1px 0;
+    padding       : 1px 6px;
+    border-radius : 8px;
+    font-size     : 11px;
+    font-weight   : 600;
+    background    : #e8eef8;
+    color         : #1a3a7a;
+    border        : 1px solid #c5d4ea;
+}
+
+/* Confirm order PO breakdown table */
+.tip4-po-block {
+    margin-top    : 8px;
+    border-top    : 1px solid #e0e6f0;
+    padding-top   : 6px;
+}
+.tip4-po-hd {
+    font-size      : 10px;
+    font-weight    : 700;
+    text-transform : uppercase;
+    letter-spacing : .4px;
+    color          : #8898b0;
+    margin-bottom  : 5px;
+}
+.tip4-po-tbl {
+    width           : 100%;
+    border-collapse : collapse;
+    font-size       : 11px;
+}
+.tip4-po-tbl thead tr {
+    background : #f0f4fc;
+}
+.tip4-po-tbl th {
+    padding    : 3px 7px;
+    text-align : left;
+    font-size  : 10px;
+    font-weight: 700;
+    color      : #5572a0;
+    text-transform : uppercase;
+    letter-spacing : .3px;
+    border-bottom  : 1px solid #dde6f5;
+}
+.tip4-po-tbl td {
+    padding       : 4px 7px;
+    border-bottom : 1px solid #f0f4fc;
+}
+.tip4-po-tbl tr:last-child td { border-bottom : none; }
+.tip4-po-tbl tr:nth-child(even) { background : #f8faff; }
+.tip4-po-no  { font-family : monospace; font-weight : 600; color : #1a3a7a; font-size : 12px; }
+.tip4-po-qty { font-weight : 700; color : #0d2b72; text-align : right; }
+.tip4-po-del { color : #444; }
+
+/* Legacy single-section tooltip still works */
 .mb-tip {
     font-size   : 12px;
     line-height : 1.4;
     color       : #000;
     font-family : Tahoma, Arial, sans-serif;
     white-space : nowrap;
+    padding     : 4px 8px;
 }
 
 .mb-tip-stage { text-decoration : underline; }
 .mb-tip-order { font-weight : bold; }
-
 .mb-tip-title { font-weight : bold; margin-bottom : 2px; }
-.mb-tip ul { margin : 4px 0 0; padding-left : 16px; }
+.mb-tip ul    { margin : 4px 0 0; padding-left : 16px; }
 
 /* ------------------------------------------------------------------ */
 /* Unplanned order panel (document 3.2)                               */

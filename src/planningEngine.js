@@ -444,10 +444,27 @@ export function autoPlanOrders(orders, lineStates, ctx) {
 
     const placements = [];
     for (const o of prepared) {
+        // The order's IDEAL start: PCD + pre-production days (never before
+        // today, never before material). An order must not start before this —
+        // but once this date is due (expired PCD), a free line must take it
+        // NOW; it may only slip later when no line is available.
+        const fwdIdeal = forwardPass(o.pcd, todayStart, isWorking, masters);
+        let idealStart = new Date(fwdIdeal.actualSewStart);
+        if (o.matReady && new Date(o.matReady) > idealStart) idealStart = new Date(o.matReady);
+        if (idealStart < todayStart) idealStart = new Date(todayStart);
+
         const candidates = lineStates.map(line => {
-            const planEff = Number(efficiencyOf(line.id, o.productType)) || Number(line.eff) || 50;
+            // Line efficiency is the floor: a product-profile efficiency only
+            // applies when it is higher than the line's own efficiency
+            const planEff = Math.max(
+                Number(efficiencyOf(line.id, o.productType)) || 0,
+                Number(line.eff) || 0
+            ) || 50;
+            // Per-line working hours (planning_resources.working_hours_per_day)
+            // override the global default working day
+            const lineWorkMin = Number(line.hours) > 0 ? Number(line.hours) * 60 : workMinPerDay;
             const availMin = Math.round(
-                (Number(line.manpower) || 50) * workMinPerDay * planEff / 100
+                (Number(line.manpower) || 50) * lineWorkMin * planEff / 100
             );
             const dur = sewingDurationDays(o.qty, o.smv, availMin);
             const lineFree = line.freeFrom > todayStart ? new Date(line.freeFrom) : new Date(todayStart);
@@ -468,13 +485,19 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             const typeFit = ctx.lineHasProductType?.(line.id, o.productType) ? 0 : 1;
             const clubPcd = line.lastPcd && sameDay(line.lastPcd, o.pcd) ? 0 : 1;
             const clubType = line.lastProductType && line.lastProductType === o.productType ? 0 : 1;
+            // How many days this line PUSHES the order past its ideal start.
+            // 0 = the line can take it exactly on time (e.g. an empty line).
+            const delayDays = Math.max(0, Math.round((start - idealStart) / 86400000));
             return {
                 line, start, endDate, dur, availMin, planEff, fwd, back, feas, lateness,
-                typeFit, clubPcd, clubType
+                typeFit, clubPcd, clubType, delayDays
             };
         });
 
         candidates.sort((a, b) => {
+            // NEVER push an order later when a line can take it earlier —
+            // a free line beats clubbing preferences outright
+            if (a.delayDays !== b.delayDays) return a.delayDays - b.delayDays;
             if (a.clubPcd !== b.clubPcd) return a.clubPcd - b.clubPcd;
             if (a.clubType !== b.clubType) return a.clubType - b.clubType;
             if (a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;

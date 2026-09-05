@@ -339,14 +339,17 @@ export function orderTypeOf(po, explicit) {
     return hashKey(String(po) + ':type') % 2 === 0 ? 'projection' : 'confirm';
 }
 
-// Same buyer + style + MBM order: the projection and its later confirm
+// Same buyer + style + MBM order: the projection and its later confirm.
+// Unicode dashes are normalised — ERP strings arrive raw while synced
+// planning_orders strings are sanitised, so 'WSCE‐2702' must equal 'WSCE-2702'
 export function orderFamilyKey(o) {
     if (!o) return '';
-    const mbm = String(o.mbmOrder || o.order_code || '').trim().toLowerCase();
-    const style = String(o.style || o.style_no || '').trim().toLowerCase();
-    const buyer = String(o.buyer || o.buyer_name || '').trim().toLowerCase();
+    const norm = s => String(s || '').trim().toLowerCase().replace(/[‐-―−]/g, '-');
+    const mbm = norm(o.mbmOrder || o.order_code);
+    const style = norm(o.style || o.style_no);
+    const buyer = norm(o.buyer || o.buyer_name);
     if (mbm && mbm !== 'mbm-0') return `${buyer}|${style}|${mbm}`;
-    return `${buyer}|${style}|${String(o.po || o.po_number || '').trim().toLowerCase()}`;
+    return `${buyer}|${style}|${norm(o.po || o.po_number)}`;
 }
 
 export function poDeliveryOf(ship) {
@@ -371,7 +374,9 @@ export function barDisplayLine(raw, compact = false) {
     if (type === 'projection') {
         return `${buyer} : ${raw.style || '—'} : ${mbm} : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
     }
-    return `${buyer} : ${raw.style || '—'} : ${mbm} : ${raw.po || '—'} : ${orderColor(raw.po)} : ${fmtDateDdMonRr(poDeliveryOf(raw.ship))}`;
+    const colorStr = raw.color || orderColor(raw.po);
+    const poStr = raw.poCount > 1 ? `[${raw.poCount} POs]` : (raw.po || '—');
+    return `${buyer} : ${raw.style || '—'} : ${mbm} : ${poStr} : ${colorStr} : ${fmtDateDdMonRr(poDeliveryOf(raw.ship))}`;
 }
 
 const PRODUCT_TYPE_BY_PO = {
@@ -428,12 +433,26 @@ export function resolveProfileType(po, profileValues, preferred) {
     return typed[Math.abs(h) % typed.length];
 }
 
+// Planning rule: line efficiency is the floor. If the product (profile)
+// efficiency is lower than or equal to the line's own efficiency, the line
+// efficiency applies; only a HIGHER product efficiency overrides it.
+// The product type is matched against profile keys the same way the tooltip
+// does (exact, then case-insensitive, then fuzzy) so an ERP category like
+// "Pant" finds a profile row named "5 Pkt Pant".
 export function resolveProfileEfficiency(profileValues, productType, fallback) {
-    const tv = Number(profileValues?.[productType]);
-    if (tv > 0) return tv;
+    const lineEff = Number(fallback) || 0;
+    let tv = Number(profileValues?.[productType]);
+    if (!(tv > 0) && productType && profileValues) {
+        const want = String(productType).trim().toLowerCase();
+        const typed = Object.keys(profileValues)
+            .filter(k => k !== '_Default' && Number(profileValues[k]) > 0);
+        const hit = typed.find(k => k.toLowerCase() === want)
+            || typed.find(k => want.includes(k.toLowerCase()) || k.toLowerCase().includes(want));
+        if (hit) tv = Number(profileValues[hit]);
+    }
     const dv = Number(profileValues?._Default);
-    if (dv > 0) return dv;
-    return Number(fallback) || 0;
+    const productEff = tv > 0 ? tv : (dv > 0 ? dv : 0);
+    return Math.max(productEff, lineEff) || 0;
 }
 
 function mkOrder(o) {

@@ -51,7 +51,8 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
         ? Number(raw.planEff)
         : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
     const strip = Math.max(1, Number(raw.stripEff) || 100);
-    applyFormulaToRaw(raw, manpower, baseEff * strip / 100, WORK_MIN_PER_DAY);
+    const lineWorkMin = Number(res?.data?.hours) > 0 ? Number(res.data.hours) * 60 : WORK_MIN_PER_DAY;
+    applyFormulaToRaw(raw, manpower, baseEff * strip / 100, lineWorkMin);
     return raw.dur;
 }
 
@@ -126,7 +127,7 @@ const events = [...ORDERS, ...STAGE_EVENTS];
 const ymdKeyOf = d =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-let gtCache = { at : 0, plan : {}, made : {} };
+let gtCache = { at : 0, plan : {}, made : {}, sah : {}, effW : {} };
 let barsByLineCache = null;
 let interactionDepth = 0;
 let interactionMode = null;
@@ -159,11 +160,14 @@ function barsOnLine(scheduler, lineId, excludeId = null) {
 
 function isPinnedBar(ev) {
     const raw = ev?.data?.raw;
-    return !!(raw?.userPinned || raw?.manualGap);
+    return !!(raw?.userPinned || raw?.manualGap || raw?.dbPinned);
 }
 
-function isFixedBar(ev) {
-    return ev.draggable === false || ev.data?.raw?.status === 'completed' || isPinnedBar(ev);
+// Bars NOTHING may displace: explicitly locked or completed. Pinned bars are
+// protected from AUTO-repacking only — a deliberate user drop or an insert
+// pushes them later like any other follower ("porer bar pichabe").
+function lockedBar(ev) {
+    return ev.draggable === false || ev.data?.raw?.status === 'completed';
 }
 
 // Suspend Bryntum refresh / STM while many strips move at once (drag-drop,
@@ -231,7 +235,7 @@ function grandTotalMaps() {
     if (isBoardInteracting() && gtCache.at) return gtCache;
     if (now - gtCache.at < 5000) return gtCache;
     const s = uiHooks.instance;
-    const plan = {}, made = {};
+    const plan = {}, made = {}, sah = {}, effW = {};
     let prodStore = {};
     try { prodStore = JSON.parse(localStorage.getItem('mbm-prod-updates') || '{}'); }
     catch { prodStore = {}; }
@@ -239,7 +243,9 @@ function grandTotalMaps() {
         for (const ev of s.eventStore.records) {
             const raw = ev.data.raw;
             if (!raw || raw.stage) continue;
-            const lid  = ev.resourceId ?? ev.data.resourceId;
+            // DB-loaded bars carry their line in the ASSIGNMENT store — the
+            // event's own resourceId is often unset there
+            const lid  = lineIdOf(s, ev);
             const line = LINE_BY_ID[lid];
             if (!line) continue;
             // Same day-wise distribution the Day Plan Report uses, but on the
@@ -274,12 +280,22 @@ function grandTotalMaps() {
                         remaining -= q;
                         const key = ymdKeyOf(d);
                         plan[key] = (plan[key] || 0) + q;
+                        sah[key]  = (sah[key]  || 0) + q * smv / 60;
+                        effW[key] = (effW[key] || 0) + q * (Number(raw.planEff) > 0
+                            ? Number(raw.planEff)
+                            : (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0));
                         lastKey = key;
                     }
                 }
                 d.setDate(d.getDate() + 1);
             }
-            if (remaining > 0 && lastKey) plan[lastKey] += remaining;
+            if (remaining > 0 && lastKey) {
+                plan[lastKey] += remaining;
+                sah[lastKey]  = (sah[lastKey] || 0) + remaining * smv / 60;
+                effW[lastKey] = (effW[lastKey] || 0) + remaining * (Number(raw.planEff) > 0
+                    ? Number(raw.planEff)
+                    : (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0));
+            }
         }
     }
     for (const days of Object.values(prodStore)) {
@@ -287,7 +303,7 @@ function grandTotalMaps() {
             made[date] = (made[date] || 0) + (Number(q) || 0);
         }
     }
-    gtCache = { at : now, plan, made };
+    gtCache = { at : now, plan, made, sah, effW };
     return gtCache;
 }
 
@@ -320,7 +336,8 @@ export function recalcCapacity(scheduler) {
 //   the span, cannot move: the inserted bar attaches exactly at its end
 // ---------------------------------------------------------------------------
 export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
-    const isFixed = isFixedBar;
+    // Only locked/completed bars block a drop — pinned followers get pushed
+    const isFixed = lockedBar;
     const bars = barsOnLine(scheduler, lineId, excludeId);
     let start = new Date(desired);
     let snapped = false, blockedBy = null;
@@ -337,9 +354,10 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
     }
     for (let guard = 0; guard < 20; guard++) {
         const end  = endOfWork(start, dur);
-        const obst = bars.find(ev =>
-            (ev.startDate < start && ev.endDate > start) ||
-            (isFixed(ev) && ev.startDate < end && ev.endDate > start));
+        // Only LOCKED/completed bars are obstacles: the placed bar sits at the
+        // exact pointed spot and every conflicting bar shifts later instead
+        // ("jekhane point kora hoy okhanei boshbe, porer bar pichabe")
+        const obst = bars.find(ev => isFixed(ev) && ev.startDate < end && ev.endDate > start);
         if (!obst) return { start, end, snapped, blockedBy };
         blockedBy = obst.name;
         start = nextStartAfter(obst.endDate);
@@ -392,10 +410,13 @@ export function isSewingRes(res) {
 // Returns the number of bars that were shifted.
 // ---------------------------------------------------------------------------
 export function pushFollowers(scheduler, lineId, placed) {
-    const isFixed = isFixedBar;
+    // Only locked/completed bars stay put — pinned followers shift later too
+    const isFixed = lockedBar;
     const bars = barsOnLine(scheduler, lineId, placed.id);
+    // Every bar that CONFLICTS with the placed spot shifts later — including
+    // one that started earlier but still covers the drop point
     const followers = bars
-        .filter(ev => ev.startDate >= placed.startDate)
+        .filter(ev => ev.endDate > placed.startDate)
         .sort((a, b) => a.startDate - b.startDate);
     let prevEnd = new Date(placed.endDate);
     let pushed  = 0;
@@ -406,7 +427,10 @@ export function pushFollowers(scheduler, lineId, placed) {
         }
         applyLineFormulaDuration(scheduler, ev.data.raw, lineId);
         let ns = nextStartAfter(prevEnd);
-        if (ev.data.raw.manualGap && ev.startDate > ns) {
+        // A bar NEVER advances earlier automatically ("plan agabe na") — it
+        // keeps its own start and only shifts LATER when the placed bar (or a
+        // pushed predecessor) actually collides with it. Gaps stay gaps.
+        if (ev.startDate > ns) {
             ns = clampIntoWorkWindow(ev.startDate);
         }
         for (let guard = 0; guard < 10; guard++) {
@@ -427,54 +451,148 @@ export function pushFollowers(scheduler, lineId, placed) {
     return pushed;
 }
 
-// Close empty time between sewing bars on every line. The next order starts
-// at the previous end (same shift if minutes remain). Completed bars stay put.
+// Re-sequence every line with zero gaps: bars are packed flush one after
+// another starting at the plan start (today's first working hour), ordered
+// by earliest PCD first (then delivery). Completed bars never move — they
+// act as fixed obstacles and following bars attach right after them.
+// Pins and manual gaps are cleared so no artificial gap survives.
+// Post-commit overlap enforcement: the scheduling engine can re-normalize a
+// bar's end AFTER the batched pack (calendar rounding on fresh events),
+// re-creating a small overlap the sync sweep already fixed. This runs with
+// the engine settled (commitAsync between passes) and pushes the later bar
+// later until every line is strictly sequential. Never moves a bar earlier.
+export async function enforceSequentialLines(scheduler) {
+    if (!scheduler) return 0;
+    let totalMoved = 0;
+    for (let pass = 0; pass < 3; pass++) {
+        try { await scheduler.project?.commitAsync?.(); } catch { /* engine busy */ }
+        let moved = 0;
+        for (const res of scheduler.resourceStore.records) {
+            if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+            const bars = scheduler.eventStore.records
+                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === res.id)
+                .sort((a, b) => a.startDate - b.startDate);
+            let prevEnd = null;
+            for (const ev of bars) {
+                const raw = ev.data.raw;
+                let evEnd = new Date(ev.endDate);
+                if (raw.status !== 'completed' && prevEnd && ev.startDate < prevEnd
+                    && prevEnd - ev.startDate > 60000) {
+                    const oldStart = new Date(ev.startDate);
+                    const ns = nextStartAfter(prevEnd);
+                    const ne = endOfWork(ns, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
+                    ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+                    raw.start = ns;
+                    raw.end   = ne;
+                    evEnd = ne;
+                    // Only a REAL displacement is worth persisting — minute-level
+                    // nudges from formula rounding must not spam the save dialog
+                    if (ns - oldStart > 3600000) uiHooks.notePositionRepair?.(String(ev.id));
+                    moved++;
+                }
+                if (!prevEnd || evEnd > prevEnd) prevEnd = evEnd;
+            }
+        }
+        totalMoved += moved;
+        if (!moved) break;
+    }
+    if (totalMoved) scheduler.refreshRows?.();
+    return totalMoved;
+}
+
 export function packBoardGaps(scheduler) {
     if (!scheduler) return 0;
     invalidateBarsCache();
     rebuildBarsCache(scheduler);
+    const anchor = startOfWorkDay(nextWorkingDay(new Date()));
     let moved = 0;
     for (const res of scheduler.resourceStore.records) {
         if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
-        moved += packLineNoGaps(scheduler, res.id);
+        moved += packLineNoGaps(scheduler, res.id, anchor);
     }
     invalidateBarsCache();
     return moved;
 }
 
-function packLineNoGaps(scheduler, lineId) {
-    const isFixed = isFixedBar;
+// Completed/locked bars AND user-pinned bars are immovable during packing —
+// a bar the user moved and saved (userPinned in its DB notes) must keep its
+// exact position across reloads; packing flows the rest around it.
+function packImmovable(ev) {
+    return ev.draggable === false
+        || ev.data?.raw?.status === 'completed'
+        || isPinnedBar(ev);
+}
+
+function packLineNoGaps(scheduler, lineId, anchor) {
     const bars = barsOnLine(scheduler, lineId)
-        .filter(ev => ev.data?.raw && !ev.data.raw.stage)
-        .sort((a, b) => {
-            const ds = a.startDate - b.startDate;
-            if (ds) return ds;
-            return String(a.id).localeCompare(String(b.id));
-        });
-    let prevEnd = null;
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage);
+    const fixed = bars.filter(packImmovable);
     let moved = 0;
-    for (const ev of bars) {
+
+    // Immovable bars keep their START, but the span must still reflect the
+    // CURRENT line parameters (manpower / eff / hours); completed bars stay.
+    for (const ev of fixed) {
         const raw = ev.data.raw;
-        if (isFixed(ev)) {
-            if (!prevEnd || ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
-            continue;
+        if (raw.status === 'completed') continue;
+        applyLineFormulaDuration(scheduler, raw, lineId);
+        const fixedEnd = endOfWork(new Date(ev.startDate), raw.dur || 1);
+        if (ev.endDate?.getTime() !== fixedEnd.getTime()) {
+            ev.set({ endDate : fixedEnd, duration : elapsedDays(ev.startDate, fixedEnd) });
+            raw.start = new Date(ev.startDate);
+            raw.end   = fixedEnd;
+            moved++;
         }
+    }
+
+    // Overlap repair among pinned bars: bad saved data (or a duration refresh
+    // growing a bar) can leave two pinned bars on top of each other. Bars must
+    // sit one after another — the LATER-starting bar shifts later (never
+    // earlier) until the line is sequential. Completed bars stay anchored.
+    const fixedSorted = [...fixed].sort((a, b) => a.startDate - b.startDate);
+    let fPrevEnd = null;
+    for (const ev of fixedSorted) {
+        const raw = ev.data.raw;
+        if (raw.status !== 'completed' && fPrevEnd && ev.startDate < fPrevEnd) {
+            const oldStart = new Date(ev.startDate);
+            const ns = nextStartAfter(fPrevEnd);
+            const ne = endOfWork(ns, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
+            ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+            raw.start = ns;
+            raw.end   = ne;
+            if (ns - oldStart > 3600000) uiHooks.notePositionRepair?.(String(ev.id));
+            moved++;
+        }
+        if (!fPrevEnd || ev.endDate > fPrevEnd) fPrevEnd = new Date(ev.endDate);
+    }
+
+    // Earliest PCD sews first; ties fall back to delivery, then current
+    // position (keeps split strips of the same order in visual order)
+    const tsOf = d => {
+        const t = d ? new Date(d).getTime() : NaN;
+        return Number.isNaN(t) ? Infinity : t;
+    };
+    const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+    const movable = bars.filter(ev => !packImmovable(ev)).sort((a, b) =>
+        cmp(tsOf(a.data.raw.pcd), tsOf(b.data.raw.pcd))
+        || cmp(tsOf(a.data.raw.ship), tsOf(b.data.raw.ship))
+        || (a.startDate - b.startDate)
+        || String(a.id).localeCompare(String(b.id)));
+
+    let cursor = new Date(anchor);
+    for (const ev of movable) {
+        const raw = ev.data.raw;
         applyLineFormulaDuration(scheduler, raw, lineId);
         const dur = raw.dur || 1;
-        const flush = prevEnd ? nextStartAfter(prevEnd) : clampIntoWorkWindow(ev.startDate);
-        let start = flush;
-        const wall = bars.find(b => isPinnedBar(b) && b.startDate > (prevEnd || ev.startDate));
-        if (wall && flush < wall.startDate) {
-            const trial = endOfWork(flush, dur);
-            if (trial > wall.startDate) {
-                start = clampIntoWorkWindow(ev.startDate);
-            }
+        let start = clampIntoWorkWindow(cursor);
+        for (let guard = 0; guard < 20; guard++) {
+            const end  = endOfWork(start, dur);
+            const obst = fixed.find(o => o.startDate < end && o.endDate > start);
+            if (!obst) break;
+            start = nextStartAfter(obst.endDate);
         }
         const end = endOfWork(start, dur);
-        if (wall && start < wall.startDate && end > wall.startDate) {
-            prevEnd = ev.endDate > prevEnd ? new Date(ev.endDate) : prevEnd;
-            continue;
-        }
+        raw.userPinned = false;
+        raw.manualGap  = false;
         if (ev.startDate?.getTime() !== start.getTime() || ev.endDate?.getTime() !== end.getTime()) {
             ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
             raw.start = start;
@@ -482,7 +600,37 @@ function packLineNoGaps(scheduler, lineId) {
             moved++;
         }
         raw.latePlan = !!(raw.pcd && startOfWorkDay(start) > startOfWorkDay(new Date(raw.pcd)));
-        prevEnd = end;
+        cursor = end;
+    }
+
+    // FINAL GUARANTEE: bars sit strictly one after another on the line.
+    // Whatever produced an overlap (auto-planner gap-fill, a stale bar cache,
+    // bad saved data), the LATER-starting bar shifts later — never earlier.
+    // Scans the event store directly so freshly added bars are included even
+    // when the line cache has not seen their assignment yet.
+    const spanStart = ev => (ev.data.raw.start instanceof Date ? ev.data.raw.start : ev.startDate);
+    const allOnLine = scheduler.eventStore.records
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === lineId)
+        .sort((a, b) => spanStart(a) - spanStart(b));
+    // NOTE: inside a batched interaction, reading ev.startDate/endDate right
+    // after ev.set() can return stale values — track the effective span
+    // locally instead of reading it back from the record.
+    let seqEnd = null;
+    for (const ev of allOnLine) {
+        const raw = ev.data.raw;
+        let evStart = raw.start instanceof Date ? raw.start : new Date(ev.startDate);
+        let evEnd   = raw.end   instanceof Date ? raw.end   : new Date(ev.endDate);
+        if (raw.status !== 'completed' && seqEnd && evStart < seqEnd) {
+            const ns = nextStartAfter(seqEnd);
+            const ne = endOfWork(ns, raw.dur || elapsedDays(evStart, evEnd) || 1);
+            ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+            raw.start = ns;
+            raw.end   = ne;
+            if (ns - evStart > 3600000) uiHooks.notePositionRepair?.(String(ev.id));
+            evEnd = ne;
+            moved++;
+        }
+        if (!seqEnd || evEnd > seqEnd) seqEnd = new Date(evEnd);
     }
     return moved;
 }
@@ -498,18 +646,18 @@ function poBaseEventCode(po) {
     return `EV-${String(po || 'NEW').replace(/[^A-Za-z0-9]/g, '')}-SEW`;
 }
 
-function nextStripEventCode(scheduler, po) {
-    const base = poBaseEventCode(po);
+function nextStripEventCode(scheduler, po, parentCode = null) {
+    // Base on the parent's own event code when it has one — projection bars
+    // have an empty po, and poBaseEventCode('') would give every projection
+    // the SAME 'EV-NEW-SEW' base, colliding across different orders
+    const base = String(parentCode || poBaseEventCode(po)).replace(/-\d+$/, '');
     let maxSuffix = 1;
     for (const ev of scheduler.eventStore.records) {
         const r = ev.data?.raw;
-        if (!r || r.po !== po) continue;
-        const code = r.eventCode || poBaseEventCode(po);
-        if (code === base) {
-            maxSuffix = Math.max(maxSuffix, 1);
-            continue;
-        }
-        const m = code.match(/-SEW-(\d+)$/);
+        if (!r) continue;
+        const code = String(r.eventCode || '');
+        if (code !== base && !code.startsWith(`${base}-`)) continue;
+        const m = code.match(/-(\d+)$/);
         if (m) maxSuffix = Math.max(maxSuffix, Number(m[1]));
     }
     return maxSuffix <= 1 ? `${base}-2` : `${base}-${maxSuffix + 1}`;
@@ -565,12 +713,20 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     rec.set({ endDate : end1, duration : elapsedDays(start1, end1) });
 
     // Part 2: a new bar attached right after part 1
-    if (!raw.eventCode) raw.eventCode = poBaseEventCode(raw.po);
+    if (!raw.eventCode) {
+        raw.eventCode = String(orig.id || '').startsWith('proj:')
+            ? `ev-${orig.id}` : poBaseEventCode(raw.po);
+    }
+    const strip2Code = nextStripEventCode(scheduler, raw.po, raw.eventCode);
     const raw2 = {
         ...orig,
         qty : q2, reqMin : Math.round(q2 * orig.smv), dur : d2,
         start : start2, end : end2, progress : 0, status : 'draft',
-        eventCode : nextStripEventCode(scheduler, raw.po),
+        eventCode : strip2Code,
+        // The piece needs its OWN board identity — copying the parent's id
+        // (e.g. 'proj:26XXX') would make the two parts indistinguishable
+        id : strip2Code.startsWith('ev-') ? strip2Code.slice(3) : strip2Code,
+        dbId : orig.dbId,
         keepSeparate : !!orig.keepSeparate
     };
     const id = `${rec.id}-sp${++splitSeq}`;
@@ -608,10 +764,17 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
 export function tryMergeAdjacent(scheduler, rec, targetLineId = null) {
     let raw = rec?.data?.raw;
     if (!raw || raw.stage) return null;
-    // Strictly same line (assignment-based, never stale) AND same order/PO
+    // Strictly same line (assignment-based, never stale) AND same order/PO.
+    // Projection bars have an empty po — identity must also include the order
+    // code, and at least one of po/order must be non-empty (otherwise two
+    // DIFFERENT projection orders would merge into one corrupted bar).
     const lineId = targetLineId ?? lineIdOf(scheduler, rec);
+    const sameOrder = o =>
+        String(o.po || '') === String(raw.po || '')
+        && String(o.mbmOrder || '') === String(raw.mbmOrder || '')
+        && (String(raw.po || '') !== '' || String(raw.mbmOrder || '') !== '');
     const same = barsOnLine(scheduler, lineId, rec.id).filter(ev =>
-        ev.data.raw.po === raw.po);
+        sameOrder(ev.data.raw));
     let merged = null;
     for (const other of same) {
         let prev, next;
@@ -647,12 +810,26 @@ export function tryMergeAdjacent(scheduler, rec, targetLineId = null) {
         rp.end      = end;
         if (rp.status === 'draft' && rn.status !== 'draft') rp.status = rn.status;
         prev.set({ endDate : end, duration : elapsedDays(start, end), percentDone : prog });
+        noteRemovedDbEvent(next);
         scheduler.eventStore.remove(next);
         merged = { po : rp.po, qty, rec : prev };
         rec = prev;
         raw = rp;
     }
     return merged;
+}
+
+// DB-persisted events removed from the board (e.g. a strip merged back into
+// its order) must be cancelled server-side on the next save, otherwise they
+// resurrect on reload and the quantity doubles.
+export const removedDbEventIds = new Set();
+
+function noteRemovedDbEvent(ev) {
+    const sid = String(ev?.id ?? '');
+    const dbId = ev?.data?.dbId ?? (sid.startsWith('db-') ? Number(sid.slice(3).split('-')[0]) : null);
+    if (dbId && !Number.isNaN(Number(dbId)) && sid.startsWith('db-') && !sid.includes('-sp')) {
+        removedDbEventIds.add(Number(dbId));
+    }
 }
 
 // Context captured when the strip right-click menu opens
@@ -684,10 +861,12 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     const manpower = Number(resourceRecord.data?.manpower ?? hint?.manpower) || 50;
     const lineEff  = Number(resourceRecord.data?.eff ?? hint?.eff) || 50;
     const profileEff = tooltipEfficiency(resourceRecord.id, order.productType, lineEff);
+    const dropWorkMin = Number(resourceRecord.data?.hours) > 0
+        ? Number(resourceRecord.data.hours) * 60 : WORK_MIN_PER_DAY;
     const reqMin = Math.round(order.qty * order.smv);
     const dur    = parkHold
-        ? Math.max(1, order.dur || formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff))
-        : formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff);
+        ? Math.max(1, order.dur || formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff, dropWorkMin))
+        : formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff, dropWorkMin);
 
     const dropped = startOfWorkDay(DateHelper.clearTime(date));
     let startFinal, end, snapped, blockedBy;
@@ -825,10 +1004,12 @@ export const schedulerProConfig = {
             htmlEncode : false,
             cellCls    : 'mb-linecell',
             sum        : () => 0,
-            summaryRenderer : () => `<div class="fr-line-foot">Grand totals
-                <div class="fr-gt-legend">
-                    <span class="fr-gt-plan">Day plan</span> ·
-                    <span class="fr-gt-act">Production</span> ·
+            summaryRenderer : () => `<div class="fr-line-foot fr-gt-head">
+                <span class="fr-gt-title">Grand totals</span>
+                <div class="fr-gt-legend fr-gt-legend-col">
+                    <span class="fr-gt-eff">Avg eff</span>
+                    <span class="fr-gt-plan">Day plan</span>
+                    <span class="fr-gt-act">Production</span>
                     <span>+/-</span>
                 </div>
             </div>`,
@@ -991,14 +1172,16 @@ export const schedulerProConfig = {
 
     eventTooltipFeature : {
         cls                  : 'mb-fr-tip',
-        hoverDelay           : 500,
+        hoverDelay           : 400,
         hideOnDelegateChange : true,
         hideOnScroll         : true,
-        allowOver            : false,
-        template({ eventRecord : e }) {
+        allowOver            : true,
+        async template({ eventRecord : e }) {
             const r = e.data.raw;
             if (!r) return StringHelper.encodeHtml(e.name);
-            const ymd = d => {
+
+            const enc  = StringHelper.encodeHtml;
+            const ymd  = d => {
                 if (!d) return '';
                 const x = new Date(d);
                 if (Number.isNaN(x.getTime())) return '';
@@ -1008,42 +1191,195 @@ export const schedulerProConfig = {
             const ymdHm = d => {
                 const day = ymd(d);
                 if (!day || !d) return day;
-                const x = new Date(d);
-                const p = n => String(n).padStart(2, '0');
+                const x = new Date(d); const p = n => String(n).padStart(2,'0');
                 return `${day} ${p(x.getHours())}:${p(x.getMinutes())}`;
             };
+            const ddMon = d => fmtDateDdMonRr(d ? new Date(d) : null) || ymd(d) || '—';
             const lid   = e.resourceId ?? e.data.resourceId;
             const ptype = tooltipProductType(r.po, lid, r.productType);
-            const start = e.startDate || r.start;
-            const end   = e.endDate || r.end;
-            const smv   = r.smv || randSmv(r.po);
+            // Round for display — ERP FLOAT columns arrive as long float32
+            // artifacts (e.g. 132.83999633789062)
+            const smv   = Math.round((Number(r.smv) || randSmv(r.po)) * 100) / 100;
+            // Show the efficiency the plan actually used when available
+            const eff   = Number(r.planEff) > 0 ? Number(r.planEff) : tooltipEfficiency(lid, ptype);
             const order = mbmOrderNo(r.po, r.mbmOrder);
             const deliv = r.ship ? new Date(r.ship) : orderDeliveryOf(r.ship);
             const pcd   = r.pcd ? new Date(r.pcd) : (r.ship ? addCalDays(new Date(r.ship), -30) : null);
             const stage = r.stage || 'Sew';
-            const enc   = StringHelper.encodeHtml;
-            const row   = (label, value, cls = '') =>
-                `<div class="${cls}">${enc(label)} : ${enc(value ?? '')}</div>`;
+
+            // Fetch ERP detail (cached per PO)
+            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
+            const cacheKey = `tip-${r.po}`;
+            let detail = null;
+            if (r.po) {
+                try {
+                    const cached = sessionStorage.getItem(cacheKey);
+                    if (cached) {
+                        detail = JSON.parse(cached);
+                    } else {
+                        const res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
+                        const json = await res.json();
+                        if (json.success) {
+                            detail = json.data;
+                            sessionStorage.setItem(cacheKey, JSON.stringify(detail));
+                        }
+                    }
+                } catch { /* API offline */ }
+            }
+
+            const s  = detail?.style  || {};
+            const bk = detail?.bookings?.[0] || {};
+
+            // Wash status label
+            const washLbl = s.wash_recipe_status ? '<span class="tip-badge tip-ok">✓ Done</span>' : '<span class="tip-badge tip-pend">Pending</span>';
+
+            // Image
+            const ERP_HOST = 'http://10.135.50.27';
+            const imgHtml  = s.stl_img_link
+                ? `<div class="tip-img-wrap"><img class="tip-img" src="${ERP_HOST}${enc(s.stl_img_link)}" onerror="this.style.display='none'"></div>`
+                : '';
+
+            // Techpack
+            const tpHtml = s.techpack
+                ? `<a class="tip-link" href="${ERP_HOST}${enc(s.techpack)}" target="_blank">📎 View techpack</a>`
+                : '<span class="tip-dim">—</span>';
+
+            // Booking status
+            const bkStatus = bk.booking_no
+                ? (bk.is_store_sent ? '<span class="tip-badge tip-ok">✓ Store received</span>' : '<span class="tip-badge tip-pend">Not received</span>')
+                : '<span class="tip-dim">No booking</span>';
+
+            // Fetch per-PO breakdown for confirm orders
+            const isConfirm  = orderTypeOf(r.po, r.orderType) === 'confirm';
+            const allPos     = Array.isArray(r.poList) && r.poList.length > 0 ? r.poList : (r.po ? [String(r.po)] : []);
+            let   poSummary  = [];
+            if (isConfirm && allPos.length > 0) {
+                try {
+                    // Query by planning_orders row IDs when the bar knows them —
+                    // a PO number can span several colours; ids give the exact
+                    // colour rows this bar covers
+                    const ids = Array.isArray(r.idList) ? r.idList.filter(n => Number(n) > 0) : [];
+                    const qs  = ids.length
+                        ? `ids=${encodeURIComponent(ids.join(','))}`
+                        : `pos=${encodeURIComponent(allPos.join(','))}`;
+                    const cacheKeyPos = `pos-sum-${qs}`;
+                    const cachedPos   = sessionStorage.getItem(cacheKeyPos);
+                    if (cachedPos) {
+                        poSummary = JSON.parse(cachedPos);
+                    } else {
+                        const resPo = await fetch(`${API_BASE}/pos-summary?${qs}`);
+                        const jsPo  = await resPo.json();
+                        if (jsPo.success) {
+                            poSummary = jsPo.rows;
+                            sessionStorage.setItem(cacheKeyPos, JSON.stringify(poSummary));
+                        }
+                    }
+                } catch { /* offline */ }
+            }
+
+            const colorHtml  = r.color
+                ? `<span class="tip4-swatch" style="background:${hashColor(r.color)}"></span>${enc(r.color)}`
+                : '<span class="tip4-dim">—</span>';
+
+            const consolidatedBadge = r.poCount > 1
+                ? `<span class="tip4-badge tip4-consol">${r.poCount} POs</span>`
+                : '';
+
+            const orderTypeBadge = isConfirm
+                ? '<span class="tip4-badge tip4-confirm">✔ Confirm</span>'
+                : r.orderType === 'projection'
+                    ? '<span class="tip4-badge tip4-proj">Projection</span>'
+                    : '';
+
+            const poCell = allPos.length > 1
+                ? allPos.map(p => `<span class="tip4-po-pill">${enc(String(p))}</span>`).join('')
+                : enc(String(r.po || '—'));
+
+            const poBreakdownHtml = isConfirm && poSummary.length > 0 ? `
+<div class="tip4-po-block">
+  <div class="tip4-po-hd">Purchase Orders</div>
+  <table class="tip4-po-tbl">
+    <thead><tr><th>PO</th><th>Color</th><th>Qty</th><th>Delivery</th></tr></thead>
+    <tbody>
+      ${poSummary.map(p => `<tr>
+        <td class="tip4-po-no">${enc(String(p.po_number || '—'))}</td>
+        <td class="tip4-po-clr">${p.color ? `<span class="tip4-swatch" style="background:${hashColor(p.color)}"></span>${enc(p.color)}` : '—'}</td>
+        <td class="tip4-po-qty">${enc(fmtQty(Number(p.order_quantity || 0)))}</td>
+        <td class="tip4-po-del">${enc(p.shipment_date ? ddMon(new Date(p.shipment_date)) : '—')}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+</div>` : '';
+
+            const R = (lbl, val, cls='') =>
+                `<div class="t4r${cls ? ' '+cls : ''}"><span class="t4l">${lbl}</span><span class="t4v">${val}</span></div>`;
+
             return `
-                <div class="mb-tip">
-                    ${row('Stage', stage, 'mb-tip-stage')}
-                    ${row('Order', order, 'mb-tip-order')}
-                    ${row('Product', r.style || '')}
-                    ${row('Description', '')}
-                    ${row('Type', ptype)}
-                    ${row('Customer', r.buyer || '')}
-                    ${row('Quantity', fmtQty(r.qty))}
-                    ${Number(r.made) > 0
-                        ? row('Produced', fmtQty(r.made)) + row('Remaining', fmtQty(Math.max(0, r.qty - r.made)))
-                        : ''}
-                    ${row('SMV', String(smv))}
-                    ${row('Efficiency', `${tooltipEfficiency(lid, ptype) ?? '—'}%`)}
-                    ${row('Order type', orderTypeOf(r.po, r.orderType))}
-                    ${row('PCD', fmtDateDdMonRr(pcd) || ymd(pcd))}
-                    ${row('Start date', ymdHm(start))}
-                    ${row('End date', ymdHm(end))}
-                    ${row('Delivery', fmtDateDdMonRr(deliv) || ymd(deliv))}
-                </div>`;
+<div class="mb-tip4">
+
+  <!-- HEADER -->
+  <div class="tip4-hdr">
+    <span class="tip4-hdr-name">${enc(e.name || r.buyer || '—')}</span>
+    <span class="tip4-hdr-badges">${orderTypeBadge}${consolidatedBadge}</span>
+  </div>
+
+  <!-- STYLE CARD -->
+  <div class="tip4-card">
+    <div class="tip4-card-hd">🎨 Style</div>
+    <div class="tip4-card-body${imgHtml ? ' tip4-has-img' : ''}">
+      ${imgHtml}
+      <div class="tip4-rows">
+        <div class="tip4-2col">
+          ${R('Style No', `<b>${enc(s.stl_no || r.style || '—')}</b>`)}
+          ${R('Type', enc(ptype || s.stl_type || '—'))}
+          ${R('Product', enc(s.stl_product_name || ptype || '—'))}
+          ${R('Wash', washLbl)}
+        </div>
+        ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(s.stl_description || s.stl_garment_description)}</i>`, 't4-full') : ''}
+        ${R('Techpack', tpHtml, 't4-full')}
+      </div>
+    </div>
+  </div>
+
+  <!-- ORDER CARD -->
+  <div class="tip4-card">
+    <div class="tip4-card-hd">📦 Order</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows">
+        ${R('Order No', `<b class="t4-order-no">${enc(r.mbmOrder || s.order_code || order || '—')}</b>`, 't4-full')}
+        ${R('Buyer', enc(r.buyer || '—'), 't4-full')}
+        <div class="tip4-2col">
+          ${R('Color', colorHtml)}
+          ${R('PO', `<b>${poCell}</b>`)}
+          ${R('Total Qty', `<b>${enc(fmtQty(r.qty))}</b>${Number(r.made) > 0 ? ` <span class="t4dim">(${fmtQty(r.made)} done)</span>` : ''}`)}
+          ${R('Ship date', enc(ddMon(deliv)))}
+          ${R('PCD', enc(ddMon(pcd)))}
+          ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
+          ${R('SMV / Eff', `${enc(String(smv))} / ${enc(String(eff ?? '—'))}%`)}
+          ${R('Stage', enc(stage))}
+        </div>
+        ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}
+      </div>
+      ${poBreakdownHtml}
+    </div>
+  </div>
+
+  <!-- RAW MATERIAL CARD -->
+  <div class="tip4-card">
+    <div class="tip4-card-hd">🧵 Raw Material</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows">
+        <div class="tip4-2col">
+          ${R('Fabric booking', bk.booking_no ? enc(String(bk.booking_no)) : '<span class="t4dim">—</span>')}
+          ${R('Booking ETA', enc(ddMon(bk.booking_eta)))}
+          ${R('Store status', bkStatus)}
+          ${R('Store date', enc(bk.store_receive_date ? ddMon(bk.store_receive_date) : '—'))}
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>`;
         }
     },
 
@@ -1083,16 +1419,18 @@ export const schedulerProConfig = {
     // Production (day_production_update_plan) and the +/- difference
     summaryFeature : {
         renderer({ startDate }) {
-            const { plan, made } = grandTotalMaps();
+            const { plan, made, effW } = grandTotalMaps();
             const key = ymdKeyOf(startDate);
             const p = plan[key] || 0;
             const a = made[key] || 0;
             if (!p && !a) {
-                return '<div class="fr-gt"><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
+                return '<div class="fr-gt"><span class="fr-gt-eff">-</span><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
             }
+            const dayEff = p ? Math.round((effW[key] || 0) / p) : 0;
             const diff = a - p;
             const dCls = diff < 0 ? 'fr-gt-neg' : 'fr-gt-pos';
             return `<div class="fr-gt">
+                <span class="fr-gt-eff">${dayEff}%</span>
                 <span class="fr-gt-plan">${fmtQty(p)}</span>
                 <span class="fr-gt-act">${fmtQty(a)}</span>
                 <span class="${dCls}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</span>
@@ -1115,6 +1453,7 @@ export const schedulerProConfig = {
           : { low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[r.risk.level] || 'green';
 
         renderData.cls.add(`mb-risk-${colorKey}`);
+        if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
 
         const q = (searchState.query || '').trim().toLowerCase();
         if (q) {
@@ -1126,7 +1465,7 @@ export const schedulerProConfig = {
         }
 
         if (pastDelivery) {
-            renderData.style = 'background-color:#d40000;border-color:#7a0000;color:#ffe600';
+            renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
         }
         else if (colorState.mode === 'buyer') {
             renderData.style = `background-color:${hashColor(r.buyer)};border-color:#222;color:#fff`;
@@ -1138,14 +1477,15 @@ export const schedulerProConfig = {
         if (r.stage) {
             return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
         }
+        // Single line, vertically centred — no confirm/projection label
+        // (the bar colour/border already distinguishes confirm orders)
         const full = barDisplayLine(r);
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
         const text = compact ? barDisplayLine(r, true) : full;
         return `
-            <div class="mb-bar">
+            <div class="mb-bar mb-bar-center">
                 <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
-                ${compact ? '' : `<div class="mb-bar-l2">${orderTypeOf(r.po, r.orderType)}${Number(r.made) > 0 ? ` · ${fmtQty(Math.max(0, r.qty - r.made))} left` : ''}</div>`}
             </div>`;
     },
 
