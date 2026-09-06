@@ -9206,27 +9206,36 @@ body {
 .tip4-lc-tbl { margin-top : 4px; }
 .tip4-lc-tbl .t4num, .t4num { text-align : right; }
 
-/* Day-wise plan chips on the Holding Row (click a bar) */
-.b-sch-resourcetimerange.mb-dayqty-range {
+/* Day-wise plan chips on the Holding Row (hover a bar).
+   NOTE: Bryntum's element class is b-sch-resource-time-range (dashed). */
+.b-sch-resource-time-range.mb-dayqty-range {
     display         : flex;
     align-items     : center;
     justify-content : center;
-    background      : #ffffff;
-    border          : 2px solid #17356b;
+    background      : #ffffff !important;
+    border          : 2px solid #17356b !important;
     border-radius   : 4px;
-    margin          : 2px 2px;
+    margin          : 2px 0;
     font-family     : Tahoma, Arial, sans-serif;
-    font-size       : 13px;
-    font-weight     : 800;
-    letter-spacing  : .2px;
-    color           : #0d224a;
     text-align      : center;
     overflow        : hidden;
     box-shadow      : 0 1px 4px rgba(0,0,0,.35);
     z-index         : 6;
 }
-.b-sch-resourcetimerange.mb-dayqty-lc  { border-color : #b45f04; color : #8a4a00; }
-.b-sch-resourcetimerange.mb-dayqty-off { opacity : .6; color : #777; font-weight : normal; font-size : 11px; }
+/* Bryntum nests the label — push the bold through every inner node */
+.b-sch-resource-time-range.mb-dayqty-range,
+.b-sch-resource-time-range.mb-dayqty-range * {
+    font-size   : 13px !important;
+    font-weight : 900 !important;
+    color       : #0d224a !important;
+    letter-spacing : .2px;
+}
+.b-sch-resource-time-range.mb-dayqty-lc { border-color : #b45f04 !important; }
+.b-sch-resource-time-range.mb-dayqty-lc,
+.b-sch-resource-time-range.mb-dayqty-lc * { color : #8a4a00 !important; }
+.b-sch-resource-time-range.mb-dayqty-off { opacity : .65; }
+.b-sch-resource-time-range.mb-dayqty-off,
+.b-sch-resource-time-range.mb-dayqty-off * { color : #777 !important; font-weight : 600 !important; font-size : 11px !important; }
 
 /* Build up curve dialog (per-bar) */
 .lcd-dialog { width : 480px; max-width : 95vw; }

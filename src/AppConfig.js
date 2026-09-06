@@ -1431,6 +1431,9 @@ export const schedulerProConfig = {
         hideOnDelegateChange : true,
         hideOnScroll         : true,
         allowOver            : true,
+        // Open BELOW the hovered bar so the Holding-Row day-qty chips at the
+        // top stay visible while the tooltip is up
+        align                : 't-b',
         async template({ eventRecord : e }) {
             const r = e.data.raw;
             if (!r) return StringHelper.encodeHtml(e.name);
