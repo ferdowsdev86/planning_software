@@ -1305,7 +1305,9 @@ const plAllStrips = computed(() => {
 
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Daily rows: quantity distributed over working days (off days show 0)
+// Daily rows: quantity distributed over working days (off days show 0).
+// Learning-curve days produce at the curve percentage of the day's target —
+// the schedule shows the reduced quantity and the applied efficiency.
 const plDailyRows = computed(() => {
     const rec = plRec.value;
     const raw = plRaw.value;
@@ -1313,8 +1315,13 @@ const plDailyRows = computed(() => {
     const line = plLine.value?.line;
     const availMin = (line?.availMin || 12000) * (raw.stripEff || 100) / 100;
     const dailyTarget = Math.max(1, Math.floor(availMin / Math.max(0.1, raw.smv)));
+    const baseEff = Math.round((line?.eff || 0) * (raw.stripEff || 100) / 100);
+    // Learning-curve ramp for this bar (annotated by applyLearningCurves)
+    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const period = lc ? lc.pct.length : 0;
     const rows = [];
     let remaining = raw.qty;
+    let workIdx   = 0;   // working days elapsed inside this bar
     const d = new Date(rec.startDate);
     d.setHours(0, 0, 0, 0);
     const end = new Date(rec.endDate);
@@ -1322,14 +1329,19 @@ const plDailyRows = computed(() => {
     while (d < end && guard++ < 120) {
         const off = isOffDay(d);
         const cfg = calendarState.days[d.getDay()] || {};
+        // Ramp factor for this working day (holidays don't advance the count)
+        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
+        const ramping = lc && !off && rampIdx < period;
+        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor));
         let q = 0;
         if (!off && remaining > 0) {
-            q = Math.min(dailyTarget, remaining);
+            q = Math.min(dayTarget, remaining);
             remaining -= q;
         }
         let hours = off || !q ? '0:00' : (cfg.hours || '10:00');
-        if (!off && q > 0 && q < dailyTarget) {
-            const clock = Math.max(1, Math.round((q / dailyTarget) * WORK_MIN_PER_DAY));
+        if (!off && q > 0 && q < dayTarget) {
+            const clock = Math.max(1, Math.round((q / dayTarget) * WORK_MIN_PER_DAY));
             hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
         }
         rows.push({
@@ -1338,10 +1350,12 @@ const plDailyRows = computed(() => {
             mKey  : `${d.getFullYear()}-${d.getMonth()}`,
             mName : d.toLocaleString('en-US', { month : 'short' }) + ' ' + d.getFullYear(),
             qty   : q,
-            eff   : off || !q ? 0 : Math.round((line?.eff || 0) * (raw.stripEff || 100) / 100),
+            eff   : off || !q ? 0 : Math.round(baseEff * factor),
+            lcDay : ramping && q > 0 ? rampIdx + 1 : 0,
             hours,
             off
         });
+        if (!off) workIdx++;
         d.setDate(d.getDate() + 1);
     }
     // Any remainder lands on the last working day
@@ -6665,12 +6679,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="(r, i) in plRows" :key="i" :class="{ 'pl-off' : r.eff === 0 }">
+                                <tr v-for="(r, i) in plRows" :key="i" :class="{ 'pl-off' : r.eff === 0, 'pl-lc' : r.lcDay > 0 }">
                                     <td class="st-user">{{ r.day }}</td>
                                     <td>{{ r.date }}</td>
                                     <td class="od-num">{{ fmtQty(r.qty) }}</td>
                                     <td class="od-num">{{ fmtQty(r.cum) }}</td>
-                                    <td class="od-num">{{ r.eff }}%</td>
+                                    <td class="od-num">
+                                        {{ r.eff }}%
+                                        <span v-if="r.lcDay" class="pl-lc-tag" :title="`Learning curve — day ${r.lcDay} of ${plRaw?.lc?.period || 3}`">LC D{{ r.lcDay }}</span>
+                                    </td>
                                     <td class="od-num">{{ r.hours }}</td>
                                 </tr>
                             </tbody>
@@ -8796,6 +8813,19 @@ body {
 /* Learning-curve table inside the bar tooltip */
 .tip4-lc-tbl { margin-top : 4px; }
 .tip4-lc-tbl .t4num, .t4num { text-align : right; }
+
+/* Planned-schedule rows on learning-curve days */
+.pl-lc td { background : #fff8e8; }
+.pl-lc-tag {
+    display       : inline-block;
+    margin-left   : 5px;
+    padding       : 0 5px;
+    border-radius : 2px;
+    background    : #b45f04;
+    color         : #fff;
+    font-size     : 9px;
+    font-weight   : bold;
+}
 .mb-bar-l2 { white-space : nowrap; font-size : 9.5px; }
 
 /* Order bars: one line of buyer/order info, centred in the bar */
