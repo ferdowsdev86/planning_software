@@ -61,10 +61,12 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
     if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
     const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
     applyFormulaToRaw(raw, manpower, effPct, mins);
-    // A bar entering the learning ramp is longer than the plain formula says —
-    // recompute with the per-day curve efficiencies (raw.lc set by the last
-    // applyLearningCurves pass; offset within the ramp is kept)
-    if (raw.lc?.applied && Array.isArray(raw.lc.pct)) {
+    // A bar entering the learning ramp is longer than the plain formula says.
+    // ONLY a bar whose ramp came from an active placement (viaPlacement) is
+    // sized by the curve — display-only annotations must never grow existing
+    // bars when pushFollowers re-runs the formula, or one move cascades into
+    // hundreds of phantom position changes across the line.
+    if (raw.lc?.applied && raw.lc.viaPlacement && Array.isArray(raw.lc.pct)) {
         const r = learningDuration({
             qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
             manpower, baseEffPct : effPct, dailyMinutes : mins,
@@ -585,13 +587,14 @@ function lcTypeKey(po, lineId, preferred) {
 
 /**
  * Re-derive the learning-curve state of every bar on the given lines (all
- * sewing lines when omitted). Always annotates raw.lc; with resize:true it
- * also recomputes durations of non-completed bars so ramping bars grow and
- * bars that left the ramp shrink back. The caller runs
- * enforceSequentialLines afterwards to push any resulting collisions later.
+ * sewing lines when omitted). ANNOTATION ONLY — raw.lc feeds the renderer,
+ * the tooltip and the day-wise schedule, but existing bar geometry is never
+ * touched here (mass-resizing cascades into hundreds of phantom position
+ * repairs). A bar takes its curve-adjusted DURATION only at the moment it is
+ * actively placed/dropped, via deriveLcForPlacement + applyLineFormulaDuration.
  * Deterministic from the bar sequence — a reload reproduces the same state.
  */
-export function applyLearningCurves(scheduler, { lineIds = null, resize = false } = {}) {
+export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
     if (!scheduler) return 0;
     lcProfCache = null; // fresh profile master per pass
     const curve = configuredLearningCurve();
@@ -618,8 +621,6 @@ export function applyLearningCurves(scheduler, { lineIds = null, resize = false 
             const raw  = ev.data.raw;
             const info = plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
-            const wasApplied = !!raw.lc?.applied;
-            const prevOffset = raw.lc?.dayOffset;
             raw.lc = {
                 applied     : info.applied,
                 reason      : info.reason,
@@ -629,7 +630,10 @@ export function applyLearningCurves(scheduler, { lineIds = null, resize = false 
                 period      : curve.period,
                 pct         : curve.pct,
                 learnFrac   : raw.lc?.learnFrac || 0,
-                dayPlan     : raw.lc?.dayPlan || []
+                dayPlan     : raw.lc?.dayPlan || [],
+                // keep the placement flag: a bar sized by the curve when it
+                // was placed stays curve-sized on later pushes
+                viaPlacement : !!raw.lc?.viaPlacement
             };
             // Tooltip data even when geometry stays untouched
             if (info.applied) {
@@ -648,25 +652,58 @@ export function applyLearningCurves(scheduler, { lineIds = null, resize = false 
                 raw.lc.learnFrac = 0;
                 raw.lc.dayPlan   = [];
             }
-            // Geometry only changes on explicit planning actions, and only
-            // when the ramp state actually changed — saved bars stay put
-            if (resize && raw.status !== 'completed'
-                && (wasApplied !== info.applied || (info.applied && prevOffset !== info.dayOffset))) {
-                const oldDur = raw.dur;
-                applyLineFormulaDuration(scheduler, raw, res.id);
-                if (Math.abs((raw.dur || 0) - (oldDur || 0)) * WORK_MIN_PER_DAY > 1) {
-                    const ns = new Date(ev.startDate);
-                    const ne = endOfWork(ns, raw.dur);
-                    ev.set({ endDate : ne, duration : elapsedDays(ns, ne) });
-                    raw.start = ns;
-                    raw.end   = ne;
-                    resized++;
-                }
-            }
         }
     }
-    if (resized) scheduler.refreshRows?.();
     return resized;
+}
+
+/**
+ * Ramp state for ONE bar about to be placed at `startDate` on `lineId` —
+ * compares against the bars already on the line (run walk-back included) and
+ * writes raw.lc so applyLineFormulaDuration computes a curve-aware duration
+ * BEFORE the bar is inserted. Only the placed bar's geometry ever changes.
+ */
+export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
+    if (!scheduler || !raw || !lineId || lineId === 'hold' || !startDate) return;
+    lcProfCache = null;
+    const curve = configuredLearningCurve();
+    if (!curve) { delete raw.lc; return; }
+    const myKey = lcTypeKey(raw.po, lineId, raw.productType) || '_Default';
+    const base = {
+        typeKey : myKey, profileName : curve.name,
+        period : curve.period, pct : curve.pct, learnFrac : 0, dayPlan : [],
+        viaPlacement : true
+    };
+    // Bars already on the line that start BEFORE the placement point
+    const prevBars = scheduler.eventStore.records
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw !== raw
+            && lineIdOf(scheduler, ev) === lineId && ev.startDate < startDate)
+        .sort((a, b) => b.startDate - a.startDate);
+    if (!prevBars.length) {
+        raw.lc = { ...base, applied : false, reason : 'first-on-line', dayOffset : 0 };
+        return;
+    }
+    const prevKey = lcTypeKey(prevBars[0].data.raw.po, lineId, prevBars[0].data.raw.productType) || '_Default';
+    if (prevKey !== myKey) {
+        raw.lc = { ...base, applied : true, reason : 'product-change', dayOffset : 0 };
+        return;
+    }
+    // Same type: walk back to the start of the run and continue its ramp
+    let runStart = prevBars[0];
+    let hasChangeoverBefore = false;
+    for (let i = 1; i < prevBars.length; i++) {
+        const k = lcTypeKey(prevBars[i].data.raw.po, lineId, prevBars[i].data.raw.productType) || '_Default';
+        if (k !== myKey) { hasChangeoverBefore = true; break; }
+        runStart = prevBars[i];
+    }
+    const offset  = Math.max(0, workDayIndexOf(startDate) - workDayIndexOf(runStart.startDate));
+    const applied = hasChangeoverBefore && offset < curve.period;
+    raw.lc = {
+        ...base,
+        applied,
+        reason    : applied ? 'continuation' : 'same-product',
+        dayOffset : Math.min(offset, curve.period)
+    };
 }
 
 export function packBoardGaps(scheduler) {
@@ -1033,11 +1070,25 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     const dropWorkMin = Number(resourceRecord.data?.hours) > 0
         ? Number(resourceRecord.data.hours) * 60 : WORK_MIN_PER_DAY;
     const reqMin = Math.round(order.qty * order.smv);
-    const dur    = parkHold
+    const dropped = startOfWorkDay(DateHelper.clearTime(date));
+    let dur = parkHold
         ? Math.max(1, order.dur || formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff, dropWorkMin))
         : formulaWorkingDays(order.qty, order.smv, manpower, profileEff || lineEff, dropWorkMin);
-
-    const dropped = startOfWorkDay(DateHelper.clearTime(date));
+    // Product changeover at this drop point? The NEW bar takes its ramp
+    // duration up front — no other bar is ever resized by the curve
+    if (!parkHold) {
+        deriveLcForPlacement(scheduler, order, line.id, dropped);
+        if (order.lc?.applied) {
+            const r = learningDuration({
+                qty : order.qty, smv : order.smv, manpower,
+                baseEffPct : profileEff || lineEff, dailyMinutes : dropWorkMin,
+                dayPcts : order.lc.pct, dayOffset : order.lc.dayOffset
+            });
+            dur = r.dur;
+            order.lc.learnFrac = r.workMin > 0 ? Math.min(1, r.learnMin / r.workMin) : 0;
+            order.lc.dayPlan   = r.dayPlan;
+        }
+    }
     let startFinal, end, snapped, blockedBy;
     if (parkHold) {
         startFinal = dropped;
@@ -1090,10 +1141,8 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
         if (mergedInfo) {
             warnings.push(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`);
         }
-        // Product changeover? Re-derive the line's learning ramp and let the
-        // placed / following bars take their curve-adjusted durations
-        const lcResized = applyLearningCurves(scheduler, { lineIds : [line.id], resize : true });
-        if (lcResized && placedRec) pushFollowers(scheduler, line.id, placedRec);
+        // Refresh ramp badges/tooltips for the line (annotation only)
+        applyLearningCurves(scheduler, { lineIds : [line.id] });
     }
 
     const util = recalcCapacity(scheduler);

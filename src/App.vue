@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, invalidateWorkDayCache,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration
 } from './AppConfig.js';
@@ -4809,7 +4809,12 @@ async function placeCarried(date, resourceRecord) {
     // moved bar compares against the previous order on the NEW line)
     const sourceLid = lineIdOf(s, rec);
 
-    if (!parkHold) applyLineFormulaDuration(s, raw, targetId);
+    if (!parkHold) {
+        // Changeover check at the drop point: ONLY this bar takes a
+        // curve-aware duration; no other bar is resized by the curve
+        deriveLcForPlacement(s, raw, targetId, date);
+        applyLineFormulaDuration(s, raw, targetId);
+    }
 
     let start, end, note = null;
     if (parkHold) {
@@ -4852,16 +4857,11 @@ async function placeCarried(date, resourceRecord) {
         try {
             pushFollowers(s, targetId, rec);
             tryMergeAdjacent(s, rec, targetId);
-            // Re-derive the learning ramp on the target line (changeover vs
-            // the new predecessor) AND the source line (the bar that used to
-            // follow this one may no longer be a changeover)
+            // Refresh ramp badges/tooltips on both lines (annotation only —
+            // never resizes other bars)
             const lcLines = [targetId];
             if (sourceLid && sourceLid !== targetId && sourceLid !== 'hold') lcLines.push(sourceLid);
-            const lcResized = applyLearningCurves(s, { lineIds : lcLines, resize : true });
-            if (lcResized) {
-                pushFollowers(s, targetId, rec);
-                enforceSequentialLines(s);
-            }
+            applyLearningCurves(s, { lineIds : lcLines });
         }
         finally {
             endBoardInteraction(s);
