@@ -64,7 +64,11 @@ export const calendarState = {
         6 : { start : '08:00', hours : '10:00', ot : '02:00' },
         0 : { start : '08:00', hours : '10:00', ot : '02:00' }
     },
-    offDays : new Set([5])
+    offDays : new Set([5]),
+    // Date-specific working-hour overrides (Change working hours dialog):
+    // 'YYYY-MM-DD' -> hours as a number (0 = that date becomes an off day,
+    // 11.5 = 11:30). Overrides beat the weekly pattern for that date only.
+    overrides : {}
 };
 
 export const hmToHours = s => {
@@ -72,7 +76,32 @@ export const hmToHours = s => {
     return (h || 0) + (m || 0) / 60;
 };
 
-export const isOffDay = d => calendarState.offDays.has(d.getDay());
+export const hoursToHm = h => {
+    const mins = Math.max(0, Math.round(Number(h || 0) * 60));
+    return `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
+};
+
+export const ymdOf = d =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Effective working hours of a specific DATE: the override when one exists,
+// otherwise the weekly pattern
+export function dayHoursOf(date) {
+    const ov = calendarState.overrides[ymdOf(date)];
+    if (ov != null && ov !== '') return Number(ov) || 0;
+    return hmToHours(calendarState.days[date.getDay()]?.hours || '0');
+}
+
+// Effective day config: an overridden date keeps its weekday start time but
+// takes the override hours (overtime folds into the override)
+export function dayCfgOf(date) {
+    const cfg = calendarState.days[date.getDay()] || {};
+    const ov = calendarState.overrides[ymdOf(date)];
+    if (ov == null || ov === '') return cfg;
+    return { ...cfg, hours : hoursToHm(ov), ot : '00:00' };
+}
+
+export const isOffDay = d => dayHoursOf(d) <= 0;
 
 // Legacy alias - all internal date maths follows the configured calendar
 export const isFriday = isOffDay;
@@ -115,7 +144,7 @@ export function nextWorkingDay(date) {
 // (08:00 + 10:00 + 02:00 -> 20:00; with 03:00 OT -> 21:00)
 export function endOfWorkDay(date) {
     const d    = new Date(date);
-    const cfg  = calendarState.days[d.getDay()] || {};
+    const cfg  = dayCfgOf(d);
     const mins = Math.round((hmToHours(cfg.start || '08:00') +
                              hmToHours(cfg.hours || '10:00') +
                              hmToHours(cfg.ot || '00:00')) * 60);
@@ -126,7 +155,7 @@ export function endOfWorkDay(date) {
 // Paid shift end (10h) — leftover capacity for the next order sits after this
 export function workEndOfDay(date) {
     const d   = new Date(date);
-    const cfg = calendarState.days[d.getDay()] || {};
+    const cfg = dayCfgOf(d);
     const mins = Math.round((hmToHours(cfg.start || '08:00') +
                              hmToHours(cfg.hours || '10:00')) * 60);
     d.setHours(Math.floor(mins / 60), mins % 60, 0, 0);

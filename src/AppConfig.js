@@ -1362,6 +1362,15 @@ export const schedulerProConfig = {
                     if (rec) uiHooks.onOpenCurve?.(rec);
                 }
             },
+            changeHours : {
+                text   : 'Change working hours',
+                icon   : 'b-fa b-fa-clock',
+                weight : 230,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    uiHooks.onOpenWorkHours?.(rec);
+                }
+            },
             splitQtyItem : {
                 text   : 'Specify quantity to split',
                 icon   : 'b-fa b-fa-scissors',

@@ -8,7 +8,7 @@ import {
     applyLineFormulaDuration
 } from './AppConfig.js';
 import {
-    UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, buildManpowerRanges,
+    UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, hoursToHm, ymdOf, dayHoursOf, dayCfgOf, buildManpowerRanges,
     buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay,
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
@@ -1284,6 +1284,86 @@ uiHooks.onOpenProps = openStripProps;
 uiHooks.onOpenSchedule = openPlannedSchedule;
 
 // ---------------------------------------------------------------------------
+// Change working hours (FastReact dialog, right-click → Change working
+// hours): date-specific hour overrides on the factory calendar — reset to
+// normal, zero out (extra holiday), set new hours or add overtime, over a
+// picked period and day filter. Overrides drive EVERY calendar rule (off-day
+// hatch, bar stretching, capacity, learning-curve day counting).
+// ---------------------------------------------------------------------------
+const chOpen   = ref(false);
+const chDays   = ref({ 1 : false, 2 : false, 3 : false, 4 : false, 5 : false, 6 : false, 0 : false });
+const chDayMode = ref('selected');   // selected | normalOnly | all | workingOnly
+const chAction  = ref('setNew');     // resetNormal | zero | setNew | addTime
+const chTime    = ref('');
+const chFrom    = ref(isoInputDate(new Date()));
+const chTo      = ref(isoInputDate(addCalDays(new Date(), 6)));
+
+const CH_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday-first like FastReact
+const chNormalHours = wd => calendarState.days[wd]?.hours || '0:00';
+
+function openWorkHours(rec) {
+    // Prefill the period with the clicked bar's span when opened from a bar
+    const raw = eventRawOf(rec);
+    if (rec?.startDate) chFrom.value = isoInputDate(rec.startDate);
+    if (rec?.endDate)   chTo.value   = isoInputDate(rec.endDate);
+    if (!raw) {
+        chFrom.value = isoInputDate(new Date());
+        chTo.value   = isoInputDate(addCalDays(new Date(), 6));
+    }
+    chOpen.value = true;
+}
+uiHooks.onOpenWorkHours = openWorkHours;
+
+function chApply() {
+    const from = new Date(chFrom.value + 'T00:00:00');
+    const to   = new Date(chTo.value + 'T00:00:00');
+    if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) {
+        toast('সঠিক date period দিন (from ≤ to)', 'warn');
+        return;
+    }
+    const needsTime = chAction.value === 'setNew' || chAction.value === 'addTime';
+    const timeH = hmToHours(chTime.value);
+    if (needsTime && !(timeH > 0)) {
+        toast('Specify time (hh:mm) ঘরে সময় দিন — যেমন 11:00', 'warn');
+        return;
+    }
+    if (chDayMode.value === 'selected' && !Object.values(chDays.value).some(Boolean)) {
+        toast('কোন কোন দিন বদলাবে — অন্তত একটা দিন select করুন', 'warn');
+        return;
+    }
+    let changed = 0;
+    const d = new Date(from);
+    for (let guard = 0; d <= to && guard < 400; guard++) {
+        const wd = d.getDay();
+        const weeklyWorks = hmToHours(chNormalHours(wd)) > 0;
+        const include =
+            chDayMode.value === 'selected'    ? !!chDays.value[wd]
+            : chDayMode.value === 'normalOnly' ? weeklyWorks
+            : chDayMode.value === 'all'        ? true
+            : /* workingOnly */                  dayHoursOf(d) > 0;
+        if (include) {
+            const k = ymdOf(d);
+            if (chAction.value === 'resetNormal')  delete calendarState.overrides[k];
+            else if (chAction.value === 'zero')    calendarState.overrides[k] = 0;
+            else if (chAction.value === 'setNew')  calendarState.overrides[k] = timeH;
+            else /* addTime */                     calendarState.overrides[k] = dayHoursOf(d) + timeH;
+            changed++;
+        }
+        d.setDate(d.getDate() + 1);
+    }
+    localStorage.setItem('mbm-cal-overrides', JSON.stringify(calendarState.overrides));
+    applyCalendarToBoard();
+    const s = getInstance();
+    if (s) {
+        recalcCapacity(s);
+        refreshGrandTotals(s);
+        s.refreshRows?.();
+    }
+    toast(`${changed} day(s) updated on calendar "${calendarState.name}" — বিদ্যমান bar গুলো move/re-plan করলে নতুন hours ধরবে`, 'ok');
+    chOpen.value = false;
+}
+
+// ---------------------------------------------------------------------------
 // Build up curve on ONE bar (right-click → Build up curve): pick any curve
 // from the configured Build up profiles and apply it to just this bar —
 // it ramps from Day 1 regardless of the automatic product-change rule.
@@ -1416,7 +1496,7 @@ const plDailyRows = computed(() => {
     let guard = 0;
     while (d < end && guard++ < 120) {
         const off = isOffDay(d);
-        const cfg = calendarState.days[d.getDay()] || {};
+        const cfg = dayCfgOf(d); // date-specific hour overrides included
         // Ramp factor for this working day (holidays don't advance the count)
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = lc && !off && rampIdx < period;
@@ -2345,6 +2425,12 @@ const bcList       = ref(loadBuildUps() || seedBuildUps());
 if (!localStorage.getItem('mbm-buildup')) {
     localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
 }
+
+// Date-specific working-hour overrides survive reloads (Change working hours)
+try {
+    Object.assign(calendarState.overrides, JSON.parse(localStorage.getItem('mbm-cal-overrides') || '{}'));
+}
+catch { /* corrupt store — start clean */ }
 const bcOpen       = ref(false);
 const bcMin        = ref(false);
 const bcTab        = ref('define');
@@ -4559,7 +4645,7 @@ function lineHoursLabel(r, day) {
     if (h > 0) {
         return `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
     }
-    return calendarState.days[day.getDay()]?.hours ?? '10:00';
+    return dayCfgOf(day).hours ?? '10:00';
 }
 
 function updateCarryClock(snap) {
@@ -5263,6 +5349,20 @@ function applyCalendarToBoard() {
         recurrentEndDate   : `on ${DAY_NAMES[(d + 1) % 7]} at 0:00`,
         isWorking          : false
     }));
+    // Date-specific overrides (Change working hours): a zeroed date becomes
+    // non-working, a positive override on a weekly-off date becomes working
+    for (const [ymd, hrsOv] of Object.entries(calendarState.overrides || {})) {
+        const d0 = new Date(`${ymd}T00:00:00`);
+        if (Number.isNaN(d0.getTime())) continue;
+        const d1 = new Date(d0);
+        d1.setDate(d1.getDate() + 1);
+        intervals.push({
+            startDate : d0,
+            endDate   : d1,
+            priority  : 30,
+            isWorking : Number(hrsOv) > 0
+        });
+    }
     s.project.calendarManagerStore.data = [{ id : 'factory', name : calendarState.name, intervals }];
     s.project.calendar = 'factory';
 
@@ -7024,6 +7124,89 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </table>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Change working hours (FastReact dialog) -->
+        <Teleport to="body">
+        <div v-if="chOpen" class="cal-overlay" @click.self="chOpen = false">
+            <div class="cal-dialog ch-dialog">
+                <div class="cal-title">
+                    Change working hours
+                    <span class="cal-title-btns">
+                        <span class="cal-x" @click="chOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="cal-tabs">
+                    <span class="cal-tab cal-tab-active">🕐 Working Hours</span>
+                    <span class="cal-tab" @click="chOpen = false">❌ Close</span>
+                </div>
+                <div class="st-body ch-body">
+                    <div class="ch-cols">
+                        <div class="ch-col">
+                            <div class="ch-head">Which days do you want to change</div>
+                            <fieldset class="pr-box">
+                                <legend>Select days</legend>
+                                <div class="ch-dayrow ch-dayrow-h"><span></span><span>Normal hours</span></div>
+                                <div v-for="wd in CH_DAY_ORDER" :key="wd" class="ch-dayrow">
+                                    <label><input v-model="chDays[wd]" type="checkbox"> {{ DAY_NAMES[wd] }}</label>
+                                    <input class="cal-in ch-nh" :value="chNormalHours(wd)" readonly>
+                                </div>
+                                <div class="ch-modes">
+                                    <label><input v-model="chDayMode" type="radio" value="selected"> Selected days only</label>
+                                    <label><input v-model="chDayMode" type="radio" value="normalOnly"> Normal working days only</label>
+                                    <label><input v-model="chDayMode" type="radio" value="all"> All days of the week</label>
+                                    <label><input v-model="chDayMode" type="radio" value="workingOnly"> Working days only</label>
+                                </div>
+                            </fieldset>
+                        </div>
+                        <div class="ch-col">
+                            <div class="ch-head">How do you want to change these days</div>
+                            <fieldset class="pr-box">
+                                <legend>Reset working hours</legend>
+                                <label class="ch-opt"><input v-model="chAction" type="radio" value="resetNormal"> Reset to normal hours</label>
+                                <label class="ch-opt"><input v-model="chAction" type="radio" value="zero"> Set to zero working hours</label>
+                            </fieldset>
+                            <div class="ch-or">---- or ----</div>
+                            <fieldset class="pr-box">
+                                <legend>Change working hours</legend>
+                                <label class="ch-opt"><input v-model="chAction" type="radio" value="setNew"> Change to new working hours</label>
+                                <label class="ch-opt"><input v-model="chAction" type="radio" value="addTime"> Add time to existing hours</label>
+                                <div class="ch-timerow">
+                                    <label>Specify time (hh:mm)</label>
+                                    <input
+                                        v-model="chTime"
+                                        class="cal-in ch-time"
+                                        type="text"
+                                        placeholder="11:00"
+                                        :disabled="chAction !== 'setNew' && chAction !== 'addTime'"
+                                    >
+                                </div>
+                            </fieldset>
+                        </div>
+                    </div>
+                    <div class="ch-cols">
+                        <fieldset class="pr-box ch-period">
+                            <legend>Period to change</legend>
+                            <div class="ch-timerow">
+                                <label>Apply changes from</label>
+                                <input v-model="chFrom" class="cal-in ch-date" type="date">
+                                <label>to</label>
+                                <input v-model="chTo" class="cal-in ch-date" type="date">
+                            </div>
+                        </fieldset>
+                        <fieldset class="pr-box ch-target">
+                            <legend>Apply changes to</legend>
+                            <label class="ch-opt"><input type="radio" checked> {{ calendarState.name }}</label>
+                        </fieldset>
+                    </div>
+                    <div class="ch-actions">
+                        <button class="cal-btn cal-btn-primary st-btn ch-apply" @click="chApply">✔ Apply</button>
+                        <span class="ch-note">these changes to calendar ⇒ <b>{{ calendarState.name }}</b></span>
+                    </div>
+                    <div class="st-hint">Zero hours = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
                 </div>
             </div>
         </div>
@@ -9227,6 +9410,51 @@ body {
 .b-sch-resource-time-range.mb-dayqty-lc * { color : #8a4a00 !important; }
 .b-sch-resource-time-range.mb-dayqty-off,
 .b-sch-resource-time-range.mb-dayqty-off * { opacity : .6; color : #888 !important; font-weight : normal !important; }
+
+/* Change working hours dialog (FastReact) */
+.ch-dialog { width : 720px; max-width : 96vw; }
+.ch-body   { font-size : 12px; }
+.ch-cols   { display : flex; gap : 14px; align-items : stretch; margin-bottom : 10px; }
+.ch-col    { flex : 1 1 0; display : flex; flex-direction : column; }
+.ch-col .pr-box { flex : 1 1 auto; }
+.ch-head   {
+    font-weight     : bold;
+    color           : #1b3f8f;
+    text-decoration : underline;
+    margin          : 2px 0 6px;
+}
+.ch-dayrow {
+    display         : flex;
+    align-items     : center;
+    justify-content : space-between;
+    gap             : 10px;
+    margin          : 2px 0;
+}
+.ch-dayrow label { display : flex; align-items : center; gap : 6px; }
+.ch-dayrow-h { font-weight : bold; font-size : 11px; color : #444; }
+.ch-nh { width : 70px; padding : 2px 6px; background : #f2f0ea; text-align : center; }
+.ch-modes { display : flex; flex-direction : column; gap : 3px; margin-top : 10px; }
+.ch-opt   { display : flex; align-items : center; gap : 6px; margin : 4px 0; }
+.ch-or    { text-align : center; color : #666; margin : 8px 0; }
+.ch-timerow {
+    display     : flex;
+    align-items : center;
+    gap         : 8px;
+    margin-top  : 8px;
+    flex-wrap   : wrap;
+}
+.ch-time  { width : 90px; text-align : center; }
+.ch-date  { width : 150px; }
+.ch-period { flex : 2 1 0; }
+.ch-target { flex : 1 1 0; }
+.ch-actions {
+    display     : flex;
+    align-items : center;
+    gap         : 14px;
+    margin      : 10px 0 4px;
+}
+.ch-apply { width : auto; margin : 0; padding : 7px 26px; }
+.ch-note  { color : #333; }
 
 /* Build up curve dialog (per-bar) */
 .lcd-dialog { width : 480px; max-width : 95vw; }
