@@ -4109,6 +4109,13 @@ function dpLineDayHour(g, d) {
     return lineHoursLabel({ hours : g.lineHours }, d);
 }
 
+// Combined 'Eff / Hour' cell: '63 / 14:00' (off day → '-')
+function dpLineDayEffHour(g, d) {
+    const h = dpLineDayHour(g, d);
+    if (h === '-') return '-';
+    return `${dpLineDayEff(g, d)} / ${h}`;
+}
+
 function dpBuildTableHtml() {
     const totalsFor = (t, lineLabel, floorLabel) => DP_META.map(c => {
         let v = '';
@@ -4137,11 +4144,11 @@ function dpBuildTableHtml() {
             return `<tr>${meta}${days}</tr>`;
         }).join('');
         let out = data + `<tr class="dp-total">${totalsFor(g.totals, `${g.line} Total`, g.floor)}${daysFor(g.totals.days)}</tr>`;
-        // Date-wise Eff % and Hour summary rows (day columns only)
+        // Date-wise 'Eff / Hour' summary row (day columns only)
         if (dpMode.value === 'day') {
-            const label = txt => `<td></td><td style="font-weight:bold">${txt}</td><td colspan="${DP_META.length - 2}"></td>`;
-            out += `<tr class="dp-effrow">${label('Eff %')}${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpLineDayEff(g, d))}</td>`).join('')}</tr>`;
-            out += `<tr class="dp-hourrow">${label('Hour')}${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpLineDayHour(g, d))}</td>`).join('')}</tr>`;
+            out += `<tr class="dp-effhour"><td></td><td style="font-weight:bold">Eff / Hour :</td><td colspan="${DP_META.length - 2}"></td>`
+                + dpDates.value.map(d => `<td style="text-align:right;white-space:nowrap">${dpEsc(dpLineDayEffHour(g, d))}</td>`).join('')
+                + '</tr>';
         }
         return out;
     }).join('');
@@ -6759,7 +6766,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td v-for="c in DP_META" :key="c.k" :class="{ 'od-num' : c.num }">{{ dpCell(r, c) }}</td>
                                     <td v-for="d in dpDates" :key="dpDayKey(d)" class="od-num">{{ dpDayVal(r.days, d) }}</td>
                                 </tr>
-                                <tr class="dp-total">
+                                <tr class="dp-total" :class="{ 'dp-total-open' : dpMode === 'day' }">
                                     <td>{{ g.floor }}</td>
                                     <td>{{ g.line }} Total</td>
                                     <td colspan="13"></td>
@@ -6774,21 +6781,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td></td>
                                     <td v-for="d in dpDates" :key="'t-' + dpDayKey(d)" class="od-num">{{ dpDayVal(g.totals.days, d) }}</td>
                                 </tr>
-                                <!-- FastReact line summary: date-wise applied Eff % and working Hour -->
-                                <template v-if="dpMode === 'day'">
-                                    <tr class="dp-effrow">
-                                        <td></td>
-                                        <td class="dp-subh">Eff %</td>
-                                        <td :colspan="DP_META.length - 2"></td>
-                                        <td v-for="d in dpDates" :key="'e-' + dpDayKey(d)" class="od-num">{{ dpLineDayEff(g, d) }}</td>
-                                    </tr>
-                                    <tr class="dp-hourrow">
-                                        <td></td>
-                                        <td class="dp-subh">Hour</td>
-                                        <td :colspan="DP_META.length - 2"></td>
-                                        <td v-for="d in dpDates" :key="'h-' + dpDayKey(d)" class="od-num">{{ dpLineDayHour(g, d) }}</td>
-                                    </tr>
-                                </template>
+                                <!-- FastReact line summary: date-wise 'Eff / Hour' in ONE row,
+                                     enclosed with the Total row inside the black band -->
+                                <tr v-if="dpMode === 'day'" class="dp-effhour">
+                                    <td></td>
+                                    <td class="dp-subh">Eff / Hour :</td>
+                                    <td :colspan="DP_META.length - 2"></td>
+                                    <td v-for="d in dpDates" :key="'eh-' + dpDayKey(d)" class="od-num">{{ dpLineDayEffHour(g, d) }}</td>
+                                </tr>
                             </template>
                             <tr v-if="dpGroups.length" class="dp-grand">
                                 <td>{{ dpUnitName }}</td>
@@ -9489,15 +9489,17 @@ body {
 .b-sch-resource-time-range.mb-dayqty-off,
 .b-sch-resource-time-range.mb-dayqty-off * { opacity : .6; color : #888 !important; font-weight : normal !important; }
 
-/* Day Plan report: date-wise Eff % / Hour summary rows under each line */
-.dp-effrow td, .dp-hourrow td {
-    background  : #fffde9;
-    font-size   : 10.5px;
-    color       : #444;
-    border-top  : 1px solid #e2ddc2;
+/* Day Plan report: 'Eff / Hour' summary row — the Total row and this row
+   sit together inside ONE black band */
+.dp-total.dp-total-open td { border-bottom : none; }
+.dp-effhour td {
+    background    : #fffde9;
+    font-size     : 10.5px;
+    color         : #444;
+    border-bottom : 2px solid #000;
+    white-space   : nowrap;
 }
-.dp-effrow td.od-num  { color : #b45f04; font-weight : bold; }
-.dp-hourrow td.od-num { color : #17356b; font-weight : bold; }
+.dp-effhour td.od-num { color : #b45f04; font-weight : bold; }
 .dp-subh { font-weight : bold; color : #333 !important; }
 
 /* Change working hours dialog (FastReact) */
