@@ -4441,6 +4441,54 @@ function onSchedMouseMove(e) {
     });
 }
 
+// Planned pieces of ONE bar's order on the given calendar day — the same
+// day-wise distribution the Planned-schedule dialog shows (learning-curve
+// aware: ramp days produce at the curve percentage of the day target)
+function barDayQty(s, rec, day) {
+    const raw = rec?.data?.raw;
+    if (!raw || raw.stage) return null;
+    const lid  = lineIdOf(s, rec);
+    const res  = lid ? s.resourceStore.getById(lid) : null;
+    const line = LINE_BY_ID[lid] || res?.data || {};
+    const availMin    = (Number(line.availMin) || 12000) * (Number(raw.stripEff) || 100) / 100;
+    const dailyTarget = Math.max(1, Math.floor(availMin / Math.max(0.1, Number(raw.smv) || 1)));
+    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const period = lc ? lc.pct.length : 0;
+    const target = new Date(day);
+    target.setHours(0, 0, 0, 0);
+    const d = new Date(rec.startDate);
+    d.setHours(0, 0, 0, 0);
+    const end = new Date(rec.endDate);
+    if (target < d || target >= end && target.getTime() !== new Date(end).setHours(0, 0, 0, 0)) return null;
+    let remaining = Number(raw.qty) || 0;
+    let workIdx = 0;
+    for (let guard = 0; d < end && guard < 200; guard++) {
+        const off = isOffDay(d);
+        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
+        const ramping = lc && !off && rampIdx < period;
+        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor));
+        let q = 0;
+        if (!off && remaining > 0) {
+            q = Math.min(dayTarget, remaining);
+            remaining -= q;
+        }
+        // Any remainder lands on the bar's last working day
+        const next = new Date(d);
+        next.setDate(next.getDate() + 1);
+        if (next >= end && remaining > 0 && !off) {
+            q += remaining;
+            remaining = 0;
+        }
+        if (d.getTime() === target.getTime()) {
+            return { qty : q, off, lcDay : ramping && q > 0 ? rampIdx + 1 : 0 };
+        }
+        if (!off) workIdx++;
+        d.setDate(d.getDate() + 1);
+    }
+    return null;
+}
+
 function updateHoverClock(clientX, clientY) {
     if (carried.value) return;
     const s = getInstance();
@@ -4452,6 +4500,22 @@ function updateHoverClock(clientX, clientY) {
         return;
     }
     let line2 = idleFormula;
+    // Pointer on a BAR: the header shows that order's planned pieces for
+    // the hovered day instead of the capacity formula
+    const wrap = document.elementFromPoint(clientX, clientY)?.closest?.('.b-sch-event-wrap');
+    const rec  = wrap?.dataset?.eventId ? s.eventStore.getById(wrap.dataset.eventId) : null;
+    if (rec?.data?.raw && !rec.data.raw.stage) {
+        const raw  = rec.data.raw;
+        const info = barDayQty(s, rec, date);
+        if (info) {
+            const label = mbmOrderNo(raw.po, raw.mbmOrder) || raw.po || '';
+            line2 = info.off
+                ? `${label} · off day · 0 pcs`
+                : `${label} · ${fmtQty(info.qty)} pcs${info.lcDay ? ` · LC D${info.lcDay}` : ''}`;
+            setClock(`${fmtClock(date)}<br>${line2}`);
+            return;
+        }
+    }
     if (res?.data?.lineRow) {
         const r   = res.data;
         const hrs = lineHoursLabel(r, date);
@@ -5341,7 +5405,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks };
+    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, updateHoverClock };
 
     const s = getInstance();
     uiHooks.instance = s;
