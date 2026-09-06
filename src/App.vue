@@ -1450,10 +1450,19 @@ function propsUpdate() {
     toast(`${mbmOrderNo(raw.po, raw.mbmOrder)}: profile efficiency ${pe}% · strip ${se}%`, 'ok');
 }
 
+// Users & permissions is Planning Manager-only — everyone else neither sees
+// the menu item nor can open the dialog
+const canManageUsers = computed(() =>
+    (authUser.value?.role || currentUser.value?.role) === 'Planning Manager');
+
 function openSettings() {
+    openMenu.value = null;
+    if (!canManageUsers.value) {
+        toast('Users & permissions শুধু Planning Manager-এর জন্য', 'warn');
+        return;
+    }
     settingsOpen.value = true;
     settingsMin.value = false;
-    openMenu.value = null;
 }
 
 function openPlanningRoles() {
@@ -5785,7 +5794,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="addBoard">➕ Add planning board</div>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
-                    <div class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
+                    <div v-if="canManageUsers" class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
                     <div class="fr-dd-item" @click="openPlanningRoles">👤 Planning roles &amp; plan criteria</div>
                     <div class="fr-dd-item" @click="openEffProfiles">📊 Efficiency profiles</div>
                     <div class="fr-dd-item" @click="openLineEffForm">🏭 Line eff &amp; hours</div>
