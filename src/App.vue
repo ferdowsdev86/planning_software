@@ -3641,13 +3641,18 @@ function dpCollapseMonths(days) {
     return out;
 }
 
-function dpStripDaily(ev, line) {
+function dpStripDaily(ev, line, planEff = 0) {
     const raw = ev.data.raw;
-    const map = {};
+    const map = {}, effMap = {};
     const availMin = (line?.availMin || Number(line?.data?.availMin) || 12000) * (raw.stripEff || 100) / 100;
     const smv = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
     const dailyTarget = Math.max(1, Math.floor(availMin / smv));
+    // Learning-curve ramp + changed-hours dates shape the per-day capacity
+    // and the day's APPLIED efficiency (FastReact's Eff % row)
+    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const period = lc ? lc.pct.length : 0;
     let remaining = Number(raw.qty) || 0;
+    let workIdx = 0;
     const d = new Date(ev.startDate);
     d.setHours(0, 0, 0, 0);
     const end = new Date(ev.endDate);
@@ -3655,12 +3660,18 @@ function dpStripDaily(ev, line) {
     let guard = 0;
     while (d < end && guard++ < 200) {
         const off = isOffDay(d);
+        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
+        const ramping = lc && !off && rampIdx < period;
+        const lcF  = ramping ? lc.pct[rampIdx] / 100 : 1;
+        const hrsF = dayCapacityFactor(d, line?.hours);
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * lcF * hrsF));
         let q = 0;
         if (!off && remaining > 0) {
-            q = Math.min(dailyTarget, remaining);
+            q = Math.min(dayTarget, remaining);
             remaining -= q;
         }
-        days.push({ key : dpDayKey(d), q, off });
+        days.push({ key : dpDayKey(d), q, off, eff : Math.round((Number(planEff) || 0) * lcF) });
+        if (!off) workIdx++;
         d.setDate(d.getDate() + 1);
     }
     if (remaining > 0) {
@@ -3668,9 +3679,12 @@ function dpStripDaily(ev, line) {
         if (lastW) lastW.q += remaining;
     }
     for (const x of days) {
-        if (x.q) map[x.key] = x.q;
+        if (x.q) {
+            map[x.key]    = x.q;
+            effMap[x.key] = x.eff;
+        }
     }
-    return map;
+    return { map, effMap };
 }
 
 const DP_META = [
@@ -3974,7 +3988,7 @@ function generateDayPlan() {
 
         // Only the quantity actually planned INSIDE the range counts as
         // Plan Qty for the range report; Allocated Qty stays the full bar
-        const dailyMap = dpStripDaily(ev, line);
+        const { map : dailyMap, effMap : dailyEff } = dpStripDaily(ev, line, planEff);
         let inRangeQty = 0;
         if (dpScope.value !== 'board') {
             const fromKey = dpDayKey(from), toKey = dpDayKey(to);
@@ -4011,19 +4025,22 @@ function generateDayPlan() {
             manpower    : Number(res?.data?.manpower ?? line.manpower) || 0,
             planEff,
             metric      : 'Plan Qty',
-            days        : dpMode.value === 'month' ? dpCollapseMonths(dailyMap) : dailyMap
+            days        : dpMode.value === 'month' ? dpCollapseMonths(dailyMap) : dailyMap,
+            dayEff      : dailyEff
         };
 
         if (!byLine.has(lid)) {
             byLine.set(lid, {
-                lineId   : lid,
-                floor    : row.floor,
-                line     : row.line,
-                sort     : isHold ? Number.MAX_SAFE_INTEGER : (LINES.findIndex(l => l.id === lid) + 1 || 999),
-                rows     : [],
-                totals   : {
+                lineId    : lid,
+                floor     : row.floor,
+                line      : row.line,
+                lineHours : Number(res?.data?.hours) || Number(line.hours) || 0,
+                sort      : isHold ? Number.MAX_SAFE_INTEGER : (LINES.findIndex(l => l.id === lid) + 1 || 999),
+                rows      : [],
+                totals    : {
                     poQty : 0, planQty : 0, allocQty : 0, totalCm : 0,
-                    manpower : row.manpower, avgEff : 0, effSum : 0, effW : 0, days : {}
+                    manpower : row.manpower, avgEff : 0, effSum : 0, effW : 0,
+                    days : {}, dayEffW : {}, dayEffQ : {}
                 }
             });
         }
@@ -4038,6 +4055,13 @@ function generateDayPlan() {
         g.totals.avgEff = g.totals.effW ? Math.round(g.totals.effSum / g.totals.effW) : 0;
         for (const [k, v] of Object.entries(row.days)) {
             g.totals.days[k] = (g.totals.days[k] || 0) + v;
+        }
+        // Day-wise applied efficiency, plan-qty weighted (Eff % summary row)
+        for (const [k, e] of Object.entries(dailyEff)) {
+            const q = dailyMap[k] || 0;
+            if (!q) continue;
+            g.totals.dayEffW[k] = (g.totals.dayEffW[k] || 0) + q * e;
+            g.totals.dayEffQ[k] = (g.totals.dayEffQ[k] || 0) + q;
         }
     }
 
@@ -4070,6 +4094,21 @@ function dpDayRaw(days, d) {
     return days?.[dpColKey(d)] || 0;
 }
 
+// Line-summary Eff % row: plan-qty-weighted applied efficiency of the day
+// (learning-curve days show the reduced ramp eff, FastReact style)
+function dpLineDayEff(g, d) {
+    const k = dpColKey(d);
+    const q = g.totals.dayEffQ?.[k];
+    return q ? `${Math.round((g.totals.dayEffW[k] || 0) / q)}` : '-';
+}
+
+// Line-summary Hour row: that line's working hours on the date —
+// date override → line hours → weekly calendar; off day shows '-'
+function dpLineDayHour(g, d) {
+    if (isOffDay(d)) return '-';
+    return lineHoursLabel({ hours : g.lineHours }, d);
+}
+
 function dpBuildTableHtml() {
     const totalsFor = (t, lineLabel, floorLabel) => DP_META.map(c => {
         let v = '';
@@ -4097,7 +4136,14 @@ function dpBuildTableHtml() {
             const days = dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpDayVal(r.days, d))}</td>`).join('');
             return `<tr>${meta}${days}</tr>`;
         }).join('');
-        return data + `<tr class="dp-total">${totalsFor(g.totals, `${g.line} Total`, g.floor)}${daysFor(g.totals.days)}</tr>`;
+        let out = data + `<tr class="dp-total">${totalsFor(g.totals, `${g.line} Total`, g.floor)}${daysFor(g.totals.days)}</tr>`;
+        // Date-wise Eff % and Hour summary rows (day columns only)
+        if (dpMode.value === 'day') {
+            const label = txt => `<td></td><td style="font-weight:bold">${txt}</td><td colspan="${DP_META.length - 2}"></td>`;
+            out += `<tr class="dp-effrow">${label('Eff %')}${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpLineDayEff(g, d))}</td>`).join('')}</tr>`;
+            out += `<tr class="dp-hourrow">${label('Hour')}${dpDates.value.map(d => `<td style="text-align:right">${dpEsc(dpLineDayHour(g, d))}</td>`).join('')}</tr>`;
+        }
+        return out;
     }).join('');
     const grand = dpGrand.value;
     const grandRow = dpGroups.value.length
@@ -6728,6 +6774,21 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td></td>
                                     <td v-for="d in dpDates" :key="'t-' + dpDayKey(d)" class="od-num">{{ dpDayVal(g.totals.days, d) }}</td>
                                 </tr>
+                                <!-- FastReact line summary: date-wise applied Eff % and working Hour -->
+                                <template v-if="dpMode === 'day'">
+                                    <tr class="dp-effrow">
+                                        <td></td>
+                                        <td class="dp-subh">Eff %</td>
+                                        <td :colspan="DP_META.length - 2"></td>
+                                        <td v-for="d in dpDates" :key="'e-' + dpDayKey(d)" class="od-num">{{ dpLineDayEff(g, d) }}</td>
+                                    </tr>
+                                    <tr class="dp-hourrow">
+                                        <td></td>
+                                        <td class="dp-subh">Hour</td>
+                                        <td :colspan="DP_META.length - 2"></td>
+                                        <td v-for="d in dpDates" :key="'h-' + dpDayKey(d)" class="od-num">{{ dpLineDayHour(g, d) }}</td>
+                                    </tr>
+                                </template>
                             </template>
                             <tr v-if="dpGroups.length" class="dp-grand">
                                 <td>{{ dpUnitName }}</td>
@@ -9427,6 +9488,17 @@ body {
 .b-sch-resource-time-range.mb-dayqty-lc * { color : #8a4a00 !important; }
 .b-sch-resource-time-range.mb-dayqty-off,
 .b-sch-resource-time-range.mb-dayqty-off * { opacity : .6; color : #888 !important; font-weight : normal !important; }
+
+/* Day Plan report: date-wise Eff % / Hour summary rows under each line */
+.dp-effrow td, .dp-hourrow td {
+    background  : #fffde9;
+    font-size   : 10.5px;
+    color       : #444;
+    border-top  : 1px solid #e2ddc2;
+}
+.dp-effrow td.od-num  { color : #b45f04; font-weight : bold; }
+.dp-hourrow td.od-num { color : #17356b; font-weight : bold; }
+.dp-subh { font-weight : bold; color : #333 !important; }
 
 /* Change working hours dialog (FastReact) */
 .ch-dialog { width : 720px; max-width : 96vw; }
