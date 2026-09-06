@@ -1322,7 +1322,8 @@ function chApply() {
         return;
     }
     const needsTime = chAction.value === 'setNew' || chAction.value === 'addTime';
-    const timeH = hmToHours(chTime.value);
+    // Accept 11:30, 11.30 and 11,30 alike — all mean 11 hours 30 minutes
+    const timeH = hmToHours(String(chTime.value).trim().replace(/[.,]/g, ':'));
     if (needsTime && !(timeH > 0)) {
         toast('Specify time (hh:mm) ঘরে সময় দিন — যেমন 11:00', 'warn');
         return;
