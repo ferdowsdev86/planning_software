@@ -984,6 +984,7 @@ let boardLoadedUnitId = null;
 
 function applyApiBoardData(s, data) {
     boardLoadedUnitId = data.unitId || null;
+    clearDayPlanChips();
     withBoardBatch(s, () => {
         s.project.loadInlineData({
             resources          : data.resources,
@@ -4500,28 +4501,55 @@ function updateHoverClock(clientX, clientY) {
         return;
     }
     let line2 = idleFormula;
-    // Pointer on a BAR: the header shows that order's planned pieces for
-    // the hovered day instead of the capacity formula
-    const wrap = document.elementFromPoint(clientX, clientY)?.closest?.('.b-sch-event-wrap');
-    const rec  = wrap?.dataset?.eventId ? s.eventStore.getById(wrap.dataset.eventId) : null;
-    if (rec?.data?.raw && !rec.data.raw.stage) {
-        const raw  = rec.data.raw;
-        const info = barDayQty(s, rec, date);
-        if (info) {
-            const label = mbmOrderNo(raw.po, raw.mbmOrder) || raw.po || '';
-            line2 = info.off
-                ? `${label} · off day · 0 pcs`
-                : `${label} · ${fmtQty(info.qty)} pcs${info.lcDay ? ` · LC D${info.lcDay}` : ''}`;
-            setClock(`${fmtClock(date)}<br>${line2}`);
-            return;
-        }
-    }
     if (res?.data?.lineRow) {
         const r   = res.data;
         const hrs = lineHoursLabel(r, date);
         line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
     }
     setClock(`${fmtClock(date)}<br>${line2}`);
+}
+
+// ---------------------------------------------------------------------------
+// Day-wise plan chips: CLICK a bar → every day of its plan shows that day's
+// quantity on the Holding Row band, right under the date headers. Cleared
+// when the selection clears, a bar is picked up, or the board reloads.
+// ---------------------------------------------------------------------------
+function clearDayPlanChips(s = getInstance()) {
+    const st = s?.resourceTimeRangeStore;
+    if (!st) return;
+    const olds = st.records.filter(r => String(r.id).startsWith('dq-'));
+    if (olds.length) st.remove(olds);
+}
+
+function showDayPlanChips(s, rec) {
+    clearDayPlanChips(s);
+    const raw = rec?.data?.raw;
+    if (!s?.resourceTimeRangeStore || !raw || raw.stage) return;
+    const d = new Date(rec.startDate);
+    d.setHours(0, 0, 0, 0);
+    const end = new Date(rec.endDate);
+    const ranges = [];
+    for (let guard = 0; d < end && guard < 200; guard++) {
+        const info = barDayQty(s, rec, d);
+        const next = new Date(d);
+        next.setDate(next.getDate() + 1);
+        if (info) {
+            ranges.push({
+                id         : `dq-${guard}`,
+                resourceId : 'hold',
+                startDate  : new Date(d),
+                endDate    : next,
+                name       : info.off
+                    ? 'off'
+                    : `${fmtQty(info.qty)}${info.lcDay ? ` · LC D${info.lcDay}` : ''}`,
+                cls        : 'mb-dayqty-range'
+                    + (info.off ? ' mb-dayqty-off' : '')
+                    + (!info.off && info.lcDay ? ' mb-dayqty-lc' : '')
+            });
+        }
+        d.setDate(d.getDate() + 1);
+    }
+    if (ranges.length) s.resourceTimeRangeStore.add(ranges);
 }
 
 // Line's own working hours (planning_resources.working_hours_per_day) when
@@ -4877,6 +4905,7 @@ function pickUp(rec, domEvent) {
     carried.value = rec;
     pickStamp     = performance.now();
     uiHooks.boardUserActive = true;
+    clearDayPlanChips();
     document.body.classList.add('mb-carry-active');
     // The bar leaves its old place entirely while carried — it exists only
     // under the mouse pointer. Plain set() so Bryntum repaints the event and
@@ -5383,8 +5412,13 @@ onMounted(() => {
     uiHooks.onOrderSelect = eventRecord => {
         const raw = eventRecord?.data?.raw;
         if (raw) order.value = raw;
+        // Day-wise quantities of the clicked bar on the Holding Row band
+        showDayPlanChips(getInstance(), eventRecord);
     };
-    uiHooks.onSelectionClear = () => { order.value = null; };
+    uiHooks.onSelectionClear = () => {
+        order.value = null;
+        clearDayPlanChips();
+    };
     uiHooks.onToast = toast;
 
     // Right-click -> Planned schedule / Properties on a strip
@@ -5405,7 +5439,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, updateHoverClock };
+    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips };
 
     const s = getInstance();
     uiHooks.instance = s;
@@ -9166,6 +9200,27 @@ body {
 /* Learning-curve table inside the bar tooltip */
 .tip4-lc-tbl { margin-top : 4px; }
 .tip4-lc-tbl .t4num, .t4num { text-align : right; }
+
+/* Day-wise plan chips on the Holding Row (click a bar) */
+.b-sch-resourcetimerange.mb-dayqty-range {
+    display         : flex;
+    align-items     : center;
+    justify-content : center;
+    background      : rgba(255,255,255,.94);
+    border          : 1px solid #b98f00;
+    border-radius   : 4px;
+    margin          : 3px 2px;
+    font-family     : Tahoma, Arial, sans-serif;
+    font-size       : 11px;
+    font-weight     : bold;
+    color           : #17356b;
+    text-align      : center;
+    overflow        : hidden;
+    box-shadow      : 0 1px 3px rgba(0,0,0,.25);
+    z-index         : 6;
+}
+.b-sch-resourcetimerange.mb-dayqty-lc  { border-color : #b45f04; color : #7a4104; }
+.b-sch-resourcetimerange.mb-dayqty-off { opacity : .55; color : #888; font-weight : normal; }
 
 /* Build up curve dialog (per-bar) */
 .lcd-dialog { width : 480px; max-width : 95vw; }
