@@ -9211,21 +9211,22 @@ body {
     display         : flex;
     align-items     : center;
     justify-content : center;
-    background      : rgba(255,255,255,.94);
-    border          : 1px solid #b98f00;
+    background      : #ffffff;
+    border          : 2px solid #17356b;
     border-radius   : 4px;
-    margin          : 3px 2px;
+    margin          : 2px 2px;
     font-family     : Tahoma, Arial, sans-serif;
-    font-size       : 11px;
-    font-weight     : bold;
-    color           : #17356b;
+    font-size       : 13px;
+    font-weight     : 800;
+    letter-spacing  : .2px;
+    color           : #0d224a;
     text-align      : center;
     overflow        : hidden;
-    box-shadow      : 0 1px 3px rgba(0,0,0,.25);
+    box-shadow      : 0 1px 4px rgba(0,0,0,.35);
     z-index         : 6;
 }
-.b-sch-resourcetimerange.mb-dayqty-lc  { border-color : #b45f04; color : #7a4104; }
-.b-sch-resourcetimerange.mb-dayqty-off { opacity : .55; color : #888; font-weight : normal; }
+.b-sch-resourcetimerange.mb-dayqty-lc  { border-color : #b45f04; color : #8a4a00; }
+.b-sch-resourcetimerange.mb-dayqty-off { opacity : .6; color : #777; font-weight : normal; font-size : 11px; }
 
 /* Build up curve dialog (per-bar) */
 .lcd-dialog { width : 480px; max-width : 95vw; }
