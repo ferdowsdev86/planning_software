@@ -10313,6 +10313,19 @@ body {
         #f4f4f4 !important;
 }
 
+/* Hours changed from the weekly default — FastReact's maroon crosshatch */
+.b-time-ranges-canvas .b-sch-range.mb-hours-changed {
+    background :
+        repeating-linear-gradient(45deg, rgba(140,26,26,.55) 0 1px, transparent 1px 5px),
+        repeating-linear-gradient(-45deg, rgba(140,26,26,.55) 0 1px, transparent 1px 5px),
+        rgba(255,244,244,.6) !important;
+}
+.b-time-ranges-canvas .b-sch-range.mb-hours-changed label {
+    font-size  : 9px;
+    font-weight : bold;
+    color      : #8c1a1a;
+}
+
 .b-sch-range.mb-today,
 .b-time-ranges-canvas .b-sch-range.mb-today {
     background :
