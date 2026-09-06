@@ -1760,17 +1760,6 @@ const loginGreeting = computed(() => {
     return 'Working late 🌙';
 });
 
-// User chips on the login card: DB users only (they have a username)
-const loginUserChips = computed(() =>
-    users.value.filter(u => u.username));
-
-function loginPickUser(u) {
-    loginU.value = u.username;
-    loginErr.value = '';
-    // jump straight to the password box
-    requestAnimationFrame(() => loginPwRef.value?.focus?.());
-}
-
 // Users come from planning_users when the API is up — localStorage fallback
 async function refreshUsersFromDb() {
     try {
@@ -6190,23 +6179,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div class="lg-logo">📅</div>
                 <div class="lg-brand">MbmPlan</div>
                 <div class="lg-sub">{{ loginGreeting }} — sign in to continue</div>
-
-                <div v-if="loginUserChips.length" class="lg-chips">
-                    <button
-                        v-for="u in loginUserChips"
-                        :key="u.id"
-                        type="button"
-                        class="lg-chip"
-                        :class="{ 'lg-chip-on' : loginU === u.username }"
-                        @click="loginPickUser(u)"
-                    >
-                        <span class="lg-avatar">{{ (u.name || u.username).slice(0, 1).toUpperCase() }}</span>
-                        <span class="lg-chip-txt">
-                            <b>{{ u.name }}</b>
-                            <small>{{ u.role }}</small>
-                        </span>
-                    </button>
-                </div>
 
                 <label class="lg-label">Username</label>
                 <input
