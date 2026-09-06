@@ -117,7 +117,9 @@ function snapshotBoardState(s) {
             line     : lid,
             lineName : lineLabel(s, lid),
             start    : ev.startDate?.getTime?.() ?? null,
-            end      : ev.endDate?.getTime?.() ?? null
+            end      : ev.endDate?.getTime?.() ?? null,
+            eff      : Number(raw.stripEff) || 100,
+            peff     : Number(raw.planEff) || 0
         };
     }
     return out;
@@ -223,6 +225,17 @@ function collectPendingChanges(s) {
                 qty      : now.qty
             });
         }
+        else if (was.eff !== now.eff || was.peff !== now.peff) {
+            // Efficiency edit that didn't move the snapped end — still a save
+            changes.push({
+                eventId  : id,
+                type     : 'retuned',
+                po       : now.po,
+                name     : now.name,
+                fromLine : now.lineName,
+                toLine   : now.lineName
+            });
+        }
     }
     return changes;
 }
@@ -239,6 +252,7 @@ function formatSaveConfirm(changes) {
         if (ch.type === 'rescheduled') return `• ${label}: rescheduled on ${ch.toLine}`;
         if (ch.type === 'replaced') return `• ${label}: confirm order replaced its projection on ${ch.toLine}`;
         if (ch.type === 'repaired') return `• ${label}: position adjusted (overlap repair) on ${ch.toLine}`;
+        if (ch.type === 'retuned') return `• ${label}: efficiency changed on ${ch.toLine}`;
         if (ch.type === 'split') return `• ${label}: qty split (${fmtQty(ch.qty)} pcs on ${ch.toLine})`;
         return `• ${label}: ${ch.fromLine} → ${ch.toLine}`;
     });

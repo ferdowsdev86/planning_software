@@ -156,6 +156,12 @@ function eventNotesPayload(raw, onHold) {
         userPinned : !!(raw.userPinned || raw.dbPinned),
         manualGap  : !!raw.manualGap
     };
+    // Strip/profile efficiency edits from the properties dialog must survive
+    // a reload — without them the duration formula re-runs on the old values
+    // and the bar snaps back to its pre-edit length
+    if (Number(raw.stripEff) > 0 && Number(raw.stripEff) !== 100) notes.stripEff = Number(raw.stripEff);
+    if (Number(raw.planEff) > 0) notes.planEff = Number(raw.planEff);
+    if (raw.keepSeparate) notes.keepSeparate = true;
     // Consolidated bar: persist the PO group, otherwise a reload degrades the
     // bar to a single PO while keeping the group quantity (5,090 shown on a
     // 1,344-pc PO)
@@ -247,6 +253,11 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // compact clears this.
         dbPinned   : !!parseEventNotes(e.notes).userPinned,
         manualGap  : !!parseEventNotes(e.notes).manualGap,
+        // Saved efficiency edits (Strip/Order properties dialog) come back so
+        // the duration formula reproduces the edited bar after reload
+        stripEff     : Number(noteGroup.stripEff) > 0 ? Number(noteGroup.stripEff) : 100,
+        planEff      : Number(noteGroup.planEff) > 0 ? Number(noteGroup.planEff) : 0,
+        keepSeparate : !!noteGroup.keepSeparate,
         dbId     : orderId,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
