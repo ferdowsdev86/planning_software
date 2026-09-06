@@ -607,33 +607,39 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
             .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === res.id)
             .sort((a, b) => a.startDate - b.startDate);
         if (!bars.length) continue;
-        if (!curve) {
-            for (const ev of bars) delete ev.data.raw.lc;
-            continue;
-        }
         const seq = bars.map(ev => ({
             id           : ev.id,
             typeKey      : lcTypeKey(ev.data.raw.po, res.id, ev.data.raw.productType) || '_Default',
             workDayIndex : workDayIndexOf(ev.startDate)
         }));
-        const plan = buildLineLearning(seq, curve);
+        const typeKeyById = new Map(seq.map(x => [x.id, x.typeKey]));
+        const plan = curve ? buildLineLearning(seq, curve) : new Map();
         for (const ev of bars) {
-            const raw  = ev.data.raw;
-            const info = plan.get(ev.id);
+            const raw = ev.data.raw;
+            // A manually applied Build up curve (context menu) overrides the
+            // automatic changeover derivation and always ramps from day 1
+            const manual = raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length
+                ? raw.lcManual : null;
+            const info = manual
+                ? { applied : true, reason : 'manual', dayOffset : 0,
+                    typeKey : typeKeyById.get(ev.id) || raw.productType || '_Default' }
+                : plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
+            const activeCurve = manual || curve;
             raw.lc = {
                 applied     : info.applied,
                 reason      : info.reason,
                 dayOffset   : info.dayOffset,
                 typeKey     : info.typeKey,
-                profileName : curve.name,
-                period      : curve.period,
-                pct         : curve.pct,
+                profileName : activeCurve.name,
+                period      : Number(activeCurve.period) || activeCurve.pct.length,
+                pct         : activeCurve.pct,
                 learnFrac   : raw.lc?.learnFrac || 0,
                 dayPlan     : raw.lc?.dayPlan || [],
                 // keep the placement flag: a bar sized by the curve when it
-                // was placed stays curve-sized on later pushes
-                viaPlacement : !!raw.lc?.viaPlacement
+                // was placed stays curve-sized on later pushes; a manual
+                // curve is always geometry-authoritative
+                viaPlacement : manual ? true : !!raw.lc?.viaPlacement
             };
             // Tooltip data even when geometry stays untouched. Base eff
             // (profile/plan eff × strip eff) shows for EVERY bar — with or
@@ -644,7 +650,7 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 const r = learningDuration({
                     qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
                     manpower, baseEffPct : effPct, dailyMinutes : mins,
-                    dayPcts : curve.pct, dayOffset : info.dayOffset
+                    dayPcts : activeCurve.pct, dayOffset : info.dayOffset
                 });
                 const total = Number(raw.workMin) > 0 ? Number(raw.workMin) : r.workMin;
                 raw.lc.learnFrac = total > 0 ? Math.min(1, r.learnMin / total) : 0;
@@ -668,6 +674,19 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
 export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     if (!scheduler || !raw || !lineId || lineId === 'hold' || !startDate) return;
     lcProfCache = null;
+    // A manually applied Build up curve travels with the bar — moving it
+    // never clears or re-derives the manual ramp
+    if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
+        raw.lc = {
+            applied : true, reason : 'manual', dayOffset : 0,
+            typeKey : lcTypeKey(raw.po, lineId, raw.productType) || '_Default',
+            profileName : raw.lcManual.name,
+            period : Number(raw.lcManual.period) || raw.lcManual.pct.length,
+            pct : raw.lcManual.pct,
+            learnFrac : 0, dayPlan : [], viaPlacement : true
+        };
+        return;
+    }
     const curve = configuredLearningCurve();
     if (!curve) { delete raw.lc; return; }
     const myKey = lcTypeKey(raw.po, lineId, raw.productType) || '_Default';
@@ -1334,6 +1353,15 @@ export const schedulerProConfig = {
                     if (rec) uiHooks.onOpenSchedule?.(rec);
                 }
             },
+            buildUpCurve : {
+                text   : 'Build up curve',
+                icon   : 'b-fa b-fa-chart-line',
+                weight : 220,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenCurve?.(rec);
+                }
+            },
             splitQtyItem : {
                 text   : 'Specify quantity to split',
                 icon   : 'b-fa b-fa-scissors',
@@ -1366,7 +1394,11 @@ export const schedulerProConfig = {
                 items.splitQtyItem  = false;
                 items.stripProps    = false;
                 items.planSchedule  = false;
+                items.buildUpCurve  = false;
                 return;
+            }
+            if (raw.status === 'completed' && items.buildUpCurve) {
+                items.buildUpCurve = false;
             }
             let date = null;
             try {
@@ -1596,7 +1628,8 @@ export const schedulerProConfig = {
             'product-change' : 'Product Change',
             'continuation'   : 'Product Change (continuing ramp)',
             'same-product'   : 'Same Product Continuation',
-            'first-on-line'  : 'First product on line'
+            'first-on-line'  : 'First product on line',
+            'manual'         : 'Applied manually (Build up curve)'
         }[lc.reason] || '—';
         const dayLbl = applied ? `Day ${Math.min((lc.dayOffset || 0) + 1, lc.period)} of ${lc.period}` : '—';
         const dayRows = applied && Array.isArray(lc.dayPlan)

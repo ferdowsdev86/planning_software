@@ -162,6 +162,15 @@ function eventNotesPayload(raw, onHold) {
     if (Number(raw.stripEff) > 0 && Number(raw.stripEff) !== 100) notes.stripEff = Number(raw.stripEff);
     if (Number(raw.planEff) > 0) notes.planEff = Number(raw.planEff);
     if (raw.keepSeparate) notes.keepSeparate = true;
+    // Manually applied Build up curve (bar context menu) — snapshot the
+    // percentages so the bar keeps ITS curve even if the profile is edited
+    if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
+        notes.lcCurve = {
+            name   : raw.lcManual.name,
+            period : Number(raw.lcManual.period) || raw.lcManual.pct.length,
+            pct    : raw.lcManual.pct.map(Number)
+        };
+    }
     // Consolidated bar: persist the PO group, otherwise a reload degrades the
     // bar to a single PO while keeping the group quantity (5,090 shown on a
     // 1,344-pc PO)
@@ -258,6 +267,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         stripEff     : Number(noteGroup.stripEff) > 0 ? Number(noteGroup.stripEff) : 100,
         planEff      : Number(noteGroup.planEff) > 0 ? Number(noteGroup.planEff) : 0,
         keepSeparate : !!noteGroup.keepSeparate,
+        lcManual     : noteGroup.lcCurve && Array.isArray(noteGroup.lcCurve.pct) && noteGroup.lcCurve.pct.length
+            ? noteGroup.lcCurve : undefined,
         dbId     : orderId,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),

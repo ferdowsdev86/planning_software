@@ -119,7 +119,8 @@ function snapshotBoardState(s) {
             start    : ev.startDate?.getTime?.() ?? null,
             end      : ev.endDate?.getTime?.() ?? null,
             eff      : Number(raw.stripEff) || 100,
-            peff     : Number(raw.planEff) || 0
+            peff     : Number(raw.planEff) || 0,
+            lcm      : raw.lcManual?.name || ''
         };
     }
     return out;
@@ -225,7 +226,7 @@ function collectPendingChanges(s) {
                 qty      : now.qty
             });
         }
-        else if (was.eff !== now.eff || was.peff !== now.peff) {
+        else if (was.eff !== now.eff || was.peff !== now.peff || was.lcm !== now.lcm) {
             // Efficiency edit that didn't move the snapped end — still a save
             changes.push({
                 eventId  : id,
@@ -1280,6 +1281,74 @@ function openPlannedSchedule(rec) {
 
 uiHooks.onOpenProps = openStripProps;
 uiHooks.onOpenSchedule = openPlannedSchedule;
+
+// ---------------------------------------------------------------------------
+// Build up curve on ONE bar (right-click → Build up curve): pick any curve
+// from the configured Build up profiles and apply it to just this bar —
+// it ramps from Day 1 regardless of the automatic product-change rule.
+// ---------------------------------------------------------------------------
+const lcDlgOpen = ref(false);
+const lcDlgRec  = shallowRef(null);
+const lcDlgSel  = ref('');
+
+const lcDlgRaw = computed(() => eventRawOf(lcDlgRec.value));
+
+function openCurveDialog(rec) {
+    const raw = eventRawOf(rec);
+    if (!raw) {
+        toast('Could not open Build up curve for this strip', 'error');
+        return;
+    }
+    lcDlgRec.value = rec;
+    lcDlgSel.value = raw.lcManual
+        ? (bcList.value.find(c => c.name === raw.lcManual.name)?.id || '')
+        : '';
+    lcDlgOpen.value = true;
+}
+uiHooks.onOpenCurve = openCurveDialog;
+
+function applyCurveDialog() {
+    const rec = lcDlgRec.value;
+    const raw = eventRawOf(rec);
+    const s   = getInstance();
+    if (!rec || !raw || !s) return;
+    const lid = lineIdOf(s, rec);
+    if (!lid || lid === 'hold') {
+        toast('Bar is on the Holding Row — plan it on a line first', 'warn');
+        lcDlgOpen.value = false;
+        return;
+    }
+    const sel = lcDlgSel.value;
+    if (!sel) {
+        delete raw.lcManual;
+        delete raw.lc;
+    }
+    else {
+        const c = bcList.value.find(x => x.id === sel);
+        if (!c) return;
+        // Snapshot the percentages: the bar keeps THIS curve even if the
+        // Build up profile is edited later
+        raw.lcManual = { name : c.name, period : c.period, pct : c.pct.map(Number) };
+    }
+    // Re-derive the ramp + curve-aware duration for THIS bar only
+    deriveLcForPlacement(s, raw, lid, new Date(rec.startDate));
+    applyLineFormulaDuration(s, raw, lid);
+    const start = new Date(rec.startDate);
+    const end   = endOfWork(start, raw.dur);
+    rec.set({ endDate : end, duration : elapsedDays(start, end) });
+    raw.start = start;
+    raw.end   = end;
+    const pushed = pushFollowers(s, lid, rec);
+    if (pushed) toast(`${pushed} following order(s) shifted later`, 'warn');
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(sel
+        ? `${mbmOrderNo(raw.po, raw.mbmOrder)}: "${raw.lcManual.name}" curve applied — Save to keep it`
+        : `${mbmOrderNo(raw.po, raw.mbmOrder)}: manual curve removed (automatic rule again) — Save to keep it`, 'ok');
+    lcDlgOpen.value = false;
+}
 
 // ---------------------------------------------------------------------------
 // Planned schedule (right-click -> Planned schedule): day-wise quantity,
@@ -6829,6 +6898,41 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
         </Teleport>
 
+        <!-- Build up curve on one bar (right-click → Build up curve) -->
+        <Teleport to="body">
+        <div v-if="lcDlgOpen && lcDlgRaw" class="cal-overlay" @click.self="lcDlgOpen = false">
+            <div class="cal-dialog lcd-dialog">
+                <div class="cal-title">
+                    Build up curve — {{ mbmOrderNo(lcDlgRaw.po, lcDlgRaw.mbmOrder) }}
+                    <span class="cal-title-btns">
+                        <span class="cal-x" @click="lcDlgOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <div class="cal-label">এই bar-এ কোন curve চলবে</div>
+                    <div class="cal-list lcd-list">
+                        <div :class="{ 'cal-sel' : lcDlgSel === '' }" @click="lcDlgSel = ''">
+                            — No manual curve (automatic product-change rule) —
+                        </div>
+                        <div
+                            v-for="c in bcList"
+                            :key="c.id"
+                            :class="{ 'cal-sel' : lcDlgSel === c.id }"
+                            @click="lcDlgSel = c.id"
+                        >
+                            📈 {{ c.name }} <span class="lcd-pcts">{{ c.pct.join('% → ') }}%</span>
+                        </div>
+                    </div>
+                    <div class="st-actions">
+                        <button class="cal-btn cal-btn-primary st-btn" @click="applyCurveDialog">✔ Apply</button>
+                        <button class="cal-btn st-btn" @click="lcDlgOpen = false">Cancel</button>
+                    </div>
+                    <div class="st-hint">Manual curve দিলে এই bar Day 1 থেকে ramp করবে (product change লাগবে না), bar লম্বা হবে সেই অনুযায়ী · automatic নিয়মে ফিরতে "No manual curve" বেছে Apply · তারপর Save</div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
         <!-- Strip / Order properties dialog -->
         <Teleport to="body">
         <div v-if="propsOpen && !propsMin && propsRaw" class="cal-overlay" @click.self="propsOpen = false">
@@ -8955,6 +9059,12 @@ body {
 /* Learning-curve table inside the bar tooltip */
 .tip4-lc-tbl { margin-top : 4px; }
 .tip4-lc-tbl .t4num, .t4num { text-align : right; }
+
+/* Build up curve dialog (per-bar) */
+.lcd-dialog { width : 480px; max-width : 95vw; }
+.lcd-list div { padding : 7px 10px; cursor : pointer; }
+.lcd-list div:hover { background : #eaf1fb; }
+.lcd-pcts { color : #777; font-size : 11px; margin-left : 8px; }
 
 /* Planned-schedule rows on learning-curve days */
 .pl-lc td { background : #fff8e8; }
