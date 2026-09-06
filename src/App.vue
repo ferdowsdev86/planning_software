@@ -1008,6 +1008,9 @@ function applyApiBoardData(s, data) {
     scrollBoardToToday(s);
     installFrVScroll(s);
     tuneBoardPerformance(s);
+    // Load-time engine work can flip readOnly on its own — re-assert the
+    // intended mode once the dust settles (sandbox users stay interactive)
+    setTimeout(() => applyBoardFilter(), 1500);
 }
 
 // _Default in each line's efficiency profile IS the line efficiency.
@@ -1694,9 +1697,10 @@ function applyBoardFilter() {
             return b.stages !== false;
         }
     });
-    // Management role gets a read-only board (document 17); so does anyone
-    // who opened the board AFTER another user took the edit lock
-    s.readOnly = currentUser.value?.role === 'Management' || boardReadOnly.value;
+    // Management role gets a read-only board (document 17). A user without
+    // the edit lock keeps FULL interaction (move bars, efficiency, learning
+    // curve — a what-if sandbox); only SAVING is blocked for them.
+    s.readOnly = currentUser.value?.role === 'Management';
     s.refreshRows?.();
 }
 
@@ -1720,18 +1724,26 @@ async function syncBoardLock() {
             boardReadOnly.value   = false;
             boardLockHolder.value = null;
             if (wasReadOnly) {
-                toast('Edit access granted — the previous editor left this board', 'ok');
-                applyBoardFilter();
+                toast('Edit access granted — board reloading from the saved plan (test changes discarded)', 'ok');
+                // The sandbox experiments must never be saved by accident:
+                // start editing from the DB truth, not the what-if state
+                if (currentBoard.value) {
+                    reloadBoardForUnit(currentBoard.value, { force : true });
+                }
             }
         }
         else {
             boardReadOnly.value   = true;
             boardLockHolder.value = r.holder;
             if (!wasReadOnly) {
-                toast(`🔒 Read-only — ${r.holder?.name || r.holder?.username} is editing this board`, 'warn');
-                applyBoardFilter();
+                toast(`🔒 ${r.holder?.name || r.holder?.username} is editing this board — try anything freely, but SAVE is disabled`, 'warn');
             }
         }
+        // Re-assert the interaction mode every heartbeat: something in the
+        // engine can flip readOnly during load, and the sandbox must stay
+        // fully interactive (only saving is gated)
+        const s = getInstance();
+        if (s) s.readOnly = currentUser.value?.role === 'Management';
     }
     catch { /* API offline — keep current mode */ }
 }
@@ -2037,6 +2049,8 @@ watch(effTab, v => { if (v === 'lines') refreshLineBoardTop(); });
 function saveEffState() {
     localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
     localStorage.setItem('mbm-line-prof', JSON.stringify(lineProfileMap.value));
+    // Sandbox session (no edit lock): efficiency tests stay LOCAL only
+    if (boardReadOnly.value) return;
     // Mirror to the efficiency_profile table (line / product / eff% / smv)
     saveEffProfilesDb(buildEffProfileRows(getInstance()))
         .catch(() => { /* API offline - localStorage stays the source */ });
@@ -2266,6 +2280,8 @@ watch(bcPeriod, n => {
 
 function saveBuildUps() {
     localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
+    // Sandbox session (no edit lock): learning-curve tests stay LOCAL only
+    if (boardReadOnly.value) return;
     // Mirror to the learning_curve table (day number / efficiency %)
     saveLearningCurvesDb(buildLearningCurveRows())
         .catch(() => { /* API offline - localStorage stays the source */ });
@@ -2760,7 +2776,6 @@ const markedComplete = ref(new Set());
 const markSaving     = ref(false);
 
 function toggleMarkComplete(row) {
-    if (boardReadOnly.value) return; // viewer can look, not change
     const s = new Set(markedComplete.value);
     const code = row.mbmOrder;
     if (!code) return;
@@ -2790,10 +2805,10 @@ function toggleMarkAll() {
 }
 
 async function saveMarkedComplete() {
-    // Orders list follows the board lock: read-only viewers can't complete
+    // Completing orders writes to the DB — blocked without the edit lock
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
         return;
     }
     const codes = [...markedComplete.value];
@@ -4173,6 +4188,12 @@ function buildPuRows() {
 }
 
 function saveProdUpdate() {
+    // Daily production writes to the DB — needs the board's edit lock
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
     const s = getInstance();
     if (!s) return;
     const store = loadProdStore();
@@ -4675,12 +4696,6 @@ function escCancel(e) {
 
 function pickUp(rec, domEvent) {
     if (carried.value) return;
-    // Read-only viewer: bars can't be picked up while another user edits
-    if (boardReadOnly.value) {
-        const h = boardLockHolder.value;
-        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
-        return;
-    }
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
@@ -5266,10 +5281,11 @@ onMounted(() => {
 let saveInFlight = false;
 
 async function saveToDb() {
-    // Read-only viewer (another user holds the board's edit lock) can't save
+    // Another user holds the board's edit lock: this session is a what-if
+    // sandbox — every change stays local, saving is the one blocked action
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board; saving is disabled`, 'warn');
+        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board. আপনার test change গুলো save হবে না`, 'warn');
         return;
     }
     // Repeated clicks while a save is preparing/running must not stack
@@ -5922,7 +5938,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly">🔒 AQL (Read only — {{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }} is editing this board)</template>
+                <template v-if="boardReadOnly">🔒 AQL (Test mode — {{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }} is editing · your changes will NOT save)</template>
                 <template v-else>AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
@@ -6059,8 +6075,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @keydown.escape="clearOrderFilters"
                     >
                     <span v-if="ordersGlobalSearch || ORDER_COLS.some(k => orderFilters[k])" class="od-gsearch-clear" @click="clearOrderFilters">✕</span>
-                    <span v-if="boardReadOnly" class="od-readonly-tag" :title="`${boardLockHolder?.name || boardLockHolder?.username || ''} is editing`">🔒 Read-only</span>
-                    <button v-if="markedComplete.size && !boardReadOnly" class="od-done-btn" :disabled="markSaving"
+                    <span v-if="boardReadOnly" class="od-readonly-tag" :title="`${boardLockHolder?.name || boardLockHolder?.username || ''} is editing — save disabled`">🔒 Save disabled</span>
+                    <button v-if="markedComplete.size" class="od-done-btn" :disabled="markSaving"
                         @click="saveMarkedComplete"
                     >{{ markSaving ? '⏳ Saving…' : `✔ Complete (${markedComplete.size})` }}</button>
                     <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
