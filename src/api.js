@@ -48,7 +48,11 @@ async function _healthy(base, timeoutMs = 2500) {
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
         const res = await fetch(`${base}/health`, { signal : ctrl.signal });
-        return res.ok;
+        if (!res.ok) return false;
+        // A web server's SPA fallback answers 200 with HTML — only a real
+        // JSON body proves this base is actually the planning API
+        const data = await res.json();
+        return !!data && typeof data === 'object';
     } catch {
         return false;
     } finally {
@@ -321,17 +325,32 @@ export const saveLearningCurvesDb  = rows => postRows('/learning-curves', rows);
 // Authentication — planning_users table (scrypt hashes verified server-side)
 // ---------------------------------------------------------------------------
 export async function authLogin(username, password) {
+    // Login happens BEFORE any board load, so the cached endpoint may be
+    // stale (e.g. cached while the API was restarting). Probe and repair the
+    // base first — otherwise the POST lands on the web server, which answers
+    // with an empty/HTML 404 and json() explodes.
+    await resolveApiBase().catch(() => {});
     const res = await fetch(`${API_BASE}/auth/login`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ username, password })
     });
-    const data = await res.json();
+    let data;
+    try {
+        data = await res.json();
+    }
+    catch {
+        // Non-JSON answer = wrong endpoint or API down; drop the bad cache
+        localStorage.removeItem('planningApiBase');
+        throw new Error('Server unreachable — API চালু আছে কিনা দেখুন, তারপর আবার চেষ্টা করুন');
+    }
     if (!data.success) throw new Error(data.error || 'Login failed');
     return data.user; // { id, username, name, role, boards }
 }
 
 export async function loadUsersDb() {
+    // Runs at app start (login chips) — repair a stale endpoint cache first
+    await resolveApiBase().catch(() => {});
     const res = await fetch(`${API_BASE}/users`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'load failed');
