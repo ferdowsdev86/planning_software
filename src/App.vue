@@ -9446,12 +9446,40 @@ body {
     box-sizing : border-box;
 }
 
+/* Keep Bryntum's HORIZONTAL scrollbar row: a desktop mouse (no trackpad
+   pan) needs a draggable bar to move through the dates. Only the vertical
+   native scrollbar is replaced by the custom fr-vscroll. */
 .mb-fr-vscroll-on .b-virtual-scrollers {
-    height         : 0 !important;
+    height         : auto !important;
     min-height     : 0 !important;
-    overflow       : hidden !important;
-    pointer-events : none;
-    border         : none !important;
+    overflow       : visible !important;
+    pointer-events : auto;
+    border-top     : 1px solid #c4c4c4 !important;
+    background     : #eceae6;
+}
+
+/* Always-visible, mouse-friendly horizontal scrollbar under the timeline */
+.mb-fr-vscroll-on .b-virtual-scroller {
+    overflow-x : scroll !important;
+    overflow-y : hidden !important;
+    height     : 16px;
+    scrollbar-width : auto;           /* Firefox */
+}
+.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar {
+    height     : 14px;
+    background : #eceae6;
+}
+.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar-thumb {
+    background    : #9aa7bd;
+    border        : 3px solid #eceae6;
+    border-radius : 7px;
+}
+.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar-thumb:hover {
+    background : #6f83a6;
+}
+/* The locked (line-name) side never scrolls — hide its stub */
+.mb-fr-vscroll-on .b-virtual-scrollers > .b-virtual-scroller:first-child {
+    overflow-x : hidden !important;
 }
 
 /* FastReact footer legend */
