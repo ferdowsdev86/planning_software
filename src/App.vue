@@ -19,7 +19,8 @@ import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
-    authLogin, loadUsersDb, saveUsersDb
+    authLogin, loadUsersDb, saveUsersDb,
+    resolveApiBase, apiMode, setApiMode
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -34,6 +35,12 @@ const toasts = ref([]);
 const colorMenuOpen = ref(false);
 const colorMode = ref('risk');
 const dataSource = ref('demo');
+const apiModeSel = ref(apiMode());        // auto | local | aws — status-bar switch
+const apiBaseLabel = ref('');             // the endpoint actually in use
+function onApiModeChange() {
+    setApiMode(apiModeSel.value);
+    window.location.reload();             // re-resolve and re-hydrate cleanly
+}
 const planMeta = ref({ name : 'AQL August Sewing Plan', status : 'Draft', version : 3 });
 const apiReady = ref(false);
 const boardLoading = ref(false);
@@ -1091,6 +1098,10 @@ async function hydrateBoardFromApi() {
         const unitId = currentBoard.value?.unitId || 3;
         setBoardLoad(true, 'Connecting to planning database…', 0);
         try {
+            // pick the live endpoint (Auto probes local + AWS; pinned modes
+            // keep their endpoint) before the first data request
+            const picked = await resolveApiBase();
+            apiBaseLabel.value = picked.base;
             const data = await loadFromApi(unitId);
             if (!s) return;
             setBoardLoad(true, 'Loading board layout…', 20);
@@ -1112,7 +1123,7 @@ async function hydrateBoardFromApi() {
             setBoardLoad(false);
             finishBoardLoad(unitId, data, s);
             setTimeout(() => syncMasterData(s), 3000);
-            toast(`Connected: ${data.project.name} (${data.unitName || 'unit'})`, 'ok');
+            toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
 
             loadProdUpdatesDb().then(rows => {
                 const store = loadProdStore();
@@ -1539,6 +1550,11 @@ const loginShowPw = ref(false);
 const loginBusy = ref(false);
 const loginErr  = ref('');
 const loginPwRef = ref(null);
+
+// Browser-tab title follows the signed-in user: "MbmPlan (Ferdows)"
+watch(authUser, u => {
+    document.title = u ? `MbmPlan (${u.name || u.username})` : 'MbmPlan';
+}, { immediate : true });
 
 // Time-of-day greeting for the login card
 const loginGreeting = computed(() => {
@@ -5636,7 +5652,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="lg-orbs"><i></i><i></i><i></i></div>
             <form class="lg-card" :class="{ 'lg-shake' : loginErr }" @submit.prevent="doLogin">
                 <div class="lg-logo">📅</div>
-                <div class="lg-brand">FastReactPlan</div>
+                <div class="lg-brand">MbmPlan</div>
                 <div class="lg-sub">{{ loginGreeting }} — sign in to continue</div>
 
                 <div v-if="loginUserChips.length" class="lg-chips">
@@ -5755,7 +5771,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <span class="fr-status-cell fr-status-logout" title="Sign out" @click="doLogout">⎋ Logout</span>
                 <span class="fr-status-cell">{{ permittedBoards.length }} board(s) permitted</span>
                 <span class="fr-status-cell fr-status-wide"></span>
-                <span class="fr-status-cell">{{ dataSource === 'db' ? 'DB: 172.16.101.70/fastreact' : 'demo data' }}</span>
+                <span class="fr-status-cell" :title="apiBaseLabel">{{ dataSource === 'db' ? ('API: ' + apiBaseLabel) : 'demo data' }}</span>
+                <span class="fr-status-cell">
+                    Server:
+                    <select v-model="apiModeSel" @change="onApiModeChange"
+                            style="background:transparent;border:1px solid #999;border-radius:3px;font:inherit">
+                        <option value="auto">Auto</option>
+                        <option value="local">Local</option>
+                        <option value="aws">AWS</option>
+                    </select>
+                </span>
                 <span v-if="boardPlanProgress.active" class="fr-status-cell fr-status-plan">
                     ⏳ {{ boardPlanProgress.msg }} {{ boardPlanProgress.pct ? `(${boardPlanProgress.pct}%)` : '' }}
                 </span>
