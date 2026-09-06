@@ -1797,6 +1797,16 @@ export const schedulerProConfig = {
         setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
     },
 
+    // Hovering a bar shows its day-wise plan quantities on the Holding Row
+    // (same trigger feel as the tooltip)
+    onEventMouseEnter({ eventRecord }) {
+        uiHooks.onBarHover?.(eventRecord);
+    },
+
+    onEventMouseLeave() {
+        uiHooks.onBarHoverOut?.();
+    },
+
     onEventMenuItem({ item, eventRecord }) {
         const rec = eventRecord || menuSplitCtx?.rec;
         if (!rec) return;

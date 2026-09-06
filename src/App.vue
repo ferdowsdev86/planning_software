@@ -5412,13 +5412,18 @@ onMounted(() => {
     uiHooks.onOrderSelect = eventRecord => {
         const raw = eventRecord?.data?.raw;
         if (raw) order.value = raw;
-        // Day-wise quantities of the clicked bar on the Holding Row band
-        showDayPlanChips(getInstance(), eventRecord);
     };
     uiHooks.onSelectionClear = () => {
         order.value = null;
         clearDayPlanChips();
     };
+    // Hover a bar (tooltip-style) → its day-wise quantities appear on the
+    // Holding Row band; leaving the bar clears them
+    uiHooks.onBarHover = eventRecord => {
+        if (carried.value) return;
+        showDayPlanChips(getInstance(), eventRecord);
+    };
+    uiHooks.onBarHoverOut = () => clearDayPlanChips();
     uiHooks.onToast = toast;
 
     // Right-click -> Planned schedule / Properties on a strip
