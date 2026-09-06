@@ -1175,8 +1175,7 @@ export const schedulerProConfig = {
 
     rowHeight    : 48,
     headerHeight : 46,
-    // Bar height = 50% of the row: margin of a quarter row above and below
-    barMargin   : 12,
+    barMargin   : 0,
     eventLayout : 'none',
     eventStyle  : null,
     eventColor  : null,
