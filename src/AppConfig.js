@@ -635,9 +635,12 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 // was placed stays curve-sized on later pushes
                 viaPlacement : !!raw.lc?.viaPlacement
             };
-            // Tooltip data even when geometry stays untouched
+            // Tooltip data even when geometry stays untouched. Base eff
+            // (profile/plan eff × strip eff) shows for EVERY bar — with or
+            // without a ramp — so a strip-efficiency edit is always visible
+            const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, res.id);
+            raw.lc.baseEffPct = Math.round(effPct * 10) / 10;
             if (info.applied) {
-                const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, res.id);
                 const r = learningDuration({
                     qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
                     manpower, baseEffPct : effPct, dailyMinutes : mins,
@@ -646,7 +649,6 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 const total = Number(raw.workMin) > 0 ? Number(raw.workMin) : r.workMin;
                 raw.lc.learnFrac = total > 0 ? Math.min(1, r.learnMin / total) : 0;
                 raw.lc.dayPlan   = r.dayPlan;
-                raw.lc.baseEffPct = Math.round(effPct * 10) / 10;
             }
             else {
                 raw.lc.learnFrac = 0;
@@ -1611,7 +1613,9 @@ export const schedulerProConfig = {
           ${R('Learning day', enc(dayLbl))}
           ${R('Profile', enc(applied ? (lc.profileName || '—') : '—'))}
           ${R('Product type', enc(lc.typeKey || ptype || '—'))}
-          ${applied ? R('Base eff', enc(`${lc.baseEffPct ?? eff}%`)) : ''}
+          ${R('Base eff', enc(Number(r.stripEff) > 0 && Number(r.stripEff) !== 100
+              ? `${lc.baseEffPct ?? eff}% (${eff}% × strip ${Number(r.stripEff)}%)`
+              : `${lc.baseEffPct ?? eff}%`))}
         </div>
         ${dayRows ? `<table class="tip4-po-tbl tip4-lc-tbl">
           <thead><tr><th>Ramp</th><th>Applied eff</th><th>Daily capacity</th></tr></thead>
