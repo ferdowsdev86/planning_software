@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration
 } from './AppConfig.js';
@@ -2151,6 +2151,11 @@ const loadBuildUps = () => {
 };
 
 const bcList       = ref(loadBuildUps() || seedBuildUps());
+// The learning-curve engine (AppConfig) reads the curves from localStorage —
+// persist the seeded list right away so both sides see the same profiles
+if (!localStorage.getItem('mbm-buildup')) {
+    localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
+}
 const bcOpen       = ref(false);
 const bcMin        = ref(false);
 const bcTab        = ref('define');
@@ -4786,6 +4791,9 @@ async function placeCarried(date, resourceRecord) {
     }
 
     const targetId = parkHold ? 'hold' : resourceRecord.id;
+    // Line the bar is leaving — its ramp re-derives after the move (rule: a
+    // moved bar compares against the previous order on the NEW line)
+    const sourceLid = lineIdOf(s, rec);
 
     if (!parkHold) applyLineFormulaDuration(s, raw, targetId);
 
@@ -4830,6 +4838,16 @@ async function placeCarried(date, resourceRecord) {
         try {
             pushFollowers(s, targetId, rec);
             tryMergeAdjacent(s, rec, targetId);
+            // Re-derive the learning ramp on the target line (changeover vs
+            // the new predecessor) AND the source line (the bar that used to
+            // follow this one may no longer be a changeover)
+            const lcLines = [targetId];
+            if (sourceLid && sourceLid !== targetId && sourceLid !== 'hold') lcLines.push(sourceLid);
+            const lcResized = applyLearningCurves(s, { lineIds : lcLines, resize : true });
+            if (lcResized) {
+                pushFollowers(s, targetId, rec);
+                enforceSequentialLines(s);
+            }
         }
         finally {
             endBoardInteraction(s);
@@ -4919,6 +4937,7 @@ function applyCalendarToBoard() {
             .filter(d => hmToHours(calendarState.days[d].hours) <= 0)
             .map(Number)
     );
+    invalidateWorkDayCache(); // learning-curve day counter follows the calendar
     const s = getInstance();
     if (!s) return;
 
@@ -8742,6 +8761,41 @@ body {
 
 .mb-bar { padding : 2px 4px; overflow : hidden; line-height : 1.35; }
 .mb-bar-l1 { font-weight : bold; white-space : nowrap; }
+
+/* Learning-curve ramp: hatched shade over the bar's first working days —
+   sits ON TOP of the status/risk colour without replacing it */
+.mb-lc-seg {
+    position       : absolute;
+    left           : 0;
+    top            : 0;
+    bottom         : 0;
+    pointer-events : none;
+    background     : repeating-linear-gradient(
+        -45deg,
+        rgba(255,255,255,.32) 0 5px,
+        rgba(0,0,0,.08)       5px 10px
+    );
+    border-right   : 2px dashed rgba(0,0,0,.55);
+}
+
+.mb-lc-badge {
+    position       : absolute;
+    top            : 1px;
+    left           : 2px;
+    z-index        : 2;
+    padding        : 0 3px;
+    border-radius  : 2px;
+    background     : rgba(0,0,0,.55);
+    color          : #ffe082;
+    font-size      : 8px;
+    font-weight    : bold;
+    letter-spacing : .5px;
+    pointer-events : none;
+}
+
+/* Learning-curve table inside the bar tooltip */
+.tip4-lc-tbl { margin-top : 4px; }
+.tip4-lc-tbl .t4num, .t4num { text-align : right; }
 .mb-bar-l2 { white-space : nowrap; font-size : 9.5px; }
 
 /* Order bars: one line of buyer/order info, centred in the bar */

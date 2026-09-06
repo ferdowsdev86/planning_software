@@ -8,8 +8,9 @@ import {
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
-    formulaWorkingDays, applyFormulaToRaw, WORK_MIN_PER_DAY, isLateVsDelivery
+    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, isLateVsDelivery
 } from './planningData.js';
+import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 
 // ---------------------------------------------------------------------------
 // Colour-by state (toolbar dropdown): risk (default) | buyer | status
@@ -40,9 +41,9 @@ function tooltipEfficiency(lineId, productType, fallbackEff) {
     return fb;
 }
 
-// (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
-export function applyLineFormulaDuration(scheduler, raw, lineId) {
-    if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
+// Line + bar → the numbers the capacity formula runs on. Single source for
+// both the plain duration formula and the learning-curve calculation.
+function lineCalcParams(scheduler, raw, lineId) {
     const res = scheduler?.resourceStore?.getById(lineId);
     const manpower = Number(res?.data?.manpower ?? LINE_BY_ID[lineId]?.manpower) || 50;
     const lineEff  = Number(res?.data?.eff ?? LINE_BY_ID[lineId]?.eff) || 50;
@@ -51,8 +52,30 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
         ? Number(raw.planEff)
         : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
     const strip = Math.max(1, Number(raw.stripEff) || 100);
-    const lineWorkMin = Number(res?.data?.hours) > 0 ? Number(res.data.hours) * 60 : WORK_MIN_PER_DAY;
-    applyFormulaToRaw(raw, manpower, baseEff * strip / 100, lineWorkMin);
+    const mins  = Number(res?.data?.hours) > 0 ? Number(res.data.hours) * 60 : WORK_MIN_PER_DAY;
+    return { manpower, effPct : baseEff * strip / 100, mins };
+}
+
+// (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
+export function applyLineFormulaDuration(scheduler, raw, lineId) {
+    if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
+    const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
+    applyFormulaToRaw(raw, manpower, effPct, mins);
+    // A bar entering the learning ramp is longer than the plain formula says —
+    // recompute with the per-day curve efficiencies (raw.lc set by the last
+    // applyLearningCurves pass; offset within the ramp is kept)
+    if (raw.lc?.applied && Array.isArray(raw.lc.pct)) {
+        const r = learningDuration({
+            qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
+            manpower, baseEffPct : effPct, dailyMinutes : mins,
+            dayPcts : raw.lc.pct, dayOffset : raw.lc.dayOffset || 0
+        });
+        const clock = snapWorkMinutes(r.dur * mins, mins);
+        raw.workMin = clock;
+        raw.dur     = clock / mins;
+        raw.lc.learnFrac = clock > 0 ? Math.min(1, r.learnMin / clock) : 0;
+        raw.lc.dayPlan   = r.dayPlan;
+    }
     return raw.dur;
 }
 
@@ -320,6 +343,10 @@ export function refreshGrandTotals(scheduler) {
 // ---------------------------------------------------------------------------
 export function recalcCapacity(scheduler) {
     if (!scheduler) return;
+    // Keep every bar's learning-curve state current (annotation only — no
+    // geometry change): insert/move/delete of a predecessor re-derives the
+    // ramp for the whole line, so badges and tooltips never go stale
+    try { applyLearningCurves(scheduler); } catch { /* board mid-batch */ }
     const util = computeLineUtil(scheduler.eventStore.records);
     for (const res of scheduler.resourceStore.records) {
         if (util.hasOwnProperty(res.id) && res.data.utilization !== util[res.id]) {
@@ -498,6 +525,148 @@ export async function enforceSequentialLines(scheduler) {
     }
     if (totalMoved) scheduler.refreshRows?.();
     return totalMoved;
+}
+
+// ---------------------------------------------------------------------------
+// Learning curve (product-changeover ramp). Domain rules live in
+// learningCurveService.mjs; this glue feeds it the board's sequences and the
+// configured Build up profile, and annotates every bar with raw.lc for the
+// renderer, the tooltip and the duration formula.
+// ---------------------------------------------------------------------------
+const LC_EPOCH = new Date(2026, 0, 1);
+const workDayIdxCache = new Map();
+
+// Working days between the epoch and a date — the calendar-aware day counter
+// the curve runs on (off days / holidays are excluded, so a ramp interrupted
+// by a holiday simply continues on the next working day)
+function workDayIndexOf(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    const key = x.getTime();
+    if (workDayIdxCache.has(key)) return workDayIdxCache.get(key);
+    let n = 0;
+    const t = new Date(LC_EPOCH);
+    while (t < x && n < 4000) {
+        if (!isOffDay(t)) n++;
+        t.setDate(t.getDate() + 1);
+    }
+    workDayIdxCache.set(key, n);
+    return n;
+}
+
+export function invalidateWorkDayCache() {
+    workDayIdxCache.clear();
+}
+
+function configuredLearningCurve() {
+    try {
+        return pickLearningCurve(JSON.parse(localStorage.getItem('mbm-buildup') || '[]'), 3);
+    }
+    catch { return null; }
+}
+
+// Per-invocation cached product-type resolver: the profile master is parsed
+// once, not once per bar (tooltipProductType hits localStorage every call)
+let lcProfCache = null;
+function lcTypeKey(po, lineId, preferred) {
+    if (!lcProfCache) {
+        try {
+            lcProfCache = {
+                map  : JSON.parse(localStorage.getItem('mbm-line-prof') || '{}'),
+                list : JSON.parse(localStorage.getItem('mbm-eff-list') || '[]')
+            };
+        }
+        catch { lcProfCache = { map : {}, list : [] }; }
+    }
+    const pid = lineId ? lcProfCache.map[lineId] : null;
+    const profile = (pid && lcProfCache.list.find(p => p.id === pid)) || lcProfCache.list[0];
+    return resolveProfileType(po, profile?.values, preferred);
+}
+
+/**
+ * Re-derive the learning-curve state of every bar on the given lines (all
+ * sewing lines when omitted). Always annotates raw.lc; with resize:true it
+ * also recomputes durations of non-completed bars so ramping bars grow and
+ * bars that left the ramp shrink back. The caller runs
+ * enforceSequentialLines afterwards to push any resulting collisions later.
+ * Deterministic from the bar sequence — a reload reproduces the same state.
+ */
+export function applyLearningCurves(scheduler, { lineIds = null, resize = false } = {}) {
+    if (!scheduler) return 0;
+    lcProfCache = null; // fresh profile master per pass
+    const curve = configuredLearningCurve();
+    const wanted = lineIds ? new Set(lineIds) : null;
+    let resized = 0;
+    for (const res of scheduler.resourceStore.records) {
+        if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+        if (wanted && !wanted.has(res.id)) continue;
+        const bars = scheduler.eventStore.records
+            .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === res.id)
+            .sort((a, b) => a.startDate - b.startDate);
+        if (!bars.length) continue;
+        if (!curve) {
+            for (const ev of bars) delete ev.data.raw.lc;
+            continue;
+        }
+        const seq = bars.map(ev => ({
+            id           : ev.id,
+            typeKey      : lcTypeKey(ev.data.raw.po, res.id, ev.data.raw.productType) || '_Default',
+            workDayIndex : workDayIndexOf(ev.startDate)
+        }));
+        const plan = buildLineLearning(seq, curve);
+        for (const ev of bars) {
+            const raw  = ev.data.raw;
+            const info = plan.get(ev.id);
+            if (!info) { delete raw.lc; continue; }
+            const wasApplied = !!raw.lc?.applied;
+            const prevOffset = raw.lc?.dayOffset;
+            raw.lc = {
+                applied     : info.applied,
+                reason      : info.reason,
+                dayOffset   : info.dayOffset,
+                typeKey     : info.typeKey,
+                profileName : curve.name,
+                period      : curve.period,
+                pct         : curve.pct,
+                learnFrac   : raw.lc?.learnFrac || 0,
+                dayPlan     : raw.lc?.dayPlan || []
+            };
+            // Tooltip data even when geometry stays untouched
+            if (info.applied) {
+                const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, res.id);
+                const r = learningDuration({
+                    qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
+                    manpower, baseEffPct : effPct, dailyMinutes : mins,
+                    dayPcts : curve.pct, dayOffset : info.dayOffset
+                });
+                const total = Number(raw.workMin) > 0 ? Number(raw.workMin) : r.workMin;
+                raw.lc.learnFrac = total > 0 ? Math.min(1, r.learnMin / total) : 0;
+                raw.lc.dayPlan   = r.dayPlan;
+                raw.lc.baseEffPct = Math.round(effPct * 10) / 10;
+            }
+            else {
+                raw.lc.learnFrac = 0;
+                raw.lc.dayPlan   = [];
+            }
+            // Geometry only changes on explicit planning actions, and only
+            // when the ramp state actually changed — saved bars stay put
+            if (resize && raw.status !== 'completed'
+                && (wasApplied !== info.applied || (info.applied && prevOffset !== info.dayOffset))) {
+                const oldDur = raw.dur;
+                applyLineFormulaDuration(scheduler, raw, res.id);
+                if (Math.abs((raw.dur || 0) - (oldDur || 0)) * WORK_MIN_PER_DAY > 1) {
+                    const ns = new Date(ev.startDate);
+                    const ne = endOfWork(ns, raw.dur);
+                    ev.set({ endDate : ne, duration : elapsedDays(ns, ne) });
+                    raw.start = ns;
+                    raw.end   = ne;
+                    resized++;
+                }
+            }
+        }
+    }
+    if (resized) scheduler.refreshRows?.();
+    return resized;
 }
 
 export function packBoardGaps(scheduler) {
@@ -921,6 +1090,10 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
         if (mergedInfo) {
             warnings.push(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`);
         }
+        // Product changeover? Re-derive the line's learning ramp and let the
+        // placed / following bars take their curve-adjusted durations
+        const lcResized = applyLearningCurves(scheduler, { lineIds : [line.id], resize : true });
+        if (lcResized && placedRec) pushFollowers(scheduler, line.id, placedRec);
     }
 
     const util = recalcCapacity(scheduler);
@@ -1363,6 +1536,42 @@ export const schedulerProConfig = {
     </div>
   </div>
 
+  <!-- LEARNING CURVE CARD -->
+  ${(() => {
+        const lc = r.lc;
+        if (!lc) return '';
+        const applied = !!lc.applied;
+        const reasonLbl = {
+            'product-change' : 'Product Change',
+            'continuation'   : 'Product Change (continuing ramp)',
+            'same-product'   : 'Same Product Continuation',
+            'first-on-line'  : 'First product on line'
+        }[lc.reason] || '—';
+        const dayLbl = applied ? `Day ${Math.min((lc.dayOffset || 0) + 1, lc.period)} of ${lc.period}` : '—';
+        const dayRows = applied && Array.isArray(lc.dayPlan)
+            ? lc.dayPlan.filter(d => d.day <= lc.period).map(d =>
+                `<tr><td>Day ${d.day}</td><td class="t4num">${d.effPct}%</td><td class="t4num">${fmtQty(d.capacity)} pcs</td></tr>`).join('')
+            : '';
+        return `<div class="tip4-card">
+    <div class="tip4-card-hd">📈 Learning Curve</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows">
+        <div class="tip4-2col">
+          ${R('Applied', applied ? '<span class="tip-badge tip-ok">Yes</span>' : '<span class="tip-badge tip-pend">No</span>')}
+          ${R('Reason', enc(reasonLbl))}
+          ${R('Learning day', enc(dayLbl))}
+          ${R('Profile', enc(applied ? (lc.profileName || '—') : '—'))}
+          ${R('Product type', enc(lc.typeKey || ptype || '—'))}
+          ${applied ? R('Base eff', enc(`${lc.baseEffPct ?? eff}%`)) : ''}
+        </div>
+        ${dayRows ? `<table class="tip4-po-tbl tip4-lc-tbl">
+          <thead><tr><th>Ramp</th><th>Applied eff</th><th>Daily capacity</th></tr></thead>
+          <tbody>${dayRows}</tbody></table>` : ''}
+      </div>
+    </div>
+  </div>`;
+    })()}
+
   <!-- RAW MATERIAL CARD -->
   <div class="tip4-card">
     <div class="tip4-card-hd">🧵 Raw Material</div>
@@ -1480,8 +1689,14 @@ export const schedulerProConfig = {
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
         const text = compact ? barDisplayLine(r, true) : full;
+        // Learning-curve ramp: hatched overlay on the bar's head — a shade on
+        // top of (never replacing) the status/risk colour
+        const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
+        const lcHtml = lcFrac > 0.005
+            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-badge" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}">LC</span>`
+            : '';
         return `
-            <div class="mb-bar mb-bar-center">
+            ${lcHtml}<div class="mb-bar mb-bar-center">
                 <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
             </div>`;
     },
