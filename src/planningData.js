@@ -103,6 +103,19 @@ export function dayCfgOf(date) {
 
 export const isOffDay = d => dayHoursOf(d) <= 0;
 
+// Ratio of a DATE's effective hours to the line's own base hours. When the
+// Change-working-hours dialog overrides a date, that override takes PRIORITY
+// over the line's normal hours — the day's available minutes and piece
+// capacity scale by this factor (1 on untouched dates).
+export function dayCapacityFactor(date, lineBaseHours) {
+    const ov = calendarState.overrides[ymdOf(date)];
+    if (ov == null || ov === '') return 1;
+    const base = Number(lineBaseHours) > 0
+        ? Number(lineBaseHours)
+        : hmToHours(calendarState.days[date.getDay()]?.hours || '10:00');
+    return base > 0 ? (Number(ov) || 0) / base : 1;
+}
+
 // Legacy alias - all internal date maths follows the configured calendar
 export const isFriday = isOffDay;
 

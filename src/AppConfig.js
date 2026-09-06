@@ -8,7 +8,8 @@ import {
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
-    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, isLateVsDelivery
+    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, isLateVsDelivery,
+    dayCapacityFactor
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 
@@ -291,14 +292,16 @@ function grandTotalMaps() {
             let guard = 0;
             while (d < end && guard++ < 200) {
                 if (!isOffDay(d) && remaining > 0) {
-                    let dayCap = target;
+                    // Changed-hours dates take PRIORITY: the day capacity
+                    // scales to the overridden hours
+                    let dayCap = Math.max(1, Math.floor(target * dayCapacityFactor(d, line.hours)));
                     // A production cut can leave the bar starting mid-shift:
                     // that first day only holds the fraction of the shift left
                     const sw = startOfWorkDay(d), ew = endOfWorkDay(d);
                     if (start > sw) {
                         dayCap = start >= ew
                             ? 0
-                            : Math.round(target * (ew.getTime() - start.getTime()) / (ew.getTime() - sw.getTime()));
+                            : Math.round(dayCap * (ew.getTime() - start.getTime()) / (ew.getTime() - sw.getTime()));
                     }
                     if (dayCap > 0) {
                         const q = Math.min(dayCap, remaining);

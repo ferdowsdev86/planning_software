@@ -8,7 +8,7 @@ import {
     applyLineFormulaDuration
 } from './AppConfig.js';
 import {
-    UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, hoursToHm, ymdOf, dayHoursOf, dayCfgOf, buildManpowerRanges,
+    UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, hoursToHm, ymdOf, dayHoursOf, dayCfgOf, dayCapacityFactor, buildManpowerRanges,
     buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay,
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
@@ -1501,7 +1501,9 @@ const plDailyRows = computed(() => {
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor));
+        // Changed-hours dates scale the day's capacity by the new hours
+        const hrsF = dayCapacityFactor(d, line?.hours);
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
         let q = 0;
         if (!off && remaining > 0) {
             q = Math.min(dayTarget, remaining);
@@ -4554,7 +4556,9 @@ function barDayQty(s, rec, day) {
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor));
+        // Changed-hours dates scale the day's capacity by the new hours
+        const hrsF = dayCapacityFactor(d, line?.hours);
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
         let q = 0;
         if (!off && remaining > 0) {
             q = Math.min(dayTarget, remaining);
@@ -4590,7 +4594,7 @@ function updateHoverClock(clientX, clientY) {
     if (res?.data?.lineRow) {
         const r   = res.data;
         const hrs = lineHoursLabel(r, date);
-        line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
+        line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${lineDayAvailMin(r, date).toFixed(3)}`;
     }
     setClock(`${fmtClock(date)}<br>${line2}`);
 }
@@ -4638,14 +4642,26 @@ function showDayPlanChips(s, rec) {
     if (ranges.length) s.resourceTimeRangeStore.add(ranges);
 }
 
-// Line's own working hours (planning_resources.working_hours_per_day) when
-// set, otherwise the weekday calendar hours
+// Working hours for a line on a specific DATE. Priority: the date's
+// Change-working-hours override → the line's own hours
+// (planning_resources.working_hours_per_day) → the weekday calendar
 function lineHoursLabel(r, day) {
+    const ov = calendarState.overrides[ymdOf(day)];
+    if (ov != null && ov !== '') return hoursToHm(ov);
     const h = Number(r.hours);
     if (h > 0) {
         return `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
     }
     return dayCfgOf(day).hours ?? '10:00';
+}
+
+// Available minutes of a line for a DATE — the hover formula's right side
+// (manpower × date hours × eff), override-aware
+function lineDayAvailMin(r, day) {
+    const mp  = Number(r.manpower) || 0;
+    const eff = Number(r.eff) || 0;
+    const lh  = hmToHours(lineHoursLabel(r, day));
+    return mp * lh * 60 * eff / 100;
 }
 
 function updateCarryClock(snap) {
@@ -4661,7 +4677,7 @@ function updateCarryClock(snap) {
     if (res?.data?.lineRow) {
         const r   = res.data;
         const hrs = lineHoursLabel(r, at);
-        line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${Number(r.availMin).toFixed(3)}`;
+        line2 = `${Number(r.manpower).toFixed(1)} x ${hrs} x ${r.eff} = ${lineDayAvailMin(r, at).toFixed(3)}`;
     }
     setClock(`${fmtClock(at)}<br>${line2}`);
 }
