@@ -2767,6 +2767,23 @@ function clearOrderFilters() {
     orderFilters.value = Object.fromEntries(ORDER_COLS.map(k => [k, '']));
 }
 
+// ⟳ button beside Excel: reset every filter/sort AND re-download the order
+// book from the DB in one click
+function reloadOrdersList() {
+    clearOrderFilters();
+    orderSort.value = { key : null, dir : 1 };
+    markedComplete.value = new Set();
+    erpAllLoading.value = true;
+    loadErpAllOrders(currentUnitId.value || null).then(rows => {
+        erpAllOrders.value  = overlayBoardPlacements(rows);
+        erpAllLoading.value = false;
+        toast(`Order list refreshed — ${rows.length} row(s)`, 'ok');
+    }).catch(e => {
+        erpAllLoading.value = false;
+        toast(`Refresh failed: ${e.message}`, 'error');
+    });
+}
+
 // True while the user has text selected in the list — a select-drag must not
 // fire the row's board-navigation click, so copying works naturally
 function windowSelectionActive() {
@@ -2937,12 +2954,17 @@ async function saveMarkedComplete() {
         unplanned.value = unplanned.value.filter(u => !codes.includes(String(u.mbmOrder || '')));
         toast(`${codes.length} order(s) marked complete — removed from the board`, 'ok');
         markedComplete.value = new Set();
-        // Refresh the list so statuses show 'completed'
-        erpAllLoading.value = true;
-        loadErpAllOrders(currentUnitId.value || null).then(rows => {
-            erpAllOrders.value  = overlayBoardPlacements(rows);
-            erpAllLoading.value = false;
-        }).catch(() => { erpAllLoading.value = false; });
+        // INSTANT list update — the server already confirmed, so flip the
+        // rows locally instead of re-downloading the whole order book
+        const codeSet2 = new Set(codes);
+        for (const r of erpAllOrders.value) {
+            if (codeSet2.has(String(r.mbmOrder || ''))) {
+                r.status   = 'completed';
+                r.planned  = false;
+                r.replaced = false;
+            }
+        }
+        erpAllOrders.value = [...erpAllOrders.value];
     }
     catch (e) {
         toast(`Mark complete failed: ${e.message}`, 'error');
@@ -6163,6 +6185,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @click="saveMarkedComplete"
                     >{{ markSaving ? '⏳ Saving…' : `✔ Complete (${markedComplete.size})` }}</button>
                     <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
+                    <button
+                        class="od-reload-btn"
+                        :disabled="erpAllLoading"
+                        title="সব filter reset + list refresh"
+                        @click="reloadOrdersList"
+                    >{{ erpAllLoading ? '⏳' : '⟳' }}</button>
                 </div>
 
                 <!-- Summary of the filtered rows — tiles are quick actions -->
@@ -7674,6 +7702,21 @@ body {
 }
 .od-xls-btn:hover:not(:disabled) { background : #2e7d32; }
 .od-xls-btn:disabled { opacity : 0.5; cursor : default; }
+
+/* ⟳ reset + refresh beside Excel */
+.od-reload-btn {
+    padding       : 6px 12px;
+    border        : 1px solid #9db3d6;
+    border-radius : 4px;
+    background    : #f4f7fc;
+    color         : #17356b;
+    font-size     : 15px;
+    font-weight   : bold;
+    cursor        : pointer;
+    line-height   : 1;
+}
+.od-reload-btn:hover:not(:disabled) { background : #e4ecf8; }
+.od-reload-btn:disabled { opacity : 0.5; cursor : default; }
 
 /* Orders dialog tab bar */
 .od-tabs {
