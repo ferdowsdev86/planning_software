@@ -5457,13 +5457,26 @@ function applyCalendarToBoard() {
         const lh  = Number(res.data.hours) || hrs;
         const availMin = Math.round(mp * lh * 60 * eff / 100);
         res.set('availMin', availMin);
-        const l = LINES.find(x => x.id === res.id);
-        if (l) {
-            l.availMin = availMin;
-            l.manpower = mp;
-            l.eff      = eff;
-            l.hours    = lh;
+        let l = LINES.find(x => x.id === res.id);
+        if (!l) {
+            // A DB line beyond the demo master (e.g. Line 09): register it so
+            // every LINE_BY_ID consumer — day-plan report, grand totals,
+            // top-3 products, capacity — sees it like any other line
+            l = {
+                id       : res.id,
+                name     : res.data.name || res.id,
+                unit     : res.data.unit || 'AQL',
+                floor    : res.data.floor || 'F1',
+                machines : Number(res.data.machines) || 0,
+                manpower : mp, eff, hours : lh, availMin
+            };
+            LINES.push(l);
+            LINE_BY_ID[res.id] = l;
         }
+        l.availMin = availMin;
+        l.manpower = mp;
+        l.eff      = eff;
+        l.hours    = lh;
     }
 
     s.project.resourceTimeRangeStore.data = buildManpowerRanges(
