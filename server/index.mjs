@@ -957,24 +957,36 @@ app.post(`${BASE}/orders/complete`, async (req, res) => {
     const codes = (Array.isArray(req.body?.orderCodes) ? req.body.orderCodes : [])
         .map(c => String(c || '').trim()).filter(Boolean).slice(0, 500);
     if (!codes.length) return res.json({ success : true, completed : 0 });
-    const conn = await pool.getConnection();
-    try {
-        await conn.beginTransaction();
-        for (const code of codes) {
+    // The 15-minute ERP sync updates planning_orders concurrently — a lock
+    // collision must retry, not bounce a 500 back to the user (same policy
+    // as scheduler-sync)
+    const RETRYABLE = new Set(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            for (const code of codes) {
+                await conn.query(
+                    'INSERT IGNORE INTO planning_completed_orders (order_code) VALUES (?)', [code]);
+            }
             await conn.query(
-                'INSERT IGNORE INTO planning_completed_orders (order_code) VALUES (?)', [code]);
+                `UPDATE planning_orders SET planning_status = 'completed', updated_at = NOW()
+                 WHERE order_code IN (${codes.map(() => '?').join(',')})`, codes);
+            await conn.commit();
+            conn.release();
+            return res.json({ success : true, completed : codes.length });
         }
-        await conn.query(
-            `UPDATE planning_orders SET planning_status = 'completed', updated_at = NOW()
-             WHERE order_code IN (${codes.map(() => '?').join(',')})`, codes);
-        await conn.commit();
-        res.json({ success : true, completed : codes.length });
+        catch (e) {
+            try { await conn.rollback(); } catch { /* already gone */ }
+            conn.release();
+            if (RETRYABLE.has(e.code) && attempt < 3) {
+                console.warn(`[complete] ${e.code} — retry ${attempt}/3`);
+                await new Promise(r => setTimeout(r, 400 * attempt));
+                continue;
+            }
+            return res.status(500).json({ success : false, error : e.message });
+        }
     }
-    catch (e) {
-        await conn.rollback();
-        res.status(500).json({ success : false, error : e.message });
-    }
-    finally { conn.release(); }
 });
 
 async function completedOrderCodes() {
