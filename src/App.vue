@@ -4488,7 +4488,7 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     const rightX = dateToClientX(s, end);
     if (leftX == null || rightX == null) return floatingCarrySnap(clientX, clientY);
 
-    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    const height = Math.max(20, Math.round((s.rowHeight || 48) / 2)); // matches 50% bar height
     const width = Math.max(32, rightX - leftX);
     lastCarrySize.width = width;
     lastCarrySize.height = height;
@@ -4525,7 +4525,7 @@ function computeCarryOrigin(s, rec) {
     const leftX  = dateToClientX(s, rec.startDate);
     const rightX = dateToClientX(s, rec.endDate);
     if (leftX == null || rightX == null) return empty;
-    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    const height = Math.max(20, Math.round((s.rowHeight || 48) / 2)); // matches 50% bar height
     return {
         valid  : true,
         left   : leftX,
@@ -5597,6 +5597,8 @@ function vZoom(delta) {
     const s = getInstance();
     if (!s) return;
     s.rowHeight = Math.max(32, Math.min(110, (s.rowHeight || 56) + delta));
+    // Keep the bar at 50% of the row height at every zoom level
+    s.barMargin = Math.round(s.rowHeight / 4);
     requestAnimationFrame(() => updateFrVScroll(s));
 }
 
