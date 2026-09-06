@@ -1531,6 +1531,61 @@ app.post(`${BASE}/auth/login`, async (req, res) => {
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Board edit locks — one editor per board (unit) at a time. First user to
+// open a board holds the lock; everyone else is read-only until the holder
+// leaves or goes silent for LOCK_TTL_MS (browser crash / closed tab).
+// In-memory: locks reset on API restart, clients re-acquire on heartbeat.
+// ---------------------------------------------------------------------------
+const boardLocks  = new Map();     // unitId -> { username, name, acquiredAt, lastSeen }
+const LOCK_TTL_MS = 90 * 1000;
+
+function liveLockHolder(unitId) {
+    const l = boardLocks.get(String(unitId));
+    if (!l) return null;
+    if (Date.now() - l.lastSeen > LOCK_TTL_MS) {
+        boardLocks.delete(String(unitId));
+        return null;
+    }
+    return l;
+}
+
+// Acquire doubles as heartbeat: the holder calls it periodically to stay live
+app.post(`${BASE}/board-lock/acquire`, (req, res) => {
+    const { unitId, username, name } = req.body || {};
+    if (!unitId || !username) {
+        return res.json({ success : false, error : 'unitId and username required' });
+    }
+    const key = String(unitId);
+    const cur = liveLockHolder(key);
+    if (cur && cur.username !== username) {
+        return res.json({
+            success : true, ok : false,
+            holder  : { username : cur.username, name : cur.name }
+        });
+    }
+    boardLocks.set(key, {
+        username,
+        name       : name || username,
+        acquiredAt : cur?.acquiredAt || Date.now(),
+        lastSeen   : Date.now()
+    });
+    res.json({ success : true, ok : true, holder : { username, name : name || username } });
+});
+
+app.post(`${BASE}/board-lock/release`, (req, res) => {
+    const { unitId, username } = req.body || {};
+    const key = String(unitId);
+    const cur = liveLockHolder(key);
+    if (cur && cur.username === username) boardLocks.delete(key);
+    res.json({ success : true });
+});
+
+app.get(`${BASE}/board-lock`, (req, res) => {
+    const cur = liveLockHolder(String(req.query.unit_id || ''));
+    res.json({ success : true, holder : cur ? { username : cur.username, name : cur.name } : null });
+});
+
 app.get(`${BASE}/users`, async (req, res) => {
     try {
         const [rows] = await pool.query(

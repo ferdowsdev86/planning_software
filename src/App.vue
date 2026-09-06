@@ -19,6 +19,7 @@ import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
+    acquireBoardLock, releaseBoardLock,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode
 } from './api.js';
@@ -1636,6 +1637,9 @@ async function doLogin() {
         loginP.value = '';
         loginShowPw.value = false;
         toast(`Welcome, ${res.name || res.username}`, 'ok');
+        // Board already open behind the gate: take/check the edit lock as
+        // the newly signed-in user
+        if (view.value === 'board' && currentUnitId.value) startLockHeartbeat();
     }
     catch (e) {
         loginErr.value = /fetch|network/i.test(e.message)
@@ -1649,6 +1653,8 @@ async function doLogin() {
 }
 
 function doLogout() {
+    // Free the board's edit lock so the next user can take over immediately
+    stopLockHeartbeat(true);
     authUser.value = null;
     localStorage.removeItem('mbm-auth');
     loginP.value = '';
@@ -1688,10 +1694,70 @@ function applyBoardFilter() {
             return b.stages !== false;
         }
     });
-    // Management role gets a read-only board (document 17)
-    s.readOnly = currentUser.value?.role === 'Management';
+    // Management role gets a read-only board (document 17); so does anyone
+    // who opened the board AFTER another user took the edit lock
+    s.readOnly = currentUser.value?.role === 'Management' || boardReadOnly.value;
     s.refreshRows?.();
 }
+
+// ---------------------------------------------------------------------------
+// Board edit lock: only ONE user edits a board at a time. The first user to
+// open it takes the server-side lock (heartbeat keeps it alive); everyone
+// else gets a read-only board + orders list until the holder leaves.
+// ---------------------------------------------------------------------------
+const boardReadOnly   = ref(false);
+const boardLockHolder = ref(null);   // { username, name } when someone ELSE holds it
+let   lockTimer       = null;
+
+async function syncBoardLock() {
+    const unitId = currentUnitId.value;
+    const me = authUser.value;
+    if (!unitId || !me?.username) return;
+    try {
+        const r = await acquireBoardLock(unitId, me.username, me.name);
+        const wasReadOnly = boardReadOnly.value;
+        if (r.ok) {
+            boardReadOnly.value   = false;
+            boardLockHolder.value = null;
+            if (wasReadOnly) {
+                toast('Edit access granted — the previous editor left this board', 'ok');
+                applyBoardFilter();
+            }
+        }
+        else {
+            boardReadOnly.value   = true;
+            boardLockHolder.value = r.holder;
+            if (!wasReadOnly) {
+                toast(`🔒 Read-only — ${r.holder?.name || r.holder?.username} is editing this board`, 'warn');
+                applyBoardFilter();
+            }
+        }
+    }
+    catch { /* API offline — keep current mode */ }
+}
+
+function startLockHeartbeat() {
+    stopLockHeartbeat();
+    syncBoardLock();
+    // Holder: keeps the lock alive · viewer: takes over when the holder leaves
+    lockTimer = setInterval(syncBoardLock, 30000);
+}
+
+function stopLockHeartbeat(release = false) {
+    if (lockTimer) { clearInterval(lockTimer); lockTimer = null; }
+    if (release && !boardReadOnly.value && currentUnitId.value && authUser.value?.username) {
+        releaseBoardLock(currentUnitId.value, authUser.value.username);
+    }
+    boardReadOnly.value   = false;
+    boardLockHolder.value = null;
+}
+
+// Tab closed / refreshed: free the lock immediately so the next user can edit
+window.addEventListener('beforeunload', () => {
+    if (!boardReadOnly.value && currentUnitId.value && authUser.value?.username) {
+        releaseBoardLock(currentUnitId.value, authUser.value.username);
+    }
+});
 
 function openBoard(b) {
     currentBoard.value = b;
@@ -1700,6 +1766,7 @@ function openBoard(b) {
     boardMin.value = false;
     openMenu.value = null;
     saveBoardView();
+    startLockHeartbeat();
     if (dataSource.value === 'db') {
         reloadBoardForUnit(b); // uses cache when ready — no API wipe
     }
@@ -1722,6 +1789,7 @@ function openBoard(b) {
 }
 
 function closeBoard() {
+    stopLockHeartbeat(true);
     view.value = 'home';
     currentBoard.value = null;
     boardMin.value = false;
@@ -2692,6 +2760,7 @@ const markedComplete = ref(new Set());
 const markSaving     = ref(false);
 
 function toggleMarkComplete(row) {
+    if (boardReadOnly.value) return; // viewer can look, not change
     const s = new Set(markedComplete.value);
     const code = row.mbmOrder;
     if (!code) return;
@@ -2721,6 +2790,12 @@ function toggleMarkAll() {
 }
 
 async function saveMarkedComplete() {
+    // Orders list follows the board lock: read-only viewers can't complete
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
     const codes = [...markedComplete.value];
     if (!codes.length) return;
     const s = getInstance();
@@ -4600,6 +4675,12 @@ function escCancel(e) {
 
 function pickUp(rec, domEvent) {
     if (carried.value) return;
+    // Read-only viewer: bars can't be picked up while another user edits
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
@@ -5185,6 +5266,12 @@ onMounted(() => {
 let saveInFlight = false;
 
 async function saveToDb() {
+    // Read-only viewer (another user holds the board's edit lock) can't save
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(`🔒 Read-only — ${h?.name || h?.username || 'another user'} is editing this board; saving is disabled`, 'warn');
+        return;
+    }
     // Repeated clicks while a save is preparing/running must not stack
     if (saveInFlight) {
         toast('Save already in progress — please wait…', 'warn');
@@ -5834,7 +5921,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <div class="fr-boardarea" :class="{ 'fr-board-hidden' : view !== 'board' }">
         <!-- Plan banner -->
         <div class="fr-banner">
-            <span class="mb-banner-title">AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ currentUser?.name }})</span>
+            <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
+                <template v-if="boardReadOnly">🔒 AQL (Read only — {{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }} is editing this board)</template>
+                <template v-else>AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ authUser?.name || currentUser?.name }})</template>
+            </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
             <span class="fr-banner-btns">
                 <span v-if="boardPlanProgress.active" class="fr-banner-plan">
@@ -5969,7 +6059,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @keydown.escape="clearOrderFilters"
                     >
                     <span v-if="ordersGlobalSearch || ORDER_COLS.some(k => orderFilters[k])" class="od-gsearch-clear" @click="clearOrderFilters">✕</span>
-                    <button v-if="markedComplete.size" class="od-done-btn" :disabled="markSaving"
+                    <span v-if="boardReadOnly" class="od-readonly-tag" :title="`${boardLockHolder?.name || boardLockHolder?.username || ''} is editing`">🔒 Read-only</span>
+                    <button v-if="markedComplete.size && !boardReadOnly" class="od-done-btn" :disabled="markSaving"
                         @click="saveMarkedComplete"
                     >{{ markSaving ? '⏳ Saving…' : `✔ Complete (${markedComplete.size})` }}</button>
                     <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
@@ -8361,6 +8452,18 @@ body {
 
 .fr-status-logout { cursor : pointer; color : #17356b; font-weight : bold; }
 .fr-status-logout:hover { text-decoration : underline; }
+
+/* Read-only lock indicators */
+.mb-banner-ro { background : #b45f04; padding : 1px 10px; border-radius : 3px; }
+.od-readonly-tag {
+    padding       : 3px 10px;
+    border-radius : 3px;
+    background    : #b45f04;
+    color         : #fff;
+    font-size     : 11px;
+    font-weight   : bold;
+    white-space   : nowrap;
+}
 .st-user     { font-weight : bold; }
 .st-check    { text-align : center; }
 .st-check input { width : 15px; height : 15px; }

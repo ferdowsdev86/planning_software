@@ -10,19 +10,76 @@ import {
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds } from './AppConfig.js';
 
-// API base resolution:
-//   1. VITE_API_URL env (baked in at build time) — but a localhost value is
-//      IGNORED on a deployed site, where the visitor's own machine is not
-//      the server
-//   2. deployed (non-localhost) page → same-origin '/api/v1/planning'
-//      (the web server must reverse-proxy this path to the Node API :4000)
-//   3. local dev → http://localhost:4000
-export const API_BASE = (() => {
-    const env = import.meta.env.VITE_API_URL;
-    const onLocalhost = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
-    if (env && (onLocalhost || !/\/\/(localhost|127\.0\.0\.1)/.test(env))) return env;
-    return onLocalhost ? 'http://localhost:4000/api/v1/planning' : '/api/v1/planning';
+// API base resolution with a Local / AWS switch.
+//
+// Two named endpoints come from build-time env:
+//   VITE_API_URL_LOCAL — the API on this machine / LAN (default localhost:4000)
+//   VITE_API_URL_AWS   — the API on the AWS deployment
+// (legacy VITE_API_URL still counts as an extra candidate.)
+//
+// The visitor picks a mode in the status bar — persisted in localStorage:
+//   auto  (default) — try the last base that worked, then local, then AWS,
+//                     then same-origin; first whose /health answers wins
+//   local / aws     — pin to that endpoint, no silent switching
+const _strip = u => (u ? String(u).replace(/\/+$/, '') : '');
+const ON_LOCALHOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
+
+export const LOCAL_BASE = _strip(import.meta.env.VITE_API_URL_LOCAL)
+    || 'http://localhost:4000/api/v1/planning';
+export const AWS_BASE = _strip(import.meta.env.VITE_API_URL_AWS);
+const LEGACY_BASE = _strip(import.meta.env.VITE_API_URL);
+
+export const apiMode = () => localStorage.getItem('planningApiMode') || 'auto';
+export const setApiMode = m => localStorage.setItem('planningApiMode', m);
+
+export let API_BASE = (() => {
+    const mode = apiMode();
+    if (mode === 'local') return LOCAL_BASE;
+    if (mode === 'aws' && AWS_BASE) return AWS_BASE;
+    const cached = _strip(localStorage.getItem('planningApiBase'));
+    if (cached) return cached;
+    if (LEGACY_BASE && (ON_LOCALHOST || !/\/\/(localhost|127\.0\.0\.1)/.test(LEGACY_BASE))) return LEGACY_BASE;
+    return ON_LOCALHOST ? LOCAL_BASE : (AWS_BASE || '/api/v1/planning');
 })();
+
+async function _healthy(base, timeoutMs = 2500) {
+    if (!base) return false;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(`${base}/health`, { signal : ctrl.signal });
+        return res.ok;
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+// Probe the candidates for the current mode and point API_BASE at the first
+// one that answers. A pinned mode keeps its endpoint even when unhealthy, so
+// the failure is visible instead of silently masked by a fallback.
+export async function resolveApiBase() {
+    const mode = apiMode();
+    const candidates = mode === 'local' ? [LOCAL_BASE]
+        : mode === 'aws' ? [AWS_BASE].filter(Boolean)
+        : [...new Set([
+            _strip(localStorage.getItem('planningApiBase')),
+            ON_LOCALHOST ? LOCAL_BASE : AWS_BASE,
+            LEGACY_BASE, LOCAL_BASE, AWS_BASE,
+            '/api/v1/planning',
+        ].filter(Boolean))];
+
+    for (const base of candidates) {
+        if (await _healthy(base)) {
+            API_BASE = base;
+            localStorage.setItem('planningApiBase', base);
+            return { base, mode, ok : true };
+        }
+    }
+    if (candidates.length) API_BASE = candidates[0];
+    return { base : API_BASE, mode, ok : false };
+}
 
 const CODE_TO_ID = {
     L01 : 'l1', L02 : 'l2', L03 : 'l3', L04 : 'l4',
@@ -291,6 +348,35 @@ export async function saveUsersDb(users) {
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'save failed');
     return data.users || [];
+}
+
+// ---------------------------------------------------------------------------
+// Board edit lock — one editor per board; later users get read-only
+// ---------------------------------------------------------------------------
+export async function acquireBoardLock(unitId, username, name) {
+    const res = await fetch(`${API_BASE}/board-lock/acquire`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ unitId, username, name })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'lock failed');
+    return data; // { ok, holder }
+}
+
+export function releaseBoardLock(unitId, username) {
+    // sendBeacon survives tab close; fall back to fetch
+    const payload = JSON.stringify({ unitId, username });
+    try {
+        if (navigator.sendBeacon) {
+            const blob = new Blob([payload], { type : 'application/json' });
+            if (navigator.sendBeacon(`${API_BASE}/board-lock/release`, blob)) return Promise.resolve();
+        }
+    }
+    catch { /* fall through */ }
+    return fetch(`${API_BASE}/board-lock/release`, {
+        method : 'POST', headers : { 'Content-Type' : 'application/json' }, body : payload
+    }).catch(() => {});
 }
 
 // Mark orders complete — flags them completed server-side; the caller removes
