@@ -20,6 +20,7 @@ import {
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
     acquireBoardLock, releaseBoardLock,
+    sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode
 } from './api.js';
@@ -1783,6 +1784,7 @@ async function doLogin() {
     loginErr.value = '';
     try {
         const res = await authLogin(u, loginP.value);
+        newSid(); // fresh session id per login — never inherits a killed one
         authUser.value = res;
         localStorage.setItem('mbm-auth', JSON.stringify(res));
         localStorage.setItem('mbm-last-user', res.username);
@@ -1814,6 +1816,8 @@ async function doLogin() {
 function doLogout() {
     // Free the board's edit lock so the next user can take over immediately
     stopLockHeartbeat(true);
+    endSession(mySid);
+    stopPresence();
     authUser.value = null;
     localStorage.removeItem('mbm-auth');
     loginP.value = '';
@@ -1821,6 +1825,124 @@ function doLogout() {
     openMenu.value = null;
     // freshest user list for the login chips
     refreshUsersFromDb();
+}
+
+// ---------------------------------------------------------------------------
+// Presence: every signed-in tab heartbeats a session id, so Tools → Login
+// status lists who is online right now. When an admin kills this session,
+// the next beat tells us and we sign ourselves out (lock freed server-side).
+// ---------------------------------------------------------------------------
+let mySid = localStorage.getItem('mbm-sid') || '';
+function newSid() {
+    mySid = crypto.randomUUID?.() || `sid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem('mbm-sid', mySid);
+    return mySid;
+}
+if (!mySid) newSid();
+
+let presenceWorker = null;
+let presenceTimer  = null;
+
+async function beatPresence() {
+    const me = authUser.value;
+    if (!me?.username) return;
+    try {
+        const r = await sessionHeartbeat({ sid : mySid, username : me.username, name : me.name, role : me.role });
+        if (r?.killed) {
+            // A fresh sid, or the still-flagged old one would kill the next login too
+            stopLockHeartbeat();
+            stopPresence();
+            newSid();
+            authUser.value = null;
+            localStorage.removeItem('mbm-auth');
+            toast('🔒 Your login session was ended by an administrator', 'warn');
+        }
+    }
+    catch { /* API offline — try again on the next beat */ }
+}
+
+function startPresence() {
+    stopPresence();
+    beatPresence();
+    // Worker tick: page timers throttle to ~1/min in background tabs, which
+    // would make idle-but-open tabs vanish from the list — workers keep rate
+    try {
+        const blob = new Blob(['setInterval(() => postMessage(1), 25000);'], { type : 'text/javascript' });
+        presenceWorker = new Worker(URL.createObjectURL(blob));
+        presenceWorker.onmessage = () => beatPresence();
+    }
+    catch {
+        presenceTimer = setInterval(beatPresence, 25000);
+    }
+}
+
+function stopPresence() {
+    if (presenceWorker) { presenceWorker.terminate(); presenceWorker = null; }
+    if (presenceTimer)  { clearInterval(presenceTimer); presenceTimer = null; }
+}
+
+watch(authUser, u => { if (u) startPresence(); else stopPresence(); }, { immediate : true });
+window.addEventListener('pagehide', () => { if (authUser.value) endSession(mySid); });
+
+// ---------------------------------------------------------------------------
+// Tools → Login status: everyone sees who is online; a Planning Manager can
+// kill a session (frees that user's board lock — the fix for a stale
+// "board in use by X" banner when X left a tab open somewhere)
+// ---------------------------------------------------------------------------
+const lsOpen = ref(false);
+const lsRows = ref([]);
+const lsBusy = ref(false);
+const lsErr  = ref('');
+const lsNow  = ref(Date.now());
+
+async function refreshLoginStatus() {
+    lsBusy.value = true;
+    lsErr.value = '';
+    try {
+        const d = await loadSessions();
+        lsRows.value = d.sessions || [];
+        lsNow.value  = d.now || Date.now();
+    }
+    catch (e) { lsErr.value = e.message || 'Failed to load sessions'; }
+    finally   { lsBusy.value = false; }
+}
+
+function openLoginStatus() {
+    openMenu.value = null;
+    lsOpen.value = true;
+    refreshLoginStatus();
+}
+
+function lsAgo(t) {
+    const s = Math.max(0, Math.round((lsNow.value - t) / 1000));
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ${m % 60}m ago`;
+}
+
+function lsTime(t) {
+    return new Date(t).toLocaleTimeString('en-GB', { hour : '2-digit', minute : '2-digit' });
+}
+
+function lsBoardName(unitId) {
+    if (unitId == null) return '';
+    const b = boards.value.find(x => String(x.unitId) === String(unitId));
+    return b?.name || `Unit ${unitId}`;
+}
+
+async function lsKill(row) {
+    if (!canManageUsers.value) return;
+    const who = row.name || row.username;
+    if (!confirm(`End the login session of "${who}"?\n\nThey are signed out within ~25s and any board lock they hold is released immediately.`)) return;
+    try {
+        await killSession(row.sid);
+        toast(`Session of ${who} ended — their board lock (if any) is released`, 'ok');
+        refreshLoginStatus();
+        // If they held OUR board's lock, promote without waiting for the beat
+        if (currentUnitId.value) syncBoardLock();
+    }
+    catch (e) { toast(e.message || 'Could not end the session', 'error'); }
 }
 
 // Per-user password rotation from Settings ('' = leave unchanged)
@@ -2638,7 +2760,7 @@ const shellMenus = [
 ];
 
 function menuClick(m) {
-    if (m.label === 'Planning' || m.label === 'Setup' || m.label === 'Reports') {
+    if (m.label === 'Planning' || m.label === 'Setup' || m.label === 'Reports' || m.label === 'Tools') {
         openMenu.value = openMenu.value === m.label ? null : m.label;
         return;
     }
@@ -6424,6 +6546,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-sep"></div>
                     <div class="fr-dd-item" @click="addBoard">➕ Add planning board</div>
                 </div>
+                <div v-if="openMenu === m.label && m.label === 'Tools'" class="fr-dropdown">
+                    <div class="fr-dd-item" @click="openLoginStatus">
+                        <i class="fa-solid fa-user-group fr-dd-fa" aria-hidden="true"></i> Login status — who is online
+                    </div>
+                </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
                     <div v-if="canManageUsers" class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
                     <div class="fr-dd-item" @click="openPlanningRoles">👤 Planning roles &amp; plan criteria</div>
@@ -7471,6 +7598,64 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn st-btn" @click="lcDlgOpen = false">Cancel</button>
                     </div>
                     <div class="st-hint">Manual curve দিলে এই bar Day 1 থেকে ramp করবে (product change লাগবে না), bar লম্বা হবে সেই অনুযায়ী · automatic নিয়মে ফিরতে "No manual curve" বেছে Apply · তারপর Save</div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Tools → Login status: who is online; admin can end sessions -->
+        <Teleport to="body">
+        <div v-if="lsOpen" class="cal-overlay" @click.self="lsOpen = false">
+            <div class="cal-dialog ls-dialog">
+                <div class="cal-title">
+                    👥 Login status — who is online
+                    <span class="cal-title-btns">
+                        <span class="cal-x" title="Refresh" @click="refreshLoginStatus">⟳</span>
+                        <span class="cal-x" @click="lsOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <div v-if="lsErr" class="ls-err">{{ lsErr }}</div>
+                    <div v-else-if="lsBusy && !lsRows.length" class="ls-dim">Loading…</div>
+                    <div v-else-if="!lsRows.length" class="ls-dim">No one is signed in right now</div>
+                    <table v-else class="ls-table">
+                        <thead>
+                            <tr>
+                                <th>User</th><th>Role</th><th>Login</th><th>Last seen</th>
+                                <th>Board editing</th>
+                                <th v-if="canManageUsers"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="s in lsRows" :key="s.sid" :class="{ 'ls-me' : s.sid === mySid }">
+                                <td>
+                                    <span class="ls-dot"></span>
+                                    <b>{{ s.name || s.username }}</b>
+                                    <span v-if="s.sid === mySid" class="ls-you">you</span>
+                                </td>
+                                <td>{{ s.role }}</td>
+                                <td>{{ lsTime(s.loginAt) }}</td>
+                                <td>{{ lsAgo(s.lastSeen) }}</td>
+                                <td>
+                                    <span v-if="s.boardUnit != null" class="ls-lock">🔒 {{ lsBoardName(s.boardUnit) }}</span>
+                                    <span v-else class="ls-dim">—</span>
+                                </td>
+                                <td v-if="canManageUsers">
+                                    <button
+                                        v-if="s.sid !== mySid"
+                                        class="ls-kill"
+                                        title="Sign this user out and release their board lock"
+                                        @click="lsKill(s)"
+                                    >✖ Kill</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="st-hint">
+                        List updates every ~25s per user · <b>Kill</b> (Planning Manager only) signs the user out
+                        and releases their board lock instantly — use it when a board shows
+                        "in use by X" but X actually left
+                    </div>
                 </div>
             </div>
         </div>
@@ -9708,6 +9893,32 @@ body {
 .lcd-dialog { width : 480px; max-width : 95vw; }
 .lcd-list div { padding : 7px 10px; cursor : pointer; }
 .lcd-list div:hover { background : #eaf1fb; }
+
+/* Tools → Login status */
+.ls-dialog { width : 640px; max-width : 96vw; }
+.ls-table { width : 100%; border-collapse : collapse; font-size : 13px; }
+.ls-table th {
+    text-align : left; padding : 6px 8px; background : #1c2b3a; color : #fff;
+    font-weight : 600; font-size : 12px;
+}
+.ls-table td { padding : 6px 8px; border-bottom : 1px solid #e3e8ee; }
+.ls-me td { background : #f2f8ff; }
+.ls-dot {
+    display : inline-block; width : 8px; height : 8px; border-radius : 50%;
+    background : #2eaf5d; margin-right : 6px; vertical-align : middle;
+}
+.ls-you {
+    margin-left : 6px; font-size : 10px; background : #d7e8ff; color : #1a5dab;
+    border-radius : 8px; padding : 1px 7px; font-weight : 700; text-transform : uppercase;
+}
+.ls-lock { color : #a35b00; font-weight : 600; }
+.ls-dim { color : #8a94a0; }
+.ls-err { color : #c0392b; padding : 8px 0; }
+.ls-kill {
+    background : #fff0ef; color : #c0392b; border : 1px solid #e2a49e;
+    border-radius : 4px; padding : 3px 10px; cursor : pointer; font : inherit; font-size : 12px;
+}
+.ls-kill:hover { background : #c0392b; color : #fff; }
 .lcd-pcts { color : #777; font-size : 11px; margin-left : 8px; }
 
 /* Planned-schedule rows on learning-curve days */

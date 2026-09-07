@@ -420,6 +420,51 @@ export function releaseBoardLock(unitId, username) {
     }).catch(() => {});
 }
 
+// ---------------------------------------------------------------------------
+// Login sessions — presence heartbeat + Tools → Login status (admin kill)
+// ---------------------------------------------------------------------------
+export async function sessionHeartbeat(payload) {
+    const res = await fetch(`${API_BASE}/session/heartbeat`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify(payload)
+    });
+    return res.json(); // { ok, killed }
+}
+
+export function endSession(sid) {
+    // sendBeacon survives tab close; fall back to fetch
+    const payload = JSON.stringify({ sid });
+    try {
+        if (navigator.sendBeacon) {
+            const blob = new Blob([payload], { type : 'application/json' });
+            if (navigator.sendBeacon(`${API_BASE}/session/end`, blob)) return Promise.resolve();
+        }
+    }
+    catch { /* fall through */ }
+    return fetch(`${API_BASE}/session/end`, {
+        method : 'POST', headers : { 'Content-Type' : 'application/json' }, body : payload
+    }).catch(() => {});
+}
+
+export async function loadSessions() {
+    const res = await fetch(`${API_BASE}/sessions`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'load failed');
+    return data; // { sessions, now }
+}
+
+export async function killSession(sid) {
+    const res = await fetch(`${API_BASE}/session/kill`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ sid })
+    });
+    const data = await res.json();
+    if (!data.success || data.ok === false) throw new Error(data.error || 'kill failed');
+    return data;
+}
+
 // Mark orders complete — flags them completed server-side; the caller removes
 // their bars from the board and syncs the removals
 export async function completeOrdersDb(orderCodes) {

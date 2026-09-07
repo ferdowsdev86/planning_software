@@ -1609,6 +1609,80 @@ app.get(`${BASE}/board-lock`, (req, res) => {
     res.json({ success : true, holder : cur ? { username : cur.username, name : cur.name } : null });
 });
 
+// ---------------------------------------------------------------------------
+// Login sessions — every signed-in browser heartbeats its presence, so
+// Tools → Login status can list who is online, and an admin can kill a
+// session (the kill also frees any board lock that user holds, which is the
+// escape hatch for a stale "board in use by X" banner when X left a tab
+// open somewhere). In-memory: resets on API restart, clients re-register.
+// ---------------------------------------------------------------------------
+const activeSessions = new Map(); // sid -> { sid, username, name, role, loginAt, lastSeen }
+const killedSessions = new Map(); // sid -> killedAt; told to the client on its next beat
+const SESSION_TTL_MS = 70 * 1000; // clients beat every 25s; 70s of silence = gone
+
+function pruneSessions() {
+    const now = Date.now();
+    for (const [sid, s] of activeSessions) {
+        if (now - s.lastSeen > SESSION_TTL_MS) activeSessions.delete(sid);
+    }
+    for (const [sid, t] of killedSessions) {
+        if (now - t > 10 * 60 * 1000) killedSessions.delete(sid);
+    }
+}
+
+app.post(`${BASE}/session/heartbeat`, (req, res) => {
+    const { sid, username, name, role } = req.body || {};
+    if (!sid || !username) {
+        return res.json({ success : false, error : 'sid and username required' });
+    }
+    if (killedSessions.has(sid)) {
+        activeSessions.delete(sid);
+        return res.json({ success : true, ok : false, killed : true });
+    }
+    const cur = activeSessions.get(sid);
+    activeSessions.set(sid, {
+        sid,
+        username,
+        name     : name || username,
+        role     : role || '',
+        loginAt  : cur?.loginAt || Date.now(),
+        lastSeen : Date.now()
+    });
+    res.json({ success : true, ok : true });
+});
+
+// Logout / tab closed (sendBeacon) — drop the session from the online list
+app.post(`${BASE}/session/end`, (req, res) => {
+    const { sid } = req.body || {};
+    if (sid) activeSessions.delete(String(sid));
+    res.json({ success : true });
+});
+
+app.get(`${BASE}/sessions`, (req, res) => {
+    pruneSessions();
+    const heldBy = {};
+    for (const [unitId, l] of boardLocks) {
+        if (Date.now() - l.lastSeen <= LOCK_TTL_MS) heldBy[l.username] = unitId;
+    }
+    const list = [...activeSessions.values()]
+        .sort((a, b) => a.loginAt - b.loginAt)
+        .map(s => ({ ...s, boardUnit : heldBy[s.username] ?? null }));
+    res.json({ success : true, sessions : list, now : Date.now() });
+});
+
+// Kill a session: its board locks free NOW (viewers promote on their next
+// 15s beat) and the killed browser signs itself out on its next beat (≤25s)
+app.post(`${BASE}/session/kill`, (req, res) => {
+    const s = activeSessions.get(String(req.body?.sid || ''));
+    if (!s) return res.json({ success : true, ok : false, error : 'session not found (already gone?)' });
+    killedSessions.set(s.sid, Date.now());
+    activeSessions.delete(s.sid);
+    for (const [unitId, l] of boardLocks) {
+        if (l.username === s.username) boardLocks.delete(unitId);
+    }
+    res.json({ success : true, ok : true });
+});
+
 app.get(`${BASE}/users`, async (req, res) => {
     try {
         const [rows] = await pool.query(
