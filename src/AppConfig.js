@@ -1213,6 +1213,10 @@ export const schedulerProConfig = {
     zoomOnMouseWheel    : false,
     zoomOnTimeAxisDoubleClick : false,
     createEventOnDblClick     : false,
+    // Double-clicking a bar must NEVER open Bryntum's 'Task information'
+    // editor — orders are edited through our own dialogs only
+    taskEditFeature           : false,
+    eventEditFeature          : false,
 
     viewPreset : {
         base              : 'dayAndWeek',

@@ -4540,6 +4540,103 @@ function showOrderOnBoard(row) {
 }
 
 // ---------------------------------------------------------------------------
+// Double-click an Orders-list record → its bar attaches to the mouse pointer
+// on the board (FastReact pick & place); clicking a line point drops it
+// there. Works for projections and confirm orders alike: an order already on
+// the board picks up its EXISTING bar (move it), an unplanned one gets a new
+// bar built from the unplanned pool.
+// ---------------------------------------------------------------------------
+function findOrderEventOnBoard(s, row) {
+    let rec = s.eventStore.getById(row.id) || null;
+    if (rec) return rec;
+    const code   = String(row.mbmOrder || '');
+    const isConf = row.orderType === 'confirm';
+    const poSet  = new Set((row.poList || []).map(String).concat(row.po ? [String(row.po)] : []));
+    return s.eventStore.records.find(ev => {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) return false;
+        if (String(raw.mbmOrder || '') !== code) return false;
+        if (!isConf) return String(raw.id || '').startsWith('proj:') || raw.orderType === 'projection';
+        if (poSet.size) {
+            if (raw.po && poSet.has(String(raw.po))) return true;
+            if ((raw.poList || []).some(p => poSet.has(String(p)))) return true;
+            return false;
+        }
+        return true;
+    }) || null;
+}
+
+function carryOrderToBoard(row) {
+    if (row.status === 'completed') {
+        toast(`${row.mbmOrder || row.po} is completed — it cannot be planned again`, 'warn');
+        return;
+    }
+    ordersOpen.value = false;
+    const wasBoard = view.value === 'board';
+    if (!wasBoard) {
+        openBoard(currentBoard.value || permittedBoards.value[0] || boards.value[0]);
+    }
+    setTimeout(() => {
+        const s = getInstance();
+        if (!s) return;
+        // Already on the board → pick that bar up so the user can re-place it
+        const existing = findOrderEventOnBoard(s, row);
+        if (existing) {
+            s.scrollEventIntoView?.(existing, { block : 'center' });
+            pickUp(existing, null);
+            toast(`${row.mbmOrder || row.po} — bar is on your pointer; click a line to place it`, 'ok');
+            return;
+        }
+        // Not on the board → build a bar from the unplanned pool entry
+        const isConf = row.orderType === 'confirm';
+        const rowPos = new Set((row.poList || []).map(String).concat(row.po ? [String(row.po)] : []));
+        const u = unplanned.value.find(x => {
+            if (String(x.mbmOrder || '') !== String(row.mbmOrder || '')) return false;
+            const xConf = orderTypeOf(x.po, x.orderType) === 'confirm';
+            if (xConf !== isConf) return false;
+            if (!isConf || !rowPos.size) return true;
+            if (x.po && rowPos.has(String(x.po))) return true;
+            return (x.poList || []).some(p => rowPos.has(String(p)));
+        });
+        if (!u) {
+            toast(`${row.mbmOrder || row.po} — not in the unplanned pool (try ⟳ refresh, or its POs may not be synced yet)`, 'warn');
+            return;
+        }
+        const evId = `ev-${u.id}`;
+        let rec = s.eventStore.getById(evId);
+        if (!rec) {
+            const smv   = Number(u.smv) > 0 ? Number(u.smv) : randSmv(u.po);
+            const start = startOfWorkDay(nextWorkingDay(new Date()));
+            const end   = endOfWork(start, 1);
+            const raw = {
+                ...u, smv,
+                qty      : Number(u.qty ?? u.orderQty) || 0,
+                orderQty : Number(u.orderQty ?? u.qty) || 0,
+                reqMin   : Math.round((Number(u.qty ?? u.orderQty) || 0) * smv),
+                dur      : 1, start, end,
+                progress : 0, status : 'unplanned', parked : true,
+                risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
+            };
+            s.eventStore.add({
+                id : evId, resourceId : 'hold',
+                startDate : start, endDate : end,
+                duration : elapsedDays(start, end), durationUnit : 'day',
+                manuallyScheduled : true,
+                name : `${u.buyer || ''} | ${u.mbmOrder || u.po}`,
+                percentDone : 0,
+                raw
+            });
+            rec = s.eventStore.getById(evId);
+            unplanned.value = unplanned.value.filter(x => x !== u);
+        }
+        if (rec) {
+            pickUp(rec, null);
+            toast(`${u.mbmOrder || u.po} — bar is on your pointer; click a line to place it`, 'ok');
+        }
+    }, wasBoard ? 150 : 600);
+}
+
+// ---------------------------------------------------------------------------
 // FastReact pick & place: click a bar -> it follows the cursor; click a line
 // to re-establish it there. The header cell live-indicates the hover time.
 // ---------------------------------------------------------------------------
@@ -6557,6 +6654,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         ? `Partial: confirm POs cover ${fmtQty(projPartialInfo(row).confQty)} of ${fmtQty(projPartialInfo(row).orderQty)} pcs (${fmtQty(projPartialInfo(row).diff)} not confirmed)`
                                         : (row.splitReason || row.validationNotes || row.boardNote || (row.planned ? 'Planned — click to highlight on board' : (row.orderType === 'projected' ? 'Projected - included in initial capacity planning.' : 'Confirm - visible for reconciliation but not included in the initial plan.')))"
                                     @click="!windowSelectionActive() && showOrderOnBoard(row)"
+                                    @dblclick.prevent="carryOrderToBoard(row)"
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
                                         :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'st-user' : k === 'po' }]"
