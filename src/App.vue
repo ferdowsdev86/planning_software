@@ -312,13 +312,12 @@ function countSewingEvents(data) {
     return (data?.events || []).filter(e => e.raw && !e.raw.stage).length;
 }
 
-// Initial projection-planning stage: on board load, auto-plan runs phase by
-// phase (chunks) over PROJECTED orders only. Replacement stage: synced confirm
-// orders automatically take their projection's slot on the board and the
-// projection is flagged replaced; projections whose confirm POs have not
-// arrived yet stay planned as projections.
-const AUTO_PLAN_ON_LOAD = true;
-const AUTO_REPLACE_WITH_CONFIRMS = true;
+// Auto-planning is OFF: the board shows ONLY events saved in planning_events.
+// Nothing gets planned on load — not projections (AUTO_PLAN_ON_LOAD) and no
+// confirm-replacement pass (AUTO_REPLACE_WITH_CONFIRMS). All planning is
+// manual: drag from the Orders list / Planning menu actions, then Save.
+const AUTO_PLAN_ON_LOAD = false;
+const AUTO_REPLACE_WITH_CONFIRMS = false;
 
 function finishBoardLoad(uid, data, s) {
     if (countSewingEvents(data) > 0) {
