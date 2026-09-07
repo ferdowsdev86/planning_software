@@ -4587,7 +4587,8 @@ function carryOrderToBoard(row) {
             toast(`${row.mbmOrder || row.po} — bar is on your pointer; click a line to place it`, 'ok');
             return;
         }
-        // Not on the board → build a bar from the unplanned pool entry
+        // Not on the board → build a bar. Confirm orders come from the
+        // unplanned pool; a projection builds straight from the list row.
         const isConf = row.orderType === 'confirm';
         const rowPos = new Set((row.poList || []).map(String).concat(row.po ? [String(row.po)] : []));
         const u = unplanned.value.find(x => {
@@ -4598,21 +4599,48 @@ function carryOrderToBoard(row) {
             if (x.po && rowPos.has(String(x.po))) return true;
             return (x.poList || []).some(p => rowPos.has(String(p)));
         });
-        if (!u) {
+        let src = u;
+        if (!src && !isConf) {
+            // Projection: no pool entry needed — the list row carries
+            // everything the bar needs
+            if (row.replaced || row.status === 'replaced') {
+                toast(`${row.mbmOrder} was replaced — its confirm POs are the ones to plan`, 'warn');
+                return;
+            }
+            const code = String(row.mbmOrder || '');
+            if (!code) return;
+            src = {
+                id          : `proj:${code}`,
+                mbmOrder    : code,
+                po          : '',
+                buyer       : row.buyer || 'Projection',
+                style       : row.style || '',
+                productType : row.productType || '',
+                orderType   : 'projection',
+                qty         : Number(row.orderQty ?? row.qty) || 0,
+                orderQty    : Number(row.orderQty ?? row.qty) || 0,
+                smv         : Number(row.smv) > 0 ? Number(row.smv) : 0,
+                ship        : row.orderDelivery || null,
+                pcd         : row.pcd || null,
+                matReady    : null,
+                unitId      : row.unitId ?? null
+            };
+        }
+        if (!src) {
             toast(`${row.mbmOrder || row.po} — not in the unplanned pool (try ⟳ refresh, or its POs may not be synced yet)`, 'warn');
             return;
         }
-        const evId = `ev-${u.id}`;
+        const evId = `ev-${src.id}`;
         let rec = s.eventStore.getById(evId);
         if (!rec) {
-            const smv   = Number(u.smv) > 0 ? Number(u.smv) : randSmv(u.po);
+            const smv   = Number(src.smv) > 0 ? Number(src.smv) : randSmv(src.po || src.mbmOrder);
             const start = startOfWorkDay(nextWorkingDay(new Date()));
             const end   = endOfWork(start, 1);
             const raw = {
-                ...u, smv,
-                qty      : Number(u.qty ?? u.orderQty) || 0,
-                orderQty : Number(u.orderQty ?? u.qty) || 0,
-                reqMin   : Math.round((Number(u.qty ?? u.orderQty) || 0) * smv),
+                ...src, smv,
+                qty      : Number(src.qty ?? src.orderQty) || 0,
+                orderQty : Number(src.orderQty ?? src.qty) || 0,
+                reqMin   : Math.round((Number(src.qty ?? src.orderQty) || 0) * smv),
                 dur      : 1, start, end,
                 progress : 0, status : 'unplanned', parked : true,
                 risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
@@ -4622,16 +4650,16 @@ function carryOrderToBoard(row) {
                 startDate : start, endDate : end,
                 duration : elapsedDays(start, end), durationUnit : 'day',
                 manuallyScheduled : true,
-                name : `${u.buyer || ''} | ${u.mbmOrder || u.po}`,
+                name : `${src.buyer || ''} | ${src.mbmOrder || src.po}`,
                 percentDone : 0,
                 raw
             });
             rec = s.eventStore.getById(evId);
-            unplanned.value = unplanned.value.filter(x => x !== u);
+            if (u) unplanned.value = unplanned.value.filter(x => x !== u);
         }
         if (rec) {
             pickUp(rec, null);
-            toast(`${u.mbmOrder || u.po} — bar is on your pointer; click a line to place it`, 'ok');
+            toast(`${src.mbmOrder || src.po} — bar is on your pointer; click a line to place it`, 'ok');
         }
     }, wasBoard ? 150 : 600);
 }
