@@ -4566,11 +4566,27 @@ function findOrderEventOnBoard(s, row) {
     }) || null;
 }
 
+// Single vs double click on a list row: the single-click action (jump /
+// search highlight) waits 260ms and is CANCELLED when a double-click
+// arrives — a dblclick must only carry the bar, never enter search mode
+let odClickTimer = null;
+function odRowClick(row) {
+    if (windowSelectionActive()) return;
+    clearTimeout(odClickTimer);
+    odClickTimer = setTimeout(() => showOrderOnBoard(row), 260);
+}
+function odRowDblClick(row) {
+    clearTimeout(odClickTimer);
+    odClickTimer = null;
+    carryOrderToBoard(row);
+}
+
 function carryOrderToBoard(row) {
     if (row.status === 'completed') {
         toast(`${row.mbmOrder || row.po} is completed — it cannot be planned again`, 'warn');
         return;
     }
+    boardSearch.value = '';   // carrying must not sit behind a search filter
     ordersOpen.value = false;
     const wasBoard = view.value === 'board';
     if (!wasBoard) {
@@ -6681,8 +6697,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     :data-note="projPartialInfo(row)
                                         ? `Partial: confirm POs cover ${fmtQty(projPartialInfo(row).confQty)} of ${fmtQty(projPartialInfo(row).orderQty)} pcs (${fmtQty(projPartialInfo(row).diff)} not confirmed)`
                                         : (row.splitReason || row.validationNotes || row.boardNote || (row.planned ? 'Planned — click to highlight on board' : (row.orderType === 'projected' ? 'Projected - included in initial capacity planning.' : 'Confirm - visible for reconciliation but not included in the initial plan.')))"
-                                    @click="!windowSelectionActive() && showOrderOnBoard(row)"
-                                    @dblclick.prevent="carryOrderToBoard(row)"
+                                    @click="odRowClick(row)"
+                                    @dblclick.prevent="odRowDblClick(row)"
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
                                         :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'st-user' : k === 'po' }]"
