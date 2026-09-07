@@ -7628,11 +7628,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <tbody>
                             <tr v-for="s in lsRows" :key="s.sid" :class="{ 'ls-me' : s.sid === mySid }">
                                 <td>
-                                    <span class="ls-dot"></span>
+                                    <span class="ls-dot" :class="{ 'ls-dot-old' : s.lockOnly }"></span>
                                     <b>{{ s.name || s.username }}</b>
                                     <span v-if="s.sid === mySid" class="ls-you">you</span>
+                                    <span v-if="s.lockOnly" class="ls-old" title="This browser runs an old app version — it holds the board lock but does not report presence. Kill works; ask them to refresh.">old version</span>
                                 </td>
-                                <td>{{ s.role }}</td>
+                                <td>{{ s.role || '—' }}</td>
                                 <td>{{ lsTime(s.loginAt) }}</td>
                                 <td>{{ lsAgo(s.lastSeen) }}</td>
                                 <td>
@@ -9911,6 +9912,11 @@ body {
     border-radius : 8px; padding : 1px 7px; font-weight : 700; text-transform : uppercase;
 }
 .ls-lock { color : #a35b00; font-weight : 600; }
+.ls-dot-old { background : #e0a800; }
+.ls-old {
+    margin-left : 6px; font-size : 10px; background : #fdf3d7; color : #8a6d00;
+    border : 1px solid #e8d48a; border-radius : 8px; padding : 1px 7px; font-weight : 700;
+}
 .ls-dim { color : #8a94a0; }
 .ls-err { color : #c0392b; padding : 8px 0; }
 .ls-kill {

@@ -1563,6 +1563,19 @@ const boardLocks  = new Map();     // unitId -> { username, name, acquiredAt, la
 // editing" banner never lingers long after they are actually gone
 const LOCK_TTL_MS = 40 * 1000;
 
+// An admin-killed user must not re-grab the lock on their next 15s beat
+// (their tab may still be open somewhere). The ban lifts on a fresh login,
+// or by itself after LOCK_BAN_MS for browsers running an old app build.
+const lockBans    = new Map();     // username -> bannedUntil (ms epoch)
+const LOCK_BAN_MS = 3 * 60 * 1000;
+
+function lockBanned(username) {
+    const until = lockBans.get(username);
+    if (!until) return false;
+    if (Date.now() >= until) { lockBans.delete(username); return false; }
+    return true;
+}
+
 function liveLockHolder(unitId) {
     const l = boardLocks.get(String(unitId));
     if (!l) return null;
@@ -1581,6 +1594,15 @@ app.post(`${BASE}/board-lock/acquire`, (req, res) => {
     }
     const key = String(unitId);
     const cur = liveLockHolder(key);
+    if (lockBanned(username)) {
+        const other = cur && cur.username !== username ? cur : null;
+        return res.json({
+            success : true, ok : false,
+            holder  : other
+                ? { username : other.username, name : other.name }
+                : { username : 'admin', name : 'Admin — your board session was ended' }
+        });
+    }
     if (cur && cur.username !== username) {
         return res.json({
             success : true, ok : false,
@@ -1639,6 +1661,9 @@ app.post(`${BASE}/session/heartbeat`, (req, res) => {
         activeSessions.delete(sid);
         return res.json({ success : true, ok : false, killed : true });
     }
+    // First beat of a brand-new sid = a fresh login: lift any lock ban so a
+    // killed-then-relogged user can edit again right away
+    if (!activeSessions.has(sid)) lockBans.delete(username);
     const cur = activeSessions.get(sid);
     activeSessions.set(sid, {
         sid,
@@ -1667,18 +1692,46 @@ app.get(`${BASE}/sessions`, (req, res) => {
     const list = [...activeSessions.values()]
         .sort((a, b) => a.loginAt - b.loginAt)
         .map(s => ({ ...s, boardUnit : heldBy[s.username] ?? null }));
+    // A live board-lock holder with NO presence session is a browser running
+    // an old app build (no heartbeat yet). They must still be visible — and
+    // killable — here, otherwise a stale "in use by X" is unfixable.
+    const seen = new Set(list.map(s => s.username));
+    for (const [unitId, l] of boardLocks) {
+        if (Date.now() - l.lastSeen > LOCK_TTL_MS) continue;
+        if (seen.has(l.username)) continue;
+        seen.add(l.username);
+        list.push({
+            sid : `lock:${l.username}`, username : l.username, name : l.name,
+            role : '', loginAt : l.acquiredAt, lastSeen : l.lastSeen,
+            boardUnit : unitId, lockOnly : true
+        });
+    }
     res.json({ success : true, sessions : list, now : Date.now() });
 });
 
 // Kill a session: its board locks free NOW (viewers promote on their next
-// 15s beat) and the killed browser signs itself out on its next beat (≤25s)
+// 15s beat), the username is lock-banned so an open tab cannot re-grab the
+// lock, and a new-build browser signs itself out on its next beat (≤25s).
+// 'lock:<username>' pseudo-sids target old-build browsers that only hold a
+// lock (no presence session).
 app.post(`${BASE}/session/kill`, (req, res) => {
-    const s = activeSessions.get(String(req.body?.sid || ''));
-    if (!s) return res.json({ success : true, ok : false, error : 'session not found (already gone?)' });
-    killedSessions.set(s.sid, Date.now());
-    activeSessions.delete(s.sid);
+    const sid = String(req.body?.sid || '');
+    let username = null;
+    if (sid.startsWith('lock:')) {
+        username = sid.slice(5);
+    }
+    else {
+        const s = activeSessions.get(sid);
+        if (s) {
+            killedSessions.set(s.sid, Date.now());
+            activeSessions.delete(s.sid);
+            username = s.username;
+        }
+    }
+    if (!username) return res.json({ success : true, ok : false, error : 'session not found (already gone?)' });
+    lockBans.set(username, Date.now() + LOCK_BAN_MS);
     for (const [unitId, l] of boardLocks) {
-        if (l.username === s.username) boardLocks.delete(unitId);
+        if (l.username === username) boardLocks.delete(unitId);
     }
     res.json({ success : true, ok : true });
 });
