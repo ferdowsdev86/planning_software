@@ -1868,6 +1868,7 @@ function applyBoardFilter() {
 const boardReadOnly   = ref(false);
 const boardLockHolder = ref(null);   // { username, name } when someone ELSE holds it
 let   lockTimer       = null;
+let   lockWorker      = null;        // worker ticks aren't throttled in background tabs
 
 async function syncBoardLock() {
     const unitId = currentUnitId.value;
@@ -1892,7 +1893,7 @@ async function syncBoardLock() {
             boardReadOnly.value   = true;
             boardLockHolder.value = r.holder;
             if (!wasReadOnly) {
-                toast(`🔒 এই board এখন "${r.holder?.name || r.holder?.username}" ব্যবহার করছে — আপনি সব test করতে পারবেন, কিন্তু SAVE হবে না`, 'warn');
+                toast(`🔒 This board is in use by "${r.holder?.name || r.holder?.username}" — you can test anything, but SAVE is disabled`, 'warn');
             }
         }
         // Re-assert the interaction mode every heartbeat: something in the
@@ -1908,12 +1909,23 @@ function startLockHeartbeat() {
     stopLockHeartbeat();
     syncBoardLock();
     // Holder: keeps the lock alive · viewer: takes over when the holder
-    // leaves (15s beat + 40s server TTL = stale banners clear fast)
-    lockTimer = setInterval(syncBoardLock, 15000);
+    // leaves (15s beat + 40s server TTL = stale banners clear fast).
+    // A Web Worker drives the tick: page timers get throttled to ~1/min in
+    // BACKGROUND tabs, which would silently expire the editor's lock —
+    // worker timers keep beating at full rate regardless of tab visibility.
+    try {
+        const blob = new Blob(['setInterval(() => postMessage(1), 15000);'], { type : 'text/javascript' });
+        lockWorker = new Worker(URL.createObjectURL(blob));
+        lockWorker.onmessage = () => syncBoardLock();
+    }
+    catch {
+        lockTimer = setInterval(syncBoardLock, 15000);
+    }
 }
 
 function stopLockHeartbeat(release = false) {
-    if (lockTimer) { clearInterval(lockTimer); lockTimer = null; }
+    if (lockTimer)  { clearInterval(lockTimer); lockTimer = null; }
+    if (lockWorker) { lockWorker.terminate(); lockWorker = null; }
     if (release && !boardReadOnly.value && currentUnitId.value && authUser.value?.username) {
         releaseBoardLock(currentUnitId.value, authUser.value.username);
     }
@@ -5620,7 +5632,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips };
+    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock };
 
     const s = getInstance();
     uiHooks.instance = s;
@@ -5669,7 +5681,7 @@ async function saveToDb() {
     // sandbox — every change stays local, saving is the one blocked action
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board. আপনার test change গুলো save হবে না`, 'warn');
+        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board. Your test changes will NOT be saved`, 'warn');
         return;
     }
     // Repeated clicks while a save is preparing/running must not stack
@@ -6305,7 +6317,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly">🔒 AQL — এই board এখন <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> ব্যবহার করছে (Test mode · আপনার change save হবে না)</template>
+                <template v-if="boardReadOnly">🔒 AQL — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
                 <template v-else>AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
