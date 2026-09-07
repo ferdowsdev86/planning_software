@@ -1550,7 +1550,10 @@ app.post(`${BASE}/auth/login`, async (req, res) => {
 // In-memory: locks reset on API restart, clients re-acquire on heartbeat.
 // ---------------------------------------------------------------------------
 const boardLocks  = new Map();     // unitId -> { username, name, acquiredAt, lastSeen }
-const LOCK_TTL_MS = 90 * 1000;
+// Client heartbeats every 15s — a lock without a beat for 40s is stale
+// (closed laptop / crashed browser) and frees automatically, so a "user is
+// editing" banner never lingers long after they are actually gone
+const LOCK_TTL_MS = 40 * 1000;
 
 function liveLockHolder(unitId) {
     const l = boardLocks.get(String(unitId));

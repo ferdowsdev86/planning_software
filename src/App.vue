@@ -1892,7 +1892,7 @@ async function syncBoardLock() {
             boardReadOnly.value   = true;
             boardLockHolder.value = r.holder;
             if (!wasReadOnly) {
-                toast(`🔒 ${r.holder?.name || r.holder?.username} is editing this board — try anything freely, but SAVE is disabled`, 'warn');
+                toast(`🔒 এই board এখন "${r.holder?.name || r.holder?.username}" ব্যবহার করছে — আপনি সব test করতে পারবেন, কিন্তু SAVE হবে না`, 'warn');
             }
         }
         // Re-assert the interaction mode every heartbeat: something in the
@@ -1907,8 +1907,9 @@ async function syncBoardLock() {
 function startLockHeartbeat() {
     stopLockHeartbeat();
     syncBoardLock();
-    // Holder: keeps the lock alive · viewer: takes over when the holder leaves
-    lockTimer = setInterval(syncBoardLock, 30000);
+    // Holder: keeps the lock alive · viewer: takes over when the holder
+    // leaves (15s beat + 40s server TTL = stale banners clear fast)
+    lockTimer = setInterval(syncBoardLock, 15000);
 }
 
 function stopLockHeartbeat(release = false) {
@@ -1920,12 +1921,15 @@ function stopLockHeartbeat(release = false) {
     boardLockHolder.value = null;
 }
 
-// Tab closed / refreshed: free the lock immediately so the next user can edit
-window.addEventListener('beforeunload', () => {
+// Tab closed / refreshed / navigated away: free the lock immediately so the
+// next user can edit and nobody sees a stale "user is editing" banner
+function releaseLockOnLeave() {
     if (!boardReadOnly.value && currentUnitId.value && authUser.value?.username) {
         releaseBoardLock(currentUnitId.value, authUser.value.username);
     }
-});
+}
+window.addEventListener('beforeunload', releaseLockOnLeave);
+window.addEventListener('pagehide', releaseLockOnLeave);
 
 function openBoard(b) {
     currentBoard.value = b;
@@ -6301,7 +6305,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly">🔒 AQL (Test mode — {{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }} is editing · your changes will NOT save)</template>
+                <template v-if="boardReadOnly">🔒 AQL — এই board এখন <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> ব্যবহার করছে (Test mode · আপনার change save হবে না)</template>
                 <template v-else>AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
@@ -8981,6 +8985,12 @@ body {
 
 /* Read-only lock indicators */
 .mb-banner-ro { background : #b45f04; padding : 1px 10px; border-radius : 3px; }
+.mb-holder-name {
+    color          : #ffe600;
+    font-size      : 13px;
+    text-transform : uppercase;
+    letter-spacing : .5px;
+}
 .od-readonly-tag {
     padding       : 3px 10px;
     border-radius : 3px;
