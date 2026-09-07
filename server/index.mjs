@@ -255,6 +255,7 @@ function unplannedQuery(unitId, limit, offset) {
                 ) ORDER BY shipment_date)                          AS po_details
             FROM planning_orders
             WHERE planning_status = 'unplanned'
+              AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
               AND order_code IS NOT NULL AND order_code != ''
               AND color      IS NOT NULL AND color      != ''
               AND (shipment_date IS NULL OR shipment_date >= '${cut}')
@@ -281,6 +282,7 @@ function unplannedQuery(unitId, limit, offset) {
                 ))                   AS po_details
             FROM planning_orders
             WHERE planning_status = 'unplanned'
+              AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
               AND (order_code IS NULL OR order_code = '' OR color IS NULL OR color = '')
               AND (shipment_date IS NULL OR shipment_date >= '${cut}')
               ${uf}
@@ -293,6 +295,7 @@ function unplannedQuery(unitId, limit, offset) {
             SELECT COUNT(*) FROM (
                 SELECT 1 FROM planning_orders
                 WHERE planning_status = 'unplanned'
+              AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
                   AND order_code IS NOT NULL AND order_code != ''
                   AND color IS NOT NULL AND color != ''
                   AND (shipment_date IS NULL OR shipment_date >= '${cut}')
@@ -303,6 +306,7 @@ function unplannedQuery(unitId, limit, offset) {
         (
             SELECT COUNT(*) FROM planning_orders
             WHERE planning_status = 'unplanned'
+              AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
               AND (order_code IS NULL OR order_code = '' OR color IS NULL OR color = '')
               AND (shipment_date IS NULL OR shipment_date >= '${cut}')
               ${uf}
@@ -1009,6 +1013,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
         const [ploRows] = await pool.query(
             `SELECT erp_order_id, COUNT(*) AS po_count FROM planning_orders
              WHERE erp_order_id IS NOT NULL AND erp_order_id != ''
+               AND erp_po_id NOT LIKE 'proj-%'
              GROUP BY erp_order_id`
         );
         const linkedPoCount = new Map(ploRows.map(r => [r.erp_order_id, Number(r.po_count)]));
@@ -1019,7 +1024,8 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
             `SELECT DISTINCT po.erp_order_id
              FROM planning_orders po
              JOIN planning_events pe ON pe.planning_order_id = po.id AND pe.event_status != 'cancelled'
-             WHERE po.erp_order_id IS NOT NULL AND po.erp_order_id != ''`
+             WHERE po.erp_order_id IS NOT NULL AND po.erp_order_id != ''
+               AND po.erp_po_id NOT LIKE 'proj-%'`
         );
         const confirmPlanned = new Set(cpRows.map(r => r.erp_order_id));
 
@@ -1114,7 +1120,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             `SELECT DISTINCT po.erp_order_id
              FROM planning_orders po
              JOIN planning_events pe ON pe.planning_order_id = po.id AND pe.event_status != 'cancelled'
-             WHERE po.erp_order_id IS NOT NULL AND po.erp_order_id != ''`
+             WHERE po.erp_order_id IS NOT NULL AND po.erp_order_id != ''
+               AND po.erp_po_id NOT LIKE 'proj-%'`
         );
         const plannedOrderCodes = new Set(ploRows.map(r => r.erp_order_id));
         const completedSet = await completedOrderCodes();
@@ -1123,7 +1130,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         // projection with none is still waiting for its confirm to arrive
         const [syncRows] = await pool.query(
             `SELECT DISTINCT erp_order_id FROM planning_orders
-             WHERE erp_order_id IS NOT NULL AND erp_order_id != ''`
+             WHERE erp_order_id IS NOT NULL AND erp_order_id != ''
+               AND erp_po_id NOT LIKE 'proj-%'`
         );
         const syncedOrderCodes = new Set(syncRows.map(r => r.erp_order_id));
 
@@ -1675,7 +1683,36 @@ async function runAutoSync() {
 
         await conn.beginTransaction();
         let synced = 0;
-        for (const r of rows) {
+        // Chunked bulk upsert — one round trip per 200 rows instead of one
+        // per row (the remote DB made 5,000+ per-row inserts take minutes)
+        const C_CHUNK = 200;
+        for (let i = 0; i < rows.length; i += C_CHUNK) {
+            const chunk  = rows.slice(i, i + C_CHUNK);
+            const values = [];
+            const params = [];
+            for (const r of chunk) {
+                values.push("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unplanned', NOW(), NOW(), NOW())");
+                params.push(
+                    String(r.src_id),
+                    r.order_code ? safeStr(r.order_code) : null,
+                    safeStr(r.po_number),
+                    r.order_code ? safeStr(r.order_code) : null,
+                    safeStr(r.buyer_name),
+                    safeStr(r.style_no),
+                    r.color ? safeStr(r.color) : null,
+                    Number(r.order_quantity) || 0,
+                    Number(r.order_quantity) || 0,
+                    Number(r.smv) || 0,
+                    r.product_category || null,
+                    r.shipment_date || null,
+                    r.shipment_date || null,
+                    r.pcd || null,
+                    r.material_ready_date || null,
+                    r.unit_id ?? null,
+                    r.prod_unit ?? null,
+                    2
+                );
+            }
             await conn.query(`
                 INSERT INTO planning_orders
                     (erp_po_id, erp_order_id, po_number, order_code,
@@ -1684,7 +1721,7 @@ async function runAutoSync() {
                      smv, product_category,
                      shipment_date, order_delivery_date, pcd, material_ready_date,
                      unit_id, prod_unit, priority, planning_status, synced_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unplanned', NOW(), NOW(), NOW())
+                VALUES ${values.join(',')}
                 ON DUPLICATE KEY UPDATE
                     erp_order_id       = VALUES(erp_order_id),
                     buyer_name         = VALUES(buyer_name),
@@ -1702,28 +1739,117 @@ async function runAutoSync() {
                     priority           = COALESCE(VALUES(priority), priority),
                     synced_at          = NOW(),
                     updated_at         = NOW()
-            `, [
-                String(r.src_id),
-                r.order_code ? safeStr(r.order_code) : null,
-                safeStr(r.po_number),
-                r.order_code ? safeStr(r.order_code) : null,
-                safeStr(r.buyer_name),
-                safeStr(r.style_no),
-                r.color ? safeStr(r.color) : null,
-                Number(r.order_quantity) || 0,
-                Number(r.order_quantity) || 0,
-                Number(r.smv) || 0,
-                r.product_category || null,
-                r.shipment_date || null,
-                r.shipment_date || null,
-                r.pcd || null,
-                r.material_ready_date || null,
-                r.unit_id ?? null,
-                r.prod_unit ?? null,
-                2
-            ]);
-            synced++;
+            `, params);
+            synced += chunk.length;
         }
+
+        // ---- PROJECTION orders: stored in planning_orders under the SAME
+        // lifecycle as confirm POs — one row per ERP order entry, keyed
+        // erp_po_id 'proj-<order_id>', po_number NULL. All confirm-only
+        // queries exclude these rows, so behaviour elsewhere is unchanged.
+        const [projSrc] = await conn.query(`
+            SELECT oe.order_id                                        AS src_id,
+                   oe.order_code,
+                   b.b_name                                           AS buyer_name,
+                   s.stl_no                                           AS style_no,
+                   COALESCE(pt.prd_type_name, s.stl_type)            AS product_category,
+                   oe.order_qty                                       AS order_quantity,
+                   oe.order_delivery_date                             AS shipment_date,
+                   CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd ELSE NULL END AS pcd,
+                   COALESCE(s.production_smv, s.stl_smv, 0)          AS smv,
+                   oe.unit_id, oe.prod_unit
+            FROM \`${ERP_DB}\`.mr_order_entry oe
+            JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+            JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+            LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+            WHERE oe.order_status NOT IN ('Closed','Inactive')
+              AND oe.order_qty > 0
+              AND oe.order_delivery_date >= ?`, [ERP_CUTOFF]);
+        // Chunked bulk upsert — one round trip per 200 rows instead of one
+        // per row (the remote DB makes per-row inserts painfully slow)
+        const P_CHUNK = 200;
+        for (let i = 0; i < projSrc.length; i += P_CHUNK) {
+            const chunk  = projSrc.slice(i, i + P_CHUNK);
+            const values = [];
+            const params = [];
+            for (const r of chunk) {
+                values.push("(?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 2, 'unplanned', NOW(), NOW(), NOW())");
+                params.push(
+                    `proj-${r.src_id}`,
+                    r.order_code ? safeStr(r.order_code) : null,
+                    r.order_code ? safeStr(r.order_code) : null,
+                    safeStr(r.buyer_name),
+                    safeStr(r.style_no),
+                    Number(r.order_quantity) || 0,
+                    Number(r.order_quantity) || 0,
+                    Number(r.smv) || 0,
+                    r.product_category || null,
+                    r.shipment_date || null,
+                    r.shipment_date || null,
+                    r.pcd || null,
+                    r.unit_id ?? null,
+                    r.prod_unit ?? null
+                );
+            }
+            await conn.query(`
+                INSERT INTO planning_orders
+                    (erp_po_id, erp_order_id, po_number, order_code,
+                     buyer_name, style_no, color,
+                     order_quantity, remaining_quantity,
+                     smv, product_category,
+                     shipment_date, order_delivery_date, pcd, material_ready_date,
+                     unit_id, prod_unit, priority, planning_status, synced_at, created_at, updated_at)
+                VALUES ${values.join(',')}
+                ON DUPLICATE KEY UPDATE
+                    erp_order_id       = VALUES(erp_order_id),
+                    buyer_name         = VALUES(buyer_name),
+                    style_no           = VALUES(style_no),
+                    order_quantity     = VALUES(order_quantity),
+                    remaining_quantity = VALUES(remaining_quantity),
+                    smv                = IF(VALUES(smv) > 0, VALUES(smv), smv),
+                    product_category   = COALESCE(VALUES(product_category), product_category),
+                    shipment_date      = VALUES(shipment_date),
+                    order_delivery_date= VALUES(order_delivery_date),
+                    pcd                = COALESCE(VALUES(pcd), pcd),
+                    unit_id            = VALUES(unit_id),
+                    prod_unit          = COALESCE(VALUES(prod_unit), prod_unit),
+                    synced_at          = NOW(),
+                    updated_at         = NOW()
+            `, params);
+            synced += chunk.length;
+        }
+
+        // Projection row status follows its board bar (ev-proj event), the
+        // same way confirm rows follow their anchored events
+        await conn.query(`
+            UPDATE planning_orders po
+            LEFT JOIN planning_events pe
+              ON (pe.event_code = CONCAT('ev-proj:', po.order_code)
+                  OR pe.event_code LIKE CONCAT('ev-proj:', po.order_code, '-%'))
+             AND pe.event_status != 'cancelled'
+            SET po.planning_status = IF(pe.id IS NULL, 'unplanned', 'fully_planned'),
+                po.updated_at = NOW()
+            WHERE po.erp_po_id LIKE 'proj-%'
+              AND po.planning_status NOT IN ('completed', 'cancelled')`);
+
+        // Projection rows whose ERP order is gone/closed leave the table
+        const [liveOrd] = await conn.query(
+            `SELECT order_id FROM \`${ERP_DB}\`.mr_order_entry
+             WHERE order_status NOT IN ('Closed','Inactive')`);
+        const liveOrdKeys = new Set(liveOrd.map(r => `proj-${r.order_id}`));
+        const [projRows] = await conn.query(
+            `SELECT id, erp_po_id FROM planning_orders
+             WHERE erp_po_id LIKE 'proj-%'
+               AND (shipment_date IS NULL OR shipment_date >= ?)`,
+            [ERP_CUTOFF]);
+        let projDeleted = 0;
+        for (const row of projRows) {
+            if (!liveOrdKeys.has(String(row.erp_po_id))) {
+                await conn.query('DELETE FROM planning_orders WHERE id = ?', [row.id]);
+                projDeleted++;
+            }
+        }
+        console.log(`[auto-sync] projections: src=${projSrc.length} inTable=${projRows.length} deleted=${projDeleted}`);
 
         // Reconcile ERP-side deletions: a PO deleted from mr_purchase_order or
         // set to status 3 must leave the Orders list — and the board — on the
@@ -1737,6 +1863,7 @@ async function runAutoSync() {
             `SELECT id, erp_po_id, order_code, po_number, order_quantity
              FROM planning_orders
              WHERE erp_po_id IS NOT NULL AND erp_po_id != ''
+               AND erp_po_id NOT LIKE 'proj-%'
                AND (shipment_date IS NULL OR shipment_date >= ?)`,
             [ERP_CUTOFF]);
         const dead = ploRows.filter(r => !liveIds.has(String(r.erp_po_id)));
