@@ -1943,6 +1943,14 @@ function releaseLockOnLeave() {
 window.addEventListener('beforeunload', releaseLockOnLeave);
 window.addEventListener('pagehide', releaseLockOnLeave);
 
+// Coming back to this tab: re-check the lock IMMEDIATELY so the banner
+// reflects the current editor without waiting for the next heartbeat
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && view.value === 'board' && currentUnitId.value) {
+        syncBoardLock();
+    }
+});
+
 function openBoard(b) {
     currentBoard.value = b;
     currentUnitId.value = b.unitId ?? 3;
