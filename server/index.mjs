@@ -1088,10 +1088,14 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
         );
         const confirmPlanned = new Set(cpRows.map(r => r.erp_order_id));
 
-        // OS unit (e.g. 20/GSL): rows come from mbm_os.os_orders matched to
+        // OS units (e.g. 20/GSL): rows come from mbm_os.os_orders matched to
         // mr_order_entry (mr_order_id + mr_order_code) — the list shows the
-        // OS order code, OS style and OS qty (the unit's own share)
-        if (OS_UNIT_IDS.includes(prodUnitId)) {
+        // OS order code, OS style and OS qty (the unit's own share).
+        // Board filtered to an OS unit → only its OS rows; no unit filter
+        // (the all-units list) → OS rows are APPENDED to the ERP projections.
+        const osProjectedRows = async units => {
+            if (!units.length) return [];
+            const ph = units.map(() => '?').join(',');
             const [osRows] = await pool.query(`
                 SELECT
                     o.os_order_code                                        AS order_code,
@@ -1102,7 +1106,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                     o.order_qty                                            AS order_qty,
                     o.odd                                                  AS shipment_date,
                     COALESCE(s.production_smv, s.stl_smv, 0)               AS smv,
-                    oe.unit_id, ? AS prod_unit,
+                    oe.unit_id, o.os_unit_id AS prod_unit,
                     COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
                     o.mr_order_code, o.mr_order_id
                 FROM \`${OS_DB}\`.os_orders o
@@ -1111,13 +1115,13 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
                 LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
-                WHERE o.os_unit_id = ?
+                WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
                   AND o.odd >= ?
                 ORDER BY shipment_date, order_code
-            `, [prodUnitId, prodUnitId, cutoff]);
+            `, [...units, cutoff]);
             const completedOs = await completedOrderCodes();
-            const outOs = osRows.map(r => {
+            return osRows.map(r => {
                 const pcd  = resolveEffectivePcd(r.source_pcd, r.shipment_date);
                 const done = completedOs.has(r.order_code);
                 const elig = done
@@ -1149,6 +1153,11 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                                      : null
                 };
             });
+        };
+
+        // Board pinned to an OS unit → only that unit's OS rows
+        if (OS_UNIT_IDS.includes(prodUnitId)) {
+            const outOs = await osProjectedRows([prodUnitId]);
             outOs.sort((a, b) => {
                 if (!a.effective_pcd && !b.effective_pcd) return String(a.order_code).localeCompare(String(b.order_code));
                 if (!a.effective_pcd) return 1;
@@ -1217,6 +1226,8 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                                  : null
             };
         });
+        // No unit filter (all-units list): OS-unit orders appear here too
+        if (prodUnitId == null) out.push(...await osProjectedRows(OS_UNIT_IDS));
         // Effective PCD ascending; missing-PCD orders stay visible at the end
         out.sort((a, b) => {
             if (!a.effective_pcd && !b.effective_pcd) return String(a.order_code).localeCompare(String(b.order_code));
@@ -1278,10 +1289,13 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty }]));
 
         // 1. Projected orders: one row per mr_order_entry (no cross-DB planning join).
-        // OS unit (e.g. 20/GSL): rows come from mbm_os.os_orders instead,
+        // OS units (e.g. 20/GSL): rows come from mbm_os.os_orders instead,
         // matched to mr_order_entry — OS order code / style / qty displayed.
-        const [projRows] = OS_UNIT_IDS.includes(prodUnitId)
-            ? await pool.query(`
+        // OS board → only its rows; all-units list → OS rows appended.
+        const osAllOrdersRows = async units => {
+            if (!units.length) return [];
+            const ph = units.map(() => '?').join(',');
+            const [r] = await pool.query(`
                 SELECT
                     'projected'                                            AS order_type,
                     o.os_order_code                                        AS order_code,
@@ -1295,7 +1309,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     o.odd                                                  AS shipment_date,
                     COALESCE(s.production_smv, s.stl_smv, 0)               AS smv,
                     oe.unit_id,
-                    ${Number(prodUnitId)}                                  AS prod_unit,
+                    o.os_unit_id                                           AS prod_unit,
                     COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
                     o.created_at                                           AS created_at,
                     NULL AS start_date, NULL AS end_date, NULL AS resource_name
@@ -1305,11 +1319,16 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
                 LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
-                WHERE o.os_unit_id = ?
+                WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
                   AND o.odd >= ?
                 ORDER BY shipment_date, order_code
-            `, [prodUnitId, cutoff])
+            `, [...units, cutoff]);
+            return r;
+        };
+
+        const [projRows] = OS_UNIT_IDS.includes(prodUnitId)
+            ? [await osAllOrdersRows([prodUnitId])]
             : await pool.query(`
             SELECT
                 'projected'                                                AS order_type,
@@ -1342,6 +1361,9 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             HAVING COALESCE(MIN(po.po_ex_fty), oe.order_delivery_date) >= ?
             ORDER BY shipment_date, order_code
         `, [...pbp, cutoff]);
+
+        // All-units list: OS-unit projected orders (GSL etc.) appear here too
+        if (prodUnitId == null) projRows.push(...await osAllOrdersRows(OS_UNIT_IDS));
 
         // Saved projection board events (event_code 'ev-proj:<order_code>') —
         // fill line / start / end for projected rows that are planned in DB
