@@ -5261,14 +5261,15 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     const rightX = dateToClientX(s, end);
     if (leftX == null || rightX == null) return floatingCarrySnap(clientX, clientY);
 
-    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    // Same geometry rule as rendered bars: half the row, hugging its top line
+    const height = Math.max(16, Math.round((s.rowHeight || 48) / 2));
     const width = Math.max(32, rightX - leftX);
     lastCarrySize.width = width;
     lastCarrySize.height = height;
 
     return {
         valid       : true,
-        barBox      : { valid : true, left : leftX, top : rowRect.top + 3, width, height },
+        barBox      : { valid : true, left : leftX, top : rowRect.top + 1, width, height },
         line        : res.name || lineId,
         start,
         end,
@@ -5298,11 +5299,11 @@ function computeCarryOrigin(s, rec) {
     const leftX  = dateToClientX(s, rec.startDate);
     const rightX = dateToClientX(s, rec.endDate);
     if (leftX == null || rightX == null) return empty;
-    const height = Math.max(20, (s.rowHeight || 48) - 8);
+    const height = Math.max(16, Math.round((s.rowHeight || 48) / 2));
     return {
         valid  : true,
         left   : leftX,
-        top    : rowRect.top + 3,
+        top    : rowRect.top + 1,
         width  : Math.max(32, rightX - leftX),
         height
     };
@@ -9932,7 +9933,7 @@ body {
 .b-sch-event-wrap {
     /* Keep Bryntum's per-row `top` so bars stay on their assigned line */
     height     : calc(var(--mb-row-h, 48px) / 2) !important;
-    margin-top : calc(var(--mb-row-h, 48px) / 4);
+    margin-top : 0;   /* bar sticks to the row's top line (common rule) */
 }
 
 .b-sch-event {
