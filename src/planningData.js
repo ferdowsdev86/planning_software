@@ -421,6 +421,50 @@ export function barDisplayLine(raw, compact = false) {
     return `${buyer} : ${raw.style || '—'} : ${mbm} : ${poStr} : ${colorStr} : ${fmtDateDdMonRr(poDeliveryOf(raw.ship))}`;
 }
 
+// Uniform delivery-date format for the "Style" display mode: DD-MMM-YYYY
+const MON_MMM = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function fmtDateDdMmmYyyy(d) {
+    if (!d) return 'N/A';
+    const x = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(x.getTime())) return 'N/A';
+    return `${String(x.getDate()).padStart(2, '0')}-${MON_MMM[x.getMonth()]}-${x.getFullYear()}`;
+}
+
+// "Style" display mode bar line: `Style : Color : Delivery` (DD-MMM-YYYY).
+// Missing pieces show N/A (never undefined/null/blank). Grouped bars show
+// every colour comma-separated and the EARLIEST PO delivery in the group.
+// Style falls back to the order code so the bar is still identifiable.
+export function barStyleLine(raw, compact = false) {
+    if (!raw) return 'N/A : N/A : N/A';
+    const style = String(raw.style || '').trim()
+        || mbmOrderNo(raw.po, raw.mbmOrder)
+        || 'N/A';
+    const type = orderTypeOf(raw.po, raw.orderType);
+    const colorSet = [];
+    const pushColor = c => {
+        const v = String(c ?? '').trim();
+        if (v && v !== '—' && !colorSet.includes(v)) colorSet.push(v);
+    };
+    if (Array.isArray(raw.colors)) raw.colors.forEach(pushColor);
+    pushColor(raw.color);
+    if (!colorSet.length && type === 'confirm') pushColor(orderColor(raw.po));
+    const colors = colorSet.length ? colorSet.join(', ') : 'N/A';
+    if (compact) return `${style} : ${colors}`;
+    // Earliest shipment across a consolidated group, else the bar's own ship
+    let ship = raw.ship ? new Date(raw.ship) : null;
+    if (ship && Number.isNaN(ship.getTime())) ship = null;
+    if (Array.isArray(raw.poDetails)) {
+        for (const p of raw.poDetails) {
+            const s = p?.ship ? new Date(p.ship) : null;
+            if (s && !Number.isNaN(s.getTime()) && (!ship || s < ship)) ship = s;
+        }
+    }
+    const delivery = type === 'projection' ? orderDeliveryOf(ship) : poDeliveryOf(ship);
+    return `${style} : ${colors} : ${fmtDateDdMmmYyyy(delivery)}`;
+}
+
 const PRODUCT_TYPE_BY_PO = {
     'PO-20115' : 'Basic Shirt',
     'PO-33445' : 'Blouse',

@@ -36,7 +36,12 @@ const unplanned = ref([...UNPLANNED_INIT]);
 const replacedOrders = ref([]);
 const toasts = ref([]);
 const colorMenuOpen = ref(false);
-const colorMode = ref('risk');
+// Display mode (risk | buyer | status | style) — last choice survives refresh
+const colorMode = ref((() => {
+    const saved = localStorage.getItem('mbm-color-mode');
+    return ['risk', 'buyer', 'status', 'style'].includes(saved) ? saved : 'risk';
+})());
+colorState.mode = colorMode.value;
 const dataSource = ref('demo');
 const apiModeSel = ref(apiMode());        // auto | local | aws — status-bar switch
 const apiBaseLabel = ref('');             // the endpoint actually in use
@@ -6593,12 +6598,14 @@ const act = name => {
 const colorModes = [
     { icon : '⚠', label : 'Risk status', mode : 'risk' },
     { icon : '👕', label : 'Buyer',       mode : 'buyer' },
-    { icon : '🏷', label : 'Plan status', mode : 'status' }
+    { icon : '🏷', label : 'Plan status', mode : 'status' },
+    { icon : '🧵', label : 'Style',       mode : 'style' }
 ];
 
 const pickColorMode = m => {
     colorMode.value = m;
     colorState.mode = m;
+    localStorage.setItem('mbm-color-mode', m); // survives refresh
     colorMenuOpen.value = false;
     const s = getInstance();
     s?.refreshWithTransition?.() ?? s?.refreshRows?.();

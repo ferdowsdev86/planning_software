@@ -6,7 +6,7 @@ import {
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
-    elapsedDays, orderTypeOf, barDisplayLine, addCalDays, randSmv, productTypeFor,
+    elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, isLateVsDelivery,
     dayCapacityFactor
@@ -1775,7 +1775,7 @@ export const schedulerProConfig = {
         if (q) {
             const hay = [
                 r.buyer, r.po, r.style, r.status, r.productType,
-                orderTypeOf(r.po, r.orderType), barDisplayLine(r), e.name
+                orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name
             ].join(' ').toLowerCase();
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
         }
@@ -1794,11 +1794,14 @@ export const schedulerProConfig = {
             return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
         }
         // Single line, vertically centred — no confirm/projection label
-        // (the bar colour/border already distinguishes confirm orders)
-        const full = barDisplayLine(r);
+        // (the bar colour/border already distinguishes confirm orders).
+        // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
+        // position, duration and colour coding stay exactly as-is.
+        const line = colorState.mode === 'style' ? barStyleLine : barDisplayLine;
+        const full = line(r);
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
-        const text = compact ? barDisplayLine(r, true) : full;
+        const text = compact ? line(r, true) : full;
         // Learning-curve ramp: hatched overlay on the bar's head — a shade on
         // top of (never replacing) the status/risk colour
         const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
