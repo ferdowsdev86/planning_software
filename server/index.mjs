@@ -884,12 +884,16 @@ app.post(`${BASE}/learning-curves`, async (req, res) => {
 // POST /sync-erp-orders                   (upsert into planning_orders)
 // --------------------------------------------------------------------------
 const ERP_DB     = 'cuttingedgedb';
-// Sub-contract "OS" units: their plan-orders list rows come from
-// mbm_os.os_orders (matched to mr_order_entry via mr_order_id +
-// mr_order_code) and display the OS order code / style / qty instead of the
-// master ERP order's values. Currently: unit 20 (GSL).
+// Sub-contract "OS" orders: rows from mbm_os.os_orders (matched to
+// mr_order_entry via mr_order_id + mr_order_code) showing the OS order
+// code / style / qty (the unit's own share). os_orders.os_unit_id refers to
+// mbm_os.os_units — NOT hr_unit: os_units 20 = ABSOLUTE QUALITYWEAR LTD
+// (AQL, fty AQL-3) = planning production unit 3, so its OS orders belong on
+// the AQL board and display AQL (never hr_unit 20 = MCON).
 const OS_DB       = 'mbm_os';
-const OS_UNIT_IDS = [20];
+const OS_UNIT_MAP = { 20 : 3 };  // os_units.id → planning prod unit (hr)
+const OS_UNIT_IDS = Object.keys(OS_UNIT_MAP).map(Number);
+const osUnitsForProdUnit = pu => OS_UNIT_IDS.filter(id => OS_UNIT_MAP[id] === Number(pu));
 const ERP_CUTOFF = '2026-08-20';
 
 const ERP_QUERY = (cutoff) => [`
@@ -1088,11 +1092,9 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
         );
         const confirmPlanned = new Set(cpRows.map(r => r.erp_order_id));
 
-        // OS units (e.g. 20/GSL): rows come from mbm_os.os_orders matched to
-        // mr_order_entry (mr_order_id + mr_order_code) — the list shows the
-        // OS order code, OS style and OS qty (the unit's own share).
-        // Board filtered to an OS unit → only its OS rows; no unit filter
-        // (the all-units list) → OS rows are APPENDED to the ERP projections.
+        // OS orders (mbm_os.os_orders, e.g. os unit 20 = AQL): appended to
+        // the ERP projections of their MAPPED production unit — the list
+        // shows the OS order code, OS style and OS qty (the unit's share).
         const osProjectedRows = async units => {
             if (!units.length) return [];
             const ph = units.map(() => '?').join(',');
@@ -1139,7 +1141,8 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                     shipment_date    : r.shipment_date,
                     smv              : Number(r.smv) || 0,
                     unit_id          : r.unit_id,
-                    prod_unit        : r.prod_unit,
+                    // os_unit_id → planning prod unit (os_units 20 = AQL/3)
+                    prod_unit        : OS_UNIT_MAP[r.prod_unit] ?? r.prod_unit,
                     source_pcd       : r.source_pcd,
                     effective_pcd    : pcd.effective_pcd,
                     pcd_source       : pcd.pcd_source,
@@ -1154,18 +1157,6 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 };
             });
         };
-
-        // Board pinned to an OS unit → only that unit's OS rows
-        if (OS_UNIT_IDS.includes(prodUnitId)) {
-            const outOs = await osProjectedRows([prodUnitId]);
-            outOs.sort((a, b) => {
-                if (!a.effective_pcd && !b.effective_pcd) return String(a.order_code).localeCompare(String(b.order_code));
-                if (!a.effective_pcd) return 1;
-                if (!b.effective_pcd) return -1;
-                return a.effective_pcd < b.effective_pcd ? -1 : a.effective_pcd > b.effective_pcd ? 1 : 0;
-            });
-            return res.json({ success : true, rows : outOs, total : outOs.length });
-        }
 
         const [rows] = await pool.query(`
             SELECT
@@ -1226,8 +1217,10 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                                  : null
             };
         });
-        // No unit filter (all-units list): OS-unit orders appear here too
-        if (prodUnitId == null) out.push(...await osProjectedRows(OS_UNIT_IDS));
+        // OS orders join their mapped unit's list (os 20 → AQL/3), and the
+        // all-units list carries every OS unit's orders
+        const osUnits = prodUnitId == null ? OS_UNIT_IDS : osUnitsForProdUnit(prodUnitId);
+        if (osUnits.length) out.push(...await osProjectedRows(osUnits));
         // Effective PCD ascending; missing-PCD orders stay visible at the end
         out.sort((a, b) => {
             if (!a.effective_pcd && !b.effective_pcd) return String(a.order_code).localeCompare(String(b.order_code));
@@ -1289,9 +1282,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty }]));
 
         // 1. Projected orders: one row per mr_order_entry (no cross-DB planning join).
-        // OS units (e.g. 20/GSL): rows come from mbm_os.os_orders instead,
-        // matched to mr_order_entry — OS order code / style / qty displayed.
-        // OS board → only its rows; all-units list → OS rows appended.
+        // OS orders (mbm_os.os_orders, e.g. os unit 20 = AQL/3): appended to
+        // their MAPPED unit's rows — OS order code / style / qty displayed.
         const osAllOrdersRows = async units => {
             if (!units.length) return [];
             const ph = units.map(() => '?').join(',');
@@ -1324,12 +1316,12 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                   AND o.odd >= ?
                 ORDER BY shipment_date, order_code
             `, [...units, cutoff]);
+            // os_unit_id → planning prod unit (os_units 20 = AQL/3)
+            for (const x of r) x.prod_unit = OS_UNIT_MAP[x.prod_unit] ?? x.prod_unit;
             return r;
         };
 
-        const [projRows] = OS_UNIT_IDS.includes(prodUnitId)
-            ? [await osAllOrdersRows([prodUnitId])]
-            : await pool.query(`
+        const [projRows] = await pool.query(`
             SELECT
                 'projected'                                                AS order_type,
                 oe.order_code,
@@ -1362,8 +1354,10 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             ORDER BY shipment_date, order_code
         `, [...pbp, cutoff]);
 
-        // All-units list: OS-unit projected orders (GSL etc.) appear here too
-        if (prodUnitId == null) projRows.push(...await osAllOrdersRows(OS_UNIT_IDS));
+        // OS orders join their mapped unit's list (os 20 → AQL/3); the
+        // all-units list carries every OS unit's orders
+        const osUnits2 = prodUnitId == null ? OS_UNIT_IDS : osUnitsForProdUnit(prodUnitId);
+        if (osUnits2.length) projRows.push(...await osAllOrdersRows(osUnits2));
 
         // Saved projection board events (event_code 'ev-proj:<order_code>') —
         // fill line / start / end for projected rows that are planned in DB
@@ -2102,7 +2096,11 @@ async function runAutoSync() {
               AND o.order_status NOT IN ('Closed','Inactive')
               AND o.order_qty > 0
               AND o.odd >= ?`, [...OS_UNIT_IDS, ERP_CUTOFF]);
-        for (const r of osSrc) r.key = `proj-os-${r.src_id}`;
+        for (const r of osSrc) {
+            r.key = `proj-os-${r.src_id}`;
+            // os_unit_id → planning prod unit (os_units 20 = AQL/3)
+            r.prod_unit = OS_UNIT_MAP[r.prod_unit] ?? r.prod_unit;
+        }
         const allProjSrc = [...projSrc, ...osSrc];
 
         // Chunked bulk upsert — one round trip per 200 rows instead of one
