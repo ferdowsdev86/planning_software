@@ -10078,6 +10078,24 @@ body {
 .lcd-list div { padding : 7px 10px; cursor : pointer; }
 .lcd-list div:hover { background : #eaf1fb; }
 
+/* Responsive two-tier date header: never let adjacent labels overlap */
+.fr-sched .b-sch-header-time-axis-cell {
+    overflow : hidden;
+    white-space : nowrap;
+    text-align : center;
+    font-size : 12px;
+    padding : 0 2px;
+}
+.mb-hdr-week {
+    display : block;
+    width : 100%;
+    text-align : right;
+    padding-right : 6px;
+    font-weight : 600;
+}
+.mb-hdr-day2 { line-height : 1.15; font-size : 11px; }
+.mb-hdr-day2 div:last-child { font-weight : 600; }
+
 /* Drag-to-pan: grab on empty schedule area, grabbing while panning */
 .mb-fr-vscroll-on .b-timeline-sub-grid { cursor : grab; }
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event,

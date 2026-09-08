@@ -1219,12 +1219,44 @@ export const schedulerProConfig = {
     taskEditFeature           : false,
     eventEditFeature          : false,
 
+    // Weeks run Saturday→Friday (factory week; Friday = off day)
+    weekStartDay : 6,
+
+    // Responsive two-tier date header (native Bryntum headers + renderers —
+    // no DOM overrides). Top: one week marker per week (its last day, like
+    // FastReact). Bottom: per-day cell whose format follows the CURRENT
+    // column width, so no zoom level ever overlaps text:
+    //   ≥112px  Monday / 18-Sep-2026 (two lines)
+    //   ≥72px   Mon 18
+    //   ≥54px   Mo 18
+    //   <54px   Mo
+    // Renderers re-run on every tickSize change (the h-zoom buttons), which
+    // makes the header adapt automatically. Only the header DISPLAY changes:
+    // ticks, bar positions, durations and calculations stay untouched.
     viewPreset : {
         base              : 'dayAndWeek',
         tickWidth         : 72,
         displayDateFormat : 'YY-MM-DD',
         headers           : [
-            { unit : 'day', dateFormat : 'YY-MM-DD' }
+            {
+                unit     : 'week',
+                renderer : (start, end) => {
+                    const last = new Date(end.getTime() - 864e5); // week's last visible day
+                    return `<span class="mb-hdr-week">${DateHelper.format(last, 'YY-MM-DD')}</span>`;
+                }
+            },
+            {
+                unit     : 'day',
+                renderer : start => {
+                    const w    = uiHooks.instance?.tickSize || 72;
+                    const dow2 = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][start.getDay()];
+                    if (w < 54)  return dow2;
+                    const dd = DateHelper.format(start, 'DD');
+                    if (w < 72)  return `${dow2} ${dd}`;
+                    if (w < 112) return `${DateHelper.format(start, 'ddd')} ${dd}`;
+                    return `<div class="mb-hdr-day2"><div>${DateHelper.format(start, 'dddd')}</div><div>${DateHelper.format(start, 'DD-MMM-YYYY')}</div></div>`;
+                }
+            }
         ]
     },
 
