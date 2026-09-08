@@ -1102,7 +1102,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 SELECT
                     o.os_order_code                                        AS order_code,
                     o.order_status,
-                    b.b_name                                               AS buyer_name,
+                    COALESCE(ob.b_name, b.b_name)                          AS buyer_name,
                     o.style                                                AS style_no,
                     COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                     o.order_qty                                            AS order_qty,
@@ -1115,6 +1115,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
                        ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
                 LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
                 LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
@@ -1291,7 +1292,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 SELECT
                     'projected'                                            AS order_type,
                     o.os_order_code                                        AS order_code,
-                    b.b_name                                               AS buyer_name,
+                    COALESCE(ob.b_name, b.b_name)                          AS buyer_name,
                     o.style                                                AS style_no,
                     COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                     o.order_qty                                            AS order_qty,
@@ -1309,6 +1310,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
                        ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
                 LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
                 LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
@@ -2078,7 +2080,7 @@ async function runAutoSync() {
         const [osSrc] = await conn.query(`
             SELECT o.id                                                AS src_id,
                    o.os_order_code                                     AS order_code,
-                   b.b_name                                            AS buyer_name,
+                   COALESCE(ob.b_name, b.b_name)                       AS buyer_name,
                    o.style                                             AS style_no,
                    COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                    o.order_qty                                         AS order_quantity,
@@ -2090,6 +2092,7 @@ async function runAutoSync() {
             LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
                    ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
             LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+            LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
             LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
             LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
             WHERE o.os_unit_id IN (${osPh})
