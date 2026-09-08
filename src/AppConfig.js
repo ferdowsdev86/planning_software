@@ -8,7 +8,7 @@ import {
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
-    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, isLateVsDelivery,
+    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
@@ -363,15 +363,20 @@ export function recalcCapacity(scheduler) {
 }
 
 // ---------------------------------------------------------------------------
-// Resolve where an inserted bar may start (no-overlap rule):
+// Resolve where an inserted bar may start (drop insertion rule):
 // - an off day start jumps to the FIRST WORKING HOUR of the next working day
-// - a bar already running across the point, or a completed (fixed) bar inside
-//   the span, cannot move: the inserted bar attaches exactly at its end
+// - a bar ALREADY RUNNING across the drop point (its start is before the
+//   point) never moves: the new bar attaches right at its end. Same when the
+//   drop lands at/near that bar's end (within the work-snap resolution).
+// - a locked/completed bar anywhere inside the span blocks the same way
+// - bars STARTING at/after the drop point are NOT obstacles here — they are
+//   the ones pushFollowers shifts later ("porer bar pichabe")
 // ---------------------------------------------------------------------------
 export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
-    // Only locked/completed bars block a drop — pinned followers get pushed
     const isFixed = lockedBar;
     const bars = barsOnLine(scheduler, lineId, excludeId);
+    // "Near the end" tolerance = the board's smallest snap resolution
+    const NEAR_MS = WORK_SNAP_MIN * 60 * 1000;
     let start = new Date(desired);
     let snapped = false, blockedBy = null;
     if (isOffDay(start)) {
@@ -387,10 +392,12 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
     }
     for (let guard = 0; guard < 20; guard++) {
         const end  = endOfWork(start, dur);
-        // Only LOCKED/completed bars are obstacles: the placed bar sits at the
-        // exact pointed spot and every conflicting bar shifts later instead
-        // ("jekhane point kora hoy okhanei boshbe, porer bar pichabe")
-        const obst = bars.find(ev => isFixed(ev) && ev.startDate < end && ev.endDate > start);
+        const obst = bars.find(ev =>
+            // started earlier and still covering (or ending within the snap
+            // window of) the drop point → it stays put, we go after it
+            (ev.startDate < start && ev.endDate.getTime() + NEAR_MS > start.getTime())
+            // locked/completed bars block anywhere inside the span
+            || (isFixed(ev) && ev.startDate < end && ev.endDate > start));
         if (!obst) return { start, end, snapped, blockedBy };
         blockedBy = obst.name;
         start = nextStartAfter(obst.endDate);

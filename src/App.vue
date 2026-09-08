@@ -5673,7 +5673,7 @@ async function placeCarried(date, resourceRecord) {
         end   = inserted.end;
         noteManualGap(s, targetId, rec, start);
         if (inserted.snapped)   note = 'off day — starts at the next working day\'s first hour';
-        if (inserted.blockedBy) note = `${inserted.blockedBy} occupies that point (locked) — attached right after it`;
+        if (inserted.blockedBy) note = `${inserted.blockedBy} runs across that point — placed right after it (it stays put)`;
     if (raw.matReady && start < raw.matReady) {
         toast(`Material for ${raw.po} is not ready before ${fmtDate(raw.matReady)}`, 'error');
         return;
