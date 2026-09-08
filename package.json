@@ -10,8 +10,8 @@
     "db:deploy": "bash database/deploy.sh"
   },
   "dependencies": {
-    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@^7.3.4",
-    "@bryntum/schedulerpro-vue-3": "^7.3.4",
+    "@bryntum/schedulerpro": "7.3.5",
+    "@bryntum/schedulerpro-vue-3": "7.3.5",
     "@fortawesome/fontawesome-free": "^7.3.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
