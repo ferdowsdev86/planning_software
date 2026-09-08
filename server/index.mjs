@@ -884,6 +884,12 @@ app.post(`${BASE}/learning-curves`, async (req, res) => {
 // POST /sync-erp-orders                   (upsert into planning_orders)
 // --------------------------------------------------------------------------
 const ERP_DB     = 'cuttingedgedb';
+// Sub-contract "OS" units: their plan-orders list rows come from
+// mbm_os.os_orders (matched to mr_order_entry via mr_order_id +
+// mr_order_code) and display the OS order code / style / qty instead of the
+// master ERP order's values. Currently: unit 20 (GSL).
+const OS_DB       = 'mbm_os';
+const OS_UNIT_IDS = [20];
 const ERP_CUTOFF = '2026-08-20';
 
 const ERP_QUERY = (cutoff) => [`
@@ -1082,6 +1088,76 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
         );
         const confirmPlanned = new Set(cpRows.map(r => r.erp_order_id));
 
+        // OS unit (e.g. 20/GSL): rows come from mbm_os.os_orders matched to
+        // mr_order_entry (mr_order_id + mr_order_code) — the list shows the
+        // OS order code, OS style and OS qty (the unit's own share)
+        if (OS_UNIT_IDS.includes(prodUnitId)) {
+            const [osRows] = await pool.query(`
+                SELECT
+                    o.os_order_code                                        AS order_code,
+                    o.order_status,
+                    b.b_name                                               AS buyer_name,
+                    o.style                                                AS style_no,
+                    COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
+                    o.order_qty                                            AS order_qty,
+                    o.odd                                                  AS shipment_date,
+                    COALESCE(s.production_smv, s.stl_smv, 0)               AS smv,
+                    oe.unit_id, ? AS prod_unit,
+                    COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
+                    o.mr_order_code, o.mr_order_id
+                FROM \`${OS_DB}\`.os_orders o
+                LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
+                       ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+                LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                WHERE o.os_unit_id = ?
+                  AND o.order_status NOT IN ('Closed','Inactive')
+                  AND o.odd >= ?
+                ORDER BY shipment_date, order_code
+            `, [prodUnitId, prodUnitId, cutoff]);
+            const completedOs = await completedOrderCodes();
+            const outOs = osRows.map(r => {
+                const pcd  = resolveEffectivePcd(r.source_pcd, r.shipment_date);
+                const done = completedOs.has(r.order_code);
+                const elig = done
+                    ? { eligible : false, reason : 'Order marked complete - removed from the board.' }
+                    : projectedEligibility({ orderStatus : r.order_status });
+                return {
+                    order_type       : 'projected',
+                    order_code       : r.order_code,
+                    mr_order_code    : r.mr_order_code,
+                    mr_order_id      : r.mr_order_id,
+                    buyer_name       : r.buyer_name,
+                    style_no         : r.style_no,
+                    product_category : r.product_category,
+                    order_qty        : Number(r.order_qty),
+                    shipment_date    : r.shipment_date,
+                    smv              : Number(r.smv) || 0,
+                    unit_id          : r.unit_id,
+                    prod_unit        : r.prod_unit,
+                    source_pcd       : r.source_pcd,
+                    effective_pcd    : pcd.effective_pcd,
+                    pcd_source       : pcd.pcd_source,
+                    pcd_status       : pcd.pcd_status,
+                    replaced         : false,
+                    linked_po_count  : linkedPoCount.get(r.order_code) || 0,
+                    eligible_for_initial_board : elig.eligible,
+                    eligibility_reason         : elig.reason,
+                    plan_warning     : pcd.pcd_status === 'missing' ? 'Cannot auto-plan: valid PCD is missing.'
+                                     : !(Number(r.order_qty) > 0)   ? 'Cannot auto-plan: order quantity is 0 (os_orders.order_qty).'
+                                     : null
+                };
+            });
+            outOs.sort((a, b) => {
+                if (!a.effective_pcd && !b.effective_pcd) return String(a.order_code).localeCompare(String(b.order_code));
+                if (!a.effective_pcd) return 1;
+                if (!b.effective_pcd) return -1;
+                return a.effective_pcd < b.effective_pcd ? -1 : a.effective_pcd > b.effective_pcd ? 1 : 0;
+            });
+            return res.json({ success : true, rows : outOs, total : outOs.length });
+        }
+
         const [rows] = await pool.query(`
             SELECT
                 oe.order_code,
@@ -1201,8 +1277,40 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         );
         const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty }]));
 
-        // 1. Projected orders: one row per mr_order_entry (no cross-DB planning join)
-        const [projRows] = await pool.query(`
+        // 1. Projected orders: one row per mr_order_entry (no cross-DB planning join).
+        // OS unit (e.g. 20/GSL): rows come from mbm_os.os_orders instead,
+        // matched to mr_order_entry — OS order code / style / qty displayed.
+        const [projRows] = OS_UNIT_IDS.includes(prodUnitId)
+            ? await pool.query(`
+                SELECT
+                    'projected'                                            AS order_type,
+                    o.os_order_code                                        AS order_code,
+                    b.b_name                                               AS buyer_name,
+                    o.style                                                AS style_no,
+                    COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
+                    o.order_qty                                            AS order_qty,
+                    NULL                                                   AS po_qty,
+                    NULL                                                   AS po_number,
+                    NULL                                                   AS color,
+                    o.odd                                                  AS shipment_date,
+                    COALESCE(s.production_smv, s.stl_smv, 0)               AS smv,
+                    oe.unit_id,
+                    ${Number(prodUnitId)}                                  AS prod_unit,
+                    COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
+                    o.created_at                                           AS created_at,
+                    NULL AS start_date, NULL AS end_date, NULL AS resource_name
+                FROM \`${OS_DB}\`.os_orders o
+                LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
+                       ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+                LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                WHERE o.os_unit_id = ?
+                  AND o.order_status NOT IN ('Closed','Inactive')
+                  AND o.odd >= ?
+                ORDER BY shipment_date, order_code
+            `, [prodUnitId, cutoff])
+            : await pool.query(`
             SELECT
                 'projected'                                                AS order_type,
                 oe.order_code,
@@ -1945,17 +2053,47 @@ async function runAutoSync() {
             WHERE oe.order_status NOT IN ('Closed','Inactive')
               AND oe.order_qty > 0
               AND oe.order_delivery_date >= ?`, [ERP_CUTOFF]);
+        for (const r of projSrc) r.key = `proj-${r.src_id}`;
+
+        // OS-unit projections (mbm_os.os_orders → e.g. unit 20/GSL): same
+        // lifecycle, keyed 'proj-os-<id>' so the two sources never collide.
+        // The row carries the OS order code / style / qty (the unit's share).
+        const osPh = OS_UNIT_IDS.map(() => '?').join(',');
+        const [osSrc] = await conn.query(`
+            SELECT o.id                                                AS src_id,
+                   o.os_order_code                                     AS order_code,
+                   b.b_name                                            AS buyer_name,
+                   o.style                                             AS style_no,
+                   COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
+                   o.order_qty                                         AS order_quantity,
+                   o.odd                                               AS shipment_date,
+                   CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd ELSE NULL END AS pcd,
+                   COALESCE(s.production_smv, s.stl_smv, 0)            AS smv,
+                   oe.unit_id, o.os_unit_id                            AS prod_unit
+            FROM \`${OS_DB}\`.os_orders o
+            LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
+                   ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+            LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+            LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+            LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+            WHERE o.os_unit_id IN (${osPh})
+              AND o.order_status NOT IN ('Closed','Inactive')
+              AND o.order_qty > 0
+              AND o.odd >= ?`, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        for (const r of osSrc) r.key = `proj-os-${r.src_id}`;
+        const allProjSrc = [...projSrc, ...osSrc];
+
         // Chunked bulk upsert — one round trip per 200 rows instead of one
         // per row (the remote DB makes per-row inserts painfully slow)
         const P_CHUNK = 200;
-        for (let i = 0; i < projSrc.length; i += P_CHUNK) {
-            const chunk  = projSrc.slice(i, i + P_CHUNK);
+        for (let i = 0; i < allProjSrc.length; i += P_CHUNK) {
+            const chunk  = allProjSrc.slice(i, i + P_CHUNK);
             const values = [];
             const params = [];
             for (const r of chunk) {
                 values.push("(?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 2, 'unplanned', NOW(), NOW(), NOW())");
                 params.push(
-                    `proj-${r.src_id}`,
+                    r.key,
                     r.order_code ? safeStr(r.order_code) : null,
                     r.order_code ? safeStr(r.order_code) : null,
                     safeStr(r.buyer_name),
@@ -2017,6 +2155,12 @@ async function runAutoSync() {
             `SELECT order_id FROM \`${ERP_DB}\`.mr_order_entry
              WHERE order_status NOT IN ('Closed','Inactive')`);
         const liveOrdKeys = new Set(liveOrd.map(r => `proj-${r.order_id}`));
+        // OS-unit projections stay while their os_orders row is alive
+        const [liveOs] = await conn.query(
+            `SELECT id FROM \`${OS_DB}\`.os_orders
+             WHERE os_unit_id IN (${osPh}) AND order_status NOT IN ('Closed','Inactive')`,
+            [...OS_UNIT_IDS]);
+        for (const r of liveOs) liveOrdKeys.add(`proj-os-${r.id}`);
         const [projRows] = await conn.query(
             `SELECT id, erp_po_id FROM planning_orders
              WHERE erp_po_id LIKE 'proj-%'
@@ -2029,7 +2173,7 @@ async function runAutoSync() {
                 projDeleted++;
             }
         }
-        console.log(`[auto-sync] projections: src=${projSrc.length} inTable=${projRows.length} deleted=${projDeleted}`);
+        console.log(`[auto-sync] projections: src=${projSrc.length} os=${osSrc.length} inTable=${projRows.length} deleted=${projDeleted}`);
 
         // Reconcile ERP-side deletions: a PO deleted from mr_purchase_order or
         // set to status 3 must leave the Orders list — and the board — on the

@@ -2160,7 +2160,10 @@ function addBoard() {
     if (!name) return;
     const floors = (window.prompt('Floors for this board (comma separated):', 'F1,F2') || 'F1,F2')
         .split(',').map(x => x.trim()).filter(Boolean);
-    const b = { id : `b${Date.now()}`, name, floors, stages : floors.length > 1 };
+    // Production unit drives which orders this board sees (mr_order_entry
+    // prod_unit — or, for OS units like 20/GSL, mbm_os.os_orders)
+    const unitId = Number(window.prompt('Production unit id (3 = AQL, 20 = GSL/OS):', '3')) || 3;
+    const b = { id : `b${Date.now()}`, name, floors, stages : floors.length > 1, unitId, unitName : name };
     boards.value.push(b);
     currentUser.value.boards.push(b.id);
     savePerms();
