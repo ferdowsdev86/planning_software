@@ -1825,6 +1825,11 @@ export const schedulerProConfig = {
         if (r.stage) {
             return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
         }
+        // Half-height bars: the strip fills the TOP half of the line row and
+        // the bottom half stays open (the day capacity figures live there)
+        if (renderData.height > 0) {
+            renderData.height = Math.max(16, Math.floor(renderData.height / 2));
+        }
         // Single line, vertically centred — no confirm/projection label
         // (the bar colour/border already distinguishes confirm orders).
         // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
