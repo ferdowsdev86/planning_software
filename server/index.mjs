@@ -2042,8 +2042,12 @@ async function runAutoSync() {
               AND oc.status = 1
               AND oc.clr_qty > 0
               AND o.order_status NOT IN ('Closed','Inactive')
-              AND COALESCE(oc.delivery_date, po.po_ex_fty, o.odd) >= ?
+              AND o.order_qty > 0
+              AND o.odd >= ?
         `, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        // ↑ window = the PROJECTION's own rule (o.odd >= cutoff, qty > 0):
+        // a confirm appears ONLY for orders whose projection is in the list —
+        // an order dropped by the cutoff never shows confirm-only rows.
         for (const r of osConf) {
             // os_unit_id → planning prod unit (os_units 20 = AQL/3)
             r.prod_unit = OS_UNIT_MAP[r.prod_unit] ?? r.prod_unit;
@@ -2269,13 +2273,16 @@ async function runAutoSync() {
              WHERE (status IS NULL OR status != 3)
                AND (po_status IS NULL OR po_status != 3)`);
         const liveIds = new Set(liveRows.map(r => String(r.po_id)));
-        // OS confirm rows stay while their os_order_color entry is alive
+        // OS confirm rows stay only while their os_order_color entry is alive
+        // AND the parent order still qualifies for a projection (same window)
         const [liveOsc] = await conn.query(
             `SELECT oc.id FROM \`${OS_DB}\`.os_order_color oc
              JOIN \`${OS_DB}\`.os_orders o ON o.id = oc.os_order_id
              WHERE oc.os_unit_id IN (${osPh}) AND oc.status = 1
-               AND o.order_status NOT IN ('Closed','Inactive')`,
-            [...OS_UNIT_IDS]);
+               AND o.order_status NOT IN ('Closed','Inactive')
+               AND o.order_qty > 0
+               AND o.odd >= ?`,
+            [...OS_UNIT_IDS, ERP_CUTOFF]);
         for (const r of liveOsc) liveIds.add(`os-c-${r.id}`);
         const [ploRows] = await conn.query(
             `SELECT id, erp_po_id, order_code, po_number, order_quantity
