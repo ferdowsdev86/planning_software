@@ -5335,6 +5335,65 @@ function trackGhost(e) {
     updateCarryPreview(e.clientX, e.clientY);
 }
 
+// ---------------------------------------------------------------------------
+// Edge auto-scroll while carrying a bar: holding the bar near the board's
+// left/right edge scrolls the timeline continuously toward earlier/later
+// dates, so planning far outside the visible range needs no extra gesture.
+// Speed grows the deeper the pointer sits in the edge zone; leaving the zone
+// stops scrolling instantly (the carry itself continues). The ghost stays
+// glued to the pointer during scrolling via the scrollable listener
+// (attachCarryScroll), and the proposed drop position updates live.
+// ---------------------------------------------------------------------------
+let edgeScrollTimer = 0;
+
+// Configurable zone width: localStorage 'mbm-carry-edge-px' (default 50px)
+function carryEdgeZonePx() {
+    const v = Number(localStorage.getItem('mbm-carry-edge-px'));
+    return Number.isFinite(v) && v > 0 ? v : 50;
+}
+
+// setInterval, not requestAnimationFrame: rAF freezes in hidden/background
+// tabs, which would silently kill the loop; a 16ms interval gives the same
+// ~60fps smoothness while the page is visible.
+function edgeScrollTick() {
+    const s = getInstance();
+    const sub = s?.timeAxisSubGrid;
+    if (!carried.value || !sub?.element) {
+        stopEdgeScroll();
+        return;
+    }
+    const r = sub.element.getBoundingClientRect();
+    const { x, y } = lastMouse;
+    // Only while the pointer is vertically over the schedule area
+    if (y < r.top || y > r.bottom) return;
+    const zone = carryEdgeZonePx();
+    const MIN = 4, MAX = 26; // px per tick — smooth, controllable ramp
+    let vel = 0;
+    if (x <= r.left + zone) {
+        const t = Math.min(1, (r.left + zone - x) / zone);
+        vel = -(MIN + t * (MAX - MIN));
+    }
+    else if (x >= r.right - zone) {
+        const t = Math.min(1, (x - (r.right - zone)) / zone);
+        vel = MIN + t * (MAX - MIN);
+    }
+    if (!vel) return;
+    const sc = sub.scrollable;
+    if (!sc) return;
+    sc.x += vel; // the scroller clamps at both timeline ends
+}
+
+function startEdgeScroll() {
+    if (!edgeScrollTimer) edgeScrollTimer = setInterval(edgeScrollTick, 16);
+}
+
+function stopEdgeScroll() {
+    if (edgeScrollTimer) {
+        clearInterval(edgeScrollTimer);
+        edgeScrollTimer = 0;
+    }
+}
+
 function attachCarryListeners() {
     detachCarryListeners();
     document.addEventListener('mousemove', trackGhost, true);
@@ -5383,6 +5442,7 @@ function pickUp(rec, domEvent) {
     lastMouse.y = cy;
     attachCarryScroll(s);
     attachCarryListeners();
+    startEdgeScroll();
     syncCarryPreviewNow(cx, cy);
     requestAnimationFrame(() => syncCarryPreviewNow(lastMouse.x, lastMouse.y));
 }
@@ -5407,6 +5467,7 @@ function cancelCarry() {
     setClock(CLOCK_DEFAULT());
     document.body.classList.remove('mb-carry-active');
     uiHooks.boardUserActive = false;
+    stopEdgeScroll();
     detachCarryScroll();
     detachCarryListeners();
 }
