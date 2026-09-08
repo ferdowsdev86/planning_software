@@ -1950,24 +1950,19 @@ export const schedulerProConfig = {
                     continue;
                 }
                 if (raw.status === 'unplanned') raw.status = 'draft';
-                // Snap rules: the DRAGGED bar adjusts, existing bars never
-                // move. Near/over the previous bar's end → flush after it;
-                // a clear gap (beyond snapToleranceDays) is intentional and
-                // kept; any remaining collision hops the dragged bar forward.
-                const desired = clampIntoWorkWindow(origStart);
-                const others  = barsOnLine(s, rid, rec.id).map(ev => ({
-                    id : ev.id, name : ev.name, start : ev.startDate, end : ev.endDate
-                }));
-                const drop = resolveDropPosition({
-                    desired,
-                    dur     : raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1,
-                    bars    : others,
-                    tol     : snapToleranceDays(),
-                    helpers : { nextStartAfter, endOfWork }
-                });
-                const sd = drop.start, end = drop.end;
+                // FastReact insertion rule (same as pick & place): the
+                // dropped bar keeps the EXACT drop point (work-calendar
+                // clamped; only a locked/completed bar blocks); overlapped
+                // bars and their followers shift LATER only via pushFollowers
+                const { start : sd, end, snapped, blockedBy } =
+                    computeInsertStart(s, rid, origStart, raw.dur, rec.id);
+                const moved = snapped || !!blockedBy || sd.getTime() !== origStart.getTime();
                 rec.set({ startDate : sd, endDate : end, duration : elapsedDays(sd, end) });
                 noteManualGap(s, rid, rec, sd);
+                const pushedCnt = pushFollowers(s, rid, rec);
+                if (pushedCnt) {
+                    uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+                }
                 const mergedInfo = tryMergeAdjacent(s, rec, rid);
                 if (mergedInfo) {
                     uiHooks.onToast?.(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
@@ -1982,13 +1977,7 @@ export const schedulerProConfig = {
                     lineUtil : 0,
                     status   : raw.status
                 });
-                if (drop.bumpedOver) {
-                    uiHooks.onToast?.(`${rec.name}: placed right after "${drop.bumpedOver.name}" — bars cannot overlap (existing bars stay put)`, 'warn');
-                }
-                else if (drop.snappedAfter) {
-                    uiHooks.onToast?.(`${rec.name}: snapped flush after "${drop.snappedAfter.name}"`, 'ok');
-                }
-                else if (desired.getTime() !== origStart.getTime()) {
+                if (moved) {
                     uiHooks.onToast?.(`${rec.name}: adjusted to the next working day (starts ${fmtDate(sd)})`, 'warn');
                 }
             }

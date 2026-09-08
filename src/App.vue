@@ -5661,33 +5661,35 @@ async function placeCarried(date, resourceRecord) {
     }
     else {
         raw.parked = false;
-        // Same snap rules as drag-drop: only THIS bar adjusts, existing bars
-        // never move; near/over the previous bar → flush after it; a clear
-        // gap is intentional and kept; residual collisions hop forward.
-        const desired = clampIntoWorkWindow(date);
-        const others  = s.eventStore.records
-            .filter(ev => ev.id !== rec.id && ev.data?.raw && !ev.data.raw.stage
-                && lineIdOf(s, ev) === targetId)
-            .map(ev => ({ id : ev.id, name : ev.name, start : ev.startDate, end : ev.endDate }));
-        const placed = resolveDropPosition({
-            desired,
-            dur     : raw.dur || 1,
-            bars    : others,
-            tol     : snapToleranceDays(),
-            helpers : { nextStartAfter, endOfWork }
-        });
-        start = placed.start;
-        end   = placed.end;
+        // FastReact insertion rule (drag-reschedule spec): the dropped bar
+        // sits at the EXACT user-selected point (clamped only into the work
+        // calendar — off day / after hours → next working hour; a locked or
+        // completed bar at that point is the one thing that can't move, so
+        // the drop attaches right after it). Overlapped existing bars are
+        // pushed LATER by pushFollowers below — never earlier, never to
+        // another line, and bars that fit before a gap stay untouched.
+        const inserted = computeInsertStart(s, targetId, date, raw.dur, rec.id);
+        start = inserted.start;
+        end   = inserted.end;
         noteManualGap(s, targetId, rec, start);
-        if (desired.getTime() !== new Date(date).getTime()) note = 'off day — starts at the next working day\'s first hour';
-        if (placed.snappedAfter) note = `snapped flush after "${placed.snappedAfter.name}"`;
-        if (placed.bumpedOver)   note = `"${placed.bumpedOver.name}" occupies that point — placed right after it (existing bars stay put)`;
+        if (inserted.snapped)   note = 'off day — starts at the next working day\'s first hour';
+        if (inserted.blockedBy) note = `${inserted.blockedBy} occupies that point (locked) — attached right after it`;
     if (raw.matReady && start < raw.matReady) {
         toast(`Material for ${raw.po} is not ready before ${fmtDate(raw.matReady)}`, 'error');
         return;
     }
         if (raw.status === 'unplanned') raw.status = 'draft';
         raw.userPinned = true;
+    }
+    // A drop must NEVER lose the bar: any invalid computed date aborts the
+    // placement and the bar returns to its previous valid position
+    if (!(start instanceof Date) || Number.isNaN(start.getTime())
+        || !(end instanceof Date) || Number.isNaN(end.getTime()) || end <= start) {
+        restoreCarriedCls();
+        cancelCarry();
+        s.refresh?.();
+        toast(`${raw.po || rec.name}: could not compute a valid position at that point — the bar was returned to its previous place`, 'error');
+        return;
     }
     raw.latePlan = !parkHold && !!raw.ship && end > new Date(raw.ship);
 
@@ -5706,8 +5708,13 @@ async function placeCarried(date, resourceRecord) {
     if (!parkHold) {
         beginBoardInteraction(s, 'light');
         try {
-            // No pushFollowers here: placement already resolved to a free
-            // spot and existing bars must never move (drag-drop spec rule 3)
+            // Forward collision resolution: overlapped bars (and their
+            // followers) shift LATER only — never earlier, never off their
+            // line; bars that already fit before a gap stay untouched
+            const pushedCnt = pushFollowers(s, targetId, rec);
+            if (pushedCnt) {
+                toast(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+            }
             tryMergeAdjacent(s, rec, targetId);
             // Refresh ramp badges/tooltips on both lines (annotation only —
             // never resizes other bars)
@@ -5717,6 +5724,15 @@ async function placeCarried(date, resourceRecord) {
         }
         finally {
             endBoardInteraction(s);
+        }
+        // Rule: a bar pushed past the visible range must stay real & visible —
+        // extend the timeline instead of letting it render nowhere
+        let maxEnd = end;
+        for (const ev of s.eventStore.records) {
+            if (ev.endDate && ev.endDate > maxEnd) maxEnd = ev.endDate;
+        }
+        if (s.endDate && maxEnd > s.endDate) {
+            s.endDate = addCalDays(maxEnd, 14);
         }
     }
 
