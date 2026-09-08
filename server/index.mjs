@@ -35,7 +35,10 @@ const pool = mysql.createPool({
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit : '2mb' }));
+// text/plain included: sendBeacon() payloads (board-lock release / session
+// end on tab close) must be CORS-simple — a JSON content-type would need a
+// preflight, which beacons cannot do, and the release would silently fail
+app.use(express.json({ limit : '2mb', type : ['application/json', 'text/plain'] }));
 
 const BASE = '/api/v1/planning';
 

@@ -406,17 +406,21 @@ export async function acquireBoardLock(unitId, username, name) {
 }
 
 export function releaseBoardLock(unitId, username) {
-    // sendBeacon survives tab close; fall back to fetch
+    // sendBeacon survives tab close. The payload goes as text/plain — a
+    // CORS-simple request needing no preflight; a JSON content-type beacon
+    // silently FAILS cross-origin (beacons cannot preflight) even though
+    // sendBeacon returns true, leaving a ghost lock for the TTL.
     const payload = JSON.stringify({ unitId, username });
     try {
-        if (navigator.sendBeacon) {
-            const blob = new Blob([payload], { type : 'application/json' });
-            if (navigator.sendBeacon(`${API_BASE}/board-lock/release`, blob)) return Promise.resolve();
+        if (navigator.sendBeacon
+            && navigator.sendBeacon(`${API_BASE}/board-lock/release`, payload)) {
+            return Promise.resolve();
         }
     }
     catch { /* fall through */ }
     return fetch(`${API_BASE}/board-lock/release`, {
-        method : 'POST', headers : { 'Content-Type' : 'application/json' }, body : payload
+        method : 'POST', headers : { 'Content-Type' : 'application/json' },
+        body : payload, keepalive : true
     }).catch(() => {});
 }
 
@@ -433,17 +437,18 @@ export async function sessionHeartbeat(payload) {
 }
 
 export function endSession(sid) {
-    // sendBeacon survives tab close; fall back to fetch
+    // Same beacon rules as releaseBoardLock: text/plain = CORS-simple
     const payload = JSON.stringify({ sid });
     try {
-        if (navigator.sendBeacon) {
-            const blob = new Blob([payload], { type : 'application/json' });
-            if (navigator.sendBeacon(`${API_BASE}/session/end`, blob)) return Promise.resolve();
+        if (navigator.sendBeacon
+            && navigator.sendBeacon(`${API_BASE}/session/end`, payload)) {
+            return Promise.resolve();
         }
     }
     catch { /* fall through */ }
     return fetch(`${API_BASE}/session/end`, {
-        method : 'POST', headers : { 'Content-Type' : 'application/json' }, body : payload
+        method : 'POST', headers : { 'Content-Type' : 'application/json' },
+        body : payload, keepalive : true
     }).catch(() => {});
 }
 

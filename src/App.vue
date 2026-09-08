@@ -1912,6 +1912,14 @@ function openLoginStatus() {
     refreshLoginStatus();
 }
 
+// While the dialog is open it refreshes itself every 5s — a logout, exit or
+// kill shows up (or clears the list) without pressing ⟳
+let lsTimer = null;
+watch(lsOpen, open => {
+    if (open && !lsTimer) lsTimer = setInterval(refreshLoginStatus, 5000);
+    if (!open && lsTimer) { clearInterval(lsTimer); lsTimer = null; }
+});
+
 function lsAgo(t) {
     const s = Math.max(0, Math.round((lsNow.value - t) / 1000));
     if (s < 60) return `${s}s ago`;
@@ -1990,13 +1998,21 @@ const boardReadOnly   = ref(false);
 const boardLockHolder = ref(null);   // { username, name } when someone ELSE holds it
 let   lockTimer       = null;
 let   lockWorker      = null;        // worker ticks aren't throttled in background tabs
+let   lockActive      = false;       // false = heartbeat stopped: in-flight replies are stale
+let   lockInFlight    = null;        // the acquire currently on the wire (release waits for it)
 
 async function syncBoardLock() {
+    if (!lockActive) return;
     const unitId = currentUnitId.value;
     const me = authUser.value;
     if (!unitId || !me?.username) return;
     try {
-        const r = await acquireBoardLock(unitId, me.username, me.name);
+        lockInFlight = acquireBoardLock(unitId, me.username, me.name);
+        const r = await lockInFlight;
+        lockInFlight = null;
+        // Stopped (minimize / close / logout) while this beat was in flight —
+        // acting on the reply would resurrect UI state that was just cleared
+        if (!lockActive) return;
         const wasReadOnly = boardReadOnly.value;
         if (r.ok) {
             boardReadOnly.value   = false;
@@ -2028,27 +2044,38 @@ async function syncBoardLock() {
 
 function startLockHeartbeat() {
     stopLockHeartbeat();
+    lockActive = true;
     syncBoardLock();
     // Holder: keeps the lock alive · viewer: takes over when the holder
-    // leaves (15s beat + 40s server TTL = stale banners clear fast).
+    // leaves. A 5s beat makes handovers feel immediate: the holder's exit /
+    // logout / minimize releases the lock instantly server-side, and every
+    // viewer notices on their next beat (≤5s) — banner clears right away.
     // A Web Worker drives the tick: page timers get throttled to ~1/min in
     // BACKGROUND tabs, which would silently expire the editor's lock —
     // worker timers keep beating at full rate regardless of tab visibility.
     try {
-        const blob = new Blob(['setInterval(() => postMessage(1), 15000);'], { type : 'text/javascript' });
+        const blob = new Blob(['setInterval(() => postMessage(1), 5000);'], { type : 'text/javascript' });
         lockWorker = new Worker(URL.createObjectURL(blob));
         lockWorker.onmessage = () => syncBoardLock();
     }
     catch {
-        lockTimer = setInterval(syncBoardLock, 15000);
+        lockTimer = setInterval(syncBoardLock, 5000);
     }
 }
 
 function stopLockHeartbeat(release = false) {
+    lockActive = false;
     if (lockTimer)  { clearInterval(lockTimer); lockTimer = null; }
     if (lockWorker) { lockWorker.terminate(); lockWorker = null; }
     if (release && !boardReadOnly.value && currentUnitId.value && authUser.value?.username) {
-        releaseBoardLock(currentUnitId.value, authUser.value.username);
+        const unitId = currentUnitId.value;
+        const user   = authUser.value.username;
+        const send   = () => releaseBoardLock(unitId, user);
+        // A heartbeat may still be on the wire: if its acquire lands AFTER
+        // our release, the server keeps a ghost lock for up to 40s and other
+        // users keep seeing "in use by X". Sequence the release behind it.
+        if (lockInFlight) lockInFlight.then(send, send);
+        else send();
     }
     boardReadOnly.value   = false;
     boardLockHolder.value = null;
@@ -2111,6 +2138,10 @@ function closeBoard() {
 }
 
 function minimizeBoard() {
+    // Leaving the board view = not using the board: free the edit lock NOW
+    // so the "in use by X" banner clears for everyone else immediately.
+    // Restoring the board re-acquires it (openBoard → startLockHeartbeat).
+    stopLockHeartbeat(true);
     view.value = 'home';
     boardMin.value = true;
     cancelCarry();
