@@ -6336,6 +6336,24 @@ function installFrVScroll(s) {
         updateFrVScroll(s);
         installFrHScroll(s);
     });
+    installPanCursor(s);
+}
+
+// Drag-to-pan cursor: empty schedule area shows `grab`, and while the mouse
+// is held down there it flips to `grabbing` (class on the scheduler element).
+// Presses that start on a bar are excluded — bars keep their own cursor and
+// behavior. Purely cosmetic: the actual panning is Bryntum's Pan feature.
+function installPanCursor(s) {
+    const el = s?.element;
+    if (!el || el.dataset.mbPanCursor) return;
+    el.dataset.mbPanCursor = '1';
+    el.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.b-sch-event, .b-sch-event-wrap')) return;
+        if (!e.target.closest('.b-timeline-sub-grid')) return;
+        el.classList.add('mb-board-panning');
+        window.addEventListener('mouseup', () => el.classList.remove('mb-board-panning'), { once : true });
+    });
 }
 
 function installFrHScroll(s) {
@@ -9991,6 +10009,13 @@ body {
 .lcd-dialog { width : 480px; max-width : 95vw; }
 .lcd-list div { padding : 7px 10px; cursor : pointer; }
 .lcd-list div:hover { background : #eaf1fb; }
+
+/* Drag-to-pan: grab on empty schedule area, grabbing while panning */
+.mb-fr-vscroll-on .b-timeline-sub-grid { cursor : grab; }
+.mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event,
+.mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event-wrap { cursor : pointer; }
+.mb-fr-vscroll-on.mb-board-panning,
+.mb-fr-vscroll-on.mb-board-panning .b-timeline-sub-grid { cursor : grabbing !important; }
 
 /* Tools → Login status */
 .ls-dialog { width : 640px; max-width : 96vw; }

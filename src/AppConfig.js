@@ -1314,6 +1314,10 @@ export const schedulerProConfig = {
     percentBarFeature         : true,
     scheduleTooltipFeature    : false,
     eventDragCreateFeature    : false,
+    // Drag-to-pan: press-and-drag on EMPTY schedule area moves the board
+    // horizontally & vertically (mouse users get what touchpad two-finger
+    // scroll already does). Presses on bars are excluded via onBeforePan.
+    panFeature                : true,
 
     // FastReact-style strip context menu (right-click on a bar)
     eventMenuFeature : {
@@ -1839,6 +1843,18 @@ export const schedulerProConfig = {
         setBarTooltipEnabled(uiHooks.instance, false);
         uiHooks.onScheduleClick?.(ev);
         setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
+    },
+
+    // Board pan never starts from a bar: with eventDrag disabled (pick &
+    // place moves bars by click), Bryntum's Pan would otherwise also grab
+    // drags that begin ON an event. Bar presses keep their own behavior
+    // (click = pick up / select, right-click = menu, resize = handles).
+    // NOTE: as a `listeners` entry — the Vue wrapper does not map an
+    // onBeforePan prop, so a top-level handler would silently never attach.
+    listeners : {
+        beforePan({ event }) {
+            if (event?.target?.closest?.('.b-sch-event, .b-sch-event-wrap')) return false;
+        }
     },
 
     // After a drag-drop: snap the start off 0-hour days, keep the sequential
