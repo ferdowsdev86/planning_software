@@ -1282,6 +1282,25 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         );
         const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty }]));
 
+        // OS order codes (GSL-…) resolve to their MAPPED unit (os 20 → AQL/3)
+        // and the OS order's own qty — so their confirm rows pass the unit
+        // filter and show the unit's share, not the master order's total
+        if (OS_UNIT_IDS.length) {
+            const osPhAll = OS_UNIT_IDS.map(() => '?').join(',');
+            const [osMapRows] = await pool.query(
+                `SELECT o.os_order_code, o.order_qty, o.os_unit_id
+                 FROM \`${OS_DB}\`.os_orders o
+                 WHERE o.os_unit_id IN (${osPhAll})`,
+                [...OS_UNIT_IDS]);
+            for (const r of osMapRows) {
+                erpOrderMap.set(r.os_order_code, {
+                    prod_unit : OS_UNIT_MAP[r.os_unit_id] ?? r.os_unit_id,
+                    unit_id   : null,
+                    order_qty : r.order_qty
+                });
+            }
+        }
+
         // 1. Projected orders: one row per mr_order_entry (no cross-DB planning join).
         // OS orders (mbm_os.os_orders, e.g. os unit 20 = AQL/3): appended to
         // their MAPPED unit's rows — OS order code / style / qty displayed.
@@ -1987,6 +2006,50 @@ async function runAutoSync() {
             .replace(/[""]/g, '"')
             .replace(/[^\x00-\xFF]/g, '?');
 
+        // OS CONFIRM rows: os_order_color (colour/PO-wise share of an OS
+        // order) combined with os_orders + mr_purchase_order — AQL's OS
+        // unit(s) only. Keyed 'os-c-<os_order_color.id>'. po_number = the
+        // master order's PO, order_code = the OS order (GSL-…), qty = the
+        // colour's share. They ride the SAME confirm upsert/lifecycle below.
+        const osConfPh = OS_UNIT_IDS.map(() => '?').join(',');
+        const [osConf] = await conn.query(`
+            SELECT
+                CONCAT('os-c-', oc.id)                              AS src_id,
+                COALESCE(po.po_no, oc.po_no)                        AS po_number,
+                o.os_order_code                                     AS order_code,
+                COALESCE(ob.b_name, b.b_name)                       AS buyer_name,
+                o.style                                             AS style_no,
+                oc.clr_qty                                          AS order_quantity,
+                COALESCE(s.production_smv, s.stl_smv, 0)            AS smv,
+                COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
+                COALESCE(oc.delivery_date, po.po_ex_fty, o.odd)     AS shipment_date,
+                CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd ELSE NULL END AS pcd,
+                NULL                                                AS material_ready_date,
+                mc.clr_name                                         AS color,
+                oe.unit_id                                          AS unit_id,
+                o.os_unit_id                                        AS prod_unit
+            FROM \`${OS_DB}\`.os_order_color oc
+            JOIN \`${OS_DB}\`.os_orders o ON o.id = oc.os_order_id
+            LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = oc.po_id
+            LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
+                   ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+            LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+            LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
+            LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+            LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+            LEFT JOIN \`${ERP_DB}\`.mr_material_color mc ON mc.clr_id = oc.clr_id
+            WHERE oc.os_unit_id IN (${osConfPh})
+              AND oc.status = 1
+              AND oc.clr_qty > 0
+              AND o.order_status NOT IN ('Closed','Inactive')
+              AND COALESCE(oc.delivery_date, po.po_ex_fty, o.odd) >= ?
+        `, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        for (const r of osConf) {
+            // os_unit_id → planning prod unit (os_units 20 = AQL/3)
+            r.prod_unit = OS_UNIT_MAP[r.prod_unit] ?? r.prod_unit;
+        }
+        rows.push(...osConf.filter(r => r.po_number));
+
         await conn.beginTransaction();
         let synced = 0;
         // Chunked bulk upsert — one round trip per 200 rows instead of one
@@ -2206,6 +2269,14 @@ async function runAutoSync() {
              WHERE (status IS NULL OR status != 3)
                AND (po_status IS NULL OR po_status != 3)`);
         const liveIds = new Set(liveRows.map(r => String(r.po_id)));
+        // OS confirm rows stay while their os_order_color entry is alive
+        const [liveOsc] = await conn.query(
+            `SELECT oc.id FROM \`${OS_DB}\`.os_order_color oc
+             JOIN \`${OS_DB}\`.os_orders o ON o.id = oc.os_order_id
+             WHERE oc.os_unit_id IN (${osPh}) AND oc.status = 1
+               AND o.order_status NOT IN ('Closed','Inactive')`,
+            [...OS_UNIT_IDS]);
+        for (const r of liveOsc) liveIds.add(`os-c-${r.id}`);
         const [ploRows] = await conn.query(
             `SELECT id, erp_po_id, order_code, po_number, order_quantity
              FROM planning_orders
