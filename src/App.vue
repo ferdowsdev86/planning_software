@@ -10211,7 +10211,7 @@ body {
     top          : 0;
     left         : 0;
     right        : 0;
-    height       : 6px;
+    height       : 2.4px;   /* 40% of the previous 6px strip */
     background   : #ff1744;
     border-radius: 3px 3px 0 0;
     pointer-events : none;
@@ -10230,7 +10230,7 @@ body {
     top          : 0;
     left         : 0;
     right        : 0;
-    height       : 6px;
+    height       : 2.4px;   /* 40% of the previous 6px strip */
     background   : #3d84d6;
     border-radius: 3px 3px 0 0;
     pointer-events : none;
