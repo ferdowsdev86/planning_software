@@ -1825,11 +1825,10 @@ export const schedulerProConfig = {
         if (r.stage) {
             return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
         }
-        // Half-height bars: the strip fills the TOP half of the line row and
-        // the bottom half stays open (the day capacity figures live there)
-        if (renderData.height > 0) {
-            renderData.height = Math.max(16, Math.floor(renderData.height / 2));
-        }
+        // Bar height is handled purely in CSS (wrap height = 50% of the row
+        // via --mb-row-h) so it stays identical in normal / selected /
+        // hovered / dragging states — a renderData.height override here was
+        // lost on selection repaints and made clicked bars jump to full row.
         // Single line, vertically centred — no confirm/projection label
         // (the bar colour/border already distinguishes confirm orders).
         // "Style" display mode swaps ONLY the text (Style : Color : Delivery);

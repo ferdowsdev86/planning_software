@@ -6384,6 +6384,7 @@ function bindFrVScroll(s, bar) {
 function installFrVScroll(s) {
     if (!s?.element) return;
     s.element.classList.add('mb-fr-vscroll-on');
+    syncRowHeightVar(s);
     s.element.querySelectorAll('.b-grid-splitter').forEach(split => {
         const parent = split.parentElement;
         if (!parent || parent.querySelector(':scope > .fr-vscroll, :scope > .fr-vscroll-pad')) return;
@@ -6560,7 +6561,14 @@ function vZoom(delta) {
     const s = getInstance();
     if (!s) return;
     s.rowHeight = Math.max(32, Math.min(110, (s.rowHeight || 56) + delta));
+    syncRowHeightVar(s);
     requestAnimationFrame(() => updateFrVScroll(s));
+}
+
+// Bars are sized in CSS as half of --mb-row-h — keep it equal to the
+// scheduler's current rowHeight so the 50% ratio holds at every zoom
+function syncRowHeightVar(s) {
+    s?.element?.style?.setProperty('--mb-row-h', `${s.rowHeight || 48}px`);
 }
 
 const act = name => {
@@ -9917,31 +9925,49 @@ body {
 /* ------------------------------------------------------------------ */
 /* Order bars (document 10)                                           */
 /* ------------------------------------------------------------------ */
-/* FastReact-style bars: every bar identical height (top 75% of the row),
-   square corners - colour never changes the geometry. The bottom 25% is a
-   blank band showing day-wise manpower. */
+/* FastReact-style bars: barHeight = rowHeight × 0.5, vertically CENTERED in
+   the line. --mb-row-h follows the current rowHeight (vertical zoom), so the
+   ratio holds at every zoom, and the height is identical in normal /
+   selected / hovered / dragging / resizing states — geometry never jumps. */
 .b-sch-event-wrap {
-    /* Keep Bryntum's per-row `top` so bars stay on their assigned line.
-       Bars sit at the TOP of the row (FastReact look). */
-    height     : 32px !important;
-    margin-top : 2px;
+    /* Keep Bryntum's per-row `top` so bars stay on their assigned line */
+    height     : calc(var(--mb-row-h, 48px) / 2) !important;
+    margin-top : calc(var(--mb-row-h, 48px) / 4);
 }
 
 .b-sch-event {
     font-size     : 10px;
     box-sizing    : border-box;
-    border-radius : 0;
     height        : 100%;
     align-items   : center;
-    /* Persistent order-to-order separator (FastReact): a hard vertical
-       edge so adjacent strips on a line stay clearly split */
-    border-top    : 1px solid rgba(0, 0, 0, 0.45);
-    border-bottom : 1px solid rgba(0, 0, 0, 0.45);
-    border-left   : 2px solid #111;
+    position      : relative;
+    overflow      : hidden;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+    font-weight   : 600;
+    /* Subtle 3D: thin dark border, slightly rounded, soft outer shadow */
+    border        : 1px solid rgba(0, 0, 0, 0.28);
+    border-left   : 2px solid #111;   /* order-to-order separator (FastReact) */
     border-right  : 2px solid #111;
-    box-shadow    : inset 1px 0 0 rgba(255, 255, 255, 0.55),
-                    inset -1px 0 0 rgba(255, 255, 255, 0.35);
+    border-radius : 3px;
+    box-shadow    : inset 0 1px 0 rgba(255, 255, 255, 0.45),
+                    0 2px 4px rgba(0, 0, 0, 0.25);
 }
+
+/* 3D fill on top of ANY dynamic base colour (risk / buyer / plan-status):
+   light highlight above → base → darker shade below, no per-colour shades */
+.b-sch-event::before {
+    content        : '';
+    position       : absolute;
+    inset          : 0;
+    pointer-events : none;
+    background     : linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.30) 0%,
+        rgba(255, 255, 255, 0.00) 45%,
+        rgba(0, 0, 0, 0.18) 100%);
+}
+
 
 .mb-bar { width : 100%; }
 
@@ -10221,7 +10247,23 @@ body {
     z-index    : 4;
 }
 
-.b-sch-event.b-selected { outline : 2px solid #ff9800; }
+/* Selection = outline only — size, padding and position never change */
+.b-sch-event.b-selected {
+    outline        : 2px solid #1d5fa7;
+    outline-offset : 1px;
+}
+
+/* FastReact 3D fill — high-specificity so theme/colour rules can't undo it */
+.mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
+    border-radius : 3px !important;
+    border        : 1px solid rgba(0, 0, 0, 0.28);
+    border-left   : 2px solid #111;
+    border-right  : 2px solid #111;
+    box-shadow    : inset 0 1px 0 rgba(255, 255, 255, 0.45),
+                    0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    font-weight   : 600 !important;
+    overflow      : hidden;
+}
 
 /* keep percent bar subtle under the text */
 .b-sch-event .b-task-percent-bar {
