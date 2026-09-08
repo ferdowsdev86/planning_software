@@ -449,6 +449,41 @@ async function upsertPlanningEvent(conn, projectId, ev) {
     return { eventId, action, eventCode };
 }
 
+// Backend overlap validation (drag-drop spec rule 7): an incoming event that
+// would overlap an EXISTING saved event on the same line is shifted forward to
+// right after the conflicting bar — the saved bar is never moved. Duration is
+// preserved (calendar shift). Events in the same batch are skipped: their own
+// incoming positions are already client-validated and about to be written.
+async function shiftIfOverlapping(conn, projectId, ev, batchIds) {
+    if (!ev || ev.onHold || !ev.resourceId || !ev.startDate || !ev.endDate) return null;
+    let start = new Date(ev.startDate);
+    let end   = new Date(ev.endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const durMs = end - start;
+    let moved = false;
+    for (let guard = 0; guard < 10; guard++) {
+        const [rows] = await conn.query(
+            `SELECT e.id, e.end_date FROM planning_events e
+             JOIN planning_assignments a ON a.event_id = e.id
+             WHERE a.resource_id = ? AND e.project_id = ?
+               AND e.event_status != 'cancelled'
+               AND e.start_date < ? AND e.end_date > ?
+             ORDER BY e.end_date DESC LIMIT 10`,
+            [ev.resourceId, projectId, end, start]
+        );
+        const hit = rows.find(r =>
+            String(r.id) !== String(ev.id ?? '') && !batchIds.has(String(r.id)));
+        if (!hit) break;
+        start = new Date(hit.end_date);
+        end   = new Date(start.getTime() + durMs);
+        moved = true;
+    }
+    if (!moved) return null;
+    ev.startDate = start;
+    ev.endDate   = end;
+    return { eventId : ev.id ?? null, eventCode : ev.eventCode ?? null, newStart : start, newEnd : end };
+}
+
 app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     const projectId = Number(req.params.id);
     const { events = {}, requestId = null, allowConfirmPlanning = false } = req.body || {};
@@ -477,6 +512,18 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     try {
         mapped = [];
         await conn.beginTransaction();
+
+        // Ids in this batch: their DB rows are stale (about to be rewritten),
+        // so they never count as overlap obstacles for each other
+        const batchIds = new Set([
+            ...(events.updated || []).map(e => String(e.id ?? '')),
+            ...(events.removed || []).map(e => String(e.id ?? ''))
+        ]);
+        const adjusted = [];
+        for (const ev of [...(events.updated || []), ...(events.added || [])]) {
+            const adj = await shiftIfOverlapping(conn, projectId, ev, batchIds);
+            if (adj) adjusted.push(adj);
+        }
 
         for (const ev of events.updated || []) {
             const [oldRows] = await conn.query(
@@ -552,7 +599,10 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
 
         await conn.commit();
         conn.release();
-        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped });
+        if (adjusted.length) {
+            console.warn(`[scheduler-sync] ${adjusted.length} event(s) shifted forward to avoid overlap with saved bars`);
+        }
+        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped, adjusted });
     }
     catch (e) {
         try {

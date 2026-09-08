@@ -28,6 +28,7 @@ import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
     backwardPass, feasibility, sequenceOptions, autoPlanOrders
 } from './planningEngine.js';
+import { resolveDropPosition, snapToleranceDays, findLineOverlaps } from './snapService.mjs';
 
 const schedRef = ref(null);
 const order = ref(null);
@@ -5590,12 +5591,27 @@ async function placeCarried(date, resourceRecord) {
     }
     else {
         raw.parked = false;
-        const inserted = computeInsertStart(s, targetId, date, raw.dur, rec.id);
-        start = inserted.start;
-        end   = inserted.end;
+        // Same snap rules as drag-drop: only THIS bar adjusts, existing bars
+        // never move; near/over the previous bar → flush after it; a clear
+        // gap is intentional and kept; residual collisions hop forward.
+        const desired = clampIntoWorkWindow(date);
+        const others  = s.eventStore.records
+            .filter(ev => ev.id !== rec.id && ev.data?.raw && !ev.data.raw.stage
+                && lineIdOf(s, ev) === targetId)
+            .map(ev => ({ id : ev.id, name : ev.name, start : ev.startDate, end : ev.endDate }));
+        const placed = resolveDropPosition({
+            desired,
+            dur     : raw.dur || 1,
+            bars    : others,
+            tol     : snapToleranceDays(),
+            helpers : { nextStartAfter, endOfWork }
+        });
+        start = placed.start;
+        end   = placed.end;
         noteManualGap(s, targetId, rec, start);
-        if (inserted.snapped)   note = 'off day — starts at the next working day\'s first hour';
-        if (inserted.blockedBy) note = `${inserted.blockedBy} occupies that point — attached right after it`;
+        if (desired.getTime() !== new Date(date).getTime()) note = 'off day — starts at the next working day\'s first hour';
+        if (placed.snappedAfter) note = `snapped flush after "${placed.snappedAfter.name}"`;
+        if (placed.bumpedOver)   note = `"${placed.bumpedOver.name}" occupies that point — placed right after it (existing bars stay put)`;
     if (raw.matReady && start < raw.matReady) {
         toast(`Material for ${raw.po} is not ready before ${fmtDate(raw.matReady)}`, 'error');
         return;
@@ -5620,7 +5636,8 @@ async function placeCarried(date, resourceRecord) {
     if (!parkHold) {
         beginBoardInteraction(s, 'light');
         try {
-            pushFollowers(s, targetId, rec);
+            // No pushFollowers here: placement already resolved to a free
+            // spot and existing bars must never move (drag-drop spec rule 3)
             tryMergeAdjacent(s, rec, targetId);
             // Refresh ramp badges/tooltips on both lines (annotation only —
             // never resizes other bars)
@@ -6005,7 +6022,57 @@ async function saveToDb() {
     }
 }
 
+// Pre-save validation (drag-drop spec rule 7): no bar may overlap another on
+// the same line. If a conflict slipped through (e.g. a curve/resize grew a
+// bar), ONLY bars the user moved/changed THIS session are nudged forward to
+// the nearest free spot — bars from the saved plan are never touched.
+function enforceNoOverlapBeforeSave(s) {
+    const current = snapshotBoardState(s);
+    const changedIds = new Set(Object.keys(current).filter(id => {
+        const was = boardBaseline?.[id];
+        const now = current[id];
+        return !was || was.line !== now.line || was.start !== now.start || was.end !== now.end;
+    }));
+    let nudged = 0;
+    for (let pass = 0; pass < 5; pass++) {
+        let fixedThisPass = 0;
+        for (const res of s.resourceStore.records) {
+            if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+            const bars = s.eventStore.records
+                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
+                .map(ev => ({ id : String(ev.id), name : ev.name, start : ev.startDate, end : ev.endDate, rec : ev }));
+            for (const [a, b] of findLineOverlaps(bars)) {
+                // Move the changed one; if both changed, the later-starting one
+                const mover = changedIds.has(b.id) || !changedIds.has(a.id) ? b : a;
+                const other = mover === b ? a : b;
+                if (!changedIds.has(mover.id) && !changedIds.has(other.id)) continue; // old DB overlap — load repair owns it
+                const rec = mover.rec;
+                const raw = rec.data.raw;
+                const fixed = resolveDropPosition({
+                    desired : rec.startDate,
+                    dur     : raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1,
+                    bars    : bars.filter(x => x.id !== mover.id),
+                    tol     : snapToleranceDays(),
+                    helpers : { nextStartAfter, endOfWork }
+                });
+                rec.set({ startDate : fixed.start, endDate : fixed.end, duration : elapsedDays(fixed.start, fixed.end) });
+                raw.start = fixed.start;
+                raw.end   = fixed.end;
+                nudged++;
+                fixedThisPass++;
+                break; // line changed — recompute this line's pairs next pass
+            }
+        }
+        if (!fixedThisPass) break;
+    }
+    if (nudged) {
+        toast(`${nudged} of your moved bar(s) nudged forward before saving — bars cannot overlap (saved plan untouched)`, 'warn');
+    }
+    return nudged;
+}
+
 async function saveToDbInner(s) {
+    enforceNoOverlapBeforeSave(s);
     const changes = collectPendingChanges(s);
     if (!changes.length) {
         toast('No changes to save — move an order first, then click Save', 'warn');
