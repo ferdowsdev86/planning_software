@@ -6318,6 +6318,9 @@ function setScrollY(s, next) {
 }
 
 function updateFrVScroll(s) {
+    // Self-heal the single horizontal scrollbar: Bryntum re-renders can wipe
+    // injected DOM — recreate the bar whenever it is found missing
+    if (s?.element && !s.element.querySelector('.fr-hscroll')) installFrHScroll(s);
     const bar = s?.element?.querySelector('.fr-vscroll');
     if (!bar) return;
     const thumb = bar.querySelector('.fr-vscroll-thumb');
@@ -6419,6 +6422,9 @@ function installFrVScroll(s) {
             split.before(pad);
         }
     });
+    // Create the single horizontal bar NOW (rAF is frozen in hidden tabs) —
+    // the rAF below only refreshes thumb geometry once layout has settled
+    installFrHScroll(s);
     requestAnimationFrame(() => {
         updateFrVScroll(s);
         installFrHScroll(s);
@@ -6556,12 +6562,17 @@ function bindFrHScroll(s, bar) {
         setScrollX(s, hScrollMetrics(s).x + (e.shiftKey ? e.deltaY : e.deltaX));
     }, { passive : false });
 
-    s.scrollable?.on?.({
-        scroll() {
-            updateFrVScroll(s);
-            updateFrHScroll(s);
-        }
-    });
+    // ONE scroll listener per scheduler instance, no matter how many times a
+    // wiped bar gets recreated — duplicate listeners would double-scroll
+    if (!s.__mbHScrollSynced) {
+        s.__mbHScrollSynced = true;
+        s.scrollable?.on?.({
+            scroll() {
+                updateFrVScroll(s);
+                updateFrHScroll(s);
+            }
+        });
+    }
 }
 
 function hZoom(delta) {
@@ -10534,40 +10545,17 @@ body {
     box-sizing : border-box;
 }
 
-/* Keep Bryntum's HORIZONTAL scrollbar row: a desktop mouse (no trackpad
-   pan) needs a draggable bar to move through the dates. Only the vertical
-   native scrollbar is replaced by the custom fr-vscroll. */
+/* ONE horizontal scrollbar only: the custom fr-hscroll (bound both ways to
+   Bryntum's scrollable) is the single control. Bryntum's own virtual
+   scroller row is hidden — showing both put two scrollbars under the board.
+   The engine still uses the hidden scroller internally, so header, body and
+   frozen columns stay in sync. */
 .mb-fr-vscroll-on .b-virtual-scrollers {
-    height         : auto !important;
+    height         : 0 !important;
     min-height     : 0 !important;
-    overflow       : visible !important;
-    pointer-events : auto;
-    border-top     : 1px solid #c4c4c4 !important;
-    background     : #eceae6;
-}
-
-/* Always-visible, mouse-friendly horizontal scrollbar under the timeline */
-.mb-fr-vscroll-on .b-virtual-scroller {
-    overflow-x : scroll !important;
-    overflow-y : hidden !important;
-    height     : 16px;
-    scrollbar-width : auto;           /* Firefox */
-}
-.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar {
-    height     : 14px;
-    background : #eceae6;
-}
-.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar-thumb {
-    background    : #9aa7bd;
-    border        : 3px solid #eceae6;
-    border-radius : 7px;
-}
-.mb-fr-vscroll-on .b-virtual-scroller::-webkit-scrollbar-thumb:hover {
-    background : #6f83a6;
-}
-/* The locked (line-name) side never scrolls — hide its stub */
-.mb-fr-vscroll-on .b-virtual-scrollers > .b-virtual-scroller:first-child {
-    overflow-x : hidden !important;
+    overflow       : hidden !important;
+    pointer-events : none;
+    border         : 0 !important;
 }
 
 /* FastReact footer legend */
