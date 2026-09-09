@@ -6471,7 +6471,10 @@ function installFrHScroll(s) {
 }
 
 function hScrollMetrics(s) {
-    const sc = s?.scrollable;
+    // Horizontal scrolling lives on the TIME AXIS subgrid's scrollable —
+    // s.scrollable is the grid body (vertical) scroller whose maxX is 0,
+    // which left the arrows/track/thumb writing into a dead axis
+    const sc = s?.timeAxisSubGrid?.scrollable || s?.scrollable;
     const x = Number(sc?.x ?? 0) || 0;
     const view = Number(sc?.clientWidth ?? s?.timeAxisSubGrid?.width) || 1;
     let max = Number(sc?.maxX);
@@ -6566,12 +6569,14 @@ function bindFrHScroll(s, bar) {
     // wiped bar gets recreated — duplicate listeners would double-scroll
     if (!s.__mbHScrollSynced) {
         s.__mbHScrollSynced = true;
-        s.scrollable?.on?.({
-            scroll() {
-                updateFrVScroll(s);
-                updateFrHScroll(s);
-            }
-        });
+        const sync = () => {
+            updateFrVScroll(s);
+            updateFrHScroll(s);
+        };
+        // vertical scrolls fire on the grid body scroller, horizontal ones
+        // on the time-axis subgrid scroller — the thumb must follow BOTH
+        s.scrollable?.on?.({ scroll : sync });
+        s.timeAxisSubGrid?.scrollable?.on?.({ scroll : sync });
     }
 }
 
