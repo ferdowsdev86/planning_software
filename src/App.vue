@@ -7134,7 +7134,9 @@ const toolbar = [
     { fa : 'fa-floppy-disk', cls : 'fr-tb-save', title : 'Save plan to fastreact DB', action : 'save' },
     { fa : 'fa-calendar-days', title : 'Calendars (working days / hours)', action : 'calendars' },
     { sep : true },
-    { fa : 'fa-angles-left', cls : 'fr-tb-pull', title : 'Plan Pull Forward', action : 'pullForward' }
+    // fa-left-from-line is FA Pro — compose the same look from the free
+    // long-left arrow + a vertical line drawn in CSS (::after)
+    { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', title : 'Plan Pull Forward', action : 'pullForward' }
 ];
 
 const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3';
@@ -10390,7 +10392,15 @@ body {
 }
 .fr-tb-btn.fr-tb-pull:hover  { background : linear-gradient(#ffffff, #cfe3f7); border-color : #4d90d0; }
 .fr-tb-btn.fr-tb-pull:active { background : #c9dcf1; box-shadow : inset 0 1px 3px rgba(0, 0, 0, 0.25); }
-.fr-tb-btn.fr-tb-pull .fr-tb-fa { color : #1d5fa7; font-size : 15px; font-weight : 900; }
+.fr-tb-btn.fr-tb-pull .fr-tb-fa {
+    color : #1d5fa7; font-size : 14px; font-weight : 900;
+    position : relative; padding-right : 5px;
+}
+/* the "from-line" vertical bar on the right of the arrow */
+.fr-tb-btn.fr-tb-pull .fr-tb-fa::after {
+    content : ''; position : absolute; right : 0; top : -1px; bottom : -1px;
+    width : 2.5px; background : currentColor; border-radius : 1px;
+}
 
 .fr-tb-search {
     display       : flex;
