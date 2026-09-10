@@ -772,7 +772,7 @@ async function runLiveOrderPlan(s, {
     if (events.length) {
         if (showToasts) toast(`Planning ${events.length} order(s)...`, 'ok');
         const CHUNK = 40;
-        s.eventStore.suspendEvents?.();
+        s.eventStore?.suspendEvents?.();
         s.suspendRefresh?.();
         try {
             for (let i = 0; i < events.length; i += CHUNK) {
@@ -788,7 +788,7 @@ async function runLiveOrderPlan(s, {
             }
         }
         finally {
-            s.eventStore.resumeEvents?.();
+            s.eventStore?.resumeEvents?.();
             s.resumeRefresh?.(true);
         }
 
@@ -4950,7 +4950,7 @@ const madeOf = (store, evId) =>
 function applyProdUpdates(s) {
     if (!s) return;
     const store = loadProdStore();
-    s.eventStore.suspendEvents?.();
+    s.eventStore?.suspendEvents?.();
     try {
         for (const ev of s.eventStore.records) {
             const raw = ev.data.raw;
@@ -5006,7 +5006,7 @@ function applyProdUpdates(s) {
         }
     }
     finally {
-        s.eventStore.resumeEvents?.();
+        s.eventStore?.resumeEvents?.();
     }
     refreshGrandTotals(s);
 }
@@ -6418,13 +6418,13 @@ const getInstance = () => {
 function withBoardBatch(s, fn) {
     if (!s) return;
     const es = s.eventStore;
-    es.suspendEvents?.();
+    es?.suspendEvents?.();
     s.suspendRefresh?.();
     try {
         fn();
     }
     finally {
-        es.resumeEvents?.();
+        es?.resumeEvents?.();
         s.resumeRefresh?.(true);
     }
 }
@@ -7134,7 +7134,7 @@ const toolbar = [
     { fa : 'fa-floppy-disk', cls : 'fr-tb-save', title : 'Save plan to fastreact DB', action : 'save' },
     { fa : 'fa-calendar-days', title : 'Calendars (working days / hours)', action : 'calendars' },
     { sep : true },
-    { fa : 'fa-angles-left', title : 'Plan Pull Forward', action : 'pullForward' }
+    { fa : 'fa-angles-left', cls : 'fr-tb-pull', title : 'Plan Pull Forward', action : 'pullForward' }
 ];
 
 const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3';
@@ -10380,6 +10380,17 @@ body {
 .fr-tb-caret { font-size : 8px; line-height : 1; color : inherit; }
 .fr-tb-anchor > .fr-tb-btn { width : auto; padding : 0 6px; }
 .fr-tb-sep  { width : 1px; height : 18px; background : #d9d9d9; margin : 0 4px; }
+
+/* Plan Pull Forward: FastReact-style beveled button with blue double arrow */
+.fr-tb-btn.fr-tb-pull {
+    background : linear-gradient(#fefefe, #dcdcdc);
+    border     : 1px solid #8f979f;
+    border-radius : 3px;
+    box-shadow : inset 0 1px 0 #fff, 0 1px 1px rgba(0, 0, 0, 0.12);
+}
+.fr-tb-btn.fr-tb-pull:hover  { background : linear-gradient(#ffffff, #cfe3f7); border-color : #4d90d0; }
+.fr-tb-btn.fr-tb-pull:active { background : #c9dcf1; box-shadow : inset 0 1px 3px rgba(0, 0, 0, 0.25); }
+.fr-tb-btn.fr-tb-pull .fr-tb-fa { color : #1d5fa7; font-size : 15px; font-weight : 900; }
 
 .fr-tb-search {
     display       : flex;

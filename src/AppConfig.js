@@ -216,7 +216,7 @@ export function beginBoardInteraction(scheduler, mode = 'batch') {
         scheduler.suspendRefresh?.();
         if (mode === 'batch' || mode === 'light') {
             rebuildBarsCache(scheduler);
-            scheduler.eventStore.suspendEvents?.();
+            scheduler.eventStore?.suspendEvents?.();
         }
         if (mode === 'batch') {
             try { scheduler.project?.stm?.disable?.(); }
@@ -233,7 +233,7 @@ export function endBoardInteraction(scheduler) {
 
     const wasLight = interactionMode === 'light';
     if (interactionMode === 'batch' || interactionMode === 'light') {
-        scheduler.eventStore.resumeEvents?.();
+        scheduler.eventStore?.resumeEvents?.();
         if (interactionMode === 'batch') {
             try { scheduler.project?.stm?.enable?.(); }
             catch { /* STM optional */ }
