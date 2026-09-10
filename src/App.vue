@@ -1525,6 +1525,12 @@ const mshCurve = computed(() => {
     return c ? { name : c.name, period : c.period, pct : c.pct.map(Number) } : null;
 });
 
+// List "Start" shows the bar's date AND time (FastReact style)
+function mshStartFmt(d) {
+    if (!d) return '—';
+    return `${fmtDate(d)} ${d.toLocaleTimeString('en-US', { hour : 'numeric', minute : '2-digit' })}`;
+}
+
 function mshBarInfo(ev) {
     const s = getInstance();
     const raw = ev.data.raw;
@@ -8252,7 +8258,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="msh-list">
                         <table>
                             <thead><tr>
-                                <th></th><th>Start</th><th>Line</th><th>Order</th><th>Buyer</th>
+                                <th></th><th>Start</th><th>Order</th><th>Buyer</th>
                                 <th>Style : Color</th><th>Qty</th><th>Delivery</th><th>Curve</th><th>Link</th>
                             </tr></thead>
                             <tbody>
@@ -8268,8 +8274,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     @click="!r.isRef && mshToggleRow(r, idx, $event)"
                                 >
                                     <td><input type="checkbox" :checked="mshSel.includes(r.id)" :disabled="r.isRef || r.completed" :title="r.reason || ''" @click.stop="mshToggleRow(r, idx, $event)"></td>
-                                    <td>{{ fmtDate(r.start) }}</td>
-                                    <td>{{ r.lineName }}</td>
+                                    <td class="msh-start">{{ mshStartFmt(r.start) }}</td>
                                     <td><b>{{ r.order }}</b><span v-if="r.isRef" class="msh-refbadge">Reference</span></td>
                                     <td>{{ r.buyer }}</td>
                                     <td>{{ r.style }} : {{ r.color }}</td>
