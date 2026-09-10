@@ -7136,7 +7136,7 @@ const toolbar = [
     { sep : true },
     // fa-left-from-line is FA Pro — compose the same look from the free
     // long-left arrow + a vertical line drawn in CSS (::after)
-    { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', title : 'Plan Pull Forward', action : 'pullForward' }
+    { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', tip : 'Plan Pull Forward', action : 'pullForward' }
 ];
 
 const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3';
@@ -7312,7 +7312,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="b.cls" :title="b.title" @click="b.action && act(b.action)">
+                <button v-else class="fr-tb-btn" :class="b.cls" :title="b.title" :aria-label="b.tip || b.title" @click="b.action && act(b.action)">
                     <i class="fa-solid fr-tb-fa" :class="b.fa" aria-hidden="true"></i>
                 </button>
             </template>
@@ -10396,6 +10396,19 @@ body {
     color : #1d5fa7; font-size : 14px; font-weight : 900;
     position : relative; padding-right : 5px;
 }
+/* Instant hover tooltip (native title is slow/unreliable here) */
+.fr-tb-btn.fr-tb-pull { position : relative; }
+.fr-tb-btn.fr-tb-pull::after {
+    content : 'Plan Pull Forward';
+    position : absolute; top : calc(100% + 6px); right : 0;
+    background : #2b3440; color : #fff; font-size : 11px; font-weight : 600;
+    padding : 4px 9px; border-radius : 4px; white-space : nowrap;
+    box-shadow : 0 2px 6px rgba(0, 0, 0, 0.3);
+    opacity : 0; pointer-events : none; transition : opacity 0.12s;
+    z-index : 60;
+}
+.fr-tb-btn.fr-tb-pull:hover::after { opacity : 1; }
+
 /* the "from-line" vertical bar on the right of the arrow */
 .fr-tb-btn.fr-tb-pull .fr-tb-fa::after {
     content : ''; position : absolute; right : 0; top : -1px; bottom : -1px;
