@@ -1510,9 +1510,14 @@ const mshCurve = computed(() => {
     if (mshCurveSel.value === 'ref') {
         const raw = mshRaw.value;
         if (raw?.lcManual?.pct?.length) return { ...raw.lcManual };
-        // fall back to the reference bar's ACTIVE auto curve, if any
-        if (raw?.lc?.applied && raw.lc.dayPcts?.length) {
-            return { name : raw.lc.profileName || 'Auto curve', period : raw.lc.dayPcts.length, pct : raw.lc.dayPcts.map(Number) };
+        // Reference runs an AUTO curve (product-change rule): use the same
+        // configured profile it is running, by name
+        if (raw?.lc?.applied) {
+            if (raw.lc.dayPcts?.length) {
+                return { name : raw.lc.profileName || 'Auto curve', period : raw.lc.dayPcts.length, pct : raw.lc.dayPcts.map(Number) };
+            }
+            const c = bcList.value.find(x => x.name === raw.lc.profileName);
+            if (c) return { name : c.name, period : c.period, pct : c.pct.map(Number) };
         }
         return null;
     }
@@ -1545,15 +1550,36 @@ function mshBarInfo(ev) {
 }
 
 const mshRows = computed(() => {
-    const s = getInstance();
-    if (!s || !mshOpen.value) return [];
+    const s   = getInstance();
+    const ref = mshRec.value;
+    if (!s || !mshOpen.value || !ref) return [];
+    // ONLY the reference bar's line, and only bars planned AT/AFTER the
+    // reference (earlier bars on the line are not link targets). Sequence =
+    // the board's actual planning order on that line: start asc, then end.
+    const refLine  = lineIdOf(s, ref);
+    const refStart = ref.startDate?.getTime?.() ?? 0;
+    const refKey   = String(ref.id);
     const q = mshSearch.value.trim().toLowerCase();
     return s.eventStore.records
-        .filter(ev => ev.data?.raw && !ev.data.raw.stage)
-        .map(ev => mshBarInfo(ev))
-        .filter(r => !q || [r.order, r.style, r.buyer, r.color, r.po, r.product, r.lineName, r.line]
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage
+            && lineIdOf(s, ev) === refLine
+            && (String(ev.id) === refKey || (ev.startDate?.getTime?.() ?? 0) >= refStart))
+        .map(ev => {
+            const r = mshBarInfo(ev);
+            r.isRef = String(ev.id) === refKey;
+            r.reason = r.isRef ? 'Reference bar — the source, not a target'
+                : r.completed ? 'Completed bar cannot be modified'
+                : '';
+            return r;
+        })
+        .filter(r => r.isRef || !q || [r.order, r.style, r.buyer, r.color, r.po, r.product, r.lineName, r.line]
             .join(' ').toLowerCase().includes(q))
-        .sort((a, b) => a.start - b.start);
+        .sort((a, b) => {
+            if (a.isRef) return -1;              // reference always first
+            if (b.isRef) return 1;
+            const d = a.start - b.start;         // then board sequence
+            return d !== 0 ? d : (a.rec.endDate - b.rec.endDate);
+        });
 });
 
 function openMultiStrip(rec) {
@@ -1571,7 +1597,7 @@ function openMultiStrip(rec) {
 uiHooks.onOpenMultiStrip = openMultiStrip;
 
 function mshToggleRow(row, idx, evd) {
-    if (row.isRefRow || row.completed) return;
+    if (row.isRef || row.completed) return;
     const cur = new Set(mshSel.value);
     if (evd?.shiftKey && mshLastIdx >= 0) {
         const rows = mshRows.value;
@@ -8234,16 +8260,17 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     v-for="(r, idx) in mshRows"
                                     :key="r.id"
                                     :class="{
-                                        'msh-row-ref' : String(r.id) === String(mshRec?.id),
+                                        'msh-row-ref' : r.isRef,
                                         'msh-row-sel' : mshSel.includes(r.id),
                                         'msh-row-done' : r.completed
                                     }"
-                                    @click="String(r.id) !== String(mshRec?.id) && mshToggleRow(r, idx, $event)"
+                                    :title="r.reason || ''"
+                                    @click="!r.isRef && mshToggleRow(r, idx, $event)"
                                 >
-                                    <td><input type="checkbox" :checked="mshSel.includes(r.id)" :disabled="String(r.id) === String(mshRec?.id) || r.completed" @click.stop="mshToggleRow(r, idx, $event)"></td>
+                                    <td><input type="checkbox" :checked="mshSel.includes(r.id)" :disabled="r.isRef || r.completed" :title="r.reason || ''" @click.stop="mshToggleRow(r, idx, $event)"></td>
                                     <td>{{ fmtDate(r.start) }}</td>
                                     <td>{{ r.lineName }}</td>
-                                    <td><b>{{ r.order }}</b><span v-if="String(r.id) === String(mshRec?.id)" class="msh-refbadge">REF</span></td>
+                                    <td><b>{{ r.order }}</b><span v-if="r.isRef" class="msh-refbadge">Reference</span></td>
                                     <td>{{ r.buyer }}</td>
                                     <td>{{ r.style }} : {{ r.color }}</td>
                                     <td class="msh-num">{{ fmtQty(r.qty) }}</td>
@@ -10575,9 +10602,10 @@ body {
 .msh-list tbody tr { cursor : pointer; }
 .msh-list tbody tr:hover { background : #f0f6fd; }
 .msh-row-sel td { background : #d5e6f9; }
-.msh-row-ref td { background : #fff6d9; font-weight : 600; }
+.msh-row-ref td { background : #d9efff; font-weight : 600; cursor : default; }
+.msh-row-ref td:first-child { border-left : 4px solid #2196f3; }
 .msh-row-done td { color : #a0a6ad; cursor : default; }
-.msh-refbadge { margin-left : 6px; font-size : 9px; background : #f3c614; color : #4a3b00; border-radius : 7px; padding : 1px 6px; font-weight : 800; }
+.msh-refbadge { margin-left : 6px; font-size : 9px; background : #2196f3; color : #fff; border-radius : 7px; padding : 1px 7px; font-weight : 800; }
 .msh-num { text-align : right; }
 .msh-link { color : #1a5dab; }
 
