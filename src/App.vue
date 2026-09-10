@@ -8258,7 +8258,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="msh-list">
                         <table>
                             <thead><tr>
-                                <th></th><th>Start</th><th>Order</th><th>Buyer</th>
+                                <th></th><th>Start</th><th>Order</th>
                                 <th>Style : Color</th><th>Qty</th><th>Delivery</th><th>Curve</th><th>Link</th>
                             </tr></thead>
                             <tbody>
@@ -8276,7 +8276,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td><input type="checkbox" :checked="mshSel.includes(r.id)" :disabled="r.isRef || r.completed" :title="r.reason || ''" @click.stop="mshToggleRow(r, idx, $event)"></td>
                                     <td class="msh-start">{{ mshStartFmt(r.start) }}</td>
                                     <td><b>{{ r.order }}</b><span v-if="r.isRef" class="msh-refbadge">Reference</span></td>
-                                    <td>{{ r.buyer }}</td>
                                     <td>{{ r.style }} : {{ r.color }}</td>
                                     <td class="msh-num">{{ fmtQty(r.qty) }}</td>
                                     <td>{{ r.delivery }}</td>
