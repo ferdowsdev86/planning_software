@@ -1742,6 +1742,154 @@ function mshImplement() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan Pull Forward (FastReact): per line, pull every following bar up to
+// the previous bar's end so unintended gaps disappear. Pull ONLY — a bar is
+// never pushed later, never re-ordered, never moved to another line, and
+// duration / qty / SMV / curve stay untouched (end recalculates from the
+// same working-day duration through the working calendar).
+// ---------------------------------------------------------------------------
+const pfOpen  = ref(false);
+const pfScope = ref('entire');          // 'entire' | 'range'
+const pfFrom  = ref(isoInputDate(new Date()));
+const pfTo    = ref(isoInputDate(addCalDays(new Date(), 30)));
+const pfPrev  = shallowRef(null);       // preview { summary, changes }
+
+const pfRangeValid = computed(() =>
+    pfScope.value !== 'range'
+    || (!!pfFrom.value && !!pfTo.value && new Date(pfFrom.value) <= new Date(pfTo.value)));
+
+function openPullForward() {
+    if (view.value !== 'board' || !currentBoard.value) {
+        toast('Open a planning board first', 'warn');
+        return;
+    }
+    pfPrev.value = null;
+    pfOpen.value = true;
+}
+
+// Completed / production-started bars are fixed anchors — never pulled
+function pfIsFixed(ev, raw) {
+    return raw.status === 'completed' || (Number(ev.percentDone) || 0) > 0;
+}
+
+function computePullForward() {
+    const s = getInstance();
+    if (!s) return null;
+    const rangeFrom = pfScope.value === 'range' ? new Date(`${pfFrom.value}T00:00:00`) : null;
+    const rangeTo   = pfScope.value === 'range' ? new Date(`${pfTo.value}T23:59:59`)   : null;
+    const inRange   = d => !rangeFrom || (d >= rangeFrom && d <= rangeTo);
+    const changes = [];
+    let unchanged = 0, skipped = 0;
+    for (const res of s.resourceStore.records) {
+        if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+        const bars = s.eventStore.records
+            .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
+            .sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
+        let anchorEnd = null;   // end of the previous bar AFTER its move
+        for (const ev of bars) {
+            const raw      = ev.data.raw;
+            const oldStart = new Date(ev.startDate);
+            const oldEnd   = new Date(ev.endDate);
+            const fixed    = pfIsFixed(ev, raw);
+            if (fixed) skipped++;
+            if (fixed || !inRange(oldStart) || anchorEnd === null) {
+                // anchor (locked / out of range / first bar on the line)
+                if (anchorEnd === null || oldEnd > anchorEnd) anchorEnd = oldEnd;
+                continue;
+            }
+            let ns = nextStartAfter(new Date(anchorEnd));
+            // Range rule: a pulled bar never crosses BEFORE the From date
+            if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
+            if (oldStart.getTime() - ns.getTime() < 30 * 60000) {
+                // already continuous (sub-30-min micro gaps don't count) —
+                // and never later: pull only!
+                unchanged++;
+                if (oldEnd > anchorEnd) anchorEnd = oldEnd;
+                continue;
+            }
+            const ne = endOfWork(ns, raw.dur || elapsedDays(oldStart, oldEnd) || 1);
+            changes.push({
+                id : ev.id, line : res.id, lineName : res.name,
+                order : mbmOrderNo(raw.po, raw.mbmOrder),
+                oldStart, oldEnd, newStart : ns, newEnd : ne,
+                gap : Math.round((oldStart - ns) / 864e5 * 10) / 10
+            });
+            anchorEnd = ne;
+        }
+    }
+    return {
+        changes,
+        summary : {
+            lines     : new Set(changes.map(c => c.line)).size,
+            moved     : changes.length,
+            gapDays   : Math.round(changes.reduce((a, c) => a + c.gap, 0) * 10) / 10,
+            unchanged,
+            skipped
+        }
+    };
+}
+
+function pfPreview() {
+    if (!pfRangeValid.value) return;
+    pfPrev.value = computePullForward();
+    if (!pfPrev.value?.changes.length) toast('No removable gaps found in the selected scope', 'ok');
+}
+
+function applyPullForward() {
+    const s = getInstance();
+    if (!s || !pfRangeValid.value) return;
+    const p = pfPrev.value || computePullForward();
+    if (!p || !p.changes.length) {
+        toast('No gaps to remove — nothing moved', 'ok');
+        return;
+    }
+    if (!window.confirm(`This action will pull ${p.changes.length} planning bars forward and remove available gaps. Continue?`)) return;
+    // One undoable step + all-or-nothing: any failure rolls every move back
+    const stm = s.project?.stm;
+    let stmTx = false;
+    try { if (stm) { stm.enable?.(); stm.startTransaction?.('Plan pull forward'); stmTx = true; } } catch { /* no stm */ }
+    const applied = [];
+    try {
+        for (const c of p.changes) {
+            const rec = s.eventStore.getById(c.id);
+            if (!rec) continue;
+            applied.push({ rec, s0 : c.oldStart, e0 : c.oldEnd });
+            rec.set({ startDate : c.newStart, endDate : c.newEnd, duration : elapsedDays(c.newStart, c.newEnd) });
+            rec.data.raw.start = c.newStart;
+            rec.data.raw.end   = c.newEnd;
+        }
+    }
+    catch (err) {
+        for (const a of applied.reverse()) {
+            a.rec.set({ startDate : a.s0, endDate : a.e0, duration : elapsedDays(a.s0, a.e0) });
+            a.rec.data.raw.start = a.s0;
+            a.rec.data.raw.end   = a.e0;
+        }
+        try { stmTx && stm.rejectTransaction?.(); } catch { /* already closed */ }
+        toast(`Pull forward failed (${err.message}) — all changes rolled back`, 'error');
+        return;
+    }
+    try { stmTx && stm.stopTransaction?.(); } catch { /* no tx */ }
+    // Audit trail: scope, user, before/after per bar
+    linkAudit(p.changes.map(c => ({
+        eventId : String(c.id).replace(/^db-/, ''), action : 'pull-forward',
+        line : c.lineName, order : c.order,
+        oldStart : c.oldStart.toISOString(), newStart : c.newStart.toISOString(),
+        oldEnd : c.oldEnd.toISOString(), newEnd : c.newEnd.toISOString(),
+        scope : pfScope.value,
+        from : pfScope.value === 'range' ? pfFrom.value : null,
+        to   : pfScope.value === 'range' ? pfTo.value : null,
+        user : authUser.value?.username, at : new Date().toISOString()
+    })));
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(`Plan pulled forward successfully. ${p.summary.moved} bars updated across ${p.summary.lines} lines — Save to keep it (Undo reverses it).`, 'ok');
+    pfOpen.value = false;
+}
+
+// ---------------------------------------------------------------------------
 // Planned schedule (right-click -> Planned schedule): day-wise quantity,
 // cumulative, efficiency and hours - FastReact "Planned quantity" window
 // ---------------------------------------------------------------------------
@@ -6340,7 +6488,8 @@ onMounted(() => {
 
     // Dev-console access for diagnostics
     window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
-        msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen } };
+        msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
+        pf  : { open : openPullForward, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
     const s = getInstance();
     uiHooks.instance = s;
@@ -6936,6 +7085,7 @@ const act = name => {
         case 'hZoomIn'  : hZoom(20); break;
         case 'vZoomIn'  : vZoom(8); break;
         case 'vZoomOut' : vZoom(-8); break;
+        case 'pullForward' : openPullForward(); break;
         case 'print'    : window.print(); break;
         case 'undo'     : s.project.stm?.canUndo && s.project.stm.undo(); break;
         case 'redo'     : s.project.stm?.canRedo && s.project.stm.redo(); break;
@@ -6982,7 +7132,9 @@ const toolbar = [
     { fa : 'fa-rotate-right', title : 'Redo', action : 'redo' },
     { sep : true },
     { fa : 'fa-floppy-disk', cls : 'fr-tb-save', title : 'Save plan to fastreact DB', action : 'save' },
-    { fa : 'fa-calendar-days', title : 'Calendars (working days / hours)', action : 'calendars' }
+    { fa : 'fa-calendar-days', title : 'Calendars (working days / hours)', action : 'calendars' },
+    { sep : true },
+    { fa : 'fa-angles-left', title : 'Plan Pull Forward', action : 'pullForward' }
 ];
 
 const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3';
@@ -8187,6 +8339,71 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         List updates every ~25s per user · <b>Kill</b> (Planning Manager only) signs the user out
                         and releases their board lock instantly — use it when a board shows
                         "in use by X" but X actually left
+                    </div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Plan Pull Forward (FastReact): remove gaps per line -->
+        <Teleport to="body">
+        <div v-if="pfOpen" class="cal-overlay" @click.self="pfOpen = false">
+            <div class="cal-dialog pf-dialog">
+                <div class="cal-title">
+                    ⏪ Plan Pull Forward
+                    <span class="cal-title-btns"><span class="cal-x" @click="pfOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <div class="pf-top">
+                        <fieldset class="pf-scope">
+                            <legend>Scope</legend>
+                            <label class="pf-radio pf-disabled"><input type="radio" disabled> Current day only <span class="msh-soon">phase 2</span></label>
+                            <label class="pf-radio pf-disabled"><input type="radio" disabled> Current week <span class="msh-soon">phase 2</span></label>
+                            <label class="pf-radio pf-disabled"><input type="radio" disabled> Current month <span class="msh-soon">phase 2</span></label>
+                            <label class="pf-radio"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
+                            <label class="pf-radio"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
+                        </fieldset>
+                        <fieldset class="pf-dates">
+                            <legend>Selected dates</legend>
+                            <label>From <input type="date" v-model="pfFrom" :disabled="pfScope !== 'range'"></label>
+                            <label>To <input type="date" v-model="pfTo" :disabled="pfScope !== 'range'"></label>
+                            <div v-if="!pfRangeValid" class="pf-err">From date must not be after To date</div>
+                        </fieldset>
+                    </div>
+
+                    <div class="st-actions">
+                        <button class="cal-btn st-btn" :disabled="!pfRangeValid" @click="pfPreview">🔍 Preview</button>
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="!pfRangeValid" @click="applyPullForward">💾 Save and Apply</button>
+                        <button class="cal-btn st-btn" @click="pfOpen = false">Close</button>
+                    </div>
+
+                    <div v-if="pfPrev" class="pf-preview">
+                        <div class="pf-sum">
+                            Affected Lines: <b>{{ pfPrev.summary.lines }}</b> ·
+                            Bars to Move: <b>{{ pfPrev.summary.moved }}</b> ·
+                            Total Gap Removed: <b>{{ pfPrev.summary.gapDays }}</b> days ·
+                            Unchanged: <b>{{ pfPrev.summary.unchanged }}</b> ·
+                            Locked/Skipped: <b>{{ pfPrev.summary.skipped }}</b>
+                        </div>
+                        <div v-if="pfPrev.changes.length" class="pf-table">
+                            <table>
+                                <thead><tr><th>Line</th><th>Order</th><th>Old Start</th><th>New Start</th><th>Old End</th><th>New End</th><th>Gap</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="c in pfPrev.changes" :key="c.id">
+                                        <td>{{ c.lineName }}</td><td><b>{{ c.order }}</b></td>
+                                        <td>{{ fmtDate(c.oldStart) }}</td><td class="pf-new">{{ fmtDate(c.newStart) }}</td>
+                                        <td>{{ fmtDate(c.oldEnd) }}</td><td class="pf-new">{{ fmtDate(c.newEnd) }}</td>
+                                        <td class="msh-num">{{ c.gap }}d</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div v-else class="ls-dim">No removable gaps in this scope</div>
+                    </div>
+                    <div class="st-hint">
+                        প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
+                        কোনো bar কখনো পরে যায় না, line/sequence/duration বদলায় না · completed/production-started bar
+                        fixed anchor · Apply-র পর Undo (↺) দিয়ে ফেরানো যায় · স্থায়ী করতে Save
                     </div>
                 </div>
             </div>
@@ -10570,6 +10787,23 @@ body {
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event-wrap { cursor : pointer; }
 .mb-fr-vscroll-on.mb-board-panning,
 .mb-fr-vscroll-on.mb-board-panning .b-timeline-sub-grid { cursor : grabbing !important; }
+
+/* Plan Pull Forward */
+.pf-dialog { width : 760px; max-width : 96vw; max-height : 90vh; overflow-y : auto; }
+.pf-top { display : flex; gap : 14px; margin-bottom : 10px; }
+.pf-scope, .pf-dates { border : 1px solid #b9c4d0; border-radius : 4px; padding : 8px 12px; flex : 1; }
+.pf-scope legend, .pf-dates legend { font-weight : 700; font-size : 12px; padding : 0 6px; }
+.pf-radio { display : flex; gap : 8px; align-items : center; font-size : 13px; padding : 4px 0; cursor : pointer; }
+.pf-disabled { color : #9aa2ac; cursor : default; }
+.pf-dates label { display : flex; gap : 10px; align-items : center; font-size : 13px; padding : 4px 0; }
+.pf-dates input[type=date] { font : inherit; padding : 3px 6px; border : 1px solid #b9c4d0; border-radius : 3px; }
+.pf-err { color : #c0392b; font-size : 12px; }
+.pf-sum { background : #eef6ff; border : 1px solid #bcd8f5; border-radius : 4px; padding : 7px 10px; font-size : 12.5px; margin-bottom : 8px; }
+.pf-table { border : 1px solid #b9c4d0; border-radius : 4px; max-height : 240px; overflow : auto; }
+.pf-table table { border-collapse : collapse; width : 100%; font-size : 12px; }
+.pf-table th { position : sticky; top : 0; background : #1c2b3a; color : #fff; padding : 5px 8px; text-align : left; font-size : 11px; }
+.pf-table td { padding : 4px 8px; border-bottom : 1px solid #edf0f3; white-space : nowrap; }
+.pf-new { color : #0a7a2f; font-weight : 700; }
 
 /* Multiple strip handling */
 .msh-dialog { width : 960px; max-width : 97vw; max-height : 92vh; overflow-y : auto; }
