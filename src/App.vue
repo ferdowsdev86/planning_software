@@ -19,7 +19,7 @@ import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
-    acquireBoardLock, releaseBoardLock,
+    acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode
@@ -1395,6 +1395,58 @@ function openCurveDialog(rec) {
 }
 uiHooks.onOpenCurve = openCurveDialog;
 
+// Apply (or clear, snap=null) a build-up curve SNAPSHOT to one bar: the
+// curve runs on the bar's OWN relative production days from its OWN start —
+// calendar dates are never copied. Start/line/qty/SMV stay untouched; only
+// the duration/end recalculates, and the existing forward push rule handles
+// any overlap. Returns the number of follower bars that shifted.
+function applyCurveSnapshotToRec(s, rec, snap) {
+    const raw = eventRawOf(rec);
+    const lid = lineIdOf(s, rec);
+    if (!raw || !lid || lid === 'hold') return -1;
+    if (snap) {
+        raw.lcManual = { name : snap.name, period : Number(snap.period) || snap.pct.length, pct : snap.pct.map(Number) };
+    }
+    else {
+        delete raw.lcManual;
+        delete raw.lc;
+    }
+    deriveLcForPlacement(s, raw, lid, new Date(rec.startDate));
+    applyLineFormulaDuration(s, raw, lid);
+    const start = new Date(rec.startDate);
+    const end   = endOfWork(start, raw.dur);
+    rec.set({ endDate : end, duration : elapsedDays(start, end) });
+    raw.start = start;
+    raw.end   = end;
+    return pushFollowers(s, lid, rec);
+}
+
+// Live link propagation: when a REFERENCE bar's curve changes, every bar
+// live-linked to it re-applies the same curve on its own days (version+1)
+function propagateLinkedCurve(s, refRec, snap) {
+    const refKey = String(refRec.id);
+    let synced = 0;
+    const audit = [];
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || ev.id === refRec.id) continue;
+        if (raw.lcLink?.mode !== 'live' || String(raw.lcLink.refId) !== refKey) continue;
+        if (raw.status === 'completed') continue;
+        applyCurveSnapshotToRec(s, ev, snap);
+        raw.lcLink = {
+            ...raw.lcLink,
+            curve    : snap ? snap.name : null,
+            version  : (Number(raw.lcLink.version) || 1) + 1,
+            lastSync : new Date().toISOString()
+        };
+        audit.push({ eventId : String(ev.id).replace(/^db-/, ''), action : 'link-sync',
+            refId : refKey, curve : snap?.name || null, mode : 'live', user : authUser.value?.username });
+        synced++;
+    }
+    if (audit.length) linkAudit(audit);
+    return synced;
+}
+
 function applyCurveDialog() {
     const rec = lcDlgRec.value;
     const raw = eventRawOf(rec);
@@ -1406,28 +1458,15 @@ function applyCurveDialog() {
         lcDlgOpen.value = false;
         return;
     }
-    const sel = lcDlgSel.value;
-    if (!sel) {
-        delete raw.lcManual;
-        delete raw.lc;
-    }
-    else {
-        const c = bcList.value.find(x => x.id === sel);
-        if (!c) return;
-        // Snapshot the percentages: the bar keeps THIS curve even if the
-        // Build up profile is edited later
-        raw.lcManual = { name : c.name, period : c.period, pct : c.pct.map(Number) };
-    }
-    // Re-derive the ramp + curve-aware duration for THIS bar only
-    deriveLcForPlacement(s, raw, lid, new Date(rec.startDate));
-    applyLineFormulaDuration(s, raw, lid);
-    const start = new Date(rec.startDate);
-    const end   = endOfWork(start, raw.dur);
-    rec.set({ endDate : end, duration : elapsedDays(start, end) });
-    raw.start = start;
-    raw.end   = end;
-    const pushed = pushFollowers(s, lid, rec);
-    if (pushed) toast(`${pushed} following order(s) shifted later`, 'warn');
+    const sel  = lcDlgSel.value;
+    const c    = sel ? bcList.value.find(x => x.id === sel) : null;
+    if (sel && !c) return;
+    const snap = c ? { name : c.name, period : c.period, pct : c.pct.map(Number) } : null;
+    const pushed = applyCurveSnapshotToRec(s, rec, snap);
+    if (pushed > 0) toast(`${pushed} following order(s) shifted later`, 'warn');
+    // Reference changed → live-linked bars follow with the same curve
+    const synced = propagateLinkedCurve(s, rec, snap);
+    if (synced) toast(`🔗 ${synced} live-linked bar(s) re-synchronized to the new curve`, 'ok');
     recalcCapacity(s);
     markBoardDirty();
     touchBoardCache(s);
@@ -1436,6 +1475,238 @@ function applyCurveDialog() {
         ? `${mbmOrderNo(raw.po, raw.mbmOrder)}: "${raw.lcManual.name}" curve applied — Save to keep it`
         : `${mbmOrderNo(raw.po, raw.mbmOrder)}: manual curve removed (automatic rule again) — Save to keep it`, 'ok');
     lcDlgOpen.value = false;
+}
+
+// ---------------------------------------------------------------------------
+// Multiple strip handling (FastReact): right-click a bar → it becomes the
+// REFERENCE strip; link other strips to its build-up curve (live or copy),
+// or unlink previously linked strips. Phase 1 actions: link + unlink.
+// ---------------------------------------------------------------------------
+const mshOpen     = ref(false);
+const mshRec      = shallowRef(null);      // reference bar record
+const mshAction   = ref('link');           // 'link' | 'unlink' (others = phase 2)
+const mshLive     = ref(false);            // Linked checkbox (live sync)
+const mshSearch   = ref('');
+const mshSel      = ref([]);               // selected event ids
+const mshCurveSel = ref('ref');            // 'ref' = reference bar's curve | curve id
+let   mshLastIdx  = -1;                    // for shift-click ranges
+
+const MSH_ACTIONS = [
+    { id : 'nothing',  label : '(nothing)' },
+    { id : 'unload',   label : 'Unload selected strips', soon : true },
+    { id : 'link',     label : 'Link strip build up curve' },
+    { id : 'unlink',   label : 'Unlink selected strips' },
+    { id : 'clearlc',  label : 'Clear previous update for build up curve', soon : true },
+    { id : 'capfac',   label : 'Change capacity factor', soon : true },
+    { id : 'clearcap', label : 'Clear capacity factor', soon : true },
+    { id : 'stripeff', label : 'Change strip efficiency', soon : true },
+    { id : 'route',    label : 'Change strip route', soon : true }
+];
+
+const mshRaw = computed(() => eventRawOf(mshRec.value));
+
+// The curve snapshot the link will apply
+const mshCurve = computed(() => {
+    if (mshCurveSel.value === 'ref') {
+        const raw = mshRaw.value;
+        if (raw?.lcManual?.pct?.length) return { ...raw.lcManual };
+        // fall back to the reference bar's ACTIVE auto curve, if any
+        if (raw?.lc?.applied && raw.lc.dayPcts?.length) {
+            return { name : raw.lc.profileName || 'Auto curve', period : raw.lc.dayPcts.length, pct : raw.lc.dayPcts.map(Number) };
+        }
+        return null;
+    }
+    const c = bcList.value.find(x => x.id === mshCurveSel.value);
+    return c ? { name : c.name, period : c.period, pct : c.pct.map(Number) } : null;
+});
+
+function mshBarInfo(ev) {
+    const s = getInstance();
+    const raw = ev.data.raw;
+    const lid = lineIdOf(s, ev);
+    return {
+        id       : String(ev.id),
+        rec      : ev,
+        start    : ev.startDate,
+        line     : lid,
+        lineName : s.resourceStore.getById(lid)?.name || lid,
+        order    : mbmOrderNo(raw.po, raw.mbmOrder),
+        style    : raw.style || '—',
+        buyer    : raw.buyer || '—',
+        product  : raw.productType || '—',
+        color    : raw.color || '—',
+        po       : raw.po || '',
+        qty      : Number(raw.qty) || 0,
+        delivery : raw.ship ? fmtDate(raw.ship) : '—',
+        curve    : raw.lcManual?.name || (raw.lc?.applied ? (raw.lc.profileName || 'auto') : '—'),
+        linked   : raw.lcLink ? `🔗 ${raw.lcLink.mode === 'live' ? 'live' : 'copy'} → ${raw.lcLink.refOrder || raw.lcLink.refId}` : '',
+        completed : raw.status === 'completed'
+    };
+}
+
+const mshRows = computed(() => {
+    const s = getInstance();
+    if (!s || !mshOpen.value) return [];
+    const q = mshSearch.value.trim().toLowerCase();
+    return s.eventStore.records
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage)
+        .map(ev => mshBarInfo(ev))
+        .filter(r => !q || [r.order, r.style, r.buyer, r.color, r.po, r.product, r.lineName, r.line]
+            .join(' ').toLowerCase().includes(q))
+        .sort((a, b) => a.start - b.start);
+});
+
+function openMultiStrip(rec) {
+    const raw = eventRawOf(rec);
+    if (!raw || raw.stage) return;
+    mshRec.value   = rec;
+    mshAction.value = 'link';
+    mshLive.value  = false;
+    mshSearch.value = '';
+    mshSel.value   = [];
+    mshCurveSel.value = 'ref';
+    mshLastIdx     = -1;
+    mshOpen.value  = true;
+}
+uiHooks.onOpenMultiStrip = openMultiStrip;
+
+function mshToggleRow(row, idx, evd) {
+    if (row.isRefRow || row.completed) return;
+    const cur = new Set(mshSel.value);
+    if (evd?.shiftKey && mshLastIdx >= 0) {
+        const rows = mshRows.value;
+        const [a, b] = [Math.min(mshLastIdx, idx), Math.max(mshLastIdx, idx)];
+        for (let i = a; i <= b; i++) {
+            const r = rows[i];
+            if (r && String(r.id) !== String(mshRec.value?.id) && !r.completed) cur.add(r.id);
+        }
+    }
+    else if (evd?.ctrlKey || evd?.metaKey) {
+        cur.has(row.id) ? cur.delete(row.id) : cur.add(row.id);
+    }
+    else {
+        cur.has(row.id) ? cur.delete(row.id) : cur.add(row.id);
+    }
+    mshLastIdx = idx;
+    mshSel.value = [...cur];
+}
+
+function mshSelectAll() {
+    mshSel.value = mshRows.value
+        .filter(r => String(r.id) !== String(mshRec.value?.id) && !r.completed)
+        .map(r => r.id);
+}
+
+function mshImplement() {
+    const s   = getInstance();
+    const ref = mshRec.value;
+    const refRaw = mshRaw.value;
+    if (!s || !ref || !refRaw) return;
+    if (!['link', 'unlink'].includes(mshAction.value)) {
+        toast('This action ships in the next phase — Link / Unlink are available now', 'warn');
+        return;
+    }
+    const targets = mshSel.value
+        .map(id => s.eventStore.getById(id))
+        .filter(Boolean);
+    if (!targets.length) {
+        toast('Select at least one strip from the list below', 'warn');
+        return;
+    }
+
+    if (mshAction.value === 'unlink') {
+        const audit = [];
+        let done = 0;
+        for (const ev of targets) {
+            const raw = ev.data.raw;
+            if (!raw?.lcLink) continue;
+            audit.push({ eventId : String(ev.id).replace(/^db-/, ''), action : 'unlink',
+                refId : raw.lcLink.refId, curve : raw.lcLink.curve,
+                user : authUser.value?.username, at : new Date().toISOString() });
+            // The last applied curve values stay on the bar — only the
+            // reference relationship (future sync) is removed
+            delete raw.lcLink;
+            done++;
+        }
+        if (audit.length) linkAudit(audit);
+        markBoardDirty();
+        touchBoardCache(s);
+        s.refreshRows?.();
+        toast(done
+            ? `${done} strip(s) unlinked — their current curve values are kept, future reference changes will no longer apply. Save to keep it.`
+            : 'None of the selected strips had a link', done ? 'ok' : 'warn');
+        return;
+    }
+
+    // ---- link ----
+    const snap = mshCurve.value;
+    if (!snap) {
+        toast('The reference strip has no build-up curve — pick one with "Select build" first', 'error');
+        return;
+    }
+    // Validation: collect reasons per skipped bar
+    const refKey = String(ref.id);
+    const masters = new Set(s.eventStore.records
+        .filter(e => e.data?.raw?.lcLink?.mode === 'live')
+        .map(e => String(e.data.raw.lcLink.refId)));
+    const skipped = [];
+    const valid   = [];
+    for (const ev of targets) {
+        const raw = ev.data.raw;
+        const name = mbmOrderNo(raw.po, raw.mbmOrder);
+        if (String(ev.id) === refKey)            { skipped.push(`${name}: reference bar itself`); continue; }
+        if (raw.status === 'completed')          { skipped.push(`${name}: completed bar cannot be modified`); continue; }
+        if (String(refRaw.lcLink?.refId || '') === String(ev.id)) { skipped.push(`${name}: circular link (reference already follows this bar)`); continue; }
+        if (masters.has(String(ev.id)))          { skipped.push(`${name}: already the MASTER of another linked group`); continue; }
+        if (lineIdOf(s, ev) === 'hold')          { skipped.push(`${name}: on the Holding Row — plan it first`); continue; }
+        valid.push(ev);
+    }
+    if (!valid.length) {
+        window.alert(`No strips could be linked:\n\n${skipped.join('\n')}`);
+        return;
+    }
+    const summary =
+        `Reference Bar: ${mbmOrderNo(refRaw.po, refRaw.mbmOrder)}\n` +
+        `Curve: ${snap.name} (${snap.pct.join('% → ')}%)\n` +
+        `Selected Target Bars: ${valid.length}${skipped.length ? ` (${skipped.length} skipped)` : ''}\n` +
+        `Action: Link Build-Up Curve\n` +
+        `Link Mode: ${mshLive.value ? 'Live Linked' : 'Copy (one-time)'}`;
+    if (!window.confirm(summary)) return;
+
+    const now   = new Date().toISOString();
+    const audit = [];
+    let pushedTotal = 0;
+    for (const ev of valid) {
+        const raw = ev.data.raw;
+        const prevVer = Number(raw.lcLink?.version) || 0;
+        const p = applyCurveSnapshotToRec(s, ev, snap);
+        if (p < 0) { skipped.push(`${mbmOrderNo(raw.po, raw.mbmOrder)}: could not apply`); continue; }
+        pushedTotal += p;
+        raw.lcLink = {
+            group    : `lg-${refKey}`,
+            refId    : refKey,
+            refOrder : mbmOrderNo(refRaw.po, refRaw.mbmOrder),
+            curve    : snap.name,
+            version  : prevVer + 1,
+            mode     : mshLive.value ? 'live' : 'copy',
+            linkedBy : authUser.value?.username || '—',
+            linkedAt : now,
+            lastSync : now
+        };
+        audit.push({ eventId : String(ev.id).replace(/^db-/, ''), action : 'link',
+            group : `lg-${refKey}`, refId : refKey, curve : snap.name,
+            version : prevVer + 1, mode : mshLive.value ? 'live' : 'copy',
+            user : authUser.value?.username, at : now });
+    }
+    if (audit.length) linkAudit(audit);
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    let msg = `🔗 ${audit.length} strip(s) linked to "${snap.name}" (${mshLive.value ? 'live' : 'copy'}) — each runs the curve from its OWN start date. Save to keep it.`;
+    if (pushedTotal) msg += ` ${pushedTotal} follower(s) shifted later.`;
+    toast(msg, 'ok');
+    if (skipped.length) window.alert(`Skipped:\n\n${skipped.join('\n')}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -6036,7 +6307,8 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock };
+    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+        msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen } };
 
     const s = getInstance();
     uiHooks.instance = s;
@@ -7883,6 +8155,109 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         List updates every ~25s per user · <b>Kill</b> (Planning Manager only) signs the user out
                         and releases their board lock instantly — use it when a board shows
                         "in use by X" but X actually left
+                    </div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Multiple strip handling (FastReact): link/unlink build-up curves -->
+        <Teleport to="body">
+        <div v-if="mshOpen && mshRaw" class="cal-overlay" @click.self="mshOpen = false">
+            <div class="cal-dialog msh-dialog">
+                <div class="cal-title">
+                    🧩 Multiple strip handling
+                    <span class="cal-title-btns"><span class="cal-x" @click="mshOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <fieldset class="msh-ref">
+                        <legend>Reference data</legend>
+                        <div class="msh-ref-grid">
+                            <label>Order</label><input readonly :value="mbmOrderNo(mshRaw.po, mshRaw.mbmOrder)">
+                            <label>Product</label><input readonly :value="(mshRaw.style || '—') + (mshRaw.color ? ' :: ' + mshRaw.color : '')">
+                            <label>Customer</label><input readonly :value="mshRaw.buyer || '—'">
+                            <label>Product type</label><input readonly :value="mshRaw.productType || '—'">
+                            <label>Plan row</label><input readonly :value="(getInstance()?.resourceStore.getById(lineIdOf(getInstance(), mshRec))?.name) || '—'">
+                            <label>PO</label><input readonly :value="mshRaw.po || '—'">
+                            <label>Start – End</label><input readonly :value="fmtDate(mshRec?.startDate) + ' → ' + fmtDate(mshRec?.endDate)">
+                            <label>Qty / SMV</label><input readonly :value="fmtQty(mshRaw.qty) + ' pcs / ' + (mshRaw.smv || '—')">
+                            <label>Current curve</label><input readonly :value="mshRaw.lcManual?.name || (mshRaw.lc?.applied ? (mshRaw.lc.profileName || 'auto') : '— none —')">
+                        </div>
+                    </fieldset>
+
+                    <div class="msh-mid">
+                        <div class="msh-actions">
+                            <div class="cal-label">What do you want to do with the selected strips</div>
+                            <div class="msh-action-list">
+                                <div
+                                    v-for="a in MSH_ACTIONS"
+                                    :key="a.id"
+                                    :class="{ 'msh-act-sel' : mshAction === a.id, 'msh-act-soon' : a.soon || a.id === 'nothing' }"
+                                    @click="!(a.soon || a.id === 'nothing') && (mshAction = a.id)"
+                                >{{ a.label }}<span v-if="a.soon" class="msh-soon">phase 2</span></div>
+                            </div>
+                        </div>
+                        <div class="msh-side">
+                            <div class="cal-label">Select build</div>
+                            <select v-model="mshCurveSel" class="msh-build-sel">
+                                <option value="ref">Reference bar's current curve</option>
+                                <option v-for="c in bcList" :key="c.id" :value="c.id">📈 {{ c.name }}</option>
+                            </select>
+                            <div v-if="mshCurve" class="msh-curve-prev">
+                                <table>
+                                    <tr><th>Day</th><th v-for="(p, i) in mshCurve.pct" :key="i">{{ i + 1 }}</th><th>{{ mshCurve.pct.length + 1 }}+</th></tr>
+                                    <tr><th>Eff%</th><td v-for="(p, i) in mshCurve.pct" :key="'p' + i">{{ p }}%</td><td>100%</td></tr>
+                                </table>
+                                <div class="msh-curve-name">{{ mshCurve.name }}</div>
+                            </div>
+                            <div v-else class="msh-curve-prev msh-curve-none">Reference bar has no curve — pick one above</div>
+                            <label class="msh-live"><input type="checkbox" v-model="mshLive"> Linked (live — reference updates re-sync all linked strips)</label>
+                            <button class="cal-btn cal-btn-primary st-btn msh-impl" @click="mshImplement">✔ Implement</button>
+                        </div>
+                    </div>
+
+                    <div class="msh-list-hd">
+                        <span>Which strips do you want to select</span>
+                        <input v-model="mshSearch" class="msh-search" placeholder="Search style, buyer, color, PO, product, line…">
+                        <span class="msh-hint-blue">Use Shift-Click and Ctrl-Click to multi-select strips</span>
+                        <button class="cal-btn st-btn" @click="mshSelectAll">Select all</button>
+                        <button class="cal-btn st-btn" @click="mshSel = []">Clear</button>
+                    </div>
+                    <div class="msh-list">
+                        <table>
+                            <thead><tr>
+                                <th></th><th>Start</th><th>Line</th><th>Order</th><th>Buyer</th>
+                                <th>Style : Color</th><th>Qty</th><th>Delivery</th><th>Curve</th><th>Link</th>
+                            </tr></thead>
+                            <tbody>
+                                <tr
+                                    v-for="(r, idx) in mshRows"
+                                    :key="r.id"
+                                    :class="{
+                                        'msh-row-ref' : String(r.id) === String(mshRec?.id),
+                                        'msh-row-sel' : mshSel.includes(r.id),
+                                        'msh-row-done' : r.completed
+                                    }"
+                                    @click="String(r.id) !== String(mshRec?.id) && mshToggleRow(r, idx, $event)"
+                                >
+                                    <td><input type="checkbox" :checked="mshSel.includes(r.id)" :disabled="String(r.id) === String(mshRec?.id) || r.completed" @click.stop="mshToggleRow(r, idx, $event)"></td>
+                                    <td>{{ fmtDate(r.start) }}</td>
+                                    <td>{{ r.lineName }}</td>
+                                    <td><b>{{ r.order }}</b><span v-if="String(r.id) === String(mshRec?.id)" class="msh-refbadge">REF</span></td>
+                                    <td>{{ r.buyer }}</td>
+                                    <td>{{ r.style }} : {{ r.color }}</td>
+                                    <td class="msh-num">{{ fmtQty(r.qty) }}</td>
+                                    <td>{{ r.delivery }}</td>
+                                    <td>{{ r.curve }}</td>
+                                    <td class="msh-link">{{ r.linked }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">
+                        Link = reference bar-এর curve টা প্রতিটি selected bar-এর <b>নিজের start date থেকে relative day</b> হিসেবে চলে (calendar dates copy হয় না) ·
+                        নিজের start/line/qty/SMV বদলায় না, শুধু end date recalculate হয় · overlap হলে আগের push-back rule ·
+                        Unlink = সম্পর্ক মুছে যায়, শেষ curve মানগুলো থেকে যায় · সব action-এর audit trail DB-তে
                     </div>
                 </div>
             </div>
@@ -10164,6 +10539,53 @@ body {
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event-wrap { cursor : pointer; }
 .mb-fr-vscroll-on.mb-board-panning,
 .mb-fr-vscroll-on.mb-board-panning .b-timeline-sub-grid { cursor : grabbing !important; }
+
+/* Multiple strip handling */
+.msh-dialog { width : 960px; max-width : 97vw; max-height : 92vh; overflow-y : auto; }
+.msh-ref { border : 1px solid #b9c4d0; border-radius : 4px; margin-bottom : 10px; padding : 6px 10px 10px; }
+.msh-ref legend { font-weight : 700; font-size : 12px; padding : 0 6px; }
+.msh-ref-grid { display : grid; grid-template-columns : 90px 1fr 110px 1fr; gap : 4px 8px; align-items : center; }
+.msh-ref-grid label { font-size : 12px; font-weight : 600; }
+.msh-ref-grid input { font : inherit; font-size : 12px; padding : 3px 6px; border : 1px solid #c6ccd4; background : #f6f8fa; border-radius : 3px; }
+.msh-mid { display : flex; gap : 14px; margin-bottom : 10px; }
+.msh-actions { flex : 1 1 auto; }
+.msh-action-list { border : 1px solid #b9c4d0; border-radius : 4px; max-height : 190px; overflow-y : auto; }
+.msh-action-list div { padding : 6px 10px; cursor : pointer; font-size : 13px; display : flex; justify-content : space-between; }
+.msh-action-list div:hover { background : #eaf1fb; }
+.msh-act-sel { background : #2f6fb4 !important; color : #fff; }
+.msh-act-soon { color : #9aa2ac; cursor : default !important; }
+.msh-soon { font-size : 10px; background : #eef1f5; color : #8a94a0; border-radius : 8px; padding : 1px 7px; align-self : center; }
+.msh-side { flex : 0 0 300px; display : flex; flex-direction : column; gap : 8px; }
+.msh-build-sel { font : inherit; font-size : 13px; padding : 5px 6px; border : 1px solid #b9c4d0; border-radius : 4px; }
+.msh-curve-prev { border : 1px solid #d5dbe2; border-radius : 4px; padding : 6px; background : #fbfcfe; }
+.msh-curve-prev table { border-collapse : collapse; width : 100%; font-size : 11px; }
+.msh-curve-prev th, .msh-curve-prev td { border : 1px solid #e1e6ec; padding : 2px 6px; text-align : center; }
+.msh-curve-prev th { background : #eef2f7; }
+.msh-curve-name { font-size : 11px; color : #5b6673; margin-top : 4px; text-align : right; }
+.msh-curve-none { color : #a35b00; font-size : 12px; }
+.msh-live { font-size : 12px; display : flex; gap : 6px; align-items : center; }
+.msh-impl { align-self : flex-start; }
+.msh-list-hd { display : flex; gap : 10px; align-items : center; margin-bottom : 6px; font-weight : 600; font-size : 13px; }
+.msh-search { flex : 1 1 auto; font : inherit; font-size : 12px; padding : 4px 8px; border : 1px solid #b9c4d0; border-radius : 4px; }
+.msh-hint-blue { color : #1a5dab; font-weight : 400; font-size : 11px; }
+.msh-list { border : 1px solid #b9c4d0; border-radius : 4px; max-height : 260px; overflow : auto; }
+.msh-list table { border-collapse : collapse; width : 100%; font-size : 12px; }
+.msh-list th { position : sticky; top : 0; background : #1c2b3a; color : #fff; padding : 5px 8px; text-align : left; font-size : 11px; }
+.msh-list td { padding : 4px 8px; border-bottom : 1px solid #edf0f3; white-space : nowrap; }
+.msh-list tbody tr { cursor : pointer; }
+.msh-list tbody tr:hover { background : #f0f6fd; }
+.msh-row-sel td { background : #d5e6f9; }
+.msh-row-ref td { background : #fff6d9; font-weight : 600; }
+.msh-row-done td { color : #a0a6ad; cursor : default; }
+.msh-refbadge { margin-left : 6px; font-size : 9px; background : #f3c614; color : #4a3b00; border-radius : 7px; padding : 1px 6px; font-weight : 800; }
+.msh-num { text-align : right; }
+.msh-link { color : #1a5dab; }
+
+/* Live-linked bar badge on the board */
+.mb-linked-badge {
+    position : absolute; top : 0; right : 2px; font-size : 9px; line-height : 1;
+    z-index : 6; pointer-events : auto; cursor : help;
+}
 
 /* Tools → Login status */
 .ls-dialog { width : 640px; max-width : 96vw; }

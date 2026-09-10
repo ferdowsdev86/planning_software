@@ -171,6 +171,9 @@ function eventNotesPayload(raw, onHold) {
             pct    : raw.lcManual.pct.map(Number)
         };
     }
+    // Multiple strip handling: linked build-up curve relationship (reference
+    // bar, mode live/copy, version) must survive a reload
+    if (raw.lcLink && raw.lcLink.refId != null) notes.lcLink = raw.lcLink;
     // Consolidated bar: persist the PO group, otherwise a reload degrades the
     // bar to a single PO while keeping the group quantity (5,090 shown on a
     // 1,344-pc PO)
@@ -269,6 +272,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         keepSeparate : !!noteGroup.keepSeparate,
         lcManual     : noteGroup.lcCurve && Array.isArray(noteGroup.lcCurve.pct) && noteGroup.lcCurve.pct.length
             ? noteGroup.lcCurve : undefined,
+        lcLink       : noteGroup.lcLink && noteGroup.lcLink.refId != null ? noteGroup.lcLink : undefined,
         dbId     : orderId,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
@@ -468,6 +472,17 @@ export async function killSession(sid) {
     const data = await res.json();
     if (!data.success || data.ok === false) throw new Error(data.error || 'kill failed');
     return data;
+}
+
+// Multiple strip handling: audit trail for link / unlink / sync actions —
+// fire-and-forget, the board must never block on it
+export function linkAudit(entries) {
+    if (!entries?.length) return Promise.resolve();
+    return fetch(`${API_BASE}/link-audit`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ entries })
+    }).catch(() => {});
 }
 
 // Mark orders complete — flags them completed server-side; the caller removes

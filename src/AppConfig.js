@@ -1422,6 +1422,15 @@ export const schedulerProConfig = {
                     uiHooks.onOpenWorkHours?.(rec);
                 }
             },
+            multiStrip : {
+                text   : 'Multiple strip handling',
+                icon   : 'b-fa b-fa-layer-group',
+                weight : 240,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenMultiStrip?.(rec);
+                }
+            },
             splitQtyItem : {
                 text   : 'Specify quantity to split',
                 icon   : 'b-fa b-fa-scissors',
@@ -1455,6 +1464,7 @@ export const schedulerProConfig = {
                 items.stripProps    = false;
                 items.planSchedule  = false;
                 items.buildUpCurve  = false;
+                items.multiStrip    = false;
                 return;
             }
             if (raw.status === 'completed' && items.buildUpCurve) {
@@ -1851,8 +1861,14 @@ export const schedulerProConfig = {
         const lcHtml = lcFrac > 0.005
             ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-badge" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}">LC</span>`
             : '';
+        // Multiple strip handling: live-linked bars carry a small link badge
+        const lk = r.lcLink;
+        const linkHtml = lk
+            ? `<span class="mb-linked-badge" title="${StringHelper.encodeHtml(
+                `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
+            : '';
         return `
-            ${lcHtml}<div class="mb-bar mb-bar-center">
+            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center">
                 <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
             </div>`;
     },

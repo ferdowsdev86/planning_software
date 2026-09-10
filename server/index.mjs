@@ -1934,6 +1934,26 @@ app.post(`${BASE}/session/kill`, (req, res) => {
     res.json({ success : true, ok : true });
 });
 
+// Multiple strip handling audit: every link / unlink / live-sync action lands
+// in planning_change_logs so the history of who linked what, when, survives
+app.post(`${BASE}/link-audit`, async (req, res) => {
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 100) : [];
+    if (!entries.length) return res.json({ success : true, logged : 0 });
+    try {
+        for (const en of entries) {
+            const evId = /^\d+$/.test(String(en.eventId ?? '')) ? Number(en.eventId) : null;
+            await pool.query(
+                `INSERT INTO planning_change_logs
+                     (project_id, event_id, action_type, new_data, changed_by, changed_at, ip_address)
+                 VALUES (1, ?, ?, ?, 1, NOW(), ?)`,
+                [evId, String(en.action || 'link').slice(0, 20),
+                 JSON.stringify(en).slice(0, 4000), req.ip]);
+        }
+        res.json({ success : true, logged : entries.length });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 app.get(`${BASE}/users`, async (req, res) => {
     try {
         const [rows] = await pool.query(
