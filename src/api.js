@@ -245,7 +245,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         po       : e.po_number || '',
         // split strips carry a numeric suffix (proj:26XXX-2) — the order code
         // itself never does, so strip it back off
-        mbmOrder : e.order_code || (projId ? projId.slice(5).replace(/-\d+$/, '') : ''),
+        mbmOrder : e.order_code || (projId ? projId.slice(5).replace(/-\d{1,2}$/, '') : ''),
         eventCode : e.event_code || null,
         productType : productTypeFor(e.po_number, e.product_category),
         qty, orderQty : orderQty || qty, smv,

@@ -136,9 +136,12 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         // from the Orders list — retired orders (planning_completed_orders)
         // and orders unknown to ERP (no mr_order_entry row AND no confirm PO
         // link) would be unmanageable ghosts on the board.
+        // Split strips append a 1-2 digit counter (…-2, …-3). Strip ONLY
+        // that: a greedy -\d+$ ate the numeric tail of real codes like
+        // GSL-250942 → 'GSL', so their planned bars were dropped as ghosts.
         const evOrderCode = e => e.order_code
             || (String(e.event_code || '').startsWith('ev-proj:')
-                ? String(e.event_code).slice(8).replace(/-\d+$/, '') : null);
+                ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
         const evCodes = [...new Set(events.map(evOrderCode).filter(Boolean))];
         if (evCodes.length) {
             const completedSet = await completedOrderCodes();
@@ -148,6 +151,15 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                 evCodes
             );
             const inErp = new Set(erpRows.map(r => r.order_code));
+            // OS orders (mbm_os.os_orders — GSL-… codes) are just as real as
+            // mr_order_entry ones: without this their planned projection bars
+            // were silently dropped as "unknown to ERP" on every board load,
+            // while the list kept showing them as Planned
+            const [osKnown] = await pool.query(
+                `SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`,
+                evCodes
+            );
+            for (const r of osKnown) inErp.add(r.os_order_code);
             events = events.filter(e => {
                 const oc = evOrderCode(e);
                 if (!oc) return true;
