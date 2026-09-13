@@ -324,7 +324,11 @@ function countSewingEvents(data) {
 // confirm-replacement pass (AUTO_REPLACE_WITH_CONFIRMS). All planning is
 // manual: drag from the Orders list / Planning menu actions, then Save.
 const AUTO_PLAN_ON_LOAD = false;
-const AUTO_REPLACE_WITH_CONFIRMS = false;
+// Confirm replacement IS on: a confirm order whose quantity EQUALS the
+// projection quantity takes over the projection bar in place (same line,
+// same saved span); an unequal quantity never plans — the projection bar is
+// highlighted until the confirm quantity matches.
+const AUTO_REPLACE_WITH_CONFIRMS = true;
 
 function finishBoardLoad(uid, data, s) {
     if (countSewingEvents(data) > 0) {
@@ -1018,11 +1022,16 @@ function applyApiBoardData(s, data) {
     removeOrdersWithoutBuyer(s);
     expandTimeAxisForEvents(s);
     beginBoardInteraction(s, 'batch');
+    let swapped = 0;
     try {
-        replaceProjectionsWithConfirms(s);
+        swapped = replaceProjectionsWithConfirms(s);
         packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
+    if (swapped) {
+        markBoardDirty();
+        toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
+    }
     // Engine-settled pass (async): bars must sit strictly one after another
     enforceSequentialLines(s);
     if (ordersOpen.value) ordersRows.value = collectOrders();
@@ -4143,171 +4152,136 @@ function replaceProjectionsWithConfirms(s) {
         if (!confirms.has(k)) confirms.set(k, { kind : 'unplanned', u : us[0] });
     }
 
-    // Insert one unplanned confirm group as a NEW bar right after anchorEv
-    const insertGroupAfter = (anchorEv, u) => {
-        const lid = lineIdOf(s, anchorEv);
-        if (!lid || lid === 'hold') return null;
-        const evId = `ev-${u.id}`;
-        if (s.eventStore.getById(evId)) return null;
-        const aRaw = anchorEv.data.raw;
-        const raw2 = {
-            id : u.id, dbId : u.dbId,
-            buyer : u.buyer, style : u.style, po : u.po,
-            mbmOrder : u.mbmOrder, orderType : 'confirm',
-            productType : u.productType || aRaw.productType,
-            qty : Number(u.qty ?? u.orderQty) || 0,
-            orderQty : Number(u.orderQty ?? u.qty) || 0,
-            smv : Number(u.smv) > 0 ? Number(u.smv) : aRaw.smv,
-            ship : u.ship, pcd : u.pcd, matReady : u.matReady,
-            color : u.color,
-            poList : Array.isArray(u.poList) && u.poList.length ? u.poList : (u.po ? [u.po] : []),
-            idList : Array.isArray(u.idList) && u.idList.length ? u.idList : (u.dbId ? [u.dbId] : []),
-            poCount : u.poCount || 1,
-            poDetails : Array.isArray(u.poDetails) ? u.poDetails : [],
-            progress : 0, status : 'draft',
-            eventCode : `EV-C${u.dbId}-SEW`,
-            viaReplacement : true,
-            risk : { score : 0, level : 'low', label : 'On track', reasons : [] }
-        };
-        applyLineFormulaDuration(s, raw2, lid);
-        const start = nextStartAfter(anchorEv.endDate);
-        const end   = endOfWork(start, raw2.dur || 1);
-        raw2.start = start;
-        raw2.end   = end;
-        s.eventStore.add({
-            id : evId, resourceId : lid,
-            startDate : start, endDate : end,
-            duration : elapsedDays(start, end), durationUnit : 'day',
-            manuallyScheduled : true,
-            name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
-            percentDone : 0,
-            raw : raw2
+    // Confirm raw for one unplanned colour group, inheriting what the
+    // projection bar knew (product type, SMV fallback)
+    const confirmRawFor = (u, aRaw) => ({
+        id : u.id, dbId : u.dbId,
+        buyer : u.buyer, style : u.style, po : u.po,
+        mbmOrder : u.mbmOrder, orderType : 'confirm',
+        productType : u.productType || aRaw.productType,
+        qty : Number(u.qty ?? u.orderQty) || 0,
+        orderQty : Number(u.orderQty ?? u.qty) || 0,
+        smv : Number(u.smv) > 0 ? Number(u.smv) : aRaw.smv,
+        ship : u.ship, pcd : u.pcd, matReady : u.matReady,
+        color : u.color,
+        poList : Array.isArray(u.poList) && u.poList.length ? u.poList : (u.po ? [u.po] : []),
+        idList : Array.isArray(u.idList) && u.idList.length ? u.idList : (u.dbId ? [u.dbId] : []),
+        poCount : u.poCount || 1,
+        poDetails : Array.isArray(u.poDetails) ? u.poDetails : [],
+        progress : 0, status : 'draft',
+        eventCode : `EV-C${u.dbId}-SEW`,
+        viaReplacement : true, userPinned : true,
+        risk : { score : 0, level : 'low', label : 'On track', reasons : [] }
+    });
+
+    // Several colour groups of one order share the projection's SAVED span
+    // by quantity — the first group keeps the swapped bar, the rest are new
+    // bars inside the same span, so no other bar on the line moves
+    const splitSpanAmong = (ev, groups) => {
+        const raw = ev.data.raw;
+        const lid = lineIdOf(s, ev);
+        const start0 = new Date(ev.startDate), end0 = new Date(ev.endDate);
+        const totalUnits = Number(raw.dur) > 0 ? Number(raw.dur) : elapsedDays(start0, end0);
+        const totalQty = groups.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0) || 1;
+        let cursor = start0;
+        groups.forEach((g, i) => {
+            const share = (Number(g.qty ?? g.orderQty) || 0) / totalQty;
+            const units = Math.max(1 / 60, totalUnits * share);
+            const end   = i === groups.length - 1 ? end0 : endOfWork(cursor, units);
+            if (i === 0) {
+                raw.dur = units;
+                raw.start = cursor; raw.end = end;
+                ev.set({ endDate : end, duration : elapsedDays(cursor, end) });
+            }
+            else {
+                const evId = `ev-${g.id}`;
+                if (!s.eventStore.getById(evId)) {
+                    const raw2 = confirmRawFor(g, raw);
+                    raw2.dur = units; raw2.start = cursor; raw2.end = end;
+                    raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
+                    s.eventStore.add({
+                        id : evId, resourceId : lid,
+                        startDate : cursor, endDate : end,
+                        duration : elapsedDays(cursor, end), durationUnit : 'day',
+                        manuallyScheduled : true,
+                        name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
+                        percentDone : 0,
+                        raw : raw2
+                    });
+                    pendingSwapIds.add(evId);
+                }
+            }
+            cursor = end;
         });
-        // Inserted before the baseline snapshot — must be force-included in
-        // the next save's change list or it silently never persists
-        pendingSwapIds.add(evId);
-        return s.eventStore.getById(evId);
     };
 
     const dropEvents = [];
     const dropUnplanned = new Set();
     let n = 0;
 
-    // Split projection strips of one order share the full orderQty — partial
-    // shrinking can only be apportioned safely when the order has ONE strip
-    const projStrips = new Map();
-    for (const ev of s.eventStore.records) {
-        const raw = ev.data?.raw;
-        if (!raw || raw.stage || raw.orderType !== 'projection') continue;
-        const k = reconKey(raw);
-        projStrips.set(k, (projStrips.get(k) || 0) + 1);
-    }
+    // Equal = same quantity (1 pc / 0.5% rounding tolerance)
+    const qtyEqual = (a, b) => b > 0 && Math.abs(a - b) <= Math.max(1, b * 0.005);
 
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage || raw.orderType !== 'projection') continue;
         const key = reconKey(raw);
         const hit = confirms.get(key);
-        if (!hit) continue;
-        // PARTIAL REPLACEMENT: confirm POs cover LESS than the full order qty —
-        // only the confirmed portion is swapped in. The projection bar shrinks
-        // to the unconfirmed remainder and STAYS on the board as a projection;
-        // later confirm arrivals shrink it further until it is fully replaced.
+        if (!hit) { delete raw.confirmMismatch; continue; }
         const grpList = (confirmGroups.get(key) || []).filter(g => !dropUnplanned.has(String(g.id)));
         const evQty   = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.qty) || 0), 0);
         const grpQty  = grpList.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0);
         const fullQty = Number(raw.orderQty || raw.qty) || 0;
-        const remaining = fullQty - evQty - grpQty;
-        if (remaining >= 1 && (evQty + grpQty) > 0 && projStrips.get(key) === 1) {
-            const lid = lineIdOf(s, ev);
-            if (Math.abs(Number(raw.qty) - remaining) >= 1) {
-                raw.qty    = remaining;
-                raw.reqMin = Math.round(remaining * (Number(raw.smv) || 0));
-                if (lid && lid !== 'hold') {
-                    applyLineFormulaDuration(s, raw, lid);
-                    const end = endOfWork(ev.startDate, raw.dur || 1);
-                    raw.end = end;
-                    ev.set({ endDate : end, duration : elapsedDays(ev.startDate, end) });
-                }
-                pendingSwapIds.add(String(ev.id));
-                n++;
-            }
-            let anchor = ev;
-            for (const g of grpList) {
-                const added = insertGroupAfter(anchor, g);
-                if (added) {
-                    dropUnplanned.add(String(g.id));
-                    anchor = added;
-                    n++;
-                }
-            }
-            if (anchor !== ev && lid) pushFollowers(s, lid, anchor);
+        // RULE: the confirm order replaces the projection ONLY when its
+        // quantity equals the projection quantity. Unequal → nothing is
+        // planned; the projection bar stays and is highlighted until the
+        // confirmed quantity matches.
+        if (evQty > 0 && qtyEqual(evQty, fullQty) && !grpList.length && hit.kind === 'event' && hit.ev !== ev) {
+            // the confirm bar is already on the board with the full quantity
+            delete raw.confirmMismatch;
+            rememberReplaced(raw, hit.raw);
+            dropEvents.push(ev);
+            n++;
             continue;
         }
-        rememberReplaced(raw, hit.raw || hit.u);
-        if (hit.kind === 'event' && hit.ev !== ev) {
-            dropEvents.push(ev);
+        if (!(evQty === 0 && grpList.length && qtyEqual(grpQty, fullQty))) {
+            raw.confirmMismatch = { confirmed : evQty + grpQty, full : fullQty };
+            continue;
         }
-        else if (hit.kind === 'unplanned') {
-            const c = hit.u;
-            raw.orderType = 'confirm';
-            raw.replaced  = false;
-            raw.po        = c.po || raw.po;
-            raw.mbmOrder  = c.mbmOrder || raw.mbmOrder;
-            raw.qty       = Number(c.qty ?? c.orderQty ?? raw.qty);
-            raw.orderQty  = Number(c.orderQty ?? c.qty ?? raw.orderQty);
-            raw.ship      = c.ship || raw.ship;
-            raw.pcd       = c.pcd || raw.pcd;
-            raw.smv       = Number(c.smv) > 0 ? Number(c.smv) : raw.smv;
-            raw.dbId      = c.dbId ?? raw.dbId;
-            raw.id        = c.id || raw.id;
-            raw.color     = c.color || orderColor(raw.po);
-            // Consolidated confirm bar: carry the whole PO group so the sync
-            // marks every planning_orders row of the group as planned
-            raw.poList    = Array.isArray(c.poList) && c.poList.length ? c.poList : (raw.po ? [raw.po] : []);
-            raw.idList    = Array.isArray(c.idList) && c.idList.length ? c.idList : (raw.dbId ? [raw.dbId] : []);
-            raw.poCount   = c.poCount || raw.poList.length || 1;
-            raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
-            // The event keeps its stable 'ev-proj:' code (PO-based codes can
-            // collide when one PO number spans several orders/colours) — the
-            // confirm link is carried by planning_order_id via raw.dbId.
-            ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
-            dropUnplanned.add(String(c.id));
-            pendingSwapIds.add(String(ev.id));
-            // Remaining colour groups of the SAME order: insert flush after
-            // the swapped bar so the whole order is planned, not one colour
-            const rest = (confirmGroups.get(reconKey(raw)) || []).filter(g => g !== c);
-            let anchor = ev;
-            for (const g of rest) {
-                const added = insertGroupAfter(anchor, g);
-                if (added) {
-                    dropUnplanned.add(String(g.id));
-                    anchor = added;
-                }
-            }
-            if (anchor !== ev) pushFollowers(s, lineIdOf(s, ev), anchor);
-        }
+        delete raw.confirmMismatch;
+        const c = grpList[0];
+        rememberReplaced(raw, c);
+        raw.orderType = 'confirm';
+        raw.replaced  = false;
+        raw.po        = c.po || raw.po;
+        raw.mbmOrder  = c.mbmOrder || raw.mbmOrder;
+        raw.qty       = Number(c.qty ?? c.orderQty ?? raw.qty);
+        raw.orderQty  = Number(c.orderQty ?? c.qty ?? raw.orderQty);
+        raw.ship      = c.ship || raw.ship;
+        raw.pcd       = c.pcd || raw.pcd;
+        raw.smv       = Number(c.smv) > 0 ? Number(c.smv) : raw.smv;
+        raw.dbId      = c.dbId ?? raw.dbId;
+        raw.id        = c.id || raw.id;
+        raw.color     = c.color || orderColor(raw.po);
+        // Consolidated confirm bar: carry the whole PO group so the sync
+        // marks every planning_orders row of the group as planned
+        raw.poList    = Array.isArray(c.poList) && c.poList.length ? c.poList : (raw.po ? [raw.po] : []);
+        raw.idList    = Array.isArray(c.idList) && c.idList.length ? c.idList : (raw.dbId ? [raw.dbId] : []);
+        raw.poCount   = c.poCount || raw.poList.length || 1;
+        raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
+        raw.reqMin    = Math.round(raw.qty * (Number(raw.smv) || 0));
+        // The swapped bar keeps the projection's SAVED span — the SOP run
+        // that sized the projection no longer re-sizes it
+        delete raw.sopDur; delete raw.sopMode;
+        raw.userPinned = true;
+        // The event keeps its stable 'ev-proj:' code (PO-based codes can
+        // collide when one PO number spans several orders/colours) — the
+        // confirm link is carried by planning_order_id via raw.dbId.
+        ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
+        pendingSwapIds.add(String(ev.id));
+        for (const g of grpList) dropUnplanned.add(String(g.id));
+        if (grpList.length > 1) splitSpanAmong(ev, grpList);
         n++;
-    }
-
-    // Second pass: orders whose confirm bar is ALREADY on the board (e.g.
-    // after a save/reload the projection is gone) but still have unplanned
-    // colour groups — insert those after the order's last bar on its line.
-    for (const [k, groups] of confirmGroups) {
-        const evs = confirmEvents.get(k);
-        if (!evs || !evs.length) continue;
-        let anchor = evs.reduce((a, b) => (b.endDate > a.endDate ? b : a));
-        const startAnchor = anchor;
-        for (const g of groups) {
-            if (dropUnplanned.has(String(g.id))) continue;
-            const added = insertGroupAfter(anchor, g);
-            if (added) {
-                dropUnplanned.add(String(g.id));
-                anchor = added;
-                n++;
-            }
-        }
-        if (anchor !== startAnchor) pushFollowers(s, lineIdOf(s, startAnchor), anchor);
     }
 
     // Unplanned projections that merely have a linked Confirm Order are NOT
@@ -11243,6 +11217,11 @@ body {
 .sop-flags span { display : inline-block; margin-right : 6px; font-size : 11px; color : #7a4a00; }
 .sop-skipped { margin-top : 8px; font-size : 12px; }
 .sop-skipped summary { cursor : pointer; color : #345; }
+/* Projection whose confirm quantity does not match: highlighted, not replaced */
+.b-sch-event.mb-qty-mismatch::before {
+    background : repeating-linear-gradient(135deg, #ffe082 0 8px, #ff8f00 8px 16px) !important;
+}
+.b-sch-event.mb-qty-mismatch { outline : 2px solid #e65100; outline-offset : -2px; color : #3e2723 !important; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .sop-opts label { display : inline-flex; align-items : center; gap : 6px; font-weight : 600; }
 

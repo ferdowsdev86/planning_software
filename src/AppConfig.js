@@ -1689,11 +1689,14 @@ export const schedulerProConfig = {
                 ? `<span class="tip4-badge tip4-consol">${r.poCount} POs</span>`
                 : '';
 
-            const orderTypeBadge = isConfirm
+            const mismatchBadge = r.confirmMismatch
+                ? `<span class="tip4-badge tip4-proj" title="Confirm quantity must equal the projection quantity before it replaces this bar">⚠ Confirm ${enc(fmtQty(r.confirmMismatch.confirmed))} / ${enc(fmtQty(r.confirmMismatch.full))} — not replaced</span>`
+                : '';
+            const orderTypeBadge = (isConfirm
                 ? '<span class="tip4-badge tip4-confirm">✔ Confirm</span>'
                 : r.orderType === 'projection'
                     ? '<span class="tip4-badge tip4-proj">Projection</span>'
-                    : '';
+                    : '') + mismatchBadge;
 
             const poCell = allPos.length > 1
                 ? allPos.map(p => `<span class="tip4-po-pill">${enc(String(p))}</span>`).join('')
@@ -1922,6 +1925,7 @@ export const schedulerProConfig = {
 
         renderData.cls.add(`mb-risk-${colorKey}`);
         if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
+        if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
 
         const q = (searchState.query || '').trim().toLowerCase();
         if (q) {
