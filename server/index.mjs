@@ -930,7 +930,7 @@ const ERP_QUERY = (cutoff) => [`
         s.stl_no                                          AS style_no,
         po.po_qty                                         AS order_quantity,
         po.po_qty                                         AS remaining_quantity,
-        COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)         AS smv,
+        COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)         AS smv,
         pt.prd_type_name                                  AS product_category,
         COALESCE(po.po_ex_fty, oe.order_delivery_date)   AS shipment_date,
         CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd ELSE NULL END AS pcd,
@@ -1132,7 +1132,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                     COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                     o.order_qty                                            AS order_qty,
                     o.odd                                                  AS shipment_date,
-                    COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)               AS smv,
+                    COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id, o.os_unit_id AS prod_unit,
                     COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
                     o.mr_order_code, o.mr_order_id
@@ -1193,7 +1193,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 COALESCE(pt.prd_type_name, s.stl_type)                 AS product_category,
                 COALESCE(NULLIF(oe.order_qty, 0), NULLIF(SUM(po.po_qty), 0), 0) AS order_qty,
                 COALESCE(MIN(po.po_ex_fty), oe.order_delivery_date)    AS shipment_date,
-                COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)               AS smv,
+                COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                 oe.unit_id, oe.prod_unit,
                 oe.pcd                                                  AS source_pcd
             FROM \`${ERP_DB}\`.mr_order_entry oe
@@ -1344,7 +1344,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     NULL                                                   AS po_number,
                     NULL                                                   AS color,
                     o.odd                                                  AS shipment_date,
-                    COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)               AS smv,
+                    COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id,
                     o.os_unit_id                                           AS prod_unit,
                     COALESCE(o.pcd, oe.pcd)                                AS source_pcd,
@@ -1379,7 +1379,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 NULL                                                       AS po_number,
                 NULL                                                       AS color,
                 COALESCE(MIN(po.po_ex_fty), oe.order_delivery_date)       AS shipment_date,
-                COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)                  AS smv,
+                COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)                  AS smv,
                 oe.unit_id,
                 oe.prod_unit,
                 oe.pcd                                                     AS source_pcd,
@@ -2065,7 +2065,7 @@ async function runAutoSync() {
                 COALESCE(ob.b_name, b.b_name)                       AS buyer_name,
                 o.style                                             AS style_no,
                 oc.clr_qty                                          AS order_quantity,
-                COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)            AS smv,
+                COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)            AS smv,
                 COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                 COALESCE(oc.delivery_date, po.po_ex_fty, o.odd)     AS shipment_date,
                 CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd ELSE NULL END AS pcd,
@@ -2174,7 +2174,7 @@ async function runAutoSync() {
                    oe.order_qty                                       AS order_quantity,
                    oe.order_delivery_date                             AS shipment_date,
                    CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd ELSE NULL END AS pcd,
-                   COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)          AS smv,
+                   COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)          AS smv,
                    oe.unit_id, oe.prod_unit
             FROM \`${ERP_DB}\`.mr_order_entry oe
             JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
@@ -2198,7 +2198,7 @@ async function runAutoSync() {
                    o.order_qty                                         AS order_quantity,
                    o.odd                                               AS shipment_date,
                    CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd ELSE NULL END AS pcd,
-                   COALESCE(NULLIF(s.production_smv, 0), NULLIF(s.stl_smv, 0), 0)            AS smv,
+                   COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)            AS smv,
                    oe.unit_id, o.os_unit_id                            AS prod_unit
             FROM \`${OS_DB}\`.os_orders o
             LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
