@@ -1407,6 +1407,47 @@ function openCurveDialog(rec) {
 }
 uiHooks.onOpenCurve = openCurveDialog;
 
+// Right-click → Recalculate duration (SOP): the ONE way a saved bar's length
+// is re-derived — by the user. Asks for the SMV when ERP has none, then
+// sizes the bar as curve-aware whole capacity days from its own start;
+// bars after it shift later only if this one grows.
+function recalcBarDuration(rec) {
+    const s = getInstance();
+    const raw = eventRawOf(rec);
+    const lid = rec ? lineIdOf(s, rec) : null;
+    if (!s || !raw || !lid || lid === 'hold') { toast('Place the bar on a line first', 'warn'); return; }
+    if (raw.status === 'completed') { toast('Completed bar — nothing to recalculate', 'warn'); return; }
+    if (raw.smvMissing && !(Number(raw.smvManual) > 0)) {
+        const v = window.prompt(`${mbmOrderNo(raw.po, raw.mbmOrder)}: ERP has no SMV for this style. Enter the SMV (minutes) to plan with:`, '');
+        if (v === null) return;
+        const smv = Number(String(v).replace(/[^0-9.]/g, ''));
+        if (!(smv > 0)) { toast('SMV must be a number greater than 0', 'error'); return; }
+        raw.smv = smv; raw.smvManual = smv; raw.smvMissing = false;
+        raw.reqMin = Math.round((Number(raw.qty) || 0) * smv);
+    }
+    const start  = new Date(rec.startDate);
+    const oldEnd = new Date(rec.endDate);
+    raw.start = start;
+    raw.sopMode = !!raw.ship;
+    deriveLcForPlacement(s, raw, lid, start);
+    applyLineFormulaDuration(s, raw, lid);
+    raw.sopMode = false;
+    const end = endOfWork(start, raw.dur || 1);
+    rec.set({ endDate : end, duration : elapsedDays(start, end) });
+    raw.end = end;
+    raw.userPinned = true;
+    let pushed = 0;
+    if (end > oldEnd) pushed = pushFollowers(s, lid, rec);
+    applyLearningCurves(s, { lineIds : [lid] });
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    const days = Number(raw.sopDur) > 0 ? `${raw.sopDur} day(s)${raw.sop?.lcDays ? ` incl. ${raw.sop.lcDays} learning-curve day(s)` : ''}` : `${(raw.dur || 0).toFixed(2)} day(s)`;
+    toast(`${mbmOrderNo(raw.po, raw.mbmOrder)}: duration recalculated — ${days}, ends ${fmtDate(end)}${pushed ? `; ${pushed} following bar(s) shifted later` : ''} — Save to keep it`, 'ok');
+}
+uiHooks.onRecalcDuration = recalcBarDuration;
+
 // Apply (or clear, snap=null) a build-up curve SNAPSHOT to one bar: the
 // curve runs on the bar's OWN relative production days from its OWN start —
 // calendar dates are never copied. Start/line/qty/SMV stay untouched; only
@@ -3621,7 +3662,7 @@ function sopForRow(r) {
     try {
         const { manpower, effPct, mins } = sopLineAverages();
         const qty = Number(r.orderQty) || null;
-        const smv = Number(r.smv) > 0 ? Number(r.smv) : null;
+        const smv = Number(r.smv) > 0 && !r.smvMissing ? Number(r.smv) : null;
         sp = sopPlan({
             exFactoryDate : new Date(ship), orderQuantity : qty, smv,
             lines : 1, operatorsPerLine : manpower, workingMinutesPerDay : mins,

@@ -177,6 +177,8 @@ function eventNotesPayload(raw, onHold) {
     if (raw.lcLink && raw.lcLink.refId != null) notes.lcLink = raw.lcLink;
     // SOP-PLN-01 production run (whole days) + milestone snapshot
     if (Number(raw.sopDur) > 0) notes.sop = { ...(raw.sop || {}), dur : Number(raw.sopDur) };
+    // SMV the planner entered because ERP has none for the style
+    if (Number(raw.smvManual) > 0) notes.smvManual = Number(raw.smvManual);
     // Consolidated bar: persist the PO group, otherwise a reload degrades the
     // bar to a single PO while keeping the group quantity (5,090 shown on a
     // 1,344-pc PO)
@@ -256,6 +258,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         eventCode : e.event_code || null,
         productType : productTypeFor(e.po_number, e.product_category),
         qty, orderQty : orderQty || qty, smv,
+        smvMissing : !(Number(e.smv) > 0) && !(Number(noteGroup.smvManual) > 0),
+        smvManual  : Number(noteGroup.smvManual) > 0 ? Number(noteGroup.smvManual) : undefined,
         reqMin   : Math.round(qty * smv),
         dur, start, end,
         pcd      : asDate(e.pcd) || (ship ? addCalDays(ship, -30) : null),
@@ -564,6 +568,7 @@ function mapUnplannedRow(o) {
         qty      : Number(o.remaining_quantity ?? o.order_quantity),
         orderQty : Number(o.order_quantity ?? o.remaining_quantity),
         smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
+        smvMissing : !(Number(o.smv) > 0),
         pcd      : asDate(o.pcd) || (ship ? addCalDays(ship, -30) : null),
         matReady : asDate(o.material_ready_date),
         ship,
@@ -742,7 +747,10 @@ export async function loadFromApi(unitId = null) {
         const known = mappedId && resources.some(r => r.id === mappedId && r.id !== 'hold');
         const orderQty = Number(e.order_quantity) || Number(e.planned_quantity) || 0;
         const qty   = Number(e.planned_quantity ?? e.order_quantity) || 0;
-        const smv   = Number(e.smv) > 0 ? Number(e.smv) : randSmv(e.po_number);
+        const noteSmv = Number(parseEventNotes(e.notes).smvManual) || 0;
+        // ERP SMV, else the SMV the planner typed in (Recalculate duration),
+        // else a placeholder that is FLAGGED as missing (never shown as real)
+        const smv   = Number(e.smv) > 0 ? Number(e.smv) : (noteSmv > 0 ? noteSmv : randSmv(e.po_number));
         const { start, end, dur } = boardSpanFromDb(e);
         const status = e.event_status === 'completed' ? 'completed' : e.event_status;
         const ship  = asDate(e.shipment_date);
@@ -844,6 +852,7 @@ export async function loadFromApi(unitId = null) {
                 orderQty    : Number(r.order_qty) || 0,
                 // round: ERP FLOAT smv arrives with float32 artifacts (23.600000381…)
                 smv         : Number(r.smv) > 0 ? Math.round(Number(r.smv) * 100) / 100 : randSmv(r.order_code),
+                smvMissing  : !(Number(r.smv) > 0),
                 ship        : asDate(r.shipment_date),
                 pcd         : r.effective_pcd ? asDate(r.effective_pcd) : null,
                 pcdSource   : r.pcd_source,
@@ -913,6 +922,7 @@ export async function loadFromApi(unitId = null) {
             qty      : Number(o.remaining_quantity ?? o.order_quantity),
             orderQty : Number(o.order_quantity ?? o.remaining_quantity),
             smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
+            smvMissing : !(Number(o.smv) > 0),
             pcd      : asDate(o.pcd) || (ship ? addCalDays(ship, -30) : null),
             matReady : asDate(o.material_ready_date),
             ship,

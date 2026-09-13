@@ -23,7 +23,9 @@ export function sopForRaw(scheduler, raw, lineId, extra = {}) {
     try {
         const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId || 'l1');
         const qty = Number(raw.orderQty ?? raw.qty) || null;
-        const smv = Number(raw.smv) > 0 ? Number(raw.smv) : null;
+        // A placeholder SMV (ERP has none) is NOT a confirmed SMV — SOP §3
+        // then plans the 10-day default run
+        const smv = Number(raw.smv) > 0 && !raw.smvMissing ? Number(raw.smv) : null;
         return sopPlan({
             exFactoryDate : new Date(raw.ship), orderQuantity : qty, smv,
             lines : 1, operatorsPerLine : manpower, workingMinutesPerDay : mins,
@@ -81,6 +83,30 @@ function lineCalcParams(scheduler, raw, lineId) {
     return { manpower, effPct : baseEff * strip / 100, mins };
 }
 
+// Whole days a bar OCCUPIES on the board for an SOP-planned order: the
+// capacity run (qty ÷ daily output, ceil) made curve-aware when the bar
+// enters a 3-day learning ramp — NO 5-day floor (the floor belongs to the
+// SOP milestone dates, not to line occupancy); SMV/qty unknown → SOP 10-day
+// default. Returns { days, lcDays, basis }.
+export function sopBoardDays(scheduler, raw, lineId) {
+    const sp = sopForRaw(scheduler, raw, lineId);
+    if (!sp) return null;
+    const run = sp.production;
+    if (run.basis !== 'capacity') return { days : run.days, lcDays : 0, basis : run.basis };
+    const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
+    const plainDays = Math.max(1, Number(run.rawDays) || 1);
+    let days = plainDays;
+    if (raw.lc?.applied && raw.lc.viaPlacement && (raw.lc.dayOffset || 0) === 0 && Array.isArray(raw.lc.pct)) {
+        const r = learningDuration({
+            qty : Number(raw.qty ?? raw.orderQty) || 0, smv : raw.smv,
+            manpower, baseEffPct : effPct, dailyMinutes : mins,
+            dayPcts : raw.lc.pct, dayOffset : 0
+        });
+        days = Math.max(plainDays, Math.ceil(r.dur - 1e-6));
+    }
+    return { days, lcDays : days - plainDays, basis : 'capacity' };
+}
+
 // (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
 export function applyLineFormulaDuration(scheduler, raw, lineId) {
     if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
@@ -89,20 +115,20 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
     // derived WHOLE-day production run (ceil, ≥5 days) — the fractional
     // formula/learning-curve sizing does not override it
     if (raw.sopMode && raw.ship) {
-        const sp = sopForRaw(scheduler, raw, lineId);
-        if (sp) raw.sopDur = sp.production.days;
+        // Being placed / recalculated: occupancy = curve-aware capacity days
+        // (learning-curve days already inside sopDur)
+        const bd = sopBoardDays(scheduler, raw, lineId);
+        if (bd) {
+            raw.sopDur = bd.days;
+            raw.sop = { ...(raw.sop || {}), lcDays : bd.lcDays, lcInside : true, basis : bd.basis };
+        }
     }
     if (Number(raw.sopDur) > 0) {
-        // 3-day learning curve on a changeover: the capacity lost while
-        // ramping (Σ 1 − day%) is added as whole days, decided at placement
-        // and then persisted with the bar (raw.sop.lcDays)
-        if (raw.lc?.viaPlacement && Array.isArray(raw.lc.pct)) {
-            const loss = raw.lc.applied && (raw.lc.dayOffset || 0) === 0
-                ? raw.lc.pct.reduce((a, p) => a + Math.max(0, 1 - Number(p) / 100), 0) : 0;
-            raw.sop = { ...(raw.sop || {}), lcDays : Math.ceil(loss - 1e-9) };
-        }
+        // Saved SOP bars planned before the curve was folded into sopDur
+        // still carry their ramp days separately
+        const extra = raw.sop?.lcInside ? 0 : (Number(raw.sop?.lcDays) || 0);
         // Whole CALENDAR working days (10h or 12h day alike) — not 600-min units
-        raw.dur     = workDayUnits(raw.start || new Date(), Number(raw.sopDur) + (Number(raw.sop?.lcDays) || 0));
+        raw.dur     = workDayUnits(raw.start || new Date(), Number(raw.sopDur) + extra);
         raw.workMin = raw.dur * mins;
         raw.reqMin  = Math.round((Number(raw.qty ?? raw.orderQty) || 0) * (Number(raw.smv) || 0));
         return raw.dur;
@@ -1471,6 +1497,15 @@ export const schedulerProConfig = {
                     if (rec) uiHooks.onOpenProps?.(rec);
                 }
             },
+            recalcDuration : {
+                text   : 'Recalculate duration (SOP)',
+                icon   : 'b-fa b-fa-rotate',
+                weight : 205,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onRecalcDuration?.(rec);
+                }
+            },
             planSchedule : {
                 text   : 'Planned schedule',
                 icon   : 'b-fa b-fa-table-list',
@@ -1762,7 +1797,7 @@ export const schedulerProConfig = {
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
-          ${R('SMV / Eff', `${enc(String(smv))} / ${enc(String(eff ?? '—'))}%`)}
+          ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}%`)}
           ${R('Stage', enc(stage))}
         </div>
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}

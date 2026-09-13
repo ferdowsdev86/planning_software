@@ -70,7 +70,7 @@ export function productionRun(o) {
     const dailyOutput = (o.lines * o.operatorsPerLine * o.workingMinutesPerDay * o.efficiency) / o.smv;
     if (!(dailyOutput > 0)) throw new Error('daily_output must be > 0 — check lines/operators/minutes/efficiency');
     const rawDays = Math.ceil(o.orderQuantity / dailyOutput);
-    const run = { days : rawDays, dailyOutput, basis : 'capacity', clamped : false, needsCapacityReview : false, message : '' };
+    const run = { days : rawDays, rawDays, dailyOutput, basis : 'capacity', clamped : false, needsCapacityReview : false, message : '' };
     if (rawDays < MIN_PRODUCTION_DAYS) {
         run.days = MIN_PRODUCTION_DAYS;
         run.clamped = true;
