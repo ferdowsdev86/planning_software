@@ -3602,7 +3602,7 @@ const ORDER_COLS = [
     'done',
     'orderType', 'status', 'deliveryStatus',
     'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
-    'orderQty', 'pcd', 'pcdSource', 'orderDelivery',
+    'orderQty', 'smv', 'pcd', 'pcdSource', 'orderDelivery',
     'ppStart', 'prodStart', 'prodEnd',
     'po', 'color', 'qty', 'poDelivery', 'grouping',
     'line', 'start', 'end'
@@ -3619,6 +3619,7 @@ const ORDER_COL_LABELS = {
     productType  : 'Product',
     mbmOrder     : 'MBM Order',
     orderQty     : 'Order Qty',
+    smv          : 'SMV',
     pcd          : 'PCD',
     pcdSource    : 'PCD Src',
     orderDelivery: 'Order Delivery',
@@ -3693,6 +3694,7 @@ function orderCellText(r, key) {
         case 'color'         : return hidePoFields ? '' : String(r.garmentColor ?? '');
         case 'qty'           : return fmtQty(r.qty);
         case 'orderQty'      : return fmtQty(r.orderQty);
+        case 'smv'           : return r.smvMissing || !(Number(r.smv) > 0) ? 'missing' : String(Math.round(Number(r.smv) * 100) / 100);
         case 'reqMin'        : return fmtQty(r.reqMin);
         case 'pcd'           : return r.pcd ? fmtDateDdMonRr(r.pcd) : '—';
         case 'poDelivery'    : return hidePoFields ? '' : (r.poDelivery ? fmtDateDdMonRr(r.poDelivery) : '—');
@@ -3727,7 +3729,7 @@ function toggleGroupExpand(row) {
 // Column filter queries: quantity columns accept >N <N >=N <=N =N;
 // date columns accept the same operators with a date (2026-09-01, 01-09-26,
 // 15-SEP-26, 01/09/2026 …). Anything else falls back to text contains.
-const QTY_FILTER_COLS  = new Set(['orderQty', 'qty']);
+const QTY_FILTER_COLS  = new Set(['orderQty', 'qty', 'smv']);
 const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end', 'ppStart', 'prodStart', 'prodEnd']);
 const MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -3762,7 +3764,9 @@ function matchColFilter(r, k, q) {
         if (QTY_FILTER_COLS.has(k)) {
             const val = Number(String(rawVal).replace(/,/g, ''));
             if (Number.isFinite(val)) {
-                const cell = k === 'orderQty' ? (Number(r.orderQty) || 0) : (Number(r.qty) || 0);
+                const cell = k === 'orderQty' ? (Number(r.orderQty) || 0)
+                    : k === 'smv' ? (r.smvMissing ? 0 : Number(r.smv) || 0)
+                    : (Number(r.qty) || 0);
                 return cmpApply(op, cell, val);
             }
         }
@@ -3797,6 +3801,7 @@ function toggleOrderSort(k) {
 function orderSortVal(r, k) {
     if (k === 'orderQty') return Number(r.orderQty) || 0;
     if (k === 'qty') return Number(r.qty) || 0;
+    if (k === 'smv') return r.smvMissing ? 0 : Number(r.smv) || 0;
     if (DATE_FILTER_COLS.has(k)) { const d = rowDateVal(r, k); return d instanceof Date ? d.getTime() : 0; }
     return orderCellText(r, k).toLowerCase();
 }
@@ -7870,7 +7875,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <thead>
                             <tr>
                                 <th v-for="k in ORDER_COLS" :key="k"
-                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
+                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
                                     :title="k === 'done' ? '' : 'Click to sort (asc → desc → off)'"
                                     @click="k !== 'done' && toggleOrderSort(k)"
                                 >
@@ -7898,8 +7903,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <tr class="od-filterrow">
                                 <th v-for="k in ORDER_COLS" :key="k" :class="'od-c-' + k">
                                     <input v-model="orderFilters[k]" class="od-filter" type="text" placeholder="🔍"
-                                        :title="k === 'orderQty' || k === 'qty'
-                                            ? 'Qty query: >1000  <500  >=1  <=1  =1500  (or plain text)'
+                                        :title="k === 'orderQty' || k === 'qty' || k === 'smv'
+                                            ? 'Qty query: >1000  <500  >=1  <=1  =1500  (or plain text; SMV: type missing)'
                                             : (['pcd','orderDelivery','poDelivery','start','end','ppStart','prodStart','prodEnd'].includes(k)
                                                 ? 'Date query: >01-09-26  <=15-SEP-26  =2026-09-01  (or plain text)'
                                                 : '')"
@@ -7917,7 +7922,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         'od-row-noconfirm' : row.orderType === 'projected' && row.confirmArrived === false && !(row.replaced || row.status === 'replaced'),
                                         'od-row-replaced'  : row.replaced || row.status === 'replaced',
                                         'od-row-partial'   : !!projPartialInfo(row),
-                                        'od-row-completed' : row.status === 'completed'
+                                        'od-row-completed' : row.status === 'completed',
+                                        'od-row-nosmv'     : !!row.smvMissing || !(Number(row.smv) > 0)
                                     }"
                                     :data-note="projPartialInfo(row)
                                         ? `Partial: confirm POs cover ${fmtQty(projPartialInfo(row).confQty)} of ${fmtQty(projPartialInfo(row).orderQty)} pcs (${fmtQty(projPartialInfo(row).diff)} not confirmed)`
@@ -7926,7 +7932,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     @dblclick.prevent="odRowDblClick(row)"
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
-                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty', 'st-user' : k === 'po' }]"
+                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv', 'st-user' : k === 'po' }]"
                                         :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null : (orderCellText(row, k) || null)"
                                     >
                                         <input v-if="k === 'done' && row.orderType === 'projected' && row.status !== 'completed'"
@@ -9873,6 +9879,10 @@ body {
 
 .od-row-projected td { background : #fffde7; }
 .od-row-projected:hover td { background : #fff9c4; }
+/* SMV missing in ERP (projection or confirm): red row — plan runs on the SOP 10-day default */
+.od-table tr.od-row-nosmv td { background : #fdecea !important; }
+.od-table tr.od-row-nosmv:hover td { background : #f9d5d1 !important; }
+.od-table tr.od-row-nosmv td.od-c-smv { color : #b71c1c; font-weight : 700; }
 
 /* Completed orders: clearly highlighted, muted + struck order info.
    Declared with higher specificity so it wins over projected/planned tints */

@@ -610,6 +610,7 @@ export async function loadErpAllOrders(prodUnit = null) {
         eligibleForInitialBoard : r.eligible_for_initial_board ?? (r.order_type !== 'confirm'),
         boardNote    : r.board_note || null,
         smv          : Math.round((Number(r.smv) || 0) * 100) / 100,
+        smvMissing   : !(Number(r.smv) > 0),
         reqMin       : Math.round(Number(r.po_qty ?? r.order_qty ?? 0) * Number(r.smv || 0)),
         status       : r.planning_status === 'completed' ? 'completed'
                      : r.planning_status === 'replaced' ? 'replaced'
