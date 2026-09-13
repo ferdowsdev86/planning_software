@@ -4316,9 +4316,9 @@ function replaceProjectionsWithConfirms(s) {
         raw.poCount   = c.poCount || raw.poList.length || 1;
         raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
         raw.reqMin    = Math.round(raw.qty * (Number(raw.smv) || 0));
-        // The swapped bar keeps the projection's SAVED span — the SOP run
-        // that sized the projection no longer re-sizes it
-        delete raw.sopDur; delete raw.sopMode;
+        // The swapped bar keeps the projection's SAVED span (and its SOP run
+        // for a later Recalculate)
+        delete raw.sopMode;
         raw.userPinned = true;
         // The event keeps its stable 'ev-proj:' code (PO-based codes can
         // collide when one PO number spans several orders/colours) — the
@@ -6517,7 +6517,10 @@ async function placeCarried(date, resourceRecord) {
         // Changeover check at the drop point: ONLY this bar takes a
         // curve-aware duration; no other bar is resized by the curve
         deriveLcForPlacement(s, raw, targetId, date);
-        applyLineFormulaDuration(s, raw, targetId);
+        // A SAVED bar keeps its saved length when the user moves it — its
+        // length changes only through Recalculate duration. Only a bar that
+        // has never been saved is sized (SOP / formula / curve) at placement.
+        if (!raw.dbPinned) applyLineFormulaDuration(s, raw, targetId);
     }
 
     let start, end, note = null;
