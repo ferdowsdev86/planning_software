@@ -12,6 +12,28 @@ import {
     dayCapacityFactor
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
+import { plan as sopPlan } from './sopTimeline.mjs';
+
+// SOP-PLN-01 backward timeline for one bar, using ITS line's capacity params
+// (1 line, this line's manpower / minutes / efficiency). Wash data is not in
+// the planning DB → wash stays provisional (conservative 7-day PP, per §2).
+export function sopForRaw(scheduler, raw, lineId, extra = {}) {
+    if (!raw?.ship) return null;
+    try {
+        const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId || 'l1');
+        const qty = Number(raw.orderQty ?? raw.qty) || null;
+        const smv = Number(raw.smv) > 0 ? Number(raw.smv) : null;
+        return sopPlan({
+            exFactoryDate : new Date(raw.ship), orderQuantity : qty, smv,
+            lines : 1, operatorsPerLine : manpower, workingMinutesPerDay : mins,
+            efficiency : Math.max(0.05, effPct / 100),
+            washType : extra.washType || 'normal', washConfirmed : !!extra.washConfirmed,
+            smvConfirmed : smv != null, quantityConfirmed : qty != null,
+            holidayDates : [], todayDate : new Date()
+        });
+    }
+    catch { return null; }
+}
 import { resolveDropPosition, snapToleranceDays } from './snapService.mjs';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +84,19 @@ function lineCalcParams(scheduler, raw, lineId) {
 export function applyLineFormulaDuration(scheduler, raw, lineId) {
     if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
     const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
+    // SOP-PLN-01 §3: a bar planned by the SOP timeline keeps its capacity-
+    // derived WHOLE-day production run (ceil, ≥5 days) — the fractional
+    // formula/learning-curve sizing does not override it
+    if (raw.sopMode && raw.ship) {
+        const sp = sopForRaw(scheduler, raw, lineId);
+        if (sp) raw.sopDur = sp.production.days;
+    }
+    if (Number(raw.sopDur) > 0) {
+        raw.dur     = Number(raw.sopDur);
+        raw.workMin = raw.dur * mins;
+        raw.reqMin  = Math.round((Number(raw.qty ?? raw.orderQty) || 0) * (Number(raw.smv) || 0));
+        return raw.dur;
+    }
     applyFormulaToRaw(raw, manpower, effPct, mins);
     // A bar entering the learning ramp is longer than the plain formula says.
     // ONLY a bar whose ramp came from an active placement (viaPlacement) is
@@ -1726,6 +1761,33 @@ export const schedulerProConfig = {
         ${dayRows ? `<table class="tip4-po-tbl tip4-lc-tbl">
           <thead><tr><th>Ramp</th><th>Applied eff</th><th>Daily capacity</th></tr></thead>
           <tbody>${dayRows}</tbody></table>` : ''}
+      </div>
+    </div>
+  </div>`;
+    })()}
+
+  <!-- SOP-PLN-01 TIMELINE CARD -->
+  ${(() => {
+        const sp = sopForRaw(uiHooks.instance, r, lid, { washConfirmed : !!s.wash_recipe_status, washType : s.wash_type || s.wash_name || 'normal' });
+        if (!sp) return '';
+        const m = sp.milestones;
+        const d = x => enc(ddMon(x));
+        const flag = sp.breached
+            ? `<span class="tip-badge tip-late">⚠ PP passed ${sp.breachDays}d</span>`
+            : (sp.production.needsCapacityReview ? '<span class="tip-badge tip-pend">⚑ capacity review</span>' : '<span class="tip-badge tip-ok">on track</span>');
+        return `<div class="tip4-card">
+    <div class="tip4-card-hd">📐 SOP Timeline (backward from ex-factory) ${flag}</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows">
+        <div class="tip4-2col">
+          ${R('PP start', `${d(m.pp_start.date)} <span class="t4dim">(${enc(m.pp_start.dayOfWeek.slice(0, 3))}, ${sp.pp.days}d ${sp.pp.basis === 'provisional_conservative' ? 'provisional' : ''})</span>`)}
+          ${R('Throughput', `${d(m.throughput_start.date)} <span class="t4dim">(2d)</span>`)}
+          ${R('Prod start', `${d(m.production_start.date)} <span class="t4dim">(${sp.production.days}d${sp.production.clamped ? ', min 5' : ''})</span>`)}
+          ${R('Prod complete', d(m.production_complete.date))}
+          ${R('Ex-factory', `${d(m.ex_factory.date)} <span class="t4dim">(+6d)</span>`)}
+          ${R('Cycle', `${sp.totalCycleDays} days <span class="t4dim">(display only)</span>`)}
+        </div>
+        ${sp.breached ? `<div class="t4note">${enc(sp.escalation)}</div>` : ''}
       </div>
     </div>
   </div>`;

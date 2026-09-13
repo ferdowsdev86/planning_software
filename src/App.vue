@@ -5,8 +5,9 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration
+    applyLineFormulaDuration, sopForRaw
 } from './AppConfig.js';
+import { plan as sopPlan } from './sopTimeline.mjs';
 import {
     UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, hoursToHm, ymdOf, dayHoursOf, dayCfgOf, dayCapacityFactor, buildManpowerRanges,
     buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay,
@@ -1890,6 +1891,222 @@ function applyPullForward() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan by SOP timeline (SOP-PLN-01): every unplanned projection / confirm
+// order with an ex-factory date is placed BACKWARD from that date —
+// production_complete = ex-factory − 6d, production_start = that − the
+// capacity-derived run (ceil, ≥5d, holidays extend), PP start = −2d − PP.
+// The line whose first feasible slot is earliest takes the bar; the board's
+// insertion / forward-push rules are unchanged. MANUAL action — never runs
+// on load (auto-plan stays off). Preview → confirm → one undoable step.
+// ---------------------------------------------------------------------------
+const sopOpen = ref(false);
+const sopPrev = shallowRef(null);
+const sopBusy = ref(false);
+
+async function openSopPlan() {
+    openMenu.value = null;
+    const s = getInstance();
+    if (view.value !== 'board' || !currentBoard.value || !s) {
+        toast('Open a planning board first', 'warn');
+        return;
+    }
+    sopOpen.value = true;
+    sopBusy.value = true;
+    try {
+        if (!erpAllOrders.value.length) {
+            const rows = await loadErpAllOrders(currentUnitId.value || null);
+            sopRowCache.clear();
+            erpAllOrders.value = overlayBoardPlacements(rows);
+        }
+        sopPrev.value = computeSopPlan();
+    }
+    catch (e) {
+        toast(`SOP plan failed: ${e.message}`, 'error');
+        sopOpen.value = false;
+    }
+    finally {
+        sopBusy.value = false;
+    }
+}
+
+// First FREE slot on a virtual bar list (real bars + bars placed earlier in
+// the same preview): SOP placement never moves an existing bar, so any bar
+// overlapping the span is an obstacle and the new bar attaches after it.
+// The apply step then re-runs the board's computeInsertStart at that start,
+// which returns the same point because nothing covers it.
+function sopVirtualInsert(bars, desired, dur) {
+    const NEAR_MS = 30 * 60000;
+    let start = startOfWorkDay(isOffDay(desired) ? nextWorkingDay(desired) : desired);
+    let blockedBy = null;
+    for (let guard = 0; guard < 60; guard++) {
+        const end  = endOfWork(start, dur);
+        const obst = bars.find(b => b.start < end && b.end.getTime() + NEAR_MS > start.getTime());
+        if (!obst) return { start, end, blockedBy };
+        blockedBy = obst.name;
+        start = nextStartAfter(obst.end);
+    }
+    return { start, end : endOfWork(start, dur), blockedBy };
+}
+
+function computeSopPlan() {
+    const s = getInstance();
+    if (!s) return null;
+    const lines = s.resourceStore.records.filter(r => isSewingRes(r));
+    if (!lines.length) return { changes : [], skipped : [], summary : { orders : 0, lines : 0, late : 0, breached : 0, review : 0 } };
+    // Virtual per-line occupancy: real bars first
+    const occ = new Map(lines.map(l => [l.id, []]));
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(s, ev);
+        if (!occ.has(lid)) continue;
+        occ.get(lid).push({ start : ev.startDate, end : ev.endDate, name : ev.name,
+            fixed : ev.draggable === false || raw.status === 'completed' || (Number(ev.percentDone) || 0) > 0 });
+    }
+    const isProj = r => r.orderType !== 'confirm';
+    const hasProjection = new Set(erpAllOrders.value.filter(r => isProj(r) && r.status !== 'completed' && !r.replaced).map(r => String(r.mbmOrder || '')));
+    const rows = erpAllOrders.value
+        .filter(r => r.status === 'unplanned' && !r.planned && !r.replaced && (r.orderDelivery || r.poDelivery))
+        .sort((a, b) => new Date(a.orderDelivery || a.poDelivery) - new Date(b.orderDelivery || b.poDelivery));
+    const changes = [], skipped = [];
+    const earliest = startOfWorkDay(nextWorkingDay(new Date()));
+    for (const r of rows) {
+        const order = r.mbmOrder || r.po;
+        // The projection is the planning row; its confirm POs plan only when
+        // no live projection row exists for that order
+        if (!isProj(r) && hasProjection.has(String(r.mbmOrder || ''))) {
+            skipped.push({ order, po : r.po, reason : 'confirm PO — its projection row is the planning row' });
+            continue;
+        }
+        if (findOrderEventOnBoard(s, r) && lineIdOf(s, findOrderEventOnBoard(s, r)) !== 'hold') {
+            skipped.push({ order, po : r.po, reason : 'already on a line' });
+            continue;
+        }
+        const { src, err } = resolveCarrySource(r);
+        if (err) { skipped.push({ order, po : r.po, reason : err }); continue; }
+        const raw = {
+            ...src,
+            smv : Number(src.smv) > 0 ? Number(src.smv) : randSmv(src.po || src.mbmOrder),
+            qty : Number(src.qty ?? src.orderQty) || 0, orderQty : Number(src.orderQty ?? src.qty) || 0
+        };
+        let best = null;
+        for (const l of lines) {
+            const sp = sopForRaw(s, raw, l.id);
+            if (!sp) continue;
+            const target  = sp.milestones.production_start.date;
+            const desired = target < earliest ? earliest : target;
+            const ins = sopVirtualInsert(occ.get(l.id), desired, sp.production.days);
+            if (!best || ins.start < best.ins.start) best = { l, sp, ins };
+        }
+        if (!best) { skipped.push({ order, po : r.po, reason : 'no ex-factory date' }); continue; }
+        const { l, sp, ins } = best;
+        const m = sp.milestones;
+        occ.get(l.id).push({ start : ins.start, end : ins.end, name : order, fixed : false });
+        const late = ins.end > endOfWorkDay(m.production_complete.date);
+        changes.push({
+            row : r, src, order, po : r.po, type : isProj(r) ? 'Projection' : 'Confirm',
+            line : l.id, lineName : l.name,
+            exFactory : m.ex_factory.date, ppStart : m.pp_start.date,
+            prodTarget : m.production_start.date, prodComplete : m.production_complete.date,
+            start : ins.start, end : ins.end, days : sp.production.days,
+            breached : sp.breached, breachDays : sp.breachDays,
+            review : sp.production.needsCapacityReview, late, blockedBy : ins.blockedBy,
+            sop : { version : sp.version, exFactory : m.ex_factory.date.toISOString(), ppStart : m.pp_start.date.toISOString(),
+                throughputStart : m.throughput_start.date.toISOString(), prodStart : m.production_start.date.toISOString(),
+                prodComplete : m.production_complete.date.toISOString(), days : sp.production.days, ppDays : sp.pp.days, ppBasis : sp.pp.basis }
+        });
+    }
+    return {
+        changes, skipped,
+        summary : {
+            orders   : changes.length,
+            lines    : new Set(changes.map(c => c.line)).size,
+            late     : changes.filter(c => c.late).length,
+            breached : changes.filter(c => c.breached).length,
+            review   : changes.filter(c => c.review).length
+        }
+    };
+}
+
+function applySopPlan() {
+    const s = getInstance();
+    const p = sopPrev.value;
+    if (!s || !p?.changes.length) {
+        toast('Nothing to plan — no unplanned order with an ex-factory date', 'ok');
+        return;
+    }
+    if (!window.confirm(`Place ${p.changes.length} order(s) on the board by the SOP backward timeline? Overlapped bars shift later (never earlier). Continue?`)) return;
+    const stm = s.project?.stm;
+    let stmTx = false;
+    try { if (stm) { stm.enable?.(); stm.startTransaction?.('Plan by SOP timeline'); stmTx = true; } } catch { /* no stm */ }
+    const placed = [];
+    let pushedTotal = 0;
+    beginBoardInteraction(s, 'light');
+    try {
+        for (const c of p.changes) {
+            const u   = unplanned.value.find(x => String(x.id) === String(c.src.id));
+            const rec = findOrderEventOnBoard(s, c.row) || buildDraftRec(s, c.src, u);
+            if (!rec) continue;
+            const raw = rec.data.raw;
+            raw.sopMode = true;
+            raw.sopDur  = c.days;
+            raw.sop     = c.sop;
+            raw.parked  = false;
+            raw.status  = 'draft';
+            raw.userPinned = false;
+            applyLineFormulaDuration(s, raw, c.line);
+            // Real-board insertion (same rule as the preview; the preview
+            // already accounted for the bars placed before this one)
+            const ins = computeInsertStart(s, c.line, c.start, raw.dur, rec.id);
+            const start = ins.start, end = ins.end;
+            if (!(start instanceof Date) || Number.isNaN(start.getTime()) || !(end > start)) continue;
+            raw.latePlan = !!raw.ship && end > new Date(raw.ship);
+            assignEventToLine(s, rec, c.line);
+            rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : c.line });
+            rec.data.resourceId = c.line;
+            raw.start = start;
+            raw.end   = end;
+            pushedTotal += pushFollowers(s, c.line, rec) || 0;
+            const util = computeLineUtil(s.eventStore.records);
+            raw.risk = calcRisk({ start, end, ship : raw.ship, matReady : raw.matReady, lineUtil : util[c.line] ?? 0, status : raw.status });
+            placed.push({ c, rec });
+        }
+    }
+    catch (err) {
+        try { stmTx && stm.rejectTransaction?.(); } catch { /* already closed */ }
+        endBoardInteraction(s);
+        toast(`SOP plan failed (${err.message}) — changes rolled back`, 'error');
+        return;
+    }
+    endBoardInteraction(s);
+    try { stmTx && stm.stopTransaction?.(); } catch { /* no tx */ }
+    applyLearningCurves(s, { lineIds : [...new Set(placed.map(x => x.c.line))] });
+    expandTimeAxisForEvents(s);
+    // The list shows these as planned immediately
+    const codes = new Set(placed.map(x => String(x.c.row.mbmOrder || '')));
+    for (const r of erpAllOrders.value) {
+        if (placed.some(x => x.c.row === r)) { r.status = 'planned'; r.planned = true; }
+    }
+    if (codes.size) erpAllOrders.value = overlayBoardPlacements([...erpAllOrders.value]);
+    linkAudit(placed.map(({ c, rec }) => ({
+        eventId : String(rec.id).replace(/^db-/, ''), action : 'sop-plan',
+        line : c.lineName, order : c.order,
+        newStart : rec.startDate.toISOString(), newEnd : rec.endDate.toISOString(),
+        exFactory : c.sop.exFactory, ppStart : c.sop.ppStart, prodStart : c.sop.prodStart, prodComplete : c.sop.prodComplete,
+        days : c.days, breached : c.breached, late : c.late,
+        user : authUser.value?.username, at : new Date().toISOString()
+    })));
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    const lateN = placed.filter(x => x.c.late).length;
+    toast(`SOP timeline: ${placed.length} order(s) placed on ${new Set(placed.map(x => x.c.line)).size} line(s)${pushedTotal ? `, ${pushedTotal} bar(s) shifted later` : ''}${lateN ? ` — ⚠ ${lateN} miss the ex-factory buffer (escalate)` : ''} — Save to keep it (Undo reverses it).`, lateN ? 'warn' : 'ok');
+    sopOpen.value = false;
+    sopPrev.value = null;
+}
+
+// ---------------------------------------------------------------------------
 // Planned schedule (right-click -> Planned schedule): day-wise quantity,
 // cumulative, efficiency and hours - FastReact "Planned quantity" window
 // ---------------------------------------------------------------------------
@@ -3281,6 +3498,7 @@ const ORDER_COLS = [
     'orderType', 'status', 'deliveryStatus',
     'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
     'orderQty', 'pcd', 'pcdSource', 'orderDelivery',
+    'ppStart', 'prodStart', 'prodEnd',
     'po', 'color', 'qty', 'poDelivery', 'grouping',
     'line', 'start', 'end'
 ];
@@ -3299,6 +3517,9 @@ const ORDER_COL_LABELS = {
     pcd          : 'PCD',
     pcdSource    : 'PCD Src',
     orderDelivery: 'Order Delivery',
+    ppStart      : 'PP Start',
+    prodStart    : 'Prod Start',
+    prodEnd      : 'Prod Complete',
     po           : 'PO',
     color        : 'Color',
     qty          : 'PO Qty',
@@ -3309,6 +3530,56 @@ const ORDER_COL_LABELS = {
     end          : 'End',
 };
 const orderFilters = ref(Object.fromEntries(ORDER_COLS.map(k => [k, ''])));
+
+// SOP-PLN-01 backward timeline for a list row: ex-factory = order delivery
+// (PO delivery for confirms), capacity = the average of the board's sewing
+// lines (the exact per-line run is re-derived when the bar is placed). Wash
+// data is not in the planning DB → conservative 7-day PP (provisional).
+const SOP_COLS = new Set(['ppStart', 'prodStart', 'prodEnd']);
+const sopRowCache = new Map();
+function sopLineAverages() {
+    const s = getInstance();
+    const lines = (s?.resourceStore?.records || []).filter(x => isSewingRes(x));
+    const src = lines.length ? lines.map(x => ({ ...LINE_BY_ID[x.id], ...(x.data || {}) })) : LINES;
+    const avg = (f, d) => src.length ? src.reduce((a, x) => a + (Number(f(x)) || d), 0) / src.length : d;
+    return {
+        manpower : avg(x => x.manpower, 50),
+        effPct   : avg(x => x.eff, 50),
+        mins     : avg(x => (Number(x.hours) > 0 ? x.hours * 60 : WORK_MIN_PER_DAY), WORK_MIN_PER_DAY)
+    };
+}
+function sopForRow(r) {
+    const ship = r.orderDelivery || r.poDelivery;
+    if (!ship || r.status === 'completed' || r.replaced) return null;
+    const key = `${+new Date(ship)}|${r.orderQty}|${r.smv}`;
+    if (sopRowCache.has(key)) return sopRowCache.get(key);
+    let sp = null;
+    try {
+        const { manpower, effPct, mins } = sopLineAverages();
+        const qty = Number(r.orderQty) || null;
+        const smv = Number(r.smv) > 0 ? Number(r.smv) : null;
+        sp = sopPlan({
+            exFactoryDate : new Date(ship), orderQuantity : qty, smv,
+            lines : 1, operatorsPerLine : manpower, workingMinutesPerDay : mins,
+            efficiency : Math.max(0.05, effPct / 100),
+            washType : 'normal', washConfirmed : false,
+            smvConfirmed : smv != null, quantityConfirmed : qty != null,
+            holidayDates : [], todayDate : new Date()
+        });
+    }
+    catch { sp = null; }
+    sopRowCache.set(key, sp);
+    return sp;
+}
+function sopDateOf(r, k) {
+    const sp = sopForRow(r);
+    if (!sp) return null;
+    return k === 'ppStart' ? sp.milestones.pp_start.date
+        : k === 'prodStart' ? sp.milestones.production_start.date
+        : sp.milestones.production_complete.date;
+}
+// Date value of a list column — SOP columns are derived, the rest stored
+const rowDateVal = (r, k) => SOP_COLS.has(k) ? sopDateOf(r, k) : r[k];
 
 function orderCellText(r, key) {
     const hidePoFields = r.orderType === 'projection' || r.orderType === 'projected';
@@ -3321,6 +3592,9 @@ function orderCellText(r, key) {
         case 'pcd'           : return r.pcd ? fmtDateDdMonRr(r.pcd) : '—';
         case 'poDelivery'    : return hidePoFields ? '' : (r.poDelivery ? fmtDateDdMonRr(r.poDelivery) : '—');
         case 'orderDelivery' : return r.orderDelivery ? fmtDateDdMonRr(r.orderDelivery) : '—';
+        case 'ppStart'       : { const sp = sopForRow(r); return sp ? `${sp.breached ? '⚠ ' : ''}${fmtDateDdMonRr(sp.milestones.pp_start.date)}` : '—'; }
+        case 'prodStart'     : { const sp = sopForRow(r); return sp ? `${sp.production.needsCapacityReview ? '⚑ ' : ''}${fmtDateDdMonRr(sp.milestones.production_start.date)}` : '—'; }
+        case 'prodEnd'       : { const sp = sopForRow(r); return sp ? `${fmtDateDdMonRr(sp.milestones.production_complete.date)} (${sp.production.days}d)` : '—'; }
         case 'start'         : return r.start ? fmtDate(r.start) : '—';
         case 'end'           : return r.end ? fmtDate(r.end) : '—';
         case 'progress'      : return `${r.progress}%`;
@@ -3349,7 +3623,7 @@ function toggleGroupExpand(row) {
 // date columns accept the same operators with a date (2026-09-01, 01-09-26,
 // 15-SEP-26, 01/09/2026 …). Anything else falls back to text contains.
 const QTY_FILTER_COLS  = new Set(['orderQty', 'qty']);
-const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end']);
+const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end', 'ppStart', 'prodStart', 'prodEnd']);
 const MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 function parseQueryDate(sv) {
@@ -3390,7 +3664,7 @@ function matchColFilter(r, k, q) {
         if (DATE_FILTER_COLS.has(k)) {
             const qd = parseQueryDate(rawVal);
             if (qd) {
-                const cell = r[k];
+                const cell = rowDateVal(r, k);
                 if (!(cell instanceof Date)) return false;
                 const day = new Date(cell); day.setHours(0, 0, 0, 0);
                 return cmpApply(op, day.getTime(), qd.getTime());
@@ -3418,7 +3692,7 @@ function toggleOrderSort(k) {
 function orderSortVal(r, k) {
     if (k === 'orderQty') return Number(r.orderQty) || 0;
     if (k === 'qty') return Number(r.qty) || 0;
-    if (DATE_FILTER_COLS.has(k)) return r[k] instanceof Date ? r[k].getTime() : 0;
+    if (DATE_FILTER_COLS.has(k)) { const d = rowDateVal(r, k); return d instanceof Date ? d.getTime() : 0; }
     return orderCellText(r, k).toLowerCase();
 }
 
@@ -3490,6 +3764,7 @@ function reloadOrdersList() {
     markedComplete.value = new Set();
     erpAllLoading.value = true;
     loadErpAllOrders(currentUnitId.value || null).then(rows => {
+        sopRowCache.clear();
         erpAllOrders.value  = overlayBoardPlacements(rows);
         erpAllLoading.value = false;
         toast(`Order list refreshed — ${rows.length} row(s)`, 'ok');
@@ -5193,6 +5468,81 @@ function odRowDblClick(row) {
     carryOrderToBoard(row);
 }
 
+// Which unplanned source a list row plans from: confirm orders come from the
+// unplanned pool; a projection builds straight from the list row.
+function resolveCarrySource(row) {
+    const isConf = row.orderType === 'confirm';
+    const rowPos = new Set((row.poList || []).map(String).concat(row.po ? [String(row.po)] : []));
+    const u = unplanned.value.find(x => {
+        if (String(x.mbmOrder || '') !== String(row.mbmOrder || '')) return false;
+        const xConf = orderTypeOf(x.po, x.orderType) === 'confirm';
+        if (xConf !== isConf) return false;
+        if (!isConf || !rowPos.size) return true;
+        if (x.po && rowPos.has(String(x.po))) return true;
+        return (x.poList || []).some(p => rowPos.has(String(p)));
+    });
+    let src = u;
+    if (!src && !isConf) {
+        if (row.replaced || row.status === 'replaced') {
+            return { err : `${row.mbmOrder} was replaced — its confirm POs are the ones to plan` };
+        }
+        const code = String(row.mbmOrder || '');
+        if (!code) return { err : 'row has no order code' };
+        src = {
+            id          : `proj:${code}`,
+            mbmOrder    : code,
+            po          : '',
+            buyer       : row.buyer || 'Projection',
+            style       : row.style || '',
+            productType : row.productType || '',
+            orderType   : 'projection',
+            qty         : Number(row.orderQty ?? row.qty) || 0,
+            orderQty    : Number(row.orderQty ?? row.qty) || 0,
+            smv         : Number(row.smv) > 0 ? Number(row.smv) : 0,
+            ship        : row.orderDelivery || null,
+            pcd         : row.pcd || null,
+            matReady    : null,
+            unitId      : row.unitId ?? null
+        };
+    }
+    if (!src) return { err : `${row.mbmOrder || row.po} — not in the unplanned pool (try ⟳ refresh, or its POs may not be synced yet)` };
+    return { src, u };
+}
+
+// Draft bar (parked on the Holding Row) for an unplanned source. Every bar
+// created from the list from now on follows SOP-PLN-01: raw.sopMode makes
+// applyLineFormulaDuration size it by the capacity-derived whole-day run.
+function buildDraftRec(s, src, u) {
+    const evId = `ev-${src.id}`;
+    let rec = s.eventStore.getById(evId);
+    if (rec) return rec;
+    const smv   = Number(src.smv) > 0 ? Number(src.smv) : randSmv(src.po || src.mbmOrder);
+    const start = startOfWorkDay(nextWorkingDay(new Date()));
+    const end   = endOfWork(start, 1);
+    const raw = {
+        ...src, smv,
+        qty      : Number(src.qty ?? src.orderQty) || 0,
+        orderQty : Number(src.orderQty ?? src.qty) || 0,
+        reqMin   : Math.round((Number(src.qty ?? src.orderQty) || 0) * smv),
+        dur      : 1, start, end,
+        progress : 0, status : 'unplanned', parked : true,
+        sopMode  : !!src.ship,
+        risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
+    };
+    s.eventStore.add({
+        id : evId, resourceId : 'hold',
+        startDate : start, endDate : end,
+        duration : elapsedDays(start, end), durationUnit : 'day',
+        manuallyScheduled : true,
+        name : `${src.buyer || ''} | ${src.mbmOrder || src.po}`,
+        percentDone : 0,
+        raw
+    });
+    rec = s.eventStore.getById(evId);
+    if (rec && u) unplanned.value = unplanned.value.filter(x => x !== u);
+    return rec;
+}
+
 function carryOrderToBoard(row) {
     if (row.status === 'completed') {
         toast(`${row.mbmOrder || row.po} is completed — it cannot be planned again`, 'warn');
@@ -5215,79 +5565,22 @@ function carryOrderToBoard(row) {
             toast(`${row.mbmOrder || row.po} — bar is on your pointer; click a line to place it`, 'ok');
             return;
         }
-        // Not on the board → build a bar. Confirm orders come from the
-        // unplanned pool; a projection builds straight from the list row.
-        const isConf = row.orderType === 'confirm';
-        const rowPos = new Set((row.poList || []).map(String).concat(row.po ? [String(row.po)] : []));
-        const u = unplanned.value.find(x => {
-            if (String(x.mbmOrder || '') !== String(row.mbmOrder || '')) return false;
-            const xConf = orderTypeOf(x.po, x.orderType) === 'confirm';
-            if (xConf !== isConf) return false;
-            if (!isConf || !rowPos.size) return true;
-            if (x.po && rowPos.has(String(x.po))) return true;
-            return (x.poList || []).some(p => rowPos.has(String(p)));
-        });
-        let src = u;
-        if (!src && !isConf) {
-            // Projection: no pool entry needed — the list row carries
-            // everything the bar needs
-            if (row.replaced || row.status === 'replaced') {
-                toast(`${row.mbmOrder} was replaced — its confirm POs are the ones to plan`, 'warn');
-                return;
-            }
-            const code = String(row.mbmOrder || '');
-            if (!code) return;
-            src = {
-                id          : `proj:${code}`,
-                mbmOrder    : code,
-                po          : '',
-                buyer       : row.buyer || 'Projection',
-                style       : row.style || '',
-                productType : row.productType || '',
-                orderType   : 'projection',
-                qty         : Number(row.orderQty ?? row.qty) || 0,
-                orderQty    : Number(row.orderQty ?? row.qty) || 0,
-                smv         : Number(row.smv) > 0 ? Number(row.smv) : 0,
-                ship        : row.orderDelivery || null,
-                pcd         : row.pcd || null,
-                matReady    : null,
-                unitId      : row.unitId ?? null
-            };
-        }
-        if (!src) {
-            toast(`${row.mbmOrder || row.po} — not in the unplanned pool (try ⟳ refresh, or its POs may not be synced yet)`, 'warn');
+        const { src, u, err } = resolveCarrySource(row);
+        if (err) {
+            toast(err, 'warn');
             return;
         }
-        const evId = `ev-${src.id}`;
-        let rec = s.eventStore.getById(evId);
-        if (!rec) {
-            const smv   = Number(src.smv) > 0 ? Number(src.smv) : randSmv(src.po || src.mbmOrder);
-            const start = startOfWorkDay(nextWorkingDay(new Date()));
-            const end   = endOfWork(start, 1);
-            const raw = {
-                ...src, smv,
-                qty      : Number(src.qty ?? src.orderQty) || 0,
-                orderQty : Number(src.orderQty ?? src.qty) || 0,
-                reqMin   : Math.round((Number(src.qty ?? src.orderQty) || 0) * smv),
-                dur      : 1, start, end,
-                progress : 0, status : 'unplanned', parked : true,
-                risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
-            };
-            s.eventStore.add({
-                id : evId, resourceId : 'hold',
-                startDate : start, endDate : end,
-                duration : elapsedDays(start, end), durationUnit : 'day',
-                manuallyScheduled : true,
-                name : `${src.buyer || ''} | ${src.mbmOrder || src.po}`,
-                percentDone : 0,
-                raw
-            });
-            rec = s.eventStore.getById(evId);
-            if (u) unplanned.value = unplanned.value.filter(x => x !== u);
-        }
+        const rec = buildDraftRec(s, src, u);
         if (rec) {
             pickUp(rec, null);
-            toast(`${src.mbmOrder || src.po} — bar is on your pointer; click a line to place it`, 'ok');
+            // SOP hint: where the backward timeline wants this order to start
+            const sp = sopForRow(row);
+            if (sp) {
+                const m = sp.milestones;
+                s.scrollToDate?.(m.production_start.date, { block : 'start' });
+                toast(`${src.mbmOrder || src.po} — SOP: PP ${fmtDateDdMonRr(m.pp_start.date)} · Prod start ${fmtDateDdMonRr(m.production_start.date)} · Complete ${fmtDateDdMonRr(m.production_complete.date)} (${sp.production.days}d)${sp.breached ? ` · ⚠ PP passed ${sp.breachDays}d` : ''} — click a line to place it`, sp.breached ? 'warn' : 'ok');
+            }
+            else toast(`${src.mbmOrder || src.po} — bar is on your pointer; click a line to place it`, 'ok');
         }
     }, wasBoard ? 150 : 600);
 }
@@ -7218,6 +7511,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <i class="fa-solid fa-route fr-dd-fa" aria-hidden="true"></i>
                         Plan live orders (PCD / delivery / critical path)
                     </div>
+                    <div class="fr-dd-item" @click="openSopPlan">📐 Plan by SOP timeline — backward from ex-factory</div>
                     <div class="fr-dd-item" @click="openPlanGenerator">🧮 Plan generator (S2)</div>
                     <div class="fr-dd-item" @click="compactBoardNoGaps">🧹 Compact lines — remove gaps</div>
                     <div class="fr-dd-sep"></div>
@@ -7487,7 +7781,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <input v-model="orderFilters[k]" class="od-filter" type="text" placeholder="🔍"
                                         :title="k === 'orderQty' || k === 'qty'
                                             ? 'Qty query: >1000  <500  >=1  <=1  =1500  (or plain text)'
-                                            : (['pcd','orderDelivery','poDelivery','start','end'].includes(k)
+                                            : (['pcd','orderDelivery','poDelivery','start','end','ppStart','prodStart','prodEnd'].includes(k)
                                                 ? 'Date query: >01-09-26  <=15-SEP-26  =2026-09-01  (or plain text)'
                                                 : '')"
                                     >
@@ -8406,6 +8700,70 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
                         কোনো bar কখনো পরে যায় না, line/sequence/duration বদলায় না · completed/production-started bar
                         fixed anchor · Apply-র পর Undo (↺) দিয়ে ফেরানো যায় · স্থায়ী করতে Save
+                    </div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Plan by SOP timeline (SOP-PLN-01): backward from ex-factory -->
+        <Teleport to="body">
+        <div v-if="sopOpen" class="cal-overlay" @click.self="sopOpen = false">
+            <div class="cal-dialog pf-dialog sop-dialog">
+                <div class="cal-title">
+                    📐 Plan by SOP timeline (SOP-PLN-01)
+                    <span class="cal-title-btns"><span class="cal-x" @click="sopOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <div v-if="sopBusy" class="ls-dim">Calculating backward timelines…</div>
+                    <template v-else-if="sopPrev">
+                        <div class="pf-sum">
+                            Orders to place: <b>{{ sopPrev.summary.orders }}</b> ·
+                            Lines: <b>{{ sopPrev.summary.lines }}</b> ·
+                            Miss ex-factory buffer: <b :class="{ 'sop-bad' : sopPrev.summary.late }">{{ sopPrev.summary.late }}</b> ·
+                            PP start passed: <b :class="{ 'sop-bad' : sopPrev.summary.breached }">{{ sopPrev.summary.breached }}</b> ·
+                            Capacity review (&gt;20d): <b>{{ sopPrev.summary.review }}</b> ·
+                            Skipped: <b>{{ sopPrev.skipped.length }}</b>
+                        </div>
+                        <div class="st-actions">
+                            <button class="cal-btn cal-btn-primary st-btn" :disabled="!sopPrev.changes.length" @click="applySopPlan">📐 Apply to board</button>
+                            <button class="cal-btn st-btn" @click="sopPrev = computeSopPlan()">⟳ Recalculate</button>
+                            <button class="cal-btn st-btn" @click="sopOpen = false">Close</button>
+                        </div>
+                        <div v-if="sopPrev.changes.length" class="pf-table sop-table">
+                            <table>
+                                <thead><tr><th>Order</th><th>Type</th><th>Ex-factory</th><th>PP Start</th><th>Prod Start (SOP)</th><th>Line</th><th>Placed Start</th><th>Placed End</th><th>Days</th><th>Flags</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="c in sopPrev.changes" :key="c.row.id" :class="{ 'sop-row-late' : c.late }">
+                                        <td><b>{{ c.order }}</b><span v-if="c.po" class="ls-dim"> {{ c.po }}</span></td>
+                                        <td>{{ c.type }}</td>
+                                        <td>{{ fmtDateDdMonRr(c.exFactory) }}</td>
+                                        <td :class="{ 'sop-bad' : c.breached }">{{ fmtDateDdMonRr(c.ppStart) }}</td>
+                                        <td>{{ fmtDateDdMonRr(c.prodTarget) }}</td>
+                                        <td>{{ c.lineName }}</td>
+                                        <td class="pf-new">{{ fmtDate(c.start) }}</td>
+                                        <td :class="c.late ? 'sop-bad' : 'pf-new'">{{ fmtDate(c.end) }}</td>
+                                        <td class="msh-num">{{ c.days }}</td>
+                                        <td class="sop-flags">
+                                            <span v-if="c.breached" title="PP start already passed — escalate to Merchandising and Planning heads today">⚠ PP −{{ c.breachDays }}d</span>
+                                            <span v-if="c.late" title="Production would finish after ex-factory − 6 days">⏰ late</span>
+                                            <span v-if="c.review" title="Over 20 production days — review with Merchandising">⚑ review</span>
+                                            <span v-if="c.blockedBy" :title="'Placed after ' + c.blockedBy">↦ after bar</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div v-else class="ls-dim">No unplanned projection / confirm order with an ex-factory date</div>
+                        <details v-if="sopPrev.skipped.length" class="sop-skipped">
+                            <summary>Skipped ({{ sopPrev.skipped.length }})</summary>
+                            <div v-for="(k, i) in sopPrev.skipped" :key="i" class="ls-dim">{{ k.order }}<span v-if="k.po"> {{ k.po }}</span> — {{ k.reason }}</div>
+                        </details>
+                    </template>
+                    <div class="st-hint">
+                        Ex-factory (locked) − 6d = production complete · − capacity run (qty ÷ daily output, ceil, min 5d, &gt;20d review) = production start ·
+                        − 2d throughput · − PP (5d normal / 7d critical or SMV &gt; 25 / provisional) = PP start ·
+                        line = earliest feasible slot; covering bars stay, later bars shift later · never auto-runs — Save to keep, Undo (↺) reverses
                     </div>
                 </div>
             </div>
@@ -10838,6 +11196,13 @@ body {
 .pf-table th { position : sticky; top : 0; background : #1c2b3a; color : #fff; padding : 5px 8px; text-align : left; font-size : 11px; }
 .pf-table td { padding : 4px 8px; border-bottom : 1px solid #edf0f3; white-space : nowrap; }
 .pf-new { color : #0a7a2f; font-weight : 700; }
+.sop-dialog { width : 960px; }
+.sop-table { max-height : 380px; }
+.sop-bad { color : #b71c1c; font-weight : 700; }
+.sop-row-late td { background : #fff5f5; }
+.sop-flags span { display : inline-block; margin-right : 6px; font-size : 11px; color : #7a4a00; }
+.sop-skipped { margin-top : 8px; font-size : 12px; }
+.sop-skipped summary { cursor : pointer; color : #345; }
 
 /* Multiple strip handling */
 .msh-dialog { width : 960px; max-width : 97vw; max-height : 92vh; overflow-y : auto; }
@@ -11558,6 +11923,8 @@ body {
 }
 .tip-ok   { background : #e8f5e9; color : #2e7d32; border : 1px solid #a5d6a7; }
 .tip-pend { background : #fff3e0; color : #e65100; border : 1px solid #ffcc80; }
+.tip-late { background : #fdecea; color : #b71c1c; border : 1px solid #ef9a9a; }
+.t4note   { font-size : 10.5px; color : #b71c1c; padding : 3px 0 0; white-space : normal; line-height : 1.35; }
 
 /* Techpack link */
 .tip-link {
