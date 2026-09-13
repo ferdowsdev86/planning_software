@@ -2093,7 +2093,8 @@ function applySopPlan() {
             raw.sop     = c.sop;
             raw.parked  = false;
             raw.status  = 'draft';
-            raw.userPinned = false;
+            // Pinned: the load-time repack must keep the SOP sequence / start
+            raw.userPinned = true;
             applyLineFormulaDuration(s, raw, c.line);
             // Real-board insertion (same rule as the preview; the preview
             // already accounted for the bars placed before this one)

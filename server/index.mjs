@@ -113,11 +113,20 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             SELECT e.id, e.planning_order_id, e.event_code, e.event_name, e.production_stage, e.start_date, e.end_date,
                     e.duration, e.duration_unit, e.planned_quantity, e.percent_done,
                     e.manually_scheduled, e.event_status, e.notes,
-                    o.buyer_name, o.style_no, o.po_number, o.order_code, o.order_quantity, o.smv,
-                    o.product_category, o.pcd, o.shipment_date, o.material_ready_date, o.priority,
-                    o.unit_id AS order_unit_id, o.color
+                    COALESCE(o.buyer_name, p.buyer_name) AS buyer_name, COALESCE(o.style_no, p.style_no) AS style_no,
+                    o.po_number, COALESCE(o.order_code, p.order_code) AS order_code,
+                    COALESCE(o.order_quantity, p.order_quantity) AS order_quantity, COALESCE(o.smv, p.smv) AS smv,
+                    COALESCE(o.product_category, p.product_category) AS product_category, COALESCE(o.pcd, p.pcd) AS pcd,
+                    COALESCE(o.shipment_date, p.shipment_date) AS shipment_date, o.material_ready_date, o.priority,
+                    COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
+             /* saved projection bars (ev-proj:<code>[-n]) carry no order link —
+                their SMV / qty / product / ship date come from the projection row */
+             LEFT JOIN planning_orders p ON e.planning_order_id IS NULL
+                  AND e.event_code LIKE 'ev-proj:%'
+                  AND p.erp_po_id LIKE 'proj-%'
+                  AND p.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
              WHERE e.project_id = ? AND e.event_status != 'cancelled'`;
         const eventParams = [projectId];
         if (effUnit) {

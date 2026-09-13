@@ -174,6 +174,8 @@ function eventNotesPayload(raw, onHold) {
     // Multiple strip handling: linked build-up curve relationship (reference
     // bar, mode live/copy, version) must survive a reload
     if (raw.lcLink && raw.lcLink.refId != null) notes.lcLink = raw.lcLink;
+    // SOP-PLN-01 production run (whole days) + milestone snapshot
+    if (Number(raw.sopDur) > 0) notes.sop = { ...(raw.sop || {}), dur : Number(raw.sopDur) };
     // Consolidated bar: persist the PO group, otherwise a reload degrades the
     // bar to a single PO while keeping the group quantity (5,090 shown on a
     // 1,344-pc PO)
@@ -273,6 +275,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         lcManual     : noteGroup.lcCurve && Array.isArray(noteGroup.lcCurve.pct) && noteGroup.lcCurve.pct.length
             ? noteGroup.lcCurve : undefined,
         lcLink       : noteGroup.lcLink && noteGroup.lcLink.refId != null ? noteGroup.lcLink : undefined,
+        // SOP-PLN-01 planned bar: its whole-day production run survives a
+        // reload (applyLineFormulaDuration keeps raw.sopDur over the formula)
+        sopDur       : Number(noteGroup.sop?.dur) > 0 ? Number(noteGroup.sop.dur) : undefined,
+        sop          : noteGroup.sop && typeof noteGroup.sop === 'object' ? noteGroup.sop : undefined,
         dbId     : orderId,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
