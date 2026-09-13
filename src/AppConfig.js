@@ -510,7 +510,9 @@ export function pushFollowers(scheduler, lineId, placed) {
             if (ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
             continue;
         }
-        applyLineFormulaDuration(scheduler, ev.data.raw, lineId);
+        // A SAVED bar keeps its saved length when it is pushed — only a bar
+        // that has never been saved is still sized by the formula
+        if (!ev.data.raw.dbPinned) applyLineFormulaDuration(scheduler, ev.data.raw, lineId);
         let ns = nextStartAfter(prevEnd);
         // A bar NEVER advances earlier automatically ("plan agabe na") — it
         // keeps its own start and only shifts LATER when the placed bar (or a

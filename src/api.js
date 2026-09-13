@@ -270,7 +270,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // reconciliation, repack) must never unpin a SAVED bar, whatever
         // happens to userPinned along the way. Only a deliberate board
         // compact clears this.
-        dbPinned   : !!parseEventNotes(e.notes).userPinned,
+        // Every bar loaded from the DB is a SAVED plan: it is fixed until the
+        // user moves it — no load-time repack, formula re-size or auto-plan
+        // may touch it (a bar is only re-calculated while it is being placed)
+        dbPinned   : !!e.start_date,
         manualGap  : !!parseEventNotes(e.notes).manualGap,
         // Saved efficiency edits (Strip/Order properties dialog) come back so
         // the duration formula reproduces the edited bar after reload
