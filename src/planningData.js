@@ -175,7 +175,7 @@ export function workEndOfDay(date) {
     return d;
 }
 
-function startOfNextWorkDay(date) {
+export function startOfNextWorkDay(date) {
     const n = new Date(date);
     n.setDate(n.getDate() + 1);
     n.setHours(0, 0, 0, 0);
@@ -190,6 +190,31 @@ export function clampIntoWorkWindow(date) {
     if (t < ws) return ws;
     if (t >= we) return startOfNextWorkDay(t);
     return t;
+}
+
+// Working (clock) minutes between two instants per the calendar — the
+// inverse of addWorkingMinutes, so a SAVED span converts back into the
+// duration units the board moves bars with
+export function workingMinutesBetween(a, b) {
+    const end = new Date(b);
+    let t = clampIntoWorkWindow(new Date(a));
+    let mins = 0, guard = 0;
+    while (t < end && guard++ < 4000) {
+        const dayEnd = workEndOfDay(t);
+        const seg = (Math.min(dayEnd.getTime(), end.getTime()) - t.getTime()) / 60000;
+        if (seg > 0) mins += seg;
+        t = startOfNextWorkDay(t);
+    }
+    return mins;
+}
+
+// Duration units (WORK_MIN_PER_DAY-based, what endOfWork consumes) worth N
+// whole working days of the calendar day the bar starts on — a 5-day SOP run
+// is 5 calendar working days whether the day is 10 or 12 hours long
+export function workDayUnits(start, days) {
+    const t = clampIntoWorkWindow(new Date(start));
+    const dayMin = Math.max(60, (workEndOfDay(t).getTime() - startOfWorkDay(t).getTime()) / 60000);
+    return Math.max(1 / 60, (Number(days) || 0) * dayMin / WORK_MIN_PER_DAY);
 }
 
 export function addWorkingMinutes(start, clockMinutes) {

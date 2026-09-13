@@ -10,6 +10,7 @@ import {
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
+, workDayUnits
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -100,7 +101,8 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
                 ? raw.lc.pct.reduce((a, p) => a + Math.max(0, 1 - Number(p) / 100), 0) : 0;
             raw.sop = { ...(raw.sop || {}), lcDays : Math.ceil(loss - 1e-9) };
         }
-        raw.dur     = Number(raw.sopDur) + (Number(raw.sop?.lcDays) || 0);
+        // Whole CALENDAR working days (10h or 12h day alike) — not 600-min units
+        raw.dur     = workDayUnits(raw.start || new Date(), Number(raw.sopDur) + (Number(raw.sop?.lcDays) || 0));
         raw.workMin = raw.dur * mins;
         raw.reqMin  = Math.round((Number(raw.qty ?? raw.orderQty) || 0) * (Number(raw.smv) || 0));
         return raw.dur;
@@ -849,20 +851,10 @@ function packLineNoGaps(scheduler, lineId, anchor) {
     const fixed = bars.filter(packImmovable);
     let moved = 0;
 
-    // Immovable bars keep their START, but the span must still reflect the
-    // CURRENT line parameters (manpower / eff / hours); completed bars stay.
-    for (const ev of fixed) {
-        const raw = ev.data.raw;
-        if (raw.status === 'completed') continue;
-        applyLineFormulaDuration(scheduler, raw, lineId);
-        const fixedEnd = endOfWork(new Date(ev.startDate), raw.dur || 1);
-        if (ev.endDate?.getTime() !== fixedEnd.getTime()) {
-            ev.set({ endDate : fixedEnd, duration : elapsedDays(ev.startDate, fixedEnd) });
-            raw.start = new Date(ev.startDate);
-            raw.end   = fixedEnd;
-            moved++;
-        }
-    }
+    // Saved (pinned) and completed bars keep their SAVED span exactly as it
+    // came from the DB — a reload must show what the user saved. The formula
+    // re-sizes a bar only when the user changes it (move, properties edit,
+    // pull forward, SOP plan), never on load.
 
     // Overlap repair among pinned bars: bad saved data (or a duration refresh
     // growing a bar) can leave two pinned bars on top of each other. Bars must

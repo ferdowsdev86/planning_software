@@ -10,7 +10,7 @@ import {
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
     UNPLANNED_INIT, LINES, LINE_BY_ID, calendarState, hmToHours, hoursToHm, ymdOf, dayHoursOf, dayCfgOf, dayCapacityFactor, buildManpowerRanges,
-    buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay,
+    buildOffDayRanges, nextWorkingDay, addWorkDays, endOfWork, startOfWorkDay, endOfWorkDay, workEndOfDay, startOfNextWorkDay,
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
@@ -1768,6 +1768,14 @@ function openPullForward() {
     pfOpen.value = true;
 }
 
+// Next start after a bar for whole-day planning: a bar that ends at (or
+// past) the day's regular hours is followed on the NEXT working day's first
+// hour — the overtime window is not a gap to pull the next bar into
+function nextDayStartAfter(end) {
+    const ns = nextStartAfter(new Date(end));
+    return ns >= workEndOfDay(ns) ? startOfNextWorkDay(ns) : ns;
+}
+
 // Completed / production-started bars are fixed anchors — never pulled
 function pfIsFixed(ev, raw) {
     return raw.status === 'completed' || (Number(ev.percentDone) || 0) > 0;
@@ -1798,7 +1806,7 @@ function computePullForward() {
                 if (anchorEnd === null || oldEnd > anchorEnd) anchorEnd = oldEnd;
                 continue;
             }
-            let ns = nextStartAfter(new Date(anchorEnd));
+            let ns = nextDayStartAfter(anchorEnd);
             // Range rule: a pulled bar never crosses BEFORE the From date
             if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
             if (oldStart.getTime() - ns.getTime() < 30 * 60000) {
@@ -1959,7 +1967,7 @@ function sopVirtualInsert(bars, desired, dur) {
         const obst = bars.find(b => b.start < end && b.end.getTime() + NEAR_MS > start.getTime());
         if (!obst) return { start, end, blockedBy };
         blockedBy = obst.name;
-        start = nextStartAfter(obst.end);
+        start = nextDayStartAfter(obst.end);
     }
     return { start, end : endOfWork(start, dur), blockedBy };
 }

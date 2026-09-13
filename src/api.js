@@ -6,7 +6,8 @@
 import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
-    addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow
+    addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
+    workingMinutesBetween
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds } from './AppConfig.js';
 
@@ -214,7 +215,11 @@ function boardSpanFromDb(e) {
         end = endOfWork(start, dur);
     }
 
-    return { start, end, dur, pinned : true };
+    // The duration the board moves this bar with must reproduce the SAVED
+    // span (working minutes of the calendar), not the DB's elapsed-day
+    // figure — otherwise every move re-sizes the bar
+    const spanUnits = workingMinutesBetween(start, end) / WORK_MIN_PER_DAY;
+    return { start, end, dur : spanUnits > 0 ? Math.round(spanUnits * 1000) / 1000 : dur, pinned : true };
 }
 
 function orderRowId(planningOrderId) {
