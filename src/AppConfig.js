@@ -92,7 +92,15 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
         if (sp) raw.sopDur = sp.production.days;
     }
     if (Number(raw.sopDur) > 0) {
-        raw.dur     = Number(raw.sopDur);
+        // 3-day learning curve on a changeover: the capacity lost while
+        // ramping (Σ 1 − day%) is added as whole days, decided at placement
+        // and then persisted with the bar (raw.sop.lcDays)
+        if (raw.lc?.viaPlacement && Array.isArray(raw.lc.pct)) {
+            const loss = raw.lc.applied && (raw.lc.dayOffset || 0) === 0
+                ? raw.lc.pct.reduce((a, p) => a + Math.max(0, 1 - Number(p) / 100), 0) : 0;
+            raw.sop = { ...(raw.sop || {}), lcDays : Math.ceil(loss - 1e-9) };
+        }
+        raw.dur     = Number(raw.sopDur) + (Number(raw.sop?.lcDays) || 0);
         raw.workMin = raw.dur * mins;
         raw.reqMin  = Math.round((Number(raw.qty ?? raw.orderQty) || 0) * (Number(raw.smv) || 0));
         return raw.dur;
@@ -613,6 +621,26 @@ function configuredLearningCurve() {
     catch { return null; }
 }
 
+// Style identity for the learning-curve run rule: the leading style number
+// (colour / size suffixes such as "13343941-maroon" vs "13343941-black" are
+// the SAME style); short codes keep their full text
+export function styleBaseKey(style) {
+    const t = String(style || '').trim().toLowerCase();
+    if (!t) return '';
+    const first = t.split(/[\s-]+/)[0];
+    return first.length >= 5 ? first : t;
+}
+
+// Learning-curve run identity = product type + style: a line that repeats
+// the same style AND product does NOT ramp again (the strips are linked as a
+// multiple-strip build-up instead); a new style — even of the same product —
+// is a changeover and takes the 3-day curve
+function lcRunKey(raw, lineId) {
+    const type = lcTypeKey(raw?.po, lineId, raw?.productType) || '_Default';
+    const st   = styleBaseKey(raw?.style);
+    return st ? `${type}|${st}` : type;
+}
+
 // Per-invocation cached product-type resolver: the profile master is parsed
 // once, not once per bar (tooltipProductType hits localStorage every call)
 let lcProfCache = null;
@@ -655,11 +683,12 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
         if (!bars.length) continue;
         const seq = bars.map(ev => ({
             id           : ev.id,
-            typeKey      : lcTypeKey(ev.data.raw.po, res.id, ev.data.raw.productType) || '_Default',
+            typeKey      : lcRunKey(ev.data.raw, res.id),
             workDayIndex : workDayIndexOf(ev.startDate)
         }));
         const typeKeyById = new Map(seq.map(x => [x.id, x.typeKey]));
         const plan = curve ? buildLineLearning(seq, curve) : new Map();
+        let runRef = null;
         for (const ev of bars) {
             const raw = ev.data.raw;
             // A manually applied Build up curve (context menu) overrides the
@@ -672,11 +701,29 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 : plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
             const activeCurve = manual || curve;
+            // Multiple strip rule: the first bar of a run is the reference;
+            // every later strip of the same style + product on the line is
+            // auto-linked to it (live) instead of ramping again. Links a
+            // user made by hand are never touched.
+            const isRunStart = info.reason === 'product-change' || info.reason === 'first-on-line' || manual;
+            if (isRunStart) {
+                runRef = { id : ev.id, order : mbmOrderNo(raw.po, raw.mbmOrder) };
+                if (raw.lcLink?.auto) delete raw.lcLink;
+            }
+            else if (runRef && runRef.id !== ev.id && (!raw.lcLink || raw.lcLink.auto)) {
+                const now = new Date().toISOString();
+                raw.lcLink = {
+                    group : `lg-${runRef.id}`, refId : runRef.id, refOrder : runRef.order,
+                    curve : activeCurve?.name || null, version : 1, mode : 'live',
+                    linkedBy : 'auto — repeated style', linkedAt : raw.lcLink?.linkedAt || now, lastSync : now, auto : true
+                };
+            }
             raw.lc = {
                 applied     : info.applied,
                 reason      : info.reason,
                 dayOffset   : info.dayOffset,
-                typeKey     : info.typeKey,
+                typeKey     : String(info.typeKey).split('|')[0],
+                runKey      : info.typeKey,
                 profileName : activeCurve.name,
                 period      : Number(activeCurve.period) || activeCurve.pct.length,
                 pct         : activeCurve.pct,
@@ -725,7 +772,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
         raw.lc = {
             applied : true, reason : 'manual', dayOffset : 0,
-            typeKey : lcTypeKey(raw.po, lineId, raw.productType) || '_Default',
+            typeKey : lcRunKey(raw, lineId),
             profileName : raw.lcManual.name,
             period : Number(raw.lcManual.period) || raw.lcManual.pct.length,
             pct : raw.lcManual.pct,
@@ -735,7 +782,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     }
     const curve = configuredLearningCurve();
     if (!curve) { delete raw.lc; return; }
-    const myKey = lcTypeKey(raw.po, lineId, raw.productType) || '_Default';
+    const myKey = lcRunKey(raw, lineId);
     const base = {
         typeKey : myKey, profileName : curve.name,
         period : curve.period, pct : curve.pct, learnFrac : 0, dayPlan : [],
@@ -750,7 +797,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
         raw.lc = { ...base, applied : false, reason : 'first-on-line', dayOffset : 0 };
         return;
     }
-    const prevKey = lcTypeKey(prevBars[0].data.raw.po, lineId, prevBars[0].data.raw.productType) || '_Default';
+    const prevKey = lcRunKey(prevBars[0].data.raw, lineId);
     if (prevKey !== myKey) {
         raw.lc = { ...base, applied : true, reason : 'product-change', dayOffset : 0 };
         return;
@@ -759,7 +806,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     let runStart = prevBars[0];
     let hasChangeoverBefore = false;
     for (let i = 1; i < prevBars.length; i++) {
-        const k = lcTypeKey(prevBars[i].data.raw.po, lineId, prevBars[i].data.raw.productType) || '_Default';
+        const k = lcRunKey(prevBars[i].data.raw, lineId);
         if (k !== myKey) { hasChangeoverBefore = true; break; }
         runStart = prevBars[i];
     }

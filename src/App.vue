@@ -2095,6 +2095,10 @@ function applySopPlan() {
             raw.status  = 'draft';
             // Pinned: the load-time repack must keep the SOP sequence / start
             raw.userPinned = true;
+            // Changeover check at the SOP slot: a new style/product on the
+            // line takes the 3-day curve (whole days added); a repeated
+            // style + product links to the reference strip instead
+            deriveLcForPlacement(s, raw, c.line, c.start);
             applyLineFormulaDuration(s, raw, c.line);
             // Real-board insertion (same rule as the preview; the preview
             // already accounted for the bars placed before this one)

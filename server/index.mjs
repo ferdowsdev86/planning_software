@@ -115,18 +115,22 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                     e.manually_scheduled, e.event_status, e.notes,
                     COALESCE(o.buyer_name, p.buyer_name) AS buyer_name, COALESCE(o.style_no, p.style_no) AS style_no,
                     o.po_number, COALESCE(o.order_code, p.order_code) AS order_code,
-                    COALESCE(o.order_quantity, p.order_quantity) AS order_quantity, COALESCE(o.smv, p.smv) AS smv,
+                    COALESCE(o.order_quantity, CASE WHEN p.erp_po_id LIKE 'proj-%' THEN p.order_quantity END) AS order_quantity,
+                    COALESCE(o.smv, p.smv) AS smv,
                     COALESCE(o.product_category, p.product_category) AS product_category, COALESCE(o.pcd, p.pcd) AS pcd,
                     COALESCE(o.shipment_date, p.shipment_date) AS shipment_date, o.material_ready_date, o.priority,
                     COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
              /* saved projection bars (ev-proj:<code>[-n]) carry no order link —
-                their SMV / qty / product / ship date come from the projection row */
+                SMV / qty / product / ship date come from the projection row, or
+                from a confirm PO row of the same order when ERP never synced a
+                projection row (order qty only from a projection row) */
              LEFT JOIN planning_orders p ON e.planning_order_id IS NULL
                   AND e.event_code LIKE 'ev-proj:%'
-                  AND p.erp_po_id LIKE 'proj-%'
-                  AND p.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
+                  AND p.id = (SELECT x.id FROM planning_orders x
+                              WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
+                              ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
              WHERE e.project_id = ? AND e.event_status != 'cancelled'`;
         const eventParams = [projectId];
         if (effUnit) {
