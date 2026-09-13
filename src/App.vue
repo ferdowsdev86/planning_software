@@ -2921,11 +2921,10 @@ const PRODUCT_TYPES = [
 
 // Line capability chart (planning team's line / product matrix, Sep 2026):
 // AQL-A1 … A9 = Line 01 … Line 09 — the product types each line can run.
-// AQL-A3 has no entry in the chart, so Line 03 shows no products.
 const LINE_CAN_DO = {
     1 : ['Jacket', 'Chino', 'Shorts Cargo'],
     2 : ['Jacket', 'Shorts Chino'],
-    3 : [],
+    3 : ['Jacket', 'Shorts Chino'],
     4 : ['Jacket', '5 Pocket', 'Pant', 'Cargo', 'Shorts Cargo'],
     5 : ['Jacket'],
     6 : ['Chino', 'Pant', 'Shorts Chino', 'Dungaree Long', 'Shorts Cargo'],
