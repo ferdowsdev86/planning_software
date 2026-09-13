@@ -2905,8 +2905,39 @@ const PRODUCT_TYPES = [
     { name : 'Blouse',               color : '#2e9e3f' },
     { name : 'BLOUSON',              color : '#ffffff' },
     { name : 'Bottom',               color : '#bdbdbd' },
-    { name : 'Boys Pant',            color : '#e8317f' }
+    { name : 'Boys Pant',            color : '#e8317f' },
+    { name : 'Cargo',                color : '#6d4c41' },
+    { name : 'Chino',                color : '#c8a165' },
+    { name : 'Dungaree Long',        color : '#3f51b5' },
+    { name : 'Hat',                  color : '#795548' },
+    { name : 'Jacket',               color : '#1565c0' },
+    { name : 'Pant',                 color : '#455a64' },
+    { name : 'Scarf',                color : '#ab47bc' },
+    { name : 'Shirt',                color : '#26a69a' },
+    { name : 'Shorts Cargo',         color : '#8d6e63' },
+    { name : 'Shorts Chino',         color : '#d4b483' },
+    { name : 'Trouser (Uniform)',    color : '#37474f' }
 ];
+
+// Line capability chart (planning team's line / product matrix, Sep 2026):
+// AQL-A1 … A9 = Line 01 … Line 09 — the product types each line can run.
+// AQL-A3 has no entry in the chart, so Line 03 shows no products.
+const LINE_CAN_DO = {
+    1 : ['Jacket', 'Chino', 'Shorts Cargo'],
+    2 : ['Jacket', 'Shorts Chino'],
+    3 : [],
+    4 : ['Jacket', '5 Pocket', 'Pant', 'Cargo', 'Shorts Cargo'],
+    5 : ['Jacket'],
+    6 : ['Chino', 'Pant', 'Shorts Chino', 'Dungaree Long', 'Shorts Cargo'],
+    7 : ['5 Pocket', 'Pant', 'Shorts Chino', 'Shirt'],
+    8 : ['5 Pocket Long', 'Shorts Chino'],
+    9 : ['Pant', 'Trouser (Uniform)', 'Blouse', 'Jacket', 'Scarf', 'Hat', 'Shorts Chino']
+};
+function lineCanDo(line) {
+    if (!line) return [];
+    const n = Number(String(line.name || '').replace(/\D/g, '')) || Number(String(line.id || '').replace(/\D/g, ''));
+    return LINE_CAN_DO[n] || [];
+}
 
 // FastReact-style defaults: pocket family runs hotter, several types unset (0)
 function defaultEffFor(name, base) {
@@ -2969,12 +3000,24 @@ function ensureProfileValues(p) {
     for (const t of PRODUCT_TYPES) {
         if (p.values[t.name] === undefined) p.values[t.name] = defaultEffFor(t.name, 50);
     }
+    // Products the chart says this profile's line(s) can run get the line
+    // efficiency when the profile has no figure for them yet
+    for (const [lid, pid] of Object.entries(lineProfileMap.value || {})) {
+        if (pid !== p.id) continue;
+        const base = Number(p.values._Default) || Number(LINE_BY_ID[lid]?.eff) || 50;
+        for (const name of lineCanDo(LINE_BY_ID[lid])) {
+            if (!(Number(p.values[name]) > 0)) p.values[name] = base;
+        }
+    }
     return p;
 }
 
 // Product types that this line's efficiency profile actually has data for
 // (efficiency > 0, excluding _Default)
 function availableProductTypes(lineId) {
+    // The line capability chart is the first word on what a line can run
+    const canDo = lineCanDo(LINE_BY_ID[lineId]);
+    if (canDo.length) return canDo;
     const pid = lineId ? lineProfileMap.value[lineId] : null;
     const profile = (pid && effList.value.find(p => p.id === pid))
         || effList.value[0];
@@ -3000,60 +3043,22 @@ const effRows = computed(() => {
         .map((t, i) => ({ ...t, idx : i, eff : p.values[t.name] ?? 0 }));
 });
 
-// Products actually PLANNED on each line (from the live board): product type →
-// total planned qty, ranked by qty. Refreshed when the dialog / Lines tab opens.
-const lineBoardTop = ref({});
-
-function refreshLineBoardTop() {
-    const s = getInstance();
-    const out = {};
-    if (s) {
-        for (const ev of s.eventStore.records) {
-            const raw = ev.data?.raw;
-            if (!raw || raw.stage) continue;
-            const lid = lineIdOf(s, ev);
-            if (lid === 'hold' || !LINE_BY_ID[lid]) continue;
-            const pType = raw.productType || productTypeFromProfile(raw.po, lid);
-            if (!pType) continue;
-            if (!out[lid]) out[lid] = {};
-            out[lid][pType] = (out[lid][pType] || 0) + (Number(raw.qty) || 0);
-        }
-    }
-    lineBoardTop.value = out;
-}
-
-// Line-wise summary: top-3 product types PLANNED on the line (from the plan
-// board, ranked by planned qty, with the line's effective efficiency for each);
-// falls back to the profile's own ranking when nothing is planned yet.
+// Line-wise summary: the products each line can run (line capability chart)
+// with the line's effective efficiency for each — profile figure when set,
+// else the line efficiency
 const lineEffSummary = computed(() => {
     return LINES.map(l => {
         const pid     = lineProfileMap.value[l.id];
         const profile = effList.value.find(p => p.id === pid) || effList.value[0];
-        ensureProfileValues(profile);
-        const ranked = Object.entries(profile?.values || {})
-            .filter(([name, eff]) => name !== '_Default' && Number(eff) > 0)
-            .sort((a, b) => Number(b[1]) - Number(a[1]));
-        const planned = Object.entries(lineBoardTop.value[l.id] || {})
-            .sort((a, b) => b[1] - a[1]);
-        const top3 = planned.length
-            ? planned.slice(0, 3).map(([name, qty]) => ({
-                name,
-                qty,
-                eff   : Math.round(lineEfficiencyOf(l.id, name)),
-                color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
-            }))
-            : ranked.slice(0, 3).map(([name, eff]) => ({
-                name,
-                qty   : 0,
-                eff   : Number(eff),
-                color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
-            }));
-        const canDo = ranked.length;
-        return { line : l, profileName : profile?.name || '—', top3, canDo, fromBoard : planned.length > 0 };
+        if (profile) ensureProfileValues(profile);
+        const products = lineCanDo(l).map(name => ({
+            name,
+            eff   : Math.round(lineEfficiencyOf(l.id, name)),
+            color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
+        }));
+        return { line : l, products };
     });
 });
-
-watch(effTab, v => { if (v === 'lines') refreshLineBoardTop(); });
 
 function saveEffState() {
     localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
@@ -3067,7 +3072,6 @@ function saveEffState() {
 
 function openEffProfiles() {
     openMenu.value = null;
-    refreshLineBoardTop();
     effTab.value = 'define';
     if (!effSelectedProfileId.value && effList.value[0]) {
         effSelectedProfileId.value = effList.value[0].id;
@@ -8219,44 +8223,35 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">_Default = line efficiency (planning_resources.default_efficiency, read-only) — line capacity সবসময় এটাই ব্যবহার করে · line efficiency বদলাতে Setup → Line eff &amp; hours · এখানে শুধু product type efficiency দিন</div>
                 </div>
 
-                <!-- Lines tab: per-line top-3 product capability summary -->
+                <!-- Lines tab: per-line product capability (line chart) with efficiency % -->
                 <div v-if="effTab === 'lines'" class="st-body ls-body">
                     <table class="st-table ls-table">
                         <thead>
                             <tr>
                                 <th class="ls-line">Line</th>
-                                <th class="ls-profile">Profile</th>
-                                <th class="ls-can">Can do</th>
-                                <th class="ls-top">Top 3 products (from plan board — by planned qty)</th>
+                                <th class="ls-top">Products the line can run — efficiency %</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="row in lineEffSummary" :key="row.line.id">
                                 <td class="ls-line"><strong>{{ row.line.name }}</strong></td>
-                                <td class="ls-profile ls-dim">{{ row.profileName }}</td>
-                                <td class="ls-can">
-                                    <span class="ls-badge" :class="row.canDo > 0 ? 'ls-badge-ok' : 'ls-badge-none'">
-                                        {{ row.canDo }}
-                                    </span>
-                                </td>
                                 <td class="ls-top">
-                                    <span v-if="!row.top3.length" class="ls-dim">— no data —</span>
+                                    <span v-if="!row.products.length" class="ls-dim">— not in the line chart —</span>
                                     <span
-                                        v-for="(t, i) in row.top3"
+                                        v-for="t in row.products"
                                         :key="t.name"
                                         class="ls-pill"
-                                        :title="t.qty ? `${t.name}: ${fmtQty(t.qty)} pcs planned · eff ${t.eff}%` : `${t.name}: ${t.eff}%`"
+                                        :title="`${t.name}: ${t.eff}%`"
                                     >
                                         <span class="ls-dot" :style="{ background: t.color }"></span>
                                         <span class="ls-pname">{{ t.name }}</span>
                                         <span class="ls-peff">{{ t.eff }}%</span>
-                                        <span v-if="t.qty" class="ls-pqty">{{ fmtQty(t.qty) }}</span>
-                                        <span v-if="i === 0" class="ls-crown" :title="row.fromBoard ? 'Most planned on this line' : 'Highest'">👑</span>
                                     </span>
                                 </td>
                             </tr>
                         </tbody>
                     </table>
+                    <div class="st-hint">Line chart: AQL-A1…A9 = Line 01…09 · % = ওই product-এর profile efficiency (Define tab-এ না থাকলে line efficiency)</div>
                 </div>
             </div>
         </div>
@@ -10080,23 +10075,10 @@ body {
 .ls-table tbody tr:hover td { background : #f0f5ff; }
 
 .ls-line    { width : 90px; }
-.ls-profile { width : 140px; font-size : 12px; color : #666; }
-.ls-can     { width : 60px; text-align : center; }
 .ls-top     { }
 
 .ls-dim { color : #999; font-style : italic; font-size : 12px; }
 
-.ls-badge {
-    display       : inline-block;
-    min-width     : 26px;
-    padding       : 1px 5px;
-    border-radius : 10px;
-    font-size     : 12px;
-    font-weight   : bold;
-    text-align    : center;
-}
-.ls-badge-ok   { background : #d4edda; color : #155724; }
-.ls-badge-none { background : #f8d7da; color : #721c24; }
 
 .ls-pill {
     display        : inline-flex;
@@ -10119,8 +10101,6 @@ body {
 }
 .ls-pname { font-weight : 500; max-width : 140px; overflow : hidden; text-overflow : ellipsis; }
 .ls-peff  { color : #17356b; font-weight : bold; }
-.ls-pqty  { color : #2e7d32; font-weight : 600; }
-.ls-crown { font-size : 11px; }
 
 /* Plan generator dialog */
 .pg-dialog { width : 960px; max-width : 97vw; max-height : 95vh; overflow-y : auto; }
