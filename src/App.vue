@@ -1902,6 +1902,22 @@ function applyPullForward() {
 const sopOpen = ref(false);
 const sopPrev = shallowRef(null);
 const sopBusy = ref(false);
+// First output = earliest production start the plan may use (PP + throughput
+// run before it); defaults to the next working day
+const sopFirstOutput = ref(isoInputDate(nextWorkingDay(new Date())));
+
+// ERP product category → line chart product names (line eligibility)
+function chartProductsFor(category) {
+    const c = String(category || '').trim().toLowerCase();
+    if (!c) return [];
+    const exact = Object.values(LINE_CAN_DO).flat().find(n => n.toLowerCase() === c);
+    if (exact) return [exact];
+    if (c === 'pant' || c === 'pants' || c === 'trouser') return ['Pant'];
+    if (c === 'shorts' || c === 'short') return ['Shorts Chino', 'Shorts Cargo'];
+    if (c === 'dungaree') return ['Dungaree Long'];
+    if (c.includes('5 pkt') || c.includes('5 pocket')) return ['5 Pocket', '5 Pocket Long'];
+    return [];
+}
 
 async function openSopPlan() {
     openMenu.value = null;
@@ -1965,11 +1981,24 @@ function computeSopPlan() {
     }
     const isProj = r => r.orderType !== 'confirm';
     const hasProjection = new Set(erpAllOrders.value.filter(r => isProj(r) && r.status !== 'completed' && !r.replaced).map(r => String(r.mbmOrder || '')));
+    // Priority: orders whose delivery date already expired go FIRST (most
+    // overdue first); the rest by SOP production start, then delivery
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const shipOf  = r => new Date(r.orderDelivery || r.poDelivery);
+    const expired = r => shipOf(r) < today;
     const rows = erpAllOrders.value
         .filter(r => r.status === 'unplanned' && !r.planned && !r.replaced && (r.orderDelivery || r.poDelivery))
-        .sort((a, b) => new Date(a.orderDelivery || a.poDelivery) - new Date(b.orderDelivery || b.poDelivery));
+        .sort((a, b) => {
+            const ea = expired(a), eb = expired(b);
+            if (ea !== eb) return ea ? -1 : 1;
+            if (ea) return shipOf(a) - shipOf(b);
+            const pa = sopForRow(a)?.milestones.production_start.date || shipOf(a);
+            const pb = sopForRow(b)?.milestones.production_start.date || shipOf(b);
+            return (pa - pb) || (shipOf(a) - shipOf(b));
+        });
     const changes = [], skipped = [];
-    const earliest = startOfWorkDay(nextWorkingDay(new Date()));
+    const firstOut = sopFirstOutput.value ? new Date(`${sopFirstOutput.value}T00:00:00`) : nextWorkingDay(new Date());
+    const earliest = startOfWorkDay(isOffDay(firstOut) ? nextWorkingDay(firstOut) : firstOut);
     for (const r of rows) {
         const order = r.mbmOrder || r.po;
         // The projection is the planning row; its confirm POs plan only when
@@ -1984,19 +2013,29 @@ function computeSopPlan() {
         }
         const { src, err } = resolveCarrySource(r);
         if (err) { skipped.push({ order, po : r.po, reason : err }); continue; }
+        // No SMV → SOP §3 unconfirmed rule (10-day default run), never a guess
         const raw = {
             ...src,
-            smv : Number(src.smv) > 0 ? Number(src.smv) : randSmv(src.po || src.mbmOrder),
+            smv : Number(src.smv) > 0 ? Number(src.smv) : 0,
             qty : Number(src.qty ?? src.orderQty) || 0, orderQty : Number(src.orderQty ?? src.qty) || 0
         };
+        // Line chart: only lines that can run this product; a product the
+        // chart does not know may go on any line (flagged)
+        const prods = chartProductsFor(r.productType || src.productType);
+        let elig = lines.filter(l => prods.some(pn => lineCanDo({ id : l.id, name : l.name }).includes(pn)));
+        const noChart = !elig.length;
+        if (noChart) elig = lines;
         let best = null;
-        for (const l of lines) {
+        for (const l of elig) {
             const sp = sopForRaw(s, raw, l.id);
             if (!sp) continue;
             const target  = sp.milestones.production_start.date;
             const desired = target < earliest ? earliest : target;
             const ins = sopVirtualInsert(occ.get(l.id), desired, sp.production.days);
-            if (!best || ins.start < best.ins.start) best = { l, sp, ins };
+            const out = sp.production.dailyOutput || 0;
+            // earliest slot wins; same slot → higher daily output, then lower line
+            if (!best || ins.start < best.ins.start
+                || (ins.start.getTime() === best.ins.start.getTime() && out > best.out)) best = { l, sp, ins, out };
         }
         if (!best) { skipped.push({ order, po : r.po, reason : 'no ex-factory date' }); continue; }
         const { l, sp, ins } = best;
@@ -2011,6 +2050,7 @@ function computeSopPlan() {
             start : ins.start, end : ins.end, days : sp.production.days,
             breached : sp.breached, breachDays : sp.breachDays,
             review : sp.production.needsCapacityReview, late, blockedBy : ins.blockedBy,
+            expired : expired(r), noChart,
             sop : { version : sp.version, exFactory : m.ex_factory.date.toISOString(), ppStart : m.pp_start.date.toISOString(),
                 throughputStart : m.throughput_start.date.toISOString(), prodStart : m.production_start.date.toISOString(),
                 prodComplete : m.production_complete.date.toISOString(), days : sp.production.days, ppDays : sp.pp.days, ppBasis : sp.pp.basis }
@@ -8709,6 +8749,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span class="cal-title-btns"><span class="cal-x" @click="sopOpen = false">✕</span></span>
                 </div>
                 <div class="st-body">
+                    <div class="sop-opts">
+                        <label>First output (earliest production start)
+                            <input type="date" v-model="sopFirstOutput" class="cal-in" @change="sopPrev = computeSopPlan()">
+                        </label>
+                        <span class="ls-dim">PP + 2d throughput run before this date · expired-delivery orders are planned first · line = product chart</span>
+                    </div>
                     <div v-if="sopBusy" class="ls-dim">Calculating backward timelines…</div>
                     <template v-else-if="sopPrev">
                         <div class="pf-sum">
@@ -8730,7 +8776,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <tbody>
                                     <tr v-for="c in sopPrev.changes" :key="c.row.id" :class="{ 'sop-row-late' : c.late }">
                                         <td><b>{{ c.order }}</b><span v-if="c.po" class="ls-dim"> {{ c.po }}</span></td>
-                                        <td>{{ c.type }}</td>
+                                        <td>{{ c.type }}<span v-if="c.expired" class="sop-bad" title="Delivery date already expired — planned first"> ⏱</span></td>
                                         <td>{{ fmtDateDdMonRr(c.exFactory) }}</td>
                                         <td :class="{ 'sop-bad' : c.breached }">{{ fmtDateDdMonRr(c.ppStart) }}</td>
                                         <td>{{ fmtDateDdMonRr(c.prodTarget) }}</td>
@@ -8743,6 +8789,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                             <span v-if="c.late" title="Production would finish after ex-factory − 6 days">⏰ late</span>
                                             <span v-if="c.review" title="Over 20 production days — review with Merchandising">⚑ review</span>
                                             <span v-if="c.blockedBy" :title="'Placed after ' + c.blockedBy">↦ after bar</span>
+                                            <span v-if="c.noChart" title="Product not in the line chart — any line allowed">? chart</span>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -8755,9 +8802,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </details>
                     </template>
                     <div class="st-hint">
-                        Ex-factory (locked) − 6d = production complete · − capacity run (qty ÷ daily output, ceil, min 5d, &gt;20d review) = production start ·
+                        Ex-factory (locked) − 6d = production complete · − capacity run (qty ÷ daily output, ceil, min 5d, &gt;20d review; no SMV → 10d) = production start ·
                         − 2d throughput · − PP (5d normal / 7d critical or SMV &gt; 25 / provisional) = PP start ·
-                        line = earliest feasible slot; covering bars stay, later bars shift later · never auto-runs — Save to keep, Undo (↺) reverses
+                        nothing starts before First output · expired deliveries first (most overdue first) · line = chart-eligible line with the earliest free slot (existing bars never move) ·
+                        never auto-runs — Save to keep, Undo (↺) reverses
                     </div>
                 </div>
             </div>
@@ -11182,6 +11230,8 @@ body {
 .sop-flags span { display : inline-block; margin-right : 6px; font-size : 11px; color : #7a4a00; }
 .sop-skipped { margin-top : 8px; font-size : 12px; }
 .sop-skipped summary { cursor : pointer; color : #345; }
+.sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
+.sop-opts label { display : inline-flex; align-items : center; gap : 6px; font-weight : 600; }
 
 /* Multiple strip handling */
 .msh-dialog { width : 960px; max-width : 97vw; max-height : 92vh; overflow-y : auto; }
