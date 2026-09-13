@@ -96,6 +96,7 @@ function cacheHasLines(cache) {
 function markBoardDirty() {
     const uid = currentUnitId.value;
     if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = true;
+    syncOrdersListFromBoard();
 }
 
 function markBoardSaved() {
@@ -1032,6 +1033,7 @@ function applyApiBoardData(s, data) {
         markBoardDirty();
         toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
     }
+    syncOrdersListFromBoard();
     // Engine-settled pass (async): bars must sit strictly one after another
     enforceSequentialLines(s);
     if (ordersOpen.value) ordersRows.value = collectOrders();
@@ -1949,7 +1951,8 @@ async function openSopPlan() {
         if (!erpAllOrders.value.length) {
             const rows = await loadErpAllOrders(currentUnitId.value || null);
             sopRowCache.clear();
-            erpAllOrders.value = overlayBoardPlacements(rows);
+            erpAllBase = rows;
+            syncOrdersListFromBoard();
         }
         sopPrev.value = computeSopPlan();
     }
@@ -2145,11 +2148,7 @@ function applySopPlan() {
     applyLearningCurves(s, { lineIds : [...new Set(placed.map(x => x.c.line))] });
     expandTimeAxisForEvents(s);
     // The list shows these as planned immediately
-    const codes = new Set(placed.map(x => String(x.c.row.mbmOrder || '')));
-    for (const r of erpAllOrders.value) {
-        if (placed.some(x => x.c.row === r)) { r.status = 'planned'; r.planned = true; }
-    }
-    if (codes.size) erpAllOrders.value = overlayBoardPlacements([...erpAllOrders.value]);
+    syncOrdersListFromBoard();
     linkAudit(placed.map(({ c, rec }) => ({
         eventId : String(rec.id).replace(/^db-/, ''), action : 'sop-plan',
         line : c.lineName, order : c.order,
@@ -3830,7 +3829,8 @@ function reloadOrdersList() {
     erpAllLoading.value = true;
     loadErpAllOrders(currentUnitId.value || null).then(rows => {
         sopRowCache.clear();
-        erpAllOrders.value  = overlayBoardPlacements(rows);
+        erpAllBase = rows;
+        syncOrdersListFromBoard();
         erpAllLoading.value = false;
         toast(`Order list refreshed — ${rows.length} row(s)`, 'ok');
     }).catch(e => {
@@ -4012,14 +4012,14 @@ async function saveMarkedComplete() {
         // INSTANT list update — the server already confirmed, so flip the
         // rows locally instead of re-downloading the whole order book
         const codeSet2 = new Set(codes);
-        for (const r of erpAllOrders.value) {
+        for (const r of erpAllBase) {
             if (codeSet2.has(String(r.mbmOrder || ''))) {
                 r.status   = 'completed';
                 r.planned  = false;
                 r.replaced = false;
             }
         }
-        erpAllOrders.value = [...erpAllOrders.value];
+        syncOrdersListFromBoard();
     }
     catch (e) {
         toast(`Mark complete failed: ${e.message}`, 'error');
@@ -4425,35 +4425,82 @@ function unitLabel(id) {
 
 // Projected rows planned on the LIVE board (not yet saved to DB) still show
 // their line / start / end in the Orders list — overlay from the scheduler.
+// Pristine ERP list rows (as the server sent them) — the board overlay is
+// re-applied onto a fresh copy every time the board changes, so a bar that
+// is placed, swapped or removed shows in the list at once
+let erpAllBase = [];
+
 function overlayBoardPlacements(rows) {
     const s = getInstance();
     if (!s) return rows;
-    const byProj = new Map();
+    const byProj  = new Map();   // order code -> live projection bar
+    const confirmBars = [];      // live confirm bars (swapped or placed)
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
-        const pid = String(raw.id || '');
-        if (pid.startsWith('proj:')) byProj.set(pid.slice(5), ev);
-    }
-    if (!byProj.size) return rows;
-    for (const r of rows) {
-        if (r.orderType !== 'projected' || !r.mbmOrder) continue;
-        const ev = byProj.get(r.mbmOrder);
-        if (!ev) continue;
         const lid = lineIdOf(s, ev);
-        const res = lid ? s.resourceStore.getById(lid) : null;
-        r.line  = res?.data?.name || res?.name || r.line;
-        r.start = ev.startDate ? new Date(ev.startDate) : r.start;
-        r.end   = ev.endDate   ? new Date(ev.endDate)   : r.end;
-        // The projection's own bar is live on the board — it is PLANNED, not
-        // replaced (replaced = bar gone, a planned confirm took its slot)
-        if (r.status === 'unplanned' || r.status === 'replaced' || r.replaced) {
-            r.status   = 'planned';
-            r.planned  = true;
-            r.replaced = false;
+        if (!lid || lid === 'hold') continue;
+        const pid = String(raw.id || '');
+        if (orderTypeOf(raw.po, raw.orderType) === 'confirm') {
+            confirmBars.push({
+                ev, lid,
+                order : String(raw.mbmOrder || '').trim(),
+                pos   : new Set((raw.poList || []).map(String).concat(raw.po ? [String(raw.po)] : [])),
+                ids   : new Set((raw.idList || []).map(String))
+            });
+        }
+        else if (pid.startsWith('proj:')) byProj.set(pid.slice(5), ev);
+        else if (raw.mbmOrder) byProj.set(String(raw.mbmOrder), ev);
+    }
+    if (!byProj.size && !confirmBars.length) return rows;
+    const lineName = lid => { const res = lid ? s.resourceStore.getById(lid) : null; return res?.data?.name || res?.name || lid; };
+    const confirmByOrder = new Map();
+    for (const c of confirmBars) {
+        if (!confirmByOrder.has(c.order)) confirmByOrder.set(c.order, []);
+        confirmByOrder.get(c.order).push(c);
+    }
+    for (const r of rows) {
+        if (!r.mbmOrder) continue;
+        if (r.orderType === 'confirm') {
+            const cands = confirmByOrder.get(String(r.mbmOrder)) || [];
+            const rowPos = (r.poList || []).map(String).concat(r.po ? [String(r.po)] : []);
+            const hit = cands.find(c => rowPos.some(p => c.pos.has(p)))
+                || cands.find(c => (r.poDetails || []).some(d => c.ids.has(String(d.id))));
+            if (!hit) continue;
+            r.line  = lineName(hit.lid);
+            r.start = hit.ev.startDate ? new Date(hit.ev.startDate) : r.start;
+            r.end   = hit.ev.endDate   ? new Date(hit.ev.endDate)   : r.end;
+            if (r.status !== 'completed') { r.status = 'planned'; r.planned = true; r.replaced = false; }
+            continue;
+        }
+        if (r.orderType !== 'projected') continue;
+        const ev = byProj.get(r.mbmOrder);
+        if (ev) {
+            r.line  = lineName(lineIdOf(s, ev));
+            r.start = ev.startDate ? new Date(ev.startDate) : r.start;
+            r.end   = ev.endDate   ? new Date(ev.endDate)   : r.end;
+            // The projection's own bar is live on the board — it is PLANNED,
+            // not replaced (replaced = bar gone, a planned confirm took its slot)
+            if (r.status === 'unplanned' || r.status === 'replaced' || r.replaced) {
+                r.status   = 'planned';
+                r.planned  = true;
+                r.replaced = false;
+            }
+        }
+        else if (confirmByOrder.has(String(r.mbmOrder)) && r.status !== 'completed') {
+            // No projection bar but its confirm order is on a line → replaced
+            r.status = 'replaced'; r.replaced = true; r.planned = false;
+            r.line = '—'; r.start = null; r.end = null;
         }
     }
     return rows;
+}
+
+// Re-apply the live-board overlay onto the pristine ERP rows (called on
+// every board change while the list has been loaded)
+function syncOrdersListFromBoard() {
+    if (!erpAllBase.length) return;
+    erpAllOrders.value = overlayBoardPlacements(erpAllBase.map(r => ({ ...r })));
 }
 
 function openOrders() {
@@ -4463,7 +4510,8 @@ function openOrders() {
     erpAllLoading.value = true;
     erpAllOrders.value  = [];
     loadErpAllOrders(currentUnitId.value || null).then(rows => {
-        erpAllOrders.value  = overlayBoardPlacements(rows);
+        erpAllBase = rows;
+        syncOrdersListFromBoard();
         erpAllLoading.value = false;
     }).catch(() => { erpAllLoading.value = false; });
     // Also refresh confirm groups from board + unplanned (for Confirm Orders tab)
