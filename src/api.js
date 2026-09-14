@@ -363,6 +363,12 @@ async function postRows(path, rows) {
 }
 
 export const saveEffProfilesDb     = rows => postRows('/efficiency-profiles', rows);
+// Line / product-type efficiency rows as saved in the DB (efficiency_profile)
+export async function loadEffProfilesDb() {
+    const j = await get('/efficiency-profiles', 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return j.rows || [];
+}
 export const saveLearningCurvesDb  = rows => postRows('/learning-curves', rows);
 
 // ---------------------------------------------------------------------------

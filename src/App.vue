@@ -18,7 +18,7 @@ import {
 } from './planningData.js';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
-    saveEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
+    saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
@@ -997,6 +997,9 @@ let boardLoadedUnitId = null;
 function applyApiBoardData(s, data) {
     boardLoadedUnitId = data.unitId || null;
     clearDayPlanChips();
+    // Every board open (fresh or cached) refreshes the shared efficiency
+    // profiles from the DB; bars re-render once they arrive
+    loadEffProfilesDb().then(rows => { if (applyEffProfilesFromDb(rows)) getInstance()?.refreshRows?.(); }).catch(() => { /* offline */ });
     withBoardBatch(s, () => {
         s.project.loadInlineData({
             resources          : data.resources,
@@ -1115,6 +1118,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
             unitId             : data.unitId,
             unitName           : data.unitName
         });
+        try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
         applyApiBoardData(s, boardUnitCache[uid].apiData);
         apiReady.value = true;
         applyBoardFilter();
@@ -1156,6 +1160,10 @@ async function hydrateBoardFromApi() {
                 unitId             : data.unitId,
                 unitName           : data.unitName
             });
+            // Shared efficiency profiles from the DB BEFORE the board is laid
+            // out — tooltips, day chips, curves and the duration formula all
+            // read them; the localStorage copy stays as the offline fallback
+            try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
             applyApiBoardData(s, boardUnitCache[unitId].apiData);
             apiReady.value = true;
             setBoardLoad(false);
@@ -3181,6 +3189,42 @@ const lineEffSummary = computed(() => {
     });
 });
 
+// Efficiency profiles are shared planning data: the DB copy (efficiency_profile,
+// written on every Update) is the source of truth for EVERY browser — a
+// planner's localStorage copy is only the offline fallback. Rebuilds the
+// profile list and the line → profile map from the DB rows.
+function applyEffProfilesFromDb(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    const s = getInstance();
+    const byName = new Map();
+    for (const r of rows) {
+        const name = String(r.profile_name || '').trim();
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, {});
+        byName.get(name)[String(r.product_type)] = Number(r.efficiency_pct) || 0;
+    }
+    if (!byName.size) return 0;
+    const slug = n => `p-${n.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const list = [...byName].map(([name, values]) => {
+        const old = effList.value.find(p => p.name === name);
+        return { id : old?.id || slug(name), name, values };
+    });
+    const lineIdByName = n => s?.resourceStore?.records.find(x => (x.data?.name || x.name) === n)?.id
+        || LINES.find(l => l.name === n)?.id || null;
+    const map = { ...lineProfileMap.value };
+    for (const r of rows) {
+        const lid = lineIdByName(String(r.line || ''));
+        const p = list.find(x => x.name === String(r.profile_name || '').trim());
+        if (lid && p) map[lid] = p.id;
+    }
+    effList.value = list;
+    lineProfileMap.value = map;
+    if (!list.some(p => p.id === effSelectedProfileId.value)) effSelectedProfileId.value = list[0]?.id || null;
+    localStorage.setItem('mbm-eff-list', JSON.stringify(list));
+    localStorage.setItem('mbm-line-prof', JSON.stringify(map));
+    return list.length;
+}
+
 function saveEffState() {
     localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
     localStorage.setItem('mbm-line-prof', JSON.stringify(lineProfileMap.value));
@@ -3193,6 +3237,8 @@ function saveEffState() {
 
 function openEffProfiles() {
     openMenu.value = null;
+    // Show the shared (DB) values, not a stale local copy
+    loadEffProfilesDb().then(applyEffProfilesFromDb).catch(() => { /* offline */ });
     effTab.value = 'define';
     if (!effSelectedProfileId.value && effList.value[0]) {
         effSelectedProfileId.value = effList.value[0].id;
@@ -3555,8 +3601,12 @@ function buildLearningCurveRows() {
 }
 
 function syncMasterData(s) {
+    // NEVER push this browser's copy of the efficiency profiles to the DB on
+    // load — the DB is the shared source of truth (loaded on every board
+    // open) and is written only by an explicit Update in the profiles dialog.
+    // A read-only / test session must not write master data at all.
+    if (boardReadOnly.value) return;
     Promise.allSettled([
-        saveEffProfilesDb(buildEffProfileRows(s)),
         saveLearningCurvesDb(buildLearningCurveRows())
     ]).then(results => {
         const failed = results.filter(r => r.status === 'rejected');
