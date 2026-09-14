@@ -2102,8 +2102,15 @@ function computeSopPlan() {
         for (const l of elig) {
             const sp = sopForRaw(s, raw, l.id);
             if (!sp) continue;
+            // RULE: the existing plan never moves for a new order — a new bar
+            // goes AFTER the line's last bar (next working day), never into a
+            // gap and never pushing anything; the SOP start only matters when
+            // the line is free earlier than that
             const target  = sp.milestones.production_start.date;
-            const desired = target < earliest ? earliest : target;
+            const lineBars = occ.get(l.id);
+            const lastEnd  = lineBars.length ? new Date(Math.max(...lineBars.map(b => b.end.getTime()))) : null;
+            let desired = target < earliest ? earliest : target;
+            if (lastEnd) { const after = nextDayStartAfter(lastEnd); if (after > desired) desired = after; }
             const ins = sopVirtualInsert(occ.get(l.id), desired, sp.production.days);
             const out = sp.production.dailyOutput || 0;
             // earliest slot wins; same slot → higher daily output, then lower line
@@ -8972,8 +8979,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">
                         Ex-factory (locked) − 6d = production complete · − capacity run (qty ÷ daily output, ceil, min 5d, &gt;20d review; no SMV → 10d) = production start ·
                         − 2d throughput · − PP (5d normal / 7d critical or SMV &gt; 25 / provisional) = PP start ·
-                        nothing starts before First output · expired deliveries first (most overdue first) · line = chart-eligible line with the earliest free slot (existing bars never move) ·
-                        never auto-runs — Save to keep, Undo (↺) reverses
+                        nothing starts before First output · expired deliveries first (most overdue first) · line = chart-eligible line whose plan ends earliest ·
+                        a new bar always goes AFTER the line's last bar — the existing plan never moves (only the user moves a bar) · never auto-runs — Save to keep, Undo (↺) reverses
                     </div>
                 </div>
             </div>
