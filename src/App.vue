@@ -3196,12 +3196,24 @@ const lineEffSummary = computed(() => {
 function applyEffProfilesFromDb(rows) {
     if (!Array.isArray(rows) || !rows.length) return 0;
     const s = getInstance();
-    const byName = new Map();
+    // Rows are stored per LINE; several lines may share one profile name.
+    // The profile's values come from its HOME line (the line named in the
+    // profile, e.g. "AQL Line 01" → Line 01), else the first line seen —
+    // another line assigned to the profile never overrides them.
+    const byNameLine = new Map();   // name -> Map(line -> values)
     for (const r of rows) {
         const name = String(r.profile_name || '').trim();
+        const line = String(r.line || '').trim();
         if (!name) continue;
-        if (!byName.has(name)) byName.set(name, {});
-        byName.get(name)[String(r.product_type)] = Number(r.efficiency_pct) || 0;
+        if (!byNameLine.has(name)) byNameLine.set(name, new Map());
+        const perLine = byNameLine.get(name);
+        if (!perLine.has(line)) perLine.set(line, {});
+        perLine.get(line)[String(r.product_type)] = Number(r.efficiency_pct) || 0;
+    }
+    const byName = new Map();
+    for (const [name, perLine] of byNameLine) {
+        const home = [...perLine.keys()].find(l => l && name.toLowerCase().includes(l.toLowerCase()));
+        byName.set(name, perLine.get(home) || perLine.values().next().value);
     }
     if (!byName.size) return 0;
     const slug = n => `p-${n.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
