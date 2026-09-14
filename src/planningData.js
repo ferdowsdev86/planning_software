@@ -562,8 +562,12 @@ export function resolveProfileEfficiency(profileValues, productType, fallback) {
         if (hit) tv = Number(profileValues[hit]);
     }
     const dv = Number(profileValues?._Default);
-    const productEff = tv > 0 ? tv : (dv > 0 ? dv : 0);
-    return Math.max(productEff, lineEff) || 0;
+    // The profile's product-type efficiency is authoritative — it may be
+    // BELOW the line default (a 50% jacket on a 60% line); only when the
+    // profile has no figure for the type do _Default / line efficiency apply
+    if (tv > 0) return tv;
+    if (dv > 0) return dv;
+    return lineEff || 0;
 }
 
 function mkOrder(o) {
