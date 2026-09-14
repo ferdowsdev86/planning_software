@@ -2406,9 +2406,155 @@ async function runAutoSync() {
     }
 }
 
+// --------------------------------------------------------------------------
+// Board snapshots: an automatic backup of every board's live plan at 23:30
+// (Asia/Dhaka) each day, plus on-demand backups; any snapshot can be
+// compared with the current plan (Reports → Board backup & compare).
+// --------------------------------------------------------------------------
+const SNAP_TZ   = 'Asia/Dhaka';
+const SNAP_TIME = '23:30';
+
+async function ensureSnapshotTable() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS planning_board_snapshots (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        snapshot_date DATE NOT NULL,
+        unit_id INT NULL,
+        taken_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        source VARCHAR(20) NOT NULL DEFAULT 'auto',
+        taken_by VARCHAR(60) NULL,
+        bars INT NOT NULL DEFAULT 0,
+        data LONGTEXT,
+        KEY idx_snap_date (snapshot_date, unit_id)
+    )`);
+}
+
+const snapFmt = d => {
+    if (!d) return null;
+    const x = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(x.getTime())) return null;
+    const p = n => String(n).padStart(2, '0');
+    return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())}`;
+};
+
+// Every live bar of a board (all boards when unitId is null) with its order
+async function liveBoardRows(unitId) {
+    const uf = unitId ? 'AND pr.unit_id = ?' : '';
+    const [rows] = await pool.query(`
+        SELECT pe.id, pe.event_code, pe.event_name, pe.start_date, pe.end_date, pe.planned_quantity, pe.event_status,
+               pa.resource_id, pr.resource_name, pr.unit_id,
+               COALESCE(o.order_code, p.order_code) AS order_code, COALESCE(o.buyer_name, p.buyer_name) AS buyer,
+               COALESCE(o.style_no, p.style_no) AS style_no, o.po_number
+        FROM planning_events pe
+        JOIN planning_assignments pa ON pa.event_id = pe.id
+        JOIN planning_resources pr ON pr.id = pa.resource_id
+        LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
+        LEFT JOIN planning_orders p ON pe.planning_order_id IS NULL AND pe.event_code LIKE 'ev-proj:%'
+             AND p.id = (SELECT x.id FROM planning_orders x
+                         WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(pe.event_code, 9), '-[0-9]{1,2}$', '')
+                         ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
+        WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line' ${uf}
+        ORDER BY pr.sort_order, pe.start_date, pe.id`, unitId ? [unitId] : []);
+    return rows.map(r => ({
+        id : r.id, code : r.event_code, name : r.event_name,
+        order : r.order_code || (String(r.event_code || '').startsWith('ev-proj:') ? String(r.event_code).slice(8) : null),
+        po : r.po_number || null, buyer : r.buyer || null, style : r.style_no || null,
+        lineId : r.resource_id, line : r.resource_name, unit : r.unit_id,
+        start : snapFmt(r.start_date), end : snapFmt(r.end_date),
+        qty : Number(r.planned_quantity) || 0, status : r.event_status
+    }));
+}
+
+async function takeBoardSnapshot(unitId, source = 'auto', by = null, dateStr = null) {
+    const rows = await liveBoardRows(unitId);
+    const snapDate = dateStr || new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+    const [ins] = await pool.query(
+        `INSERT INTO planning_board_snapshots (snapshot_date, unit_id, source, taken_by, bars, data) VALUES (?, ?, ?, ?, ?, ?)`,
+        [snapDate, unitId ?? null, source, by, rows.length, JSON.stringify(rows)]);
+    console.log(`[snapshot] ${source} backup ${snapDate} unit ${unitId ?? 'all'}: ${rows.length} bars (id ${ins.insertId})`);
+    return { id : ins.insertId, snapshotDate : snapDate, bars : rows.length };
+}
+
+// 23:30 Dhaka time, once per day per board unit
+let snapLastRunDate = null;
+async function snapshotTick() {
+    try {
+        const now  = new Date();
+        const hm   = now.toLocaleTimeString('en-GB', { timeZone : SNAP_TZ, hour : '2-digit', minute : '2-digit', hour12 : false });
+        const date = now.toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+        if (hm !== SNAP_TIME || snapLastRunDate === date) return;
+        snapLastRunDate = date;
+        const [units] = await pool.query(`SELECT DISTINCT unit_id FROM planning_resources WHERE resource_type='sewing_line' AND active=1 AND unit_id IS NOT NULL`);
+        for (const u of units) {
+            const [[{ n }]] = await pool.query(`SELECT COUNT(*) n FROM planning_board_snapshots WHERE snapshot_date=? AND unit_id=? AND source='auto'`, [date, u.unit_id]);
+            if (!n) await takeBoardSnapshot(u.unit_id, 'auto', 'scheduler', date);
+        }
+    }
+    catch (e) { console.error('[snapshot] failed:', e.message); }
+}
+
+app.get(`${BASE}/board-snapshots`, async (req, res) => {
+    const unitId = req.query.unit ? Number(req.query.unit) : null;
+    try {
+        const [rows] = await pool.query(
+            `SELECT id, snapshot_date, unit_id, taken_at, source, taken_by, bars FROM planning_board_snapshots
+             ${unitId ? 'WHERE unit_id = ?' : ''} ORDER BY taken_at DESC LIMIT 200`, unitId ? [unitId] : []);
+        res.json({ success : true, rows : rows.map(r => ({ ...r, snapshot_date : r.snapshot_date instanceof Date ? r.snapshot_date.toLocaleDateString('en-CA') : r.snapshot_date })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+app.post(`${BASE}/board-snapshots`, async (req, res) => {
+    const unitId = req.body?.unit ? Number(req.body.unit) : null;
+    try { res.json({ success : true, ...(await takeBoardSnapshot(unitId, 'manual', req.body?.by || null)) }); }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+// Snapshot vs the live plan: added / removed / line / moved / resized / qty
+app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
+    try {
+        const [[snap]] = await pool.query('SELECT * FROM planning_board_snapshots WHERE id = ?', [Number(req.params.id)]);
+        if (!snap) return res.status(404).json({ success : false, error : 'snapshot not found' });
+        const unitId = req.query.unit ? Number(req.query.unit) : (snap.unit_id ?? null);
+        const before = (typeof snap.data === 'string' ? JSON.parse(snap.data) : snap.data) || [];
+        const now = await liveBoardRows(unitId);
+        const bMap = new Map(before.map(b => [String(b.id), b]));
+        const nMap = new Map(now.map(n => [String(n.id), n]));
+        const changes = [];
+        for (const b of before) {
+            const n = nMap.get(String(b.id));
+            if (!n) { changes.push({ type : 'removed', ...pick(b, null) }); continue; }
+            const lineChanged = b.lineId !== n.lineId;
+            const startChanged = b.start !== n.start, endChanged = b.end !== n.end, qtyChanged = Number(b.qty) !== Number(n.qty);
+            if (!lineChanged && !startChanged && !endChanged && !qtyChanged) continue;
+            const type = lineChanged ? 'line' : startChanged ? 'moved' : endChanged ? 'resized' : 'qty';
+            changes.push({ type, ...pick(b, n) });
+        }
+        for (const n of now) if (!bMap.has(String(n.id))) changes.push({ type : 'added', ...pick(null, n) });
+        const order = { removed : 0, added : 1, line : 2, moved : 3, resized : 4, qty : 5 };
+        changes.sort((a, b) => (order[a.type] - order[b.type]) || String(a.lineNew || a.lineOld).localeCompare(String(b.lineNew || b.lineOld)) || String(a.startNew || a.startOld || '').localeCompare(String(b.startNew || b.startOld || '')));
+        const summary = { snapshotBars : before.length, liveBars : now.length };
+        for (const k of Object.keys(order)) summary[k] = changes.filter(c => c.type === k).length;
+        res.json({ success : true, snapshot : { id : snap.id, date : snap.snapshot_date, takenAt : snap.taken_at, source : snap.source, by : snap.taken_by, unit : snap.unit_id }, summary, changes });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+    function pick(b, n) {
+        const x = n || b;
+        return {
+            id : x.id, order : x.order, po : x.po, buyer : x.buyer, style : x.style, code : x.code,
+            lineOld : b?.line ?? null, lineNew : n?.line ?? null,
+            startOld : b?.start ?? null, startNew : n?.start ?? null,
+            endOld : b?.end ?? null, endNew : n?.end ?? null,
+            qtyOld : b?.qty ?? null, qtyNew : n?.qty ?? null
+        };
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
+    ensureSnapshotTable()
+        .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
+        .catch(e => console.error('[snapshot] table init failed:', e.message));
     // Run once on startup so orders are fresh immediately
     runAutoSync();
     // Then continuously, every SYNC_INTERVAL_MS

@@ -371,6 +371,27 @@ export async function loadEffProfilesDb() {
 }
 export const saveLearningCurvesDb  = rows => postRows('/learning-curves', rows);
 
+// Board snapshots (daily 23:30 auto backup + manual) and compare with the live plan
+export async function loadBoardSnapshots(unitId) {
+    const j = await get(`/board-snapshots${unitId ? `?unit=${unitId}` : ''}`, 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return j.rows || [];
+}
+export async function createBoardSnapshot(unitId, by) {
+    const res = await fetch(`${API_BASE}/board-snapshots`, {
+        method : 'POST', headers : { 'Content-Type' : 'application/json' },
+        body : JSON.stringify({ unit : unitId, by })
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'backup failed');
+    return j;
+}
+export async function compareBoardSnapshot(id, unitId) {
+    const j = await get(`/board-snapshots/${id}/compare${unitId ? `?unit=${unitId}` : ''}`, 15000);
+    if (!j.success) throw new Error(j.error || 'compare failed');
+    return j;
+}
+
 // ---------------------------------------------------------------------------
 // Authentication — planning_users table (scrypt hashes verified server-side)
 // ---------------------------------------------------------------------------

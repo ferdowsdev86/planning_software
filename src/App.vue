@@ -19,6 +19,7 @@ import {
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
+    loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
@@ -2225,6 +2226,67 @@ function applySopPlan() {
     toast(`SOP timeline: ${placed.length} order(s) placed on ${new Set(placed.map(x => x.c.line)).size} line(s)${pushedTotal ? `, ${pushedTotal} bar(s) shifted later` : ''}${lateN ? ` — ⚠ ${lateN} miss the ex-factory buffer (escalate)` : ''} — Save to keep it (Undo reverses it).`, lateN ? 'warn' : 'ok');
     sopOpen.value = false;
     sopPrev.value = null;
+}
+
+// ---------------------------------------------------------------------------
+// Board backup & compare (Reports): the server backs every board up at
+// 23:30 (Asia/Dhaka) daily; any backup (or a manual one) can be compared
+// with the live plan — added / removed / line / moved / resized / qty.
+// ---------------------------------------------------------------------------
+const bsOpen    = ref(false);
+const bsList    = ref([]);
+const bsSel     = ref(null);
+const bsBusy    = ref(false);
+const bsResult  = shallowRef(null);
+const bsTypeLbl = { added : 'New bar', removed : 'Removed', line : 'Line changed', moved : 'Moved', resized : 'Length changed', qty : 'Qty changed' };
+
+async function bsRefresh() {
+    bsBusy.value = true;
+    try { bsList.value = await loadBoardSnapshots(currentUnitId.value || null); }
+    catch (e) { toast(`Backup list failed: ${e.message}`, 'error'); }
+    finally { bsBusy.value = false; }
+}
+
+async function openBoardBackup() {
+    openMenu.value = null;
+    bsResult.value = null;
+    bsSel.value = null;
+    bsOpen.value = true;
+    await bsRefresh();
+    if (bsList.value.length) bsSel.value = bsList.value[0].id;
+}
+
+async function bsBackupNow() {
+    bsBusy.value = true;
+    try {
+        const r = await createBoardSnapshot(currentUnitId.value || null, authUser.value?.username || null);
+        toast(`Board backed up — ${r.bars} bar(s), ${r.snapshotDate}`, 'ok');
+        await bsRefresh();
+        bsSel.value = r.id;
+    }
+    catch (e) { toast(`Backup failed: ${e.message}`, 'error'); }
+    finally { bsBusy.value = false; }
+}
+
+async function bsCompare() {
+    if (!bsSel.value) return;
+    bsBusy.value = true;
+    try { bsResult.value = await compareBoardSnapshot(bsSel.value, currentUnitId.value || null); }
+    catch (e) { toast(`Compare failed: ${e.message}`, 'error'); }
+    finally { bsBusy.value = false; }
+}
+
+function bsPrint() {
+    const r = bsResult.value;
+    if (!r) return;
+    const esc = v => String(v ?? '').replace(/[&<>]/g, c => ({ '&' : '&amp;', '<' : '&lt;', '>' : '&gt;' }[c]));
+    const rows = r.changes.map(c => `<tr><td>${esc(bsTypeLbl[c.type] || c.type)}</td><td>${esc(c.order)}</td><td>${esc(c.po || '')}</td><td>${esc(c.buyer || '')}</td><td>${esc(c.lineOld || '—')}</td><td>${esc(c.lineNew || '—')}</td><td>${esc(c.startOld || '—')}</td><td>${esc(c.startNew || '—')}</td><td>${esc(c.endOld || '—')}</td><td>${esc(c.endNew || '—')}</td><td>${esc(c.qtyOld ?? '—')}</td><td>${esc(c.qtyNew ?? '—')}</td></tr>`).join('');
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<html><head><title>Board changes since ${esc(r.snapshot.date)}</title><style>body{font:12px Verdana,sans-serif;padding:16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:3px 6px;font-size:11px}th{background:#eee}h2{margin:0 0 6px}</style></head><body><h2>Board changes vs backup ${esc(r.snapshot.date)} (${esc(r.snapshot.source)}, ${esc(r.snapshot.takenAt)})</h2><p>Backup ${r.summary.snapshotBars} bars · now ${r.summary.liveBars} bars · new ${r.summary.added} · removed ${r.summary.removed} · line ${r.summary.line} · moved ${r.summary.moved} · length ${r.summary.resized} · qty ${r.summary.qty}</p><table><thead><tr><th>Change</th><th>Order</th><th>PO</th><th>Buyer</th><th>Line (was)</th><th>Line (now)</th><th>Start (was)</th><th>Start (now)</th><th>End (was)</th><th>End (now)</th><th>Qty (was)</th><th>Qty (now)</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
 }
 
 // ---------------------------------------------------------------------------
@@ -7720,6 +7782,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openProdUpdate">
                         <i class="fa-solid fa-industry fr-dd-fa" aria-hidden="true"></i> Daily production update
                     </div>
+                    <div class="fr-dd-item" @click="openBoardBackup">
+                        <i class="fa-solid fa-clock-rotate-left fr-dd-fa" aria-hidden="true"></i> Board backup &amp; compare (daily 23:30)
+                    </div>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Planning'" class="fr-dropdown">
                     <div class="fr-dd-item" @click="planLiveOrders">
@@ -8910,6 +8975,59 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         কোনো bar কখনো পরে যায় না, line/sequence/duration বদলায় না · completed/production-started bar
                         fixed anchor · Apply-র পর Undo (↺) দিয়ে ফেরানো যায় · স্থায়ী করতে Save
                     </div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Board backup & compare: daily 23:30 snapshots vs the live plan -->
+        <Teleport to="body">
+        <div v-if="bsOpen" class="cal-overlay" @click.self="bsOpen = false">
+            <div class="cal-dialog pf-dialog bs-dialog">
+                <div class="cal-title">
+                    🕘 Board backup &amp; compare
+                    <span class="cal-title-btns"><span class="cal-x" @click="bsOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <div class="bs-top">
+                        <label>Backup
+                            <select v-model="bsSel" class="cal-in st-select bs-select">
+                                <option v-for="b in bsList" :key="b.id" :value="b.id">
+                                    {{ b.snapshot_date }} · {{ String(b.taken_at).slice(11, 16) }} · {{ b.source === 'auto' ? 'auto 23:30' : ('manual · ' + (b.taken_by || '')) }} · {{ b.bars }} bars
+                                </option>
+                            </select>
+                        </label>
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="!bsSel || bsBusy" @click="bsCompare">🔍 Compare with current plan</button>
+                        <button class="cal-btn st-btn" :disabled="bsBusy" @click="bsBackupNow">💾 Backup now</button>
+                        <button class="cal-btn st-btn" :disabled="!bsResult" @click="bsPrint">🖨 Print</button>
+                        <button class="cal-btn st-btn" @click="bsOpen = false">Close</button>
+                    </div>
+                    <div v-if="bsBusy" class="ls-dim">Working…</div>
+                    <div v-else-if="!bsList.length" class="ls-dim">No backup yet — the first automatic backup is taken tonight at 23:30, or click Backup now.</div>
+                    <template v-if="bsResult">
+                        <div class="pf-sum">
+                            Backup <b>{{ bsResult.snapshot.date }}</b> ({{ bsResult.snapshot.source }}) · {{ bsResult.summary.snapshotBars }} bars → now {{ bsResult.summary.liveBars }} bars ·
+                            New: <b>{{ bsResult.summary.added }}</b> · Removed: <b>{{ bsResult.summary.removed }}</b> · Line changed: <b>{{ bsResult.summary.line }}</b> ·
+                            Moved: <b>{{ bsResult.summary.moved }}</b> · Length: <b>{{ bsResult.summary.resized }}</b> · Qty: <b>{{ bsResult.summary.qty }}</b>
+                        </div>
+                        <div v-if="bsResult.changes.length" class="pf-table bs-table">
+                            <table>
+                                <thead><tr><th>Change</th><th>Order</th><th>PO</th><th>Buyer</th><th>Line was</th><th>Line now</th><th>Start was</th><th>Start now</th><th>End was</th><th>End now</th><th>Qty</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="c in bsResult.changes" :key="c.type + c.id" :class="'bs-' + c.type">
+                                        <td><b>{{ bsTypeLbl[c.type] || c.type }}</b></td>
+                                        <td>{{ c.order }}</td><td>{{ c.po || '' }}</td><td>{{ c.buyer || '' }}</td>
+                                        <td>{{ c.lineOld || '—' }}</td><td :class="{ 'pf-new' : c.lineOld !== c.lineNew }">{{ c.lineNew || '—' }}</td>
+                                        <td>{{ c.startOld || '—' }}</td><td :class="{ 'pf-new' : c.startOld !== c.startNew }">{{ c.startNew || '—' }}</td>
+                                        <td>{{ c.endOld || '—' }}</td><td :class="{ 'pf-new' : c.endOld !== c.endNew }">{{ c.endNew || '—' }}</td>
+                                        <td class="msh-num">{{ c.qtyOld === c.qtyNew ? (c.qtyNew ?? '') : `${c.qtyOld ?? '—'} → ${c.qtyNew ?? '—'}` }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div v-else class="ls-dim">No difference — the current plan is identical to this backup.</div>
+                    </template>
+                    <div class="st-hint">প্রতিদিন রাত 23:30-এ (Asia/Dhaka) server নিজে board-এর backup নেয় (তারিখ ধরে) · যেকোনো backup বেছে Compare দিলে current plan-এর সাথে পার্থক্য দেখায় · Backup now = এখনই একটা backup</div>
                 </div>
             </div>
         </div>
@@ -11420,6 +11538,14 @@ body {
 }
 .b-sch-event.mb-qty-mismatch { outline : 2px solid #e65100; outline-offset : -2px; color : #3e2723 !important; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
+.bs-dialog { width : 1040px; }
+.bs-top { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
+.bs-top .st-btn { width : auto; flex : 0 0 auto; }
+.bs-select { width : 340px; text-align : left; }
+.bs-table { max-height : 420px; }
+.bs-table tr.bs-added td { background : #e8f5e9; }
+.bs-table tr.bs-removed td { background : #fdecea; }
+.bs-table tr.bs-line td { background : #fff8e1; }
 .sop-opts label { display : inline-flex; align-items : center; gap : 6px; font-weight : 600; }
 
 /* Multiple strip handling */
