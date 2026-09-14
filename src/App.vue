@@ -8314,7 +8314,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <label>Search</label>
                         <input v-model="effSearch" class="cal-in ef-search" placeholder="*">
                     </div>
-                    <table v-if="selProfile" class="st-table ef-table">
+                    <div v-if="selProfile" class="ef-table-wrap">
+                    <table class="st-table ef-table">
                         <thead>
                             <tr>
                                 <th class="ef-mark"></th>
@@ -8347,6 +8348,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </tbody>
                     </table>
+                    </div>
                     <div class="st-actions">
                         <button class="cal-btn cal-btn-primary st-btn" :disabled="!selProfile" @click="effUpdate">💾 Update</button>
                         <button class="cal-btn st-btn" :disabled="!selProfile" @click="effCopyDown">📋 Copy down</button>
@@ -10151,7 +10153,12 @@ body {
 .od-subrow td { background : #f4f7fb; font-size : 10.5px; color : #37474f; border-top : 1px dashed #cfd8dc; padding : 3px 7px; }
 
 /* Efficiency profiles dialog */
-.ef-dialog { width : 520px; max-width : 95vw; }
+/* .cal-dialog.ef-dialog beats the generic .cal-dialog width that is declared later */
+.cal-dialog.ef-dialog { width : 560px; max-width : 95vw; max-height : 92vh; overflow-y : auto; }
+/* Product-type grid: fixed-height scroll area so 25+ types never stretch the dialog */
+.ef-table-wrap { max-height : 52vh; overflow-y : auto; border : 1px solid #c9c5b8; background : #fff; }
+.ef-table-wrap .ef-table { border : none; }
+.ef-table th { position : sticky; top : 0; z-index : 1; }
 
 .ef-row {
     display     : flex;
@@ -10165,7 +10172,7 @@ body {
 .ef-search { flex : 1; text-align : left; width : auto; }
 
 .ef-table { width : 100%; }
-.ef-table td { padding : 3px 6px; }
+.ef-table th, .ef-table td { padding : 2px 6px; line-height : 1.25; }
 
 .ef-mark   { width : 22px; text-align : center; color : #17356b; }
 .ef-chip-h { width : 26px; }
@@ -10174,13 +10181,13 @@ body {
 
 .ef-chip {
     display : inline-block;
-    width   : 16px;
-    height  : 14px;
+    width   : 14px;
+    height  : 12px;
     border  : 1px solid #777;
     vertical-align : middle;
 }
 
-.ef-in { width : 70px; }
+.ef-in { width : 60px; height : 22px; padding : 0 4px; box-sizing : border-box; }
 
 .ef-sel td { background : #dce9fb; }
 
