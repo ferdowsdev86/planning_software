@@ -2256,6 +2256,19 @@ const plAllStrips = computed(() => {
 
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Day capacity of a bar on its line (minutes) — manpower × hours × the
+// PRODUCT efficiency (profile value for the bar's product type, else the
+// line default), × strip efficiency; a plan efficiency set on the bar wins.
+// Used by the board day chips and the Planned schedule so both show the
+// same day output as the duration formula.
+function barDayCapacity(raw, lid, line) {
+    const manpower = Number(line?.manpower) || 47;
+    const hours    = Number(line?.hours) > 0 ? Number(line.hours) : (Number(line?.availMin) > 0 && manpower ? 10 : 10);
+    const baseEff  = Number(raw.planEff) > 0 ? Number(raw.planEff) : (readProfileEff(raw, lid) || Number(line?.eff) || 50);
+    const eff      = baseEff * (Number(raw.stripEff) || 100) / 100;
+    return { availMin : manpower * hours * 60 * eff / 100, eff : Math.round(eff * 10) / 10 };
+}
+
 // Daily rows: quantity distributed over working days (off days show 0).
 // Learning-curve days produce at the curve percentage of the day's target —
 // the schedule shows the reduced quantity and the applied efficiency.
@@ -2265,9 +2278,9 @@ const plDailyRows = computed(() => {
     const raw = plRaw.value;
     if (!rec || !raw) return [];
     const line = plLine.value?.line;
-    const availMin = (line?.availMin || 12000) * (raw.stripEff || 100) / 100;
-    const dailyTarget = Math.max(1, Math.floor(availMin / Math.max(0.1, raw.smv)));
-    const baseEff = Math.round((line?.eff || 0) * (raw.stripEff || 100) / 100);
+    const cap  = barDayCapacity(raw, plLine.value?.id, line);
+    const dailyTarget = Math.max(1, Math.floor(cap.availMin / Math.max(0.1, raw.smv)));
+    const baseEff = Math.round(cap.eff);
     // Learning-curve ramp for this bar (annotated by applyLearningCurves)
     const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
@@ -5783,8 +5796,7 @@ function barDayQty(s, rec, day) {
     const lid  = lineIdOf(s, rec);
     const res  = lid ? s.resourceStore.getById(lid) : null;
     const line = LINE_BY_ID[lid] || res?.data || {};
-    const availMin    = (Number(line.availMin) || 12000) * (Number(raw.stripEff) || 100) / 100;
-    const dailyTarget = Math.max(1, Math.floor(availMin / Math.max(0.1, Number(raw.smv) || 1)));
+    const dailyTarget = Math.max(1, Math.floor(barDayCapacity(raw, lid, line).availMin / Math.max(0.1, Number(raw.smv) || 1)));
     const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
     const target = new Date(day);
