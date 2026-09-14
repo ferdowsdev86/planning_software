@@ -1294,6 +1294,10 @@ function openPlannedSchedule(rec) {
     }
     plRec.value = rec;
     plPeriod.value = 'daily';
+    // raw.lc / raw.qty are plain (non-reactive) fields on the record: bump a
+    // tick so the day rows recompute for THIS opening instead of serving the
+    // rows cached from an earlier open of the same bar (pre learning-curve)
+    plTick.value++;
     plOpen.value = true;
     plMin.value = false;
 }
@@ -2216,10 +2220,12 @@ const plOpen   = ref(false);
 const plMin    = ref(false);
 const plRec    = shallowRef(null);
 const plPeriod = ref('daily');   // daily | weekly | monthly
+const plTick   = ref(0);         // bumped on every open → fresh rows
 
 const plRaw = computed(() => eventRawOf(plRec.value));
 
 const plLine = computed(() => {
+    plTick.value;
     const s = getInstance();
     const rec = plRec.value;
     if (!s || !rec) return null;
@@ -2254,6 +2260,7 @@ const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Learning-curve days produce at the curve percentage of the day's target —
 // the schedule shows the reduced quantity and the applied efficiency.
 const plDailyRows = computed(() => {
+    plTick.value; // dependency: recompute per open (see openPlannedSchedule)
     const rec = plRec.value;
     const raw = plRaw.value;
     if (!rec || !raw) return [];
