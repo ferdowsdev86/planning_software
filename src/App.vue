@@ -7189,12 +7189,13 @@ async function saveToDbInner(s) {
     }
     // Connection pre-check: a dead API/DB is reported IMMEDIATELY instead of
     // the save silently doing nothing while the user keeps clicking
-    try {
-        await pingApi(4000);
-    }
-    catch {
-        window.alert('⚠ CONNECTION ISSUE\n\nPlanning API/DB is not reachable (localhost:4000 → MySQL).\nNothing was saved. Start the API server / check the network, then try again.');
-        return;
+    // Reachability check is advisory: a slow ping must not block the save —
+    // the save itself reports a real failure with the server's message
+    let pingFailed = false;
+    try { await pingApi(10000); }
+    catch { pingFailed = true; }
+    if (pingFailed) {
+        if (!window.confirm(`⚠ The planning API (${API_BASE}) did not answer in time.\n\nTry to save anyway?`)) return;
     }
     if (!window.confirm(formatSaveConfirm(changes))) return;
     toast(`Saving ${changes.length} change(s)…`, 'ok');

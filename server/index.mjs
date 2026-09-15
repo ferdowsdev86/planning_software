@@ -27,7 +27,9 @@ const pool = mysql.createPool({
     database        : DB_NAME,
     ssl             : false,
     waitForConnections : true,
-    connectionLimit : 5,
+    // Several planners load 400-bar boards while the 15-min ERP sync holds
+    // connections — 5 was exhausted and made /health (and saves) queue
+    connectionLimit : 20,
     dateStrings     : true,
     enableKeepAlive : true,
     keepAliveInitialDelay : 10000
@@ -60,15 +62,17 @@ const bumpRev = id => {
     return r;
 };
 
-app.get(`${BASE}/health`, async (req, res) => {
-    try {
-        await pool.query('SELECT 1');
-        res.json({ success : true, db : `${DB_HOST}/${DB_NAME}` });
-    }
-    catch (e) {
-        res.status(500).json({ success : false, error : e.message });
-    }
+// Liveness only — never waits on the DB pool (a queued SELECT 1 behind a
+// busy sync used to make the app think the DB was down and refuse to save)
+app.get(`${BASE}/health`, (req, res) => {
+    res.json({ success : true, db : `${DB_HOST}/${DB_NAME}`, uptime : Math.round(process.uptime()), busy : syncRunning });
 });
+
+// The process must survive a dropped DB connection / a stray rejected
+// promise (pm2 would restart it, but every request in flight — a Save —
+// would fail meanwhile)
+process.on('unhandledRejection', e => console.error('[unhandledRejection]', e?.message || e));
+process.on('uncaughtException',  e => console.error('[uncaughtException]',  e?.message || e));
 
 // --------------------------------------------------------------------------
 // Scheduler load API (document 6)

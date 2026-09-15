@@ -1057,8 +1057,11 @@ function resolveEventDbId(ev) {
 // Persist current board state (dates / line moves / new events)
 // Quick reachability probe — used before a save so a dead API/DB is reported
 // immediately instead of the save appearing to hang
-export function pingApi(timeoutMs = 4000) {
-    return get('/health', timeoutMs);
+// Liveness ping: one retry, generous timeout — a slow moment must not be
+// reported as "API/DB down"
+export async function pingApi(timeoutMs = 10000) {
+    try { return await get('/health', timeoutMs); }
+    catch { return await get('/health', timeoutMs); }
 }
 
 export async function syncToApi(scheduler, { eventIds = null } = {}) {
