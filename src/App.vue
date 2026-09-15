@@ -9430,6 +9430,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <label>Signed in:</label>
                         <b>{{ authUser?.name }} ({{ authUser?.username }}) · {{ authUser?.role }}</b>
                     </div>
+                    <div class="st-table-wrap">
                     <table class="st-table">
                         <thead>
                             <tr>
@@ -9471,6 +9472,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </tbody>
                     </table>
+                    </div>
                     <div class="st-hint">Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
@@ -10691,7 +10693,11 @@ body {
 .bc-ro { background : #f0efe8; }
 
 /* Settings dialog */
-.st-dialog { width : 780px; max-width : 95vw; }
+/* .cal-dialog.st-dialog beats the generic .cal-dialog width declared later */
+.cal-dialog.st-dialog { width : 1000px; max-width : 96vw; }
+/* The permissions grid scrolls inside the dialog instead of spilling past its edge */
+.st-table-wrap { overflow-x : auto; max-width : 100%; }
+.st-table-wrap .st-table { min-width : 720px; }
 
 .st-body { padding : 12px; }
 
@@ -10721,7 +10727,7 @@ body {
 
 .st-table th { background : #f4f2ec; color : #17356b; }
 .st-board-h  { font-size : 11px; max-width : 130px; }
-.st-pw { width : 110px; padding : 3px 6px; font-size : 11px; }
+.st-pw { width : 96px; padding : 3px 6px; font-size : 11px; }
 
 /* ------------------------------------------------------------------ */
 /* Login gate — smart sign-in screen                                  */
@@ -11569,7 +11575,7 @@ body {
 .b-sch-event.mb-qty-mismatch { outline : 2px solid #e65100; outline-offset : -2px; color : #3e2723 !important; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }
-.st-access { width : 108px; text-align : left; }
+.st-access { width : 100px; text-align : left; font-size : 11px; padding : 2px 4px; }
 .st-access-read  { background : #fff8e1; }
 .st-access-write { background : #e8f5e9; }
 .bs-top { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
