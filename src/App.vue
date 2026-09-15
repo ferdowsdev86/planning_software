@@ -2594,7 +2594,25 @@ const users         = ref(loadLS('mbm-users', DEFAULT_USERS));
 const currentUserId = ref(localStorage.getItem('mbm-current-user') || 'u1');
 
 const currentUser     = computed(() => users.value.find(u => u.id === currentUserId.value) || users.value[0]);
-const permittedBoards = computed(() => boards.value.filter(b => currentUser.value?.boards.includes(b.id)));
+// Per-board access level. Stored inside the user's `boards` list (DB
+// planning_users.boards, JSON): "<boardId>" = write (edit + save),
+// "<boardId>:read" = read only (open and look, no edit, no save).
+function boardAccessOf(u, boardId) {
+    const list = u?.boards || [];
+    if (list.includes(boardId)) return 'write';
+    if (list.includes(`${boardId}:read`)) return 'read';
+    return null;
+}
+function setBoardPerm(u, boardId, level) {
+    u.boards = (u.boards || []).filter(x => x !== boardId && x !== `${boardId}:read`);
+    if (level === 'write') u.boards.push(boardId);
+    else if (level === 'read') u.boards.push(`${boardId}:read`);
+}
+const permittedBoards = computed(() => boards.value.filter(b => boardAccessOf(currentUser.value, b.id)));
+// View-only session: Management role (§17) or read access to the open board
+const boardViewOnly = computed(() =>
+    currentUser.value?.role === 'Management'
+    || (!!currentBoard.value && boardAccessOf(currentUser.value, currentBoard.value.id) === 'read'));
 
 function savePerms() {
     localStorage.setItem('mbm-boards', JSON.stringify(boards.value));
@@ -2858,7 +2876,7 @@ function applyBoardFilter() {
     // Management role gets a read-only board (document 17). A user without
     // the edit lock keeps FULL interaction (move bars, efficiency, learning
     // curve — a what-if sandbox); only SAVING is blocked for them.
-    s.readOnly = currentUser.value?.role === 'Management';
+    s.readOnly = boardViewOnly.value;
     s.refreshRows?.();
 }
 
@@ -2879,6 +2897,15 @@ async function syncBoardLock() {
     const unitId = currentUnitId.value;
     const me = authUser.value;
     if (!unitId || !me?.username) return;
+    // Read access: never take the edit lock — the board stays view-only and
+    // the editor's lock is left free for someone with write access
+    if (boardViewOnly.value) {
+        boardReadOnly.value   = true;
+        boardLockHolder.value = null;
+        const s = getInstance();
+        if (s) s.readOnly = true;
+        return;
+    }
     try {
         lockInFlight = acquireBoardLock(unitId, me.username, me.name);
         const r = await lockInFlight;
@@ -2910,7 +2937,7 @@ async function syncBoardLock() {
         // engine can flip readOnly during load, and the sandbox must stay
         // fully interactive (only saving is gated)
         const s = getInstance();
-        if (s) s.readOnly = currentUser.value?.role === 'Management';
+        if (s) s.readOnly = boardViewOnly.value;
     }
     catch { /* API offline — keep current mode */ }
 }
@@ -3051,12 +3078,6 @@ function addUser() {
     savePerms();
 }
 
-function toggleBoardPerm(u, boardId) {
-    const i = u.boards.indexOf(boardId);
-    if (i >= 0) u.boards.splice(i, 1);
-    else u.boards.push(boardId);
-}
-
 async function saveSettings() {
     savePerms();
     // Persist users (and any typed passwords) to planning_users in the DB
@@ -3075,7 +3096,7 @@ async function saveSettings() {
     catch (e) {
         toast(`DB save failed (${e.message}) — saved locally only`, 'warn');
     }
-    if (currentBoard.value && !currentUser.value.boards.includes(currentBoard.value.id)) {
+    if (currentBoard.value && !boardAccessOf(currentUser.value, currentBoard.value.id)) {
         closeBoard();
         toast('Access to the open board was removed — view closed', 'warn');
     }
@@ -4160,7 +4181,8 @@ async function saveMarkedComplete() {
     // Completing orders writes to the DB — blocked without the edit lock
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot save this board'
+            : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
         return;
     }
     const codes = [...markedComplete.value];
@@ -5614,7 +5636,8 @@ function saveProdUpdate() {
     // Daily production writes to the DB — needs the board's edit lock
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot save this board'
+            : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
         return;
     }
     const s = getInstance();
@@ -7108,7 +7131,9 @@ async function saveToDb() {
     // sandbox — every change stays local, saving is the one blocked action
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
-        toast(`🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board. Your test changes will NOT be saved`, 'warn');
+        toast(boardViewOnly.value
+            ? '🔒 Read only access — you cannot save this board'
+            : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board. Your test changes will NOT be saved`, 'warn');
         return;
     }
     // Repeated clicks while a save is preparing/running must not stack
@@ -7853,8 +7878,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly">🔒 AQL — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
-                <template v-else>AQL ({{ currentUser?.role === 'Management' ? 'Read only access' : 'Planning' }} — in use by {{ authUser?.name || currentUser?.name }})</template>
+                <template v-if="boardReadOnly && boardViewOnly">🔒 AQL — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
+                <template v-else-if="boardReadOnly">🔒 AQL — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
+                <template v-else>AQL (Planning — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
             <span class="fr-banner-btns">
@@ -9433,16 +9459,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     </select>
                                 </td>
                                 <td v-for="b in boards" :key="b.id" class="st-check">
-                                    <input
-                                        type="checkbox"
-                                        :checked="u.boards.includes(b.id)"
-                                        @change="toggleBoardPerm(u, b.id)"
+                                    <select class="cal-in st-select st-access" :class="'st-access-' + (boardAccessOf(u, b.id) || 'none')"
+                                        :value="boardAccessOf(u, b.id) || ''"
+                                        @change="setBoardPerm(u, b.id, $event.target.value)"
                                     >
+                                        <option value="">— no access</option>
+                                        <option value="read">Read</option>
+                                        <option value="write">Write</option>
+                                    </select>
                                 </td>
                             </tr>
                         </tbody>
                     </table>
-                    <div class="st-hint">Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management read-only (§17)</div>
+                    <div class="st-hint">Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -11540,6 +11569,9 @@ body {
 .b-sch-event.mb-qty-mismatch { outline : 2px solid #e65100; outline-offset : -2px; color : #3e2723 !important; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }
+.st-access { width : 108px; text-align : left; }
+.st-access-read  { background : #fff8e1; }
+.st-access-write { background : #e8f5e9; }
 .bs-top { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-top .st-btn { width : auto; flex : 0 0 auto; }
 .bs-select { width : 340px; text-align : left; }
