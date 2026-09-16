@@ -70,7 +70,7 @@ function tooltipEfficiency(lineId, productType, fallbackEff) {
 
 // Line + bar → the numbers the capacity formula runs on. Single source for
 // both the plain duration formula and the learning-curve calculation.
-function lineCalcParams(scheduler, raw, lineId) {
+export function lineCalcParams(scheduler, raw, lineId) {
     const res = scheduler?.resourceStore?.getById(lineId);
     const manpower = Number(res?.data?.manpower ?? LINE_BY_ID[lineId]?.manpower) || 50;
     const lineEff  = Number(res?.data?.eff ?? LINE_BY_ID[lineId]?.eff) || 50;

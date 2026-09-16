@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw
+    applyLineFormulaDuration, sopForRaw, lineCalcParams
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -2338,12 +2338,12 @@ const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // line default), × strip efficiency; a plan efficiency set on the bar wins.
 // Used by the board day chips and the Planned schedule so both show the
 // same day output as the duration formula.
-function barDayCapacity(raw, lid, line) {
-    const manpower = Number(line?.manpower) || 47;
-    const hours    = Number(line?.hours) > 0 ? Number(line.hours) : (Number(line?.availMin) > 0 && manpower ? 10 : 10);
-    const baseEff  = Number(raw.planEff) > 0 ? Number(raw.planEff) : (readProfileEff(raw, lid) || Number(line?.eff) || 50);
-    const eff      = baseEff * (Number(raw.stripEff) || 100) / 100;
-    return { availMin : manpower * hours * 60 * eff / 100, eff : Math.round(eff * 10) / 10 };
+function barDayCapacity(raw, lid) {
+    // EXACTLY the numbers the duration formula / SOP run use for this bar on
+    // this line (board resource manpower & hours, product-profile efficiency,
+    // plan / strip efficiency) — chips, schedule and bar length must agree
+    const { manpower, effPct, mins } = lineCalcParams(getInstance(), raw, lid);
+    return { availMin : manpower * mins * effPct / 100, eff : Math.round(effPct * 10) / 10 };
 }
 
 // Daily rows: quantity distributed over working days (off days show 0).
@@ -2355,7 +2355,7 @@ const plDailyRows = computed(() => {
     const raw = plRaw.value;
     if (!rec || !raw) return [];
     const line = plLine.value?.line;
-    const cap  = barDayCapacity(raw, plLine.value?.id, line);
+    const cap  = barDayCapacity(raw, plLine.value?.id);
     const dailyTarget = Math.max(1, Math.floor(cap.availMin / Math.max(0.1, raw.smv)));
     const baseEff = Math.round(cap.eff);
     // Learning-curve ramp for this bar (annotated by applyLearningCurves)
@@ -2480,18 +2480,27 @@ function propsUpdate() {
     }
 
     if (lid && lid !== 'hold' && raw.status !== 'completed') {
-        applyLineFormulaDuration(s, raw, lid);
+        // An efficiency edit re-sizes THIS bar by the SOP run with the new
+        // figures (curve-aware, whole days) — a saved bar's fixed SOP run
+        // must not swallow the change, or the schedule and the bar disagree
         const start = new Date(rec.startDate);
+        raw.start   = start;
+        raw.sopMode = !!raw.ship;
+        deriveLcForPlacement(s, raw, lid, start);
+        applyLineFormulaDuration(s, raw, lid);
+        raw.sopMode = false;
         const end   = endOfWork(start, raw.dur);
         rec.set({ endDate : end, duration : elapsedDays(start, end) });
-        raw.start = start;
         raw.end   = end;
+        raw.userPinned = true;
         const pushed = pushFollowers(s, lid, rec);
         if (pushed) toast(`${pushed} following order(s) shifted later`, 'warn');
+        applyLearningCurves(s, { lineIds : [lid] });
         recalcCapacity(s);
+        markBoardDirty();
         s.refreshWithTransition?.();
     }
-    toast(`${mbmOrderNo(raw.po, raw.mbmOrder)}: profile efficiency ${pe}% · strip ${se}%`, 'ok');
+    toast(`${mbmOrderNo(raw.po, raw.mbmOrder)}: profile efficiency ${pe}% · strip ${se}% — bar re-sized${raw.sopDur ? ` to ${raw.sopDur} day(s)` : ''}; Save to keep it`, 'ok');
 }
 
 // Users & permissions is Planning Manager-only — everyone else neither sees
@@ -5950,7 +5959,7 @@ function barDayQty(s, rec, day) {
     const lid  = lineIdOf(s, rec);
     const res  = lid ? s.resourceStore.getById(lid) : null;
     const line = LINE_BY_ID[lid] || res?.data || {};
-    const dailyTarget = Math.max(1, Math.floor(barDayCapacity(raw, lid, line).availMin / Math.max(0.1, Number(raw.smv) || 1)));
+    const dailyTarget = Math.max(1, Math.floor(barDayCapacity(raw, lid).availMin / Math.max(0.1, Number(raw.smv) || 1)));
     const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
     const target = new Date(day);
