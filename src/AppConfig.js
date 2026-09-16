@@ -1639,8 +1639,13 @@ export const schedulerProConfig = {
             // Round for display — ERP FLOAT columns arrive as long float32
             // artifacts (e.g. 132.83999633789062)
             const smv   = Math.round((Number(r.smv) || randSmv(r.po)) * 100) / 100;
-            // Show the efficiency the plan actually used when available
-            const eff   = Number(r.planEff) > 0 ? Number(r.planEff) : tooltipEfficiency(lid, ptype);
+            // The efficiency the bar is actually sized with: plan / product
+            // profile efficiency × strip efficiency (same as the formula)
+            const baseEffT = Number(r.planEff) > 0 ? Number(r.planEff) : tooltipEfficiency(lid, ptype);
+            const stripT   = Number(r.stripEff) > 0 ? Number(r.stripEff) : 100;
+            const eff      = stripT !== 100
+                ? `${Math.round(baseEffT * stripT / 100)}% (${baseEffT}% × strip ${stripT}%)`
+                : `${baseEffT}%`;
             const order = mbmOrderNo(r.po, r.mbmOrder);
             const deliv = r.ship ? new Date(r.ship) : orderDeliveryOf(r.ship);
             const pcd   = r.pcd ? new Date(r.pcd) : (r.ship ? addCalDays(new Date(r.ship), -30) : null);
@@ -1797,7 +1802,7 @@ export const schedulerProConfig = {
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
-          ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}%`)}
+          ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
           ${R('Stage', enc(stage))}
         </div>
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}
@@ -1834,8 +1839,8 @@ export const schedulerProConfig = {
           ${R('Profile', enc(applied ? (lc.profileName || '—') : '—'))}
           ${R('Product type', enc(lc.typeKey || ptype || '—'))}
           ${R('Base eff', enc(Number(r.stripEff) > 0 && Number(r.stripEff) !== 100
-              ? `${lc.baseEffPct ?? eff}% (${eff}% × strip ${Number(r.stripEff)}%)`
-              : `${lc.baseEffPct ?? eff}%`))}
+              ? `${lc.baseEffPct ?? Math.round(baseEffT * stripT / 100)}% (${baseEffT}% × strip ${Number(r.stripEff)}%)`
+              : `${lc.baseEffPct ?? baseEffT}%`))}
         </div>
         ${dayRows ? `<table class="tip4-po-tbl tip4-lc-tbl">
           <thead><tr><th>Ramp</th><th>Applied eff</th><th>Daily capacity</th></tr></thead>
