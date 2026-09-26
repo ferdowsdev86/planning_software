@@ -2553,8 +2553,144 @@ app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
     }
 });
 
+// --------------------------------------------------------------------------
+// Actual production from the ERP → day_production_update_plan
+//   sources: cuttingedgedb.daily_productions (sewing Out, unit AQL)
+//            mbm_os.os_daily_productions (OS unit 20 = AQL, sewing_qty)
+//   only orders / POs that exist in the plan order list (planning_orders)
+//   one row per PO per day; rows are matched to the board bar (event_ref)
+//   so "Made so far" in the Daily production update follows automatically.
+//   Runs twice a day (18:00 and 23:30 Asia/Dhaka) plus a catch-up on start.
+// --------------------------------------------------------------------------
+const PROD_SYNC_TIMES = ['18:00', '23:30'];
+const PROD_SYNC_FROM  = '2026-09-26';        // daily rows start here; before it: one summary row per PO
+const PROD_SUMMARY_TO = '2026-09-25';
+const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL
+
+const erpLineToBoard = n => { const m = /^A0?(\d)$/i.exec(String(n || '').trim()); return m ? `Line 0${m[1]}` : null; };
+const erpFloorOf = line => { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; };
+
+// Production per PO per date (or per PO only when summary=true), ERP + OS
+async function erpProductionRows(from, to, summary = false) {
+    const dateSel = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(d.prod_date)';
+    const grp     = summary ? 'd.po_id' : 'd.po_id, DATE(d.prod_date)';
+    const [erp] = await pool.query(`
+        SELECT d.po_id, MAX(COALESCE(NULLIF(d.e_po_no, ''), po.po_no)) AS po_no, MAX(d.e_order_code) AS order_code, MAX(d.e_stl_no) AS style, MAX(d.e_clr_name) AS color,
+               MAX(po.po_qty) AS po_qty, ${dateSel} AS prod_date, SUM(d.prod_qty) AS qty,
+               SUBSTRING_INDEX(GROUP_CONCAT(hl.hr_line_name ORDER BY d.prod_qty DESC), ',', 1) AS erp_line
+        FROM \`${ERP_DB}\`.daily_productions d
+        LEFT JOIN \`${ERP_DB}\`.hr_unit u ON u.hr_unit_id = d.prod_unit_id
+        LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = d.po_id
+        LEFT JOIN \`${ERP_DB}\`.hr_line hl ON hl.hr_line_id = d.hr_line_id
+        WHERE d.mr_operation_type_id = 2 AND d.status = 'Out' AND u.hr_unit_short_name = 'AQL'
+          AND DATE(d.prod_date) BETWEEN ? AND ?
+        GROUP BY ${grp}`, [from, to]);
+    const dateSelOs = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(od.prod_date)';
+    const grpOs     = summary ? 'od.mr_order_id, od.po_id' : 'od.mr_order_id, od.po_id, DATE(od.prod_date)';
+    const [os] = await pool.query(`
+        SELECT od.po_id, MAX(od.po_no) AS po_no, MAX(oo.os_order_code) AS order_code, MAX(oo.style) AS style, NULL AS color,
+               MAX(oo.order_qty) AS po_qty, ${dateSelOs} AS prod_date, SUM(od.sewing_qty) AS qty, NULL AS erp_line
+        FROM \`${OS_DB}\`.os_daily_productions od
+        JOIN \`${OS_DB}\`.os_orders oo ON oo.mr_order_id = od.mr_order_id AND oo.os_unit_id = od.os_unit_id
+        WHERE od.os_unit_id = ? AND DATE(od.prod_date) BETWEEN ? AND ?
+        GROUP BY ${grpOs}`, [OS_PROD_UNIT, from, to]);
+    return [...erp, ...os].filter(r => Number(r.qty) > 0);
+}
+
+let prodSyncRunning = false;
+async function syncErpProduction({ from, to, summary = false } = {}) {
+    if (prodSyncRunning) return { skipped : true };
+    prodSyncRunning = true;
+    try {
+        const rows = await erpProductionRows(from, to, summary);
+        // plan order list: PO → order code, order code set
+        const [plan] = await pool.query(`SELECT order_code, po_number, style_no, color, order_quantity FROM planning_orders`);
+        const byPo   = new Map(plan.filter(r => r.po_number).map(r => [String(r.po_number), r]));
+        const codes  = new Set(plan.map(r => String(r.order_code || '')));
+        // board bars: PO → confirm bar, order code → projection bar (with line / floor)
+        const [bars] = await pool.query(`
+            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.floor_id
+            FROM planning_events pe JOIN planning_assignments pa ON pa.event_id = pe.id
+            JOIN planning_resources pr ON pr.id = pa.resource_id
+            LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
+            WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line'`);
+        const barByPo = new Map(), barByCode = new Map();
+        for (const b of bars) {
+            if (b.po_number && !barByPo.has(String(b.po_number))) barByPo.set(String(b.po_number), b);
+            const code = b.order_code || (String(b.event_code || '').startsWith('ev-proj:') ? String(b.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+            if (code && !barByCode.has(code)) barByCode.set(code, b);
+        }
+        let written = 0, skipped = 0;
+        const conn = await pool.getConnection();
+        try {
+            for (const r of rows) {
+                const poNo = String(r.po_no || '').trim();
+                const code = String(r.order_code || '').trim();
+                const planRow = byPo.get(poNo);
+                if (!planRow && !codes.has(code)) { skipped++; continue; }   // not in the plan order list
+                const bar   = barByPo.get(poNo) || barByCode.get(code) || null;
+                const ref   = bar ? `db-${bar.id}` : `erp-po:${r.po_id}`;
+                const line  = bar?.line || erpLineToBoard(r.erp_line) || null;
+                const floor = bar ? (Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : null) : erpFloorOf(line);
+                const date  = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
+                await conn.query(`
+                    INSERT INTO day_production_update_plan
+                        (event_id, event_ref, unit, floor, line, operation_type, style, order_no, po_number, color, order_qty, day_plan_qty, prod_qty, save_date, created_at, updated_at)
+                    VALUES (?, ?, 'AQL', ?, ?, 'Sewing', ?, ?, ?, ?, ?, 0, ?, ?, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        event_id = VALUES(event_id), line = COALESCE(VALUES(line), line), floor = COALESCE(VALUES(floor), floor),
+                        style = COALESCE(VALUES(style), style), order_no = VALUES(order_no), po_number = VALUES(po_number),
+                        color = COALESCE(VALUES(color), color), order_qty = VALUES(order_qty), prod_qty = VALUES(prod_qty), updated_at = NOW()`,
+                    [bar?.id ?? null, ref, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
+                     r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
+                written++;
+            }
+        }
+        finally { conn.release(); }
+        console.log(`[prod-sync] ${summary ? `summary ≤ ${PROD_SUMMARY_TO}` : `${from} → ${to}`}: ${written} row(s) written, ${skipped} not in plan list`);
+        return { written, skipped };
+    }
+    catch (e) { console.error('[prod-sync] failed:', e.message); return { error : e.message }; }
+    finally { prodSyncRunning = false; }
+}
+
+let prodSyncLastKey = null;
+async function prodSyncTick() {
+    const now  = new Date();
+    const hm   = now.toLocaleTimeString('en-GB', { timeZone : SNAP_TZ, hour : '2-digit', minute : '2-digit', hour12 : false });
+    const date = now.toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+    if (!PROD_SYNC_TIMES.includes(hm) || prodSyncLastKey === `${date} ${hm}`) return;
+    prodSyncLastKey = `${date} ${hm}`;
+    const from = new Date(now.getTime() - 2 * 864e5).toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+    await syncErpProduction({ from, to : date });
+}
+
+// Manual / catch-up: POST { from, to } or { summary : true }
+app.post(`${BASE}/production-sync`, async (req, res) => {
+    const b = req.body || {};
+    try {
+        if (b.summary) return res.json({ success : true, ...(await syncErpProduction({ from : '2000-01-01', to : PROD_SUMMARY_TO, summary : true })) });
+        const to   = b.to   || new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+        const from = b.from || PROD_SYNC_FROM;
+        res.json({ success : true, ...(await syncErpProduction({ from, to })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);
+    // Actual production: one-time summary (≤ PROD_SUMMARY_TO, one row per PO) if
+    // it is not there yet, catch up daily rows since PROD_SYNC_FROM, then 18:00 / 23:30
+    setTimeout(async () => {
+        try {
+            const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM day_production_update_plan WHERE save_date = ?', [PROD_SUMMARY_TO]);
+            if (!n) await syncErpProduction({ from : '2000-01-01', to : PROD_SUMMARY_TO, summary : true });
+        }
+        catch (e) { console.error('[prod-sync] summary check failed:', e.message); }
+        await syncErpProduction({ from : PROD_SYNC_FROM, to : new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ }) });
+    }, 15000);
+    setInterval(prodSyncTick, 60000);
+    console.log(`[prod-sync] ERP production sync at ${PROD_SYNC_TIMES.join(' & ')} ${SNAP_TZ} (daily rows from ${PROD_SYNC_FROM})`);
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
