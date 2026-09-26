@@ -5626,7 +5626,7 @@ function buildPuRows() {
                 line     : res?.name || lid,
                 opType   : 'Sewing',
                 style    : raw.style || '—',
-                order    : mbmOrderNo(raw.po),
+                order    : mbmOrderNo(raw.po, raw.mbmOrder),   // real order code (26DROTT088), not a PO-derived label
                 po       : raw.po || '—',
                 color    : orderColor(raw.po),
                 orderQty : raw.qty,
