@@ -2565,6 +2565,7 @@ app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
 const PROD_SYNC_TIMES = ['18:00', '23:30'];
 const PROD_SYNC_FROM  = '2026-09-26';        // daily rows start here; before it: one summary row per PO
 const PROD_SUMMARY_TO = '2026-09-25';
+const PROD_BOARD_FROM = '2026-09-16';        // only orders / POs planned on the board from this date are tracked
 const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL
 
 const erpLineToBoard = n => { const m = /^A0?(\d)$/i.exec(String(n || '').trim()); return m ? `Line 0${m[1]}` : null; };
@@ -2607,13 +2608,14 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
         const [plan] = await pool.query(`SELECT order_code, po_number, style_no, color, order_quantity FROM planning_orders`);
         const byPo   = new Map(plan.filter(r => r.po_number).map(r => [String(r.po_number), r]));
         const codes  = new Set(plan.map(r => String(r.order_code || '')));
-        // board bars: PO → confirm bar, order code → projection bar (with line / floor)
+        // board bars planned from PROD_BOARD_FROM: PO → confirm bar, order code →
+        // projection bar (with line / floor). ONLY production of these is kept.
         const [bars] = await pool.query(`
             SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.floor_id
             FROM planning_events pe JOIN planning_assignments pa ON pa.event_id = pe.id
             JOIN planning_resources pr ON pr.id = pa.resource_id
             LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
-            WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line'`);
+            WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line' AND pe.start_date >= ?`, [PROD_BOARD_FROM]);
         const barByPo = new Map(), barByCode = new Map();
         for (const b of bars) {
             if (b.po_number && !barByPo.has(String(b.po_number))) barByPo.set(String(b.po_number), b);
@@ -2627,11 +2629,14 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 const poNo = String(r.po_no || '').trim();
                 const code = String(r.order_code || '').trim();
                 const planRow = byPo.get(poNo);
-                if (!planRow && !codes.has(code)) { skipped++; continue; }   // not in the plan order list
                 const bar   = barByPo.get(poNo) || barByCode.get(code) || null;
-                const ref   = bar ? `db-${bar.id}` : `erp-po:${r.po_id}`;
-                const line  = bar?.line || erpLineToBoard(r.erp_line) || null;
-                const floor = bar ? (Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : null) : erpFloorOf(line);
+                if (!bar) { skipped++; continue; }   // not planned on the board (from PROD_BOARD_FROM)
+                // confirm bar = one PO → plain ref; projection bar covers several
+                // POs → one row per PO ("db-<id>:po<po_id>"), summed by the app
+                const viaPo = barByPo.get(poNo) === bar;
+                const ref   = viaPo ? `db-${bar.id}` : `db-${bar.id}:po${r.po_id}`;
+                const line  = bar.line || erpLineToBoard(r.erp_line) || null;
+                const floor = Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : erpFloorOf(line);
                 const date  = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
                 await conn.query(`
                     INSERT INTO day_production_update_plan
@@ -2644,6 +2649,16 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                     [bar?.id ?? null, ref, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
                      r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
                 written++;
+                // ERP is authoritative for that bar/date — a manual plain row
+                // for a projection bar would double-count with the PO rows
+                if (!viaPo) await conn.query('DELETE FROM day_production_update_plan WHERE event_ref = ? AND save_date = ?', [`db-${bar.id}`, date]);
+            }
+            // Keep the table to the tracked board plan only
+            const liveRefs = bars.map(b => `db-${b.id}`);
+            if (liveRefs.length) {
+                const [del] = await conn.query(
+                    `DELETE FROM day_production_update_plan WHERE SUBSTRING_INDEX(event_ref, ':po', 1) NOT IN (${liveRefs.map(() => '?').join(',')})`, liveRefs);
+                if (del.affectedRows) console.log(`[prod-sync] removed ${del.affectedRows} row(s) of orders not planned on the board from ${PROD_BOARD_FROM}`);
             }
         }
         finally { conn.release(); }

@@ -1173,12 +1173,14 @@ async function hydrateBoardFromApi() {
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
 
             loadProdUpdatesDb().then(rows => {
-                const store = loadProdStore();
+                // Rebuild from the DB: ERP rows of a projection bar come per PO
+                // as "db-<id>:po<po_id>" — sum them onto the bar ("db-<id>")
+                const store = {};
                 for (const r of rows) {
-                    const key  = String(r.event_ref);
+                    const key  = String(r.event_ref).split(':po')[0];
                     const date = String(r.save_date).slice(0, 10);
                     if (!store[key]) store[key] = {};
-                    store[key][date] = Number(r.prod_qty) || 0;
+                    store[key][date] = (store[key][date] || 0) + (Number(r.prod_qty) || 0);
                 }
                 localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
                 applyProdUpdates(s);
