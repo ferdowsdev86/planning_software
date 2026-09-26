@@ -5516,6 +5516,71 @@ const puOpen = ref(false);
 const puMin  = ref(false);
 const puDate = ref(isoInputDate(new Date()));
 const puRows = ref([]);
+// Date-range report: line-wise groups of order / PO / style / colour with a
+// column per date, the last date's production, the range total, made so far
+// and remaining — read straight from day_production_update_plan (ERP-synced
+// + manual rows), so POs not on the board show too
+const puMode   = ref('day');            // 'day' = update one date · 'range' = report
+const puFrom   = ref(isoInputDate(addCalDays(new Date(), -6)));
+const puTo     = ref(isoInputDate(new Date()));
+const puReport = shallowRef(null);
+const puBusy   = ref(false);
+
+async function buildPuReport() {
+    const from = puFrom.value, to = puTo.value;
+    if (!from || !to || from > to) { toast('From date must not be after To date', 'warn'); return; }
+    puBusy.value = true;
+    try {
+        const all = await loadProdUpdatesDb();
+        const dkey = d => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('en-CA'));
+        const dates = [...new Set(all.map(r => dkey(r.save_date)).filter(d => d >= from && d <= to))].sort();
+        const lines = new Map();
+        for (const r of all) {
+            const d = dkey(r.save_date);
+            if (d > to) continue;
+            const line = r.line || '— (no line)';
+            if (!lines.has(line)) lines.set(line, { line, items : new Map(), byDate : {}, last : 0, total : 0 });
+            const g = lines.get(line);
+            const key = `${r.event_ref || ''}|${r.po_number || ''}|${r.order_no || ''}`;
+            if (!g.items.has(key)) g.items.set(key, { key, order : r.order_no || '—', po : r.po_number || '—', style : r.style || '—', color : r.color || '—', orderQty : Number(r.order_qty) || 0, byDate : {}, made : 0, last : 0, total : 0 });
+            const it = g.items.get(key);
+            const q = Number(r.prod_qty) || 0;
+            it.made += q;                                   // everything up to To
+            if (d >= from) {
+                it.byDate[d] = (it.byDate[d] || 0) + q;
+                it.total += q;
+                g.byDate[d] = (g.byDate[d] || 0) + q;
+                g.total += q;
+                if (d === to) { it.last += q; g.last += q; }
+            }
+        }
+        const groups = [...lines.values()]
+            .map(g => ({ ...g, items : [...g.items.values()].filter(it => it.total > 0 || it.byDate[to]).map(it => ({ ...it, rest : Math.max(0, it.orderQty - it.made) })).sort((a, b) => a.order.localeCompare(b.order) || a.po.localeCompare(b.po)) }))
+            .filter(g => g.items.length)
+            .sort((a, b) => a.line.localeCompare(b.line));
+        const grand = { byDate : {}, last : 0, total : 0 };
+        for (const g of groups) { for (const d of dates) grand.byDate[d] = (grand.byDate[d] || 0) + (g.byDate[d] || 0); grand.last += g.last; grand.total += g.total; }
+        puReport.value = { from, to, dates, groups, grand };
+        if (!groups.length) toast('No production rows in this date range', 'warn');
+    }
+    catch (e) { toast(`Report failed: ${e.message}`, 'error'); }
+    finally { puBusy.value = false; }
+}
+
+function puPrint() {
+    const r = puReport.value;
+    if (!r) return;
+    const esc = v => String(v ?? '').replace(/[&<>]/g, c => ({ '&' : '&amp;', '<' : '&lt;', '>' : '&gt;' }[c]));
+    const dd = d => d.slice(8, 10) + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d.slice(5, 7)) - 1];
+    const head = `<tr><th>Order</th><th>PO</th><th>Style</th><th>Color</th><th>Order Qty</th>${r.dates.map(d => `<th>${dd(d)}</th>`).join('')}<th>Last (${dd(r.to)})</th><th>Total</th><th>Made so far</th><th>Remaining</th></tr>`;
+    const body = r.groups.map(g => `<tr class="g"><td colspan="5"><b>${esc(g.line)}</b></td>${r.dates.map(d => `<td><b>${fmtQty(g.byDate[d] || 0)}</b></td>`).join('')}<td><b>${fmtQty(g.last)}</b></td><td><b>${fmtQty(g.total)}</b></td><td></td><td></td></tr>`
+        + g.items.map(it => `<tr><td>${esc(it.order)}</td><td>${esc(it.po)}</td><td>${esc(it.style)}</td><td>${esc(it.color)}</td><td>${fmtQty(it.orderQty)}</td>${r.dates.map(d => `<td>${it.byDate[d] ? fmtQty(it.byDate[d]) : ''}</td>`).join('')}<td>${fmtQty(it.last)}</td><td>${fmtQty(it.total)}</td><td>${fmtQty(it.made)}</td><td>${fmtQty(it.rest)}</td></tr>`).join('')).join('');
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<html><head><title>Production ${esc(r.from)} → ${esc(r.to)}</title><style>body{font:11px Verdana,sans-serif;padding:14px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:2px 5px;font-size:10.5px;text-align:right}th:nth-child(-n+4),td:nth-child(-n+4){text-align:left}th{background:#eee}tr.g td{background:#dde8f5}h2{margin:0 0 6px}</style></head><body><h2>Line-wise production ${esc(r.from)} → ${esc(r.to)}</h2><p>Total ${fmtQty(r.grand.total)} pcs · last day (${esc(r.to)}) ${fmtQty(r.grand.last)} pcs</p><table><thead>${head}</thead><tbody>${body}</tbody></table></body></html>`);
+    w.document.close(); w.focus(); w.print();
+}
+const puDd = d => d.slice(8, 10) + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(d.slice(5, 7)) - 1];
 
 const loadProdStore = () => {
     try { return JSON.parse(localStorage.getItem('mbm-prod-updates') || '{}'); }
@@ -8401,15 +8466,71 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </span>
                 </div>
                 <div class="dp-toolbar">
-                    <label class="dp-range">Save date
-                        <input v-model="puDate" class="cal-in dp-date" type="date">
-                    </label>
-                    <button class="dp-act dp-act-gen" @click="buildPuRows">⟳ Load</button>
-                    <button class="dp-act dp-act-xls" :disabled="!puRows.length" @click="saveProdUpdate">💾 Save</button>
+                    <label class="pu-mode"><input type="radio" value="day" v-model="puMode"> Update a date</label>
+                    <label class="pu-mode"><input type="radio" value="range" v-model="puMode"> Date range report</label>
+                    <template v-if="puMode === 'day'">
+                        <label class="dp-range">Save date
+                            <input v-model="puDate" class="cal-in dp-date" type="date">
+                        </label>
+                        <button class="dp-act dp-act-gen" @click="buildPuRows">⟳ Load</button>
+                        <button class="dp-act dp-act-xls" :disabled="!puRows.length" @click="saveProdUpdate">💾 Save</button>
+                    </template>
+                    <template v-else>
+                        <label class="dp-range">From <input v-model="puFrom" class="cal-in dp-date" type="date"></label>
+                        <label class="dp-range">To <input v-model="puTo" class="cal-in dp-date" type="date"></label>
+                        <button class="dp-act dp-act-gen" :disabled="puBusy" @click="buildPuReport">⟳ Load</button>
+                        <button class="dp-act dp-act-xls" :disabled="!puReport" @click="puPrint">🖨 Print</button>
+                    </template>
                     <span class="dp-flex"></span>
                     <button class="dp-act dp-act-close" @click="puOpen = false">✕ Close</button>
                 </div>
-                <div class="st-body od-body dp-body">
+                <div v-if="puMode === 'range'" class="st-body od-body dp-body">
+                    <div v-if="puBusy" class="ls-dim">Loading…</div>
+                    <template v-else-if="puReport && puReport.groups.length">
+                        <div class="pf-sum">
+                            {{ puReport.from }} → {{ puReport.to }} · Total production <b>{{ fmtQty(puReport.grand.total) }}</b> pcs ·
+                            Last day ({{ puDd(puReport.to) }}) <b>{{ fmtQty(puReport.grand.last) }}</b> pcs · {{ puReport.groups.length }} line(s)
+                        </div>
+                        <table class="st-table dp-table pu-rtable">
+                            <thead>
+                                <tr>
+                                    <th>Order</th><th>PO</th><th>Style</th><th>Color</th>
+                                    <th class="od-num">Order Qty</th>
+                                    <th v-for="d in puReport.dates" :key="d" class="od-num pu-dcol">{{ puDd(d) }}</th>
+                                    <th class="od-num pu-last">Last ({{ puDd(puReport.to) }})</th>
+                                    <th class="od-num pu-tot">Total</th>
+                                    <th class="od-num">Made so far</th>
+                                    <th class="od-num">Remaining</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template v-for="g in puReport.groups" :key="g.line">
+                                    <tr class="pu-grp">
+                                        <td colspan="5"><b>🏭 {{ g.line }}</b> <span class="ls-dim">{{ g.items.length }} order/PO</span></td>
+                                        <td v-for="d in puReport.dates" :key="d" class="od-num"><b>{{ fmtQty(g.byDate[d] || 0) }}</b></td>
+                                        <td class="od-num pu-last"><b>{{ fmtQty(g.last) }}</b></td>
+                                        <td class="od-num pu-tot"><b>{{ fmtQty(g.total) }}</b></td>
+                                        <td></td><td></td>
+                                    </tr>
+                                    <tr v-for="it in g.items" :key="g.line + it.key">
+                                        <td class="st-user">{{ it.order }}</td>
+                                        <td>{{ it.po }}</td>
+                                        <td>{{ it.style }}</td>
+                                        <td>{{ it.color }}</td>
+                                        <td class="od-num">{{ fmtQty(it.orderQty) }}</td>
+                                        <td v-for="d in puReport.dates" :key="d" class="od-num">{{ it.byDate[d] ? fmtQty(it.byDate[d]) : '' }}</td>
+                                        <td class="od-num pu-last">{{ fmtQty(it.last) }}</td>
+                                        <td class="od-num pu-tot">{{ fmtQty(it.total) }}</td>
+                                        <td class="od-num">{{ fmtQty(it.made) }}</td>
+                                        <td class="od-num pu-rest">{{ fmtQty(it.rest) }}</td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </template>
+                    <div v-else class="st-hint dp-hint">From / To দিয়ে ⟳ Load চাপুন — line-wise order / PO / style / colour, প্রতিটি তারিখের production, শেষ তারিখের production, range total, made so far ও remaining</div>
+                </div>
+                <div v-else class="st-body od-body dp-body">
                     <table v-if="puRows.length" class="st-table dp-table">
                         <thead>
                             <tr>
@@ -10319,6 +10440,12 @@ body {
     padding    : 3px 6px;
 }
 .pu-rest { color : #c62828; font-weight : bold; }
+.pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
+.pu-rtable td, .pu-rtable th { white-space : nowrap; }
+.pu-rtable tr.pu-grp td { background : #dde8f5; border-top : 2px solid #9db3d3; }
+.pu-rtable .pu-last { background : #fff8e1; }
+.pu-rtable .pu-tot  { background : #e8f5e9; }
+.pu-rtable .pu-dcol { font-size : 10.5px; }
 
 .od-status {
     padding       : 1px 8px;
