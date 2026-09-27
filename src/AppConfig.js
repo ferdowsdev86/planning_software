@@ -1039,6 +1039,20 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
         q2 = orig.qty - q1;
     }
 
+    // SOP-planned bar: each part gets ITS OWN whole-day run from its own
+    // quantity (the parent's run must not be inherited — later edits would
+    // keep sizing both parts by the full order)
+    let sop1 = null, sop2 = null;
+    if (Number(orig.sopDur) > 0) {
+        const t1 = { ...orig, qty : q1, orderQty : q1, sopMode : true, sop : { ...(orig.sop || {}) } };
+        const t2 = { ...orig, qty : q2, orderQty : q2, sopMode : true, sop : { ...(orig.sop || {}), lcDays : 0 }, lc : orig.lc ? { ...orig.lc, applied : false } : undefined };
+        applyLineFormulaDuration(scheduler, t1, line.id);
+        applyLineFormulaDuration(scheduler, t2, line.id);
+        d1 = t1.dur; d2 = t2.dur;
+        sop1 = { sopDur : t1.sopDur, sop : t1.sop };
+        sop2 = { sopDur : t2.sopDur, sop : t2.sop };
+    }
+
     const start1 = new Date(rec.startDate);
     const end1   = endOfWork(start1, d1);
     const start2 = nextStartAfter(end1);
@@ -1048,6 +1062,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     raw.qty    = q1;
     raw.reqMin = Math.round(q1 * orig.smv);
     raw.dur    = d1;
+    if (sop1) { raw.sopDur = sop1.sopDur; raw.sop = sop1.sop; }
     raw.start  = start1;
     raw.end    = end1;
     rec.set({ endDate : end1, duration : elapsedDays(start1, end1) });
@@ -1067,7 +1082,8 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
         // (e.g. 'proj:26XXX') would make the two parts indistinguishable
         id : strip2Code.startsWith('ev-') ? strip2Code.slice(3) : strip2Code,
         dbId : orig.dbId,
-        keepSeparate : !!orig.keepSeparate
+        keepSeparate : !!orig.keepSeparate,
+        ...(sop2 ? { sopDur : sop2.sopDur, sop : sop2.sop } : {})
     };
     const id = `${rec.id}-sp${++splitSeq}`;
     scheduler.eventStore.add({
