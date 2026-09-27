@@ -1085,6 +1085,38 @@ app.post(`${BASE}/orders/complete`, async (req, res) => {
     }
 });
 
+// Re-open completed orders: back to the projection / confirm stage as
+// UNPLANNED (the planner then plans them again). Only users with the
+// "reopen" permission may call this (checked in the app; the server just
+// records who did it).
+app.post(`${BASE}/orders/reopen`, async (req, res) => {
+    const codes = (Array.isArray(req.body?.orderCodes) ? req.body.orderCodes : [])
+        .map(c => String(c || '').trim()).filter(Boolean).slice(0, 500);
+    if (!codes.length) return res.json({ success : true, reopened : 0 });
+    const RETRYABLE = new Set(['ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            const ph = codes.map(() => '?').join(',');
+            await conn.query(`DELETE FROM planning_completed_orders WHERE order_code IN (${ph})`, codes);
+            await conn.query(
+                `UPDATE planning_orders SET planning_status = 'unplanned', updated_at = NOW()
+                 WHERE order_code IN (${ph}) AND planning_status = 'completed'`, codes);
+            await conn.commit();
+            conn.release();
+            console.log(`[reopen] ${codes.length} order(s) re-opened by ${req.body?.by || '?'}: ${codes.join(', ')}`);
+            return res.json({ success : true, reopened : codes.length });
+        }
+        catch (e) {
+            try { await conn.rollback(); } catch { /* already gone */ }
+            conn.release();
+            if (RETRYABLE.has(e.code) && attempt < 3) { await new Promise(r => setTimeout(r, 400 * attempt)); continue; }
+            return res.status(500).json({ success : false, error : e.message });
+        }
+    }
+});
+
 async function completedOrderCodes() {
     const [rows] = await pool.query('SELECT order_code FROM planning_completed_orders');
     return new Set(rows.map(r => r.order_code));

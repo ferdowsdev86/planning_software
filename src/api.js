@@ -543,6 +543,18 @@ export async function completeOrdersDb(orderCodes) {
     return data;
 }
 
+// Re-open completed orders (back to projection / confirm stage, unplanned)
+export async function reopenOrdersDb(orderCodes, by) {
+    const res = await fetch(`${API_BASE}/orders/reopen`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ orderCodes, by })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'reopen failed');
+    return data;
+}
+
 // Persist line efficiency (profile _Default) to planning_resources
 export async function saveLineEfficiencyDb(updates) {
     const res = await fetch(`${API_BASE}/resources/efficiency`, {

@@ -20,7 +20,7 @@ import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot,
-    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb,
+    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb, reopenOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
@@ -2620,6 +2620,18 @@ function setBoardPerm(u, boardId, level) {
     else if (level === 'read') u.boards.push(`${boardId}:read`);
 }
 const permittedBoards = computed(() => boards.value.filter(b => boardAccessOf(currentUser.value, b.id)));
+// Extra permissions ride in the same list as "perm:<name>" tokens
+const PERM_REOPEN = 'perm:reopen';
+const userHasPerm = (u, perm) => (u?.boards || []).includes(perm);
+function setUserPerm(u, perm, on) {
+    u.boards = (u.boards || []).filter(x => x !== perm);
+    if (on) u.boards.push(perm);
+}
+// Re-open a completed order (back to projection / confirm): Planning
+// Manager always, others only when granted in Settings
+const canReopenOrders = computed(() =>
+    (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
+    || userHasPerm(currentUser.value, PERM_REOPEN) || userHasPerm(authUser.value, PERM_REOPEN));
 // View-only session: Management role (§17) or read access to the open board
 const boardViewOnly = computed(() =>
     currentUser.value?.role === 'Management'
@@ -4158,6 +4170,48 @@ const ordersSummary = computed(() => {
 // ---------------------------------------------------------------------------
 const markedComplete = ref(new Set());
 const markSaving     = ref(false);
+// Completed orders the user clicked to send back to the projection / confirm
+// stage — applied (DB) on Save only
+const markedReopen   = ref(new Set());
+
+function toggleMarkReopen(row) {
+    if (row.status !== 'completed' || !row.mbmOrder) return;
+    if (!canReopenOrders.value) {
+        toast('🔒 You do not have permission to re-open a completed order (Settings → Re-open)', 'warn');
+        return;
+    }
+    const s = new Set(markedReopen.value);
+    if (s.has(row.mbmOrder)) s.delete(row.mbmOrder); else s.add(row.mbmOrder);
+    markedReopen.value = s;
+}
+
+async function saveMarkedReopen() {
+    if (!canReopenOrders.value) return;
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot save this board'
+            : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
+    const codes = [...markedReopen.value];
+    if (!codes.length) return;
+    if (!window.confirm(`Re-open ${codes.length} completed order(s) as UNPLANNED (projection / confirm stage)?\n\n${codes.join(', ')}`)) return;
+    markSaving.value = true;
+    try {
+        await reopenOrdersDb(codes, authUser.value?.username || null);
+        const codeSet = new Set(codes);
+        for (const r of erpAllBase) {
+            if (codeSet.has(String(r.mbmOrder || '')) && r.status === 'completed') {
+                r.status = 'unplanned'; r.planned = false; r.replaced = false;
+            }
+        }
+        markedReopen.value = new Set();
+        syncOrdersListFromBoard();
+        toast(`${codes.length} order(s) re-opened — now unplanned; plan them from the list or the SOP timeline`, 'ok');
+    }
+    catch (e) { toast(`Re-open failed: ${e.message}`, 'error'); }
+    finally { markSaving.value = false; }
+}
 
 function toggleMarkComplete(row) {
     const s = new Set(markedComplete.value);
@@ -8096,6 +8150,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <button v-if="markedComplete.size" class="od-done-btn" :disabled="markSaving"
                         @click="saveMarkedComplete"
                     >{{ markSaving ? '⏳ Saving…' : `✔ Complete (${markedComplete.size})` }}</button>
+                    <button v-if="markedReopen.size" class="od-done-btn od-reopen-btn" :disabled="markSaving"
+                        @click="saveMarkedReopen"
+                    >{{ markSaving ? '⏳ Saving…' : `↩ Save re-open (${markedReopen.size})` }}</button>
                     <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
                     <button
                         class="od-reload-btn"
@@ -8204,6 +8261,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         <span v-else-if="k === 'orderType'" class="od-status"
                                             :class="row.orderType === 'confirm' ? 'od-ord-confirm' : 'od-ord-proj'"
                                         >{{ row.orderType === 'confirm' ? 'confirm' : 'projected' }}</span>
+                                        <span v-else-if="k === 'status' && row.status === 'completed'" class="od-status"
+                                            :class="markedReopen.has(row.mbmOrder) ? 'od-unplanned od-reopen-pending' : 'od-completed od-reopen-click'"
+                                            :title="canReopenOrders ? (markedReopen.has(row.mbmOrder) ? 'Will be re-opened on Save — click to undo' : 'Click to re-open this completed order (projection / confirm stage)') : 'Completed — re-open needs permission'"
+                                            @click.stop="toggleMarkReopen(row)"
+                                        >{{ markedReopen.has(row.mbmOrder) ? '↩ unplanned' : 'completed' }}</span>
                                         <span v-else-if="k === 'status'" class="od-status" :class="`od-${row.status}`"
                                         >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
                                         <span v-else-if="k === 'deliveryStatus' && projPartialInfo(row)"
@@ -9571,6 +9633,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <th>Set password</th>
                                 <th>Role</th>
                                 <th v-for="b in boards" :key="b.id" class="st-board-h">{{ b.name }}</th>
+                                <th class="st-board-h" title="May send a completed order back to the projection / confirm stage">Re-open completed</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -9601,11 +9664,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         <option value="write">Write</option>
                                     </select>
                                 </td>
+                                <td class="st-check">
+                                    <input type="checkbox"
+                                        :checked="u.role === 'Planning Manager' || userHasPerm(u, PERM_REOPEN)"
+                                        :disabled="u.role === 'Planning Manager'"
+                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'Allow re-opening completed orders'"
+                                        @change="setUserPerm(u, PERM_REOPEN, $event.target.checked)"
+                                    >
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint">Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
+                    <div class="st-hint"><b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -11714,6 +11785,10 @@ body {
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }
 .st-access { width : 100px; text-align : left; font-size : 11px; padding : 2px 4px; }
+.od-reopen-click { cursor : pointer; }
+.od-reopen-click:hover { outline : 2px solid #1565c0; outline-offset : 1px; }
+.od-reopen-pending { cursor : pointer; outline : 2px dashed #1565c0; outline-offset : 1px; }
+.od-reopen-btn { background : #e3f2fd !important; color : #0d47a1 !important; border-color : #90caf9 !important; }
 .st-access-read  { background : #fff8e1; }
 .st-access-write { background : #e8f5e9; }
 .bs-top { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
