@@ -2681,9 +2681,11 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                     [bar?.id ?? null, ref, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
                      r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
                 written++;
-                // ERP is authoritative for that bar/date — a manual plain row
-                // for a projection bar would double-count with the PO rows
+                // ERP is authoritative for that bar/date — the OTHER key form
+                // for the same bar (plain "db-<id>" vs per-PO "db-<id>:po…")
+                // must not survive, or the day is counted twice
                 if (!viaPo) await conn.query('DELETE FROM day_production_update_plan WHERE event_ref = ? AND save_date = ?', [`db-${bar.id}`, date]);
+                else await conn.query('DELETE FROM day_production_update_plan WHERE event_ref LIKE ? AND save_date = ?', [`db-${bar.id}:po%`, date]);
             }
             // Keep the table to the tracked board plan only
             const liveRefs = bars.map(b => `db-${b.id}`);

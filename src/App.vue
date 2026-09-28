@@ -5720,13 +5720,31 @@ function openProdUpdate() {
     puMin.value = false;
 }
 
-// Strips running on the selected date, one row per line/strip
-function buildPuRows() {
+// Rows for the selected date = the strips running on the board that day
+// PLUS every bar that has production saved for that date in
+// day_production_update_plan (ERP-synced / manual) even if its bar is not
+// planned on that date — so the day's actual output is never hidden
+async function buildPuRows() {
     const s = getInstance();
-    const store = loadProdStore();
+    const date = puDate.value;
+    let dbRows = [];
+    try { dbRows = await loadProdUpdatesDb(); } catch { /* offline — local store only */ }
+    // Fresh store from the DB (per-PO rows of a projection bar summed onto the bar)
+    let store = loadProdStore();
+    if (dbRows.length) {
+        store = {};
+        for (const r of dbRows) {
+            const key = String(r.event_ref).split(':po')[0];
+            const d = String(r.save_date).slice(0, 10);
+            if (!store[key]) store[key] = {};
+            store[key][d] = (store[key][d] || 0) + (Number(r.prod_qty) || 0);
+        }
+        localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+    }
     const rows = [];
+    const listed = new Set();
     if (s) {
-        const day = new Date(puDate.value + 'T12:00:00');
+        const day = new Date(date + 'T12:00:00');
         for (const ev of s.eventStore.records) {
             const raw = ev.data.raw;
             if (!raw || raw.stage) continue;
@@ -5739,6 +5757,7 @@ function buildPuRows() {
             const res  = s.resourceStore.getById(lid);
             const line = LINE_BY_ID[lid];
             const made = madeOf(store, String(ev.id));
+            listed.add(String(ev.id));
             rows.push({
                 evId     : String(ev.id),
                 dbId     : ev.data.dbId ?? null,
@@ -5754,9 +5773,30 @@ function buildPuRows() {
                 planQty  : dpStripDaily(ev, line)[dpDayKey(day)] || 0,
                 made,
                 rest     : Math.max(0, (Number(raw.qty) || 0) - made),
-                prodQty  : store[String(ev.id)]?.[puDate.value] ?? ''
+                prodQty  : store[String(ev.id)]?.[date] ?? ''
             });
         }
+    }
+    // Saved production for this date whose bar is not running that day on
+    // the board (moved / finished earlier / other board)
+    const extra = new Map();
+    for (const r of dbRows) {
+        if (String(r.save_date).slice(0, 10) !== date) continue;
+        const key = String(r.event_ref).split(':po')[0];
+        if (listed.has(key)) continue;
+        if (!extra.has(key)) {
+            extra.set(key, {
+                evId : key, dbId : r.event_id ?? null,
+                unit : r.unit || 'AQL', floor : r.floor || '—', line : r.line || '—',
+                opType : r.operation_type || 'Sewing', style : r.style || '—',
+                order : r.order_no || '—', po : r.po_number || '—', color : r.color || '—',
+                orderQty : Number(r.order_qty) || 0, planQty : 0, fromDb : true
+            });
+        }
+    }
+    for (const c of extra.values()) {
+        const made = madeOf(store, c.evId);
+        rows.push({ ...c, made, rest : Math.max(0, c.orderQty - made), prodQty : store[c.evId]?.[date] ?? '' });
     }
     rows.sort((a, b) => String(a.line).localeCompare(String(b.line)) || String(a.po).localeCompare(String(b.po)));
     puRows.value = rows;
@@ -8608,7 +8648,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in puRows" :key="r.evId">
+                            <tr v-for="r in puRows" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb }" :title="r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
                                 <td>{{ r.unit }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ r.line }}</td>
@@ -10513,6 +10553,7 @@ body {
     padding    : 3px 6px;
 }
 .pu-rest { color : #c62828; font-weight : bold; }
+.pu-fromdb td { background : #f3f7ff; }
 .pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
 .pu-rtable td, .pu-rtable th { white-space : nowrap; }
 .pu-rtable tr.pu-grp td { background : #dde8f5; border-top : 2px solid #9db3d3; }
