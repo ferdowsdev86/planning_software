@@ -5572,6 +5572,18 @@ const puOpen = ref(false);
 const puMin  = ref(false);
 const puDate = ref(isoInputDate(new Date()));
 const puRows = ref([]);
+// Totals of the "Update a date" table (Prod Qty follows what is typed)
+const puTotals = computed(() => {
+    const t = { orderQty : 0, planQty : 0, made : 0, rest : 0, prodQty : 0 };
+    for (const r of puRows.value) {
+        t.orderQty += Number(r.orderQty) || 0;
+        t.planQty  += Number(r.planQty) || 0;
+        t.made     += Number(r.made) || 0;
+        t.rest     += Number(r.rest) || 0;
+        t.prodQty  += Number(r.prodQty) || 0;
+    }
+    return t;
+});
 // Date-range report: line-wise groups of order / PO / style / colour with a
 // column per date, the last date's production, the range total, made so far
 // and remaining — read straight from day_production_update_plan (ERP-synced
@@ -8697,6 +8709,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <input v-model="r.prodQty" class="cal-in pu-in" type="number" min="0" placeholder="0" :disabled="r.fromErp">
                                 </td>
                             </tr>
+                            <tr class="dp-grand pu-total">
+                                <td colspan="8">Total ({{ puRows.length }} rows)</td>
+                                <td class="od-num">{{ fmtQty(puTotals.orderQty) }}</td>
+                                <td class="od-num">{{ fmtQty(puTotals.planQty) }}</td>
+                                <td class="od-num">{{ fmtQty(puTotals.made) }}</td>
+                                <td class="od-num">{{ fmtQty(puTotals.rest) }}</td>
+                                <td class="od-num pu-total-prod">{{ fmtQty(puTotals.prodQty) }}</td>
+                            </tr>
                         </tbody>
                     </table>
                     <div v-else class="st-hint dp-hint">এই তারিখে কোনো strip planned নেই — Save date বদলে ⟳ Load চাপুন</div>
@@ -10587,6 +10607,9 @@ body {
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
+.pu-total td { text-align : right; }
+.pu-total td:first-child { text-align : left; }
+.pu-total .pu-total-prod { font-size : 13px; }
 .pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
 .pu-rtable td, .pu-rtable th { white-space : nowrap; }
 .pu-rtable tr.pu-grp td { background : #dde8f5; border-top : 2px solid #9db3d3; }
