@@ -1318,6 +1318,24 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     return { ok : true, errors, warnings };
 }
 
+// Bar tooltip tabs (Info / Purchase Orders / Learning Curve / SOP / Raw
+// Material): one delegated click handler for every tooltip instance
+let tip4TabsInstalled = false;
+function installTip4Tabs() {
+    if (tip4TabsInstalled) return;
+    tip4TabsInstalled = true;
+    document.addEventListener('click', ev => {
+        const btn = ev.target?.closest?.('.mb-tip4 .tip4-tab');
+        if (!btn) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const root = btn.closest('.mb-tip4');
+        const key  = btn.dataset.tab;
+        root.querySelectorAll('.tip4-tab').forEach(b => b.classList.toggle('tip4-tab-on', b === btn));
+        root.querySelectorAll('.tip4-panel').forEach(p => p.classList.toggle('tip4-panel-on', p.dataset.panel === key));
+    }, true);
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler configuration (document 9)
 // ---------------------------------------------------------------------------
@@ -1629,6 +1647,9 @@ export const schedulerProConfig = {
 
     eventTooltipFeature : {
         cls                  : 'mb-fr-tip',
+        // The tooltip stays up while hovered (allowOver) — tab clicks inside
+        // it switch panels without re-rendering the template
+        onBeforeShow() { installTip4Tabs(); },
         hoverDelay           : 400,
         hideOnDelegateChange : true,
         hideOnScroll         : true,
@@ -1764,8 +1785,7 @@ export const schedulerProConfig = {
                 : enc(String(r.po || '—'));
 
             const poBreakdownHtml = isConfirm && poSummary.length > 0 ? `
-<div class="tip4-po-block">
-  <div class="tip4-po-hd">Purchase Orders</div>
+<div class="tip4-po-block tip4-po-tab">
   <table class="tip4-po-tbl">
     <thead><tr><th>PO</th><th>Color</th><th>Qty</th><th>Delivery</th></tr></thead>
     <tbody>
@@ -1791,6 +1811,16 @@ export const schedulerProConfig = {
     <span class="tip4-hdr-badges">${orderTypeBadge}${consolidatedBadge}</span>
   </div>
 
+  <!-- TABS: first view = style + order only; the rest open on click -->
+  <div class="tip4-tabs">
+    <button type="button" class="tip4-tab tip4-tab-on" data-tab="info">ℹ️ Info</button>
+    <button type="button" class="tip4-tab" data-tab="po" title="Purchase orders">🧾 POs${allPos.length > 1 ? ` <span class="tip4-tab-n">${allPos.length}</span>` : ''}</button>
+    <button type="button" class="tip4-tab" data-tab="lc" title="Learning curve">📈 Curve</button>
+    <button type="button" class="tip4-tab" data-tab="sop" title="SOP timeline">📐 SOP</button>
+    <button type="button" class="tip4-tab" data-tab="rm" title="Raw material">🧵 Material</button>
+  </div>
+
+  <div class="tip4-panel tip4-panel-on" data-panel="info">
   <!-- STYLE CARD -->
   <div class="tip4-card">
     <div class="tip4-card-hd">🎨 Style</div>
@@ -1829,11 +1859,24 @@ export const schedulerProConfig = {
         </div>
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}
       </div>
-      ${poBreakdownHtml}
+    </div>
+  </div>
+  </div>
+
+  <!-- PURCHASE ORDERS TAB -->
+  <div class="tip4-panel" data-panel="po">
+    <div class="tip4-card">
+      <div class="tip4-card-hd">🧾 Purchase Orders</div>
+      <div class="tip4-card-body">
+        ${poBreakdownHtml || (allPos.length
+            ? `<div class="tip4-rows">${R('PO', allPos.map(p => `<span class="tip4-po-pill">${enc(String(p))}</span>`).join(''), 't4-full')}${R('PO Qty', `<b>${enc(fmtQty(r.baseQty ?? r.orderQty ?? r.qty))}</b>`, 't4-full')}${R('Delivery', enc(ddMon(deliv)), 't4-full')}</div>`
+            : '<div class="t4-empty">Projection — no purchase order yet</div>')}
+      </div>
     </div>
   </div>
 
-  <!-- LEARNING CURVE CARD -->
+  <!-- LEARNING CURVE TAB -->
+  <div class="tip4-panel" data-panel="lc">
   ${(() => {
         const lc = r.lc;
         if (!lc) return '';
@@ -1870,9 +1913,11 @@ export const schedulerProConfig = {
       </div>
     </div>
   </div>`;
-    })()}
+    })() || '<div class="tip4-card"><div class="tip4-card-hd">📈 Learning Curve</div><div class="tip4-card-body"><div class="t4-empty">No learning curve on this bar</div></div></div>'}
+  </div>
 
-  <!-- SOP-PLN-01 TIMELINE CARD -->
+  <!-- SOP TAB -->
+  <div class="tip4-panel" data-panel="sop">
   ${(() => {
         const sp = sopForRaw(uiHooks.instance, r, lid, { washConfirmed : !!s.wash_recipe_status, washType : s.wash_type || s.wash_name || 'normal' });
         if (!sp) return '';
@@ -1897,9 +1942,11 @@ export const schedulerProConfig = {
       </div>
     </div>
   </div>`;
-    })()}
+    })() || '<div class="tip4-card"><div class="tip4-card-hd">📐 SOP Timeline</div><div class="tip4-card-body"><div class="t4-empty">No SOP timeline (missing ship date)</div></div></div>'}
+  </div>
 
-  <!-- RAW MATERIAL CARD -->
+  <!-- RAW MATERIAL TAB -->
+  <div class="tip4-panel" data-panel="rm">
   <div class="tip4-card">
     <div class="tip4-card-hd">🧵 Raw Material</div>
     <div class="tip4-card-body">
@@ -1912,6 +1959,7 @@ export const schedulerProConfig = {
         </div>
       </div>
     </div>
+  </div>
   </div>
 
 </div>`;

@@ -12703,12 +12703,57 @@ body {
     border        : 1px solid #c5d4ea;
 }
 
+/* Tooltip tabs — first view is Info (style + order); the rest on click */
+.tip4-tabs {
+    display    : flex;
+    gap        : 2px;
+    padding    : 5px 8px 0;
+    background : #e9eef8;
+    border-bottom : 1px solid #d5deee;
+    overflow-x : auto;
+    scrollbar-width : none;
+}
+.tip4-tab {
+    appearance    : none;
+    border        : 1px solid transparent;
+    border-bottom : 0;
+    background    : transparent;
+    color         : #4a5a78;
+    font          : 600 11px/1 'Segoe UI', Tahoma, Arial, sans-serif;
+    padding       : 6px 9px 7px;
+    border-radius : 6px 6px 0 0;
+    cursor        : pointer;
+    white-space   : nowrap;
+}
+.tip4-tab:hover { background : #f4f6fb; color : #1565c0; }
+.tip4-tab.tip4-tab-on {
+    background   : #fff;
+    color        : #0d2b72;
+    border-color : #d5deee;
+    box-shadow   : 0 1px 0 #fff;
+}
+.tip4-tab-n {
+    display       : inline-block;
+    min-width     : 14px;
+    padding       : 0 4px;
+    border-radius : 8px;
+    background    : #1565c0;
+    color         : #fff;
+    font-size     : 9.5px;
+    line-height   : 14px;
+    text-align    : center;
+}
+.tip4-panel { display : none; }
+.tip4-panel.tip4-panel-on { display : block; }
+.t4-empty { color : #8898b0; font-style : italic; padding : 4px 0; }
+
 /* Confirm order PO breakdown table */
 .tip4-po-block {
     margin-top    : 8px;
     border-top    : 1px solid #e0e6f0;
     padding-top   : 6px;
 }
+.tip4-po-block.tip4-po-tab { margin-top : 0; border-top : 0; padding-top : 0; }
 .tip4-po-hd {
     font-size      : 10px;
     font-weight    : 700;
