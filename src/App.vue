@@ -3048,6 +3048,7 @@ function openBoard(b) {
         applyBoardFilter();
         removeOrdersWithoutBuyer(s);
         installFrVScroll(s);
+        requestAnimationFrame(() => fitBoardView(s));
     });
 }
 
@@ -7313,8 +7314,9 @@ onMounted(() => {
         installFrVScroll(s);
         s.on?.({
             paint() { installFrVScroll(s); },
-            resize() { updateFrVScroll(s); }
+            resize() { updateFrVScroll(s); fitBoardView(s); }
         });
+        requestAnimationFrame(() => fitBoardView(s));
     }
 
     // Try the MySQL-backed API (172.16.101.70 / fastreact); fall back to demo
@@ -7843,14 +7845,60 @@ function bindFrHScroll(s, bar) {
     }
 }
 
+// Horizontal zoom is expressed in WEEKS on screen: the board opens showing
+// 6 weeks (day width = axis width / 42) and zooming out stops at 10 weeks.
+// Zooming in has a fixed pixel ceiling.
+const VIEW_WEEKS_DEFAULT = 6;
+const VIEW_WEEKS_MAX     = 10;
+const TICK_MAX_PX        = 220;
+const axisWidthPx = s => Number(s?.timeAxisSubGrid?.scrollable?.clientWidth || s?.timeAxisSubGrid?.width) || 0;
+const tickForWeeks = (s, weeks, round = Math.floor) => { const w = axisWidthPx(s); return w ? Math.max(6, round(w / (weeks * 7))) : 0; };
+// ceil: at the bound the axis shows AT MOST 10 weeks, never a day more
+const minTickPx = s => tickForWeeks(s, VIEW_WEEKS_MAX, Math.ceil) || 40;
+
+function setTick(s, px, keep) {
+    const next = Math.max(minTickPx(s), Math.min(TICK_MAX_PX, Math.round(px)));
+    const at   = keep || s.visibleDateRange?.startDate || currentBoardDate();
+    if (next !== s.tickSize) s.tickSize = next;
+    // the axis re-renders asynchronously after a tick change — scroll after it
+    requestAnimationFrame(() => {
+        s.scrollToDate?.(at, { block : 'start' });
+        updateFrHScroll(s);
+    });
+}
+
+// Fit N weeks into the visible time axis (default view on board open)
+function fitWeeks(s, weeks = VIEW_WEEKS_DEFAULT, keep) {
+    const t = tickForWeeks(s, weeks);
+    if (!t) return false;
+    setTick(s, t, keep);
+    return true;
+}
+
+let userZoomed  = false;   // the user pressed a zoom button — keep their zoom
+let lastFitWidth = 0;
+// Board visible / axis resized: until the user zooms, always show 6 weeks
+// for the current axis width (the width settles over a few layout passes
+// after opening); after a manual zoom only enforce the 10-week bound
+function fitBoardView(s) {
+    const w = axisWidthPx(s);
+    if (!s || !w) return;
+    if (!userZoomed) {
+        if (w === lastFitWidth && s.tickSize === tickForWeeks(s, VIEW_WEEKS_DEFAULT)) return;
+        lastFitWidth = w;
+        fitWeeks(s, VIEW_WEEKS_DEFAULT, currentBoardDate());
+    }
+    else if ((s.tickSize || 0) < minTickPx(s)) setTick(s, minTickPx(s));
+}
+
 function hZoom(delta) {
     const s = getInstance();
     if (!s) return;
     const keep = s.visibleDateRange?.startDate || currentBoardDate();
-    const next = Math.max(40, Math.min(220, (s.tickSize || 96) + delta));
-    s.tickSize = next;
-    s.scrollToDate?.(keep, { block : 'start' });
-    requestAnimationFrame(() => updateFrHScroll(s));
+    const cur  = s.tickSize || 96;
+    userZoomed = true;
+    // ~20% per step so a 6-week view reaches 10 weeks in three clicks
+    setTick(s, delta > 0 ? cur * 1.2 : cur / 1.2, keep);
 }
 
 function vZoom(delta) {

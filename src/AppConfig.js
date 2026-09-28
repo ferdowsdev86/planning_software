@@ -1356,6 +1356,7 @@ export const schedulerProConfig = {
     //   ≥72px   Mon 18
     //   ≥54px   Mo 18
     //   <54px   Mo
+//   <22px   M
     // Renderers re-run on every tickSize change (the h-zoom buttons), which
     // makes the header adapt automatically. Only the header DISPLAY changes:
     // ticks, bar positions, durations and calculations stay untouched.
@@ -1376,6 +1377,7 @@ export const schedulerProConfig = {
                 renderer : start => {
                     const w    = uiHooks.instance?.tickSize || 72;
                     const dow2 = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][start.getDay()];
+                    if (w < 22)  return dow2[0];
                     if (w < 54)  return dow2;
                     const dd = DateHelper.format(start, 'DD');
                     if (w < 72)  return `${dow2} ${dd}`;
