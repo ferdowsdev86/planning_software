@@ -22,7 +22,8 @@ export function sopForRaw(scheduler, raw, lineId, extra = {}) {
     if (!raw?.ship) return null;
     try {
         const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId || 'l1');
-        const qty = Number(raw.orderQty ?? raw.qty) || null;
+        // The BAR's quantity (a split strip / one PO), never the whole order
+        const qty = Number(raw.qty ?? raw.orderQty) || null;
         // A placeholder SMV (ERP has none) is NOT a confirmed SMV — SOP §3
         // then plans the 10-day default run
         const smv = Number(raw.smv) > 0 && !raw.smvMissing ? Number(raw.smv) : null;
