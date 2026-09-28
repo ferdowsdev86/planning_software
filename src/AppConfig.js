@@ -10,7 +10,7 @@ import {
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
-, workDayUnits
+, workDayUnits, planQtyOf
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -1059,7 +1059,9 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const start2 = nextStartAfter(end1);
     const end2   = endOfWork(start2, d2);
 
-    // Part 1: the original record shrinks
+    // Part 1: the original record shrinks (ERP base qty follows the same split)
+    const base0 = Number(orig.baseQty) > 0 ? Number(orig.baseQty) : null;
+    if (base0) raw.baseQty = Math.round(base0 * q1 / Math.max(1, orig.qty));
     raw.qty    = q1;
     raw.reqMin = Math.round(q1 * orig.smv);
     raw.dur    = d1;
@@ -1817,7 +1819,8 @@ export const schedulerProConfig = {
         <div class="tip4-2col">
           ${R('Color', colorHtml)}
           ${R('PO', `<b>${poCell}</b>`)}
-          ${R('Total Qty', `<b>${enc(fmtQty(r.qty))}</b>${Number(r.made) > 0 ? ` <span class="t4dim">(${fmtQty(r.made)} done)</span>` : ''}`)}
+          ${R('Order Qty', `<b>${enc(fmtQty(r.baseQty ?? r.orderQty ?? r.qty))}</b>`)}
+          ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>${Number(r.made) > 0 ? ` <span class="t4dim">(${fmtQty(r.made)} done)</span>` : ''}`)}
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}

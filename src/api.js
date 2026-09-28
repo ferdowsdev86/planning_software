@@ -7,7 +7,7 @@ import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
     addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
-    workingMinutesBetween
+    workingMinutesBetween, planQtyOf
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds } from './AppConfig.js';
 
@@ -155,8 +155,12 @@ function eventNotesPayload(raw, onHold) {
         // dbPinned = the pin as loaded from DB; keeps saved positions pinned
         // even when load-time processing has cleared the working flag
         userPinned : !!(raw.userPinned || raw.dbPinned),
-        manualGap  : !!raw.manualGap
+        manualGap  : !!raw.manualGap,
+        // plan qty (+3%) already applied to this bar's quantity — never twice
+        pq3        : true
     };
+    if (Number(raw.orderQty) > 0) notes.orderQty = Number(raw.orderQty);
+    if (Number(raw.baseQty) > 0)  notes.baseQty  = Number(raw.baseQty);   // ERP qty behind the plan qty
     // Strip/profile efficiency edits from the properties dialog must survive
     // a reload — without them the duration formula re-runs on the old values
     // and the bar snaps back to its pre-edit length
@@ -239,8 +243,13 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
     // clamp stale group quantities left over from before groups were persisted
     // (split strips keep their smaller planned quantity untouched)
     const noteGroup = parseEventNotes(e.notes);
+    // Plan qty (+3%): bars saved before the rule carry the ERP qty — apply it
+    // once on load; bars saved with the rule (notes.pq3) already hold it
+    let baseQty = Number(noteGroup.baseQty) > 0 ? Number(noteGroup.baseQty) : null;
+    if (!noteGroup.pq3) { baseQty = qty; qty = planQtyOf(qty); }
+    if (Number(noteGroup.orderQty) > 0) orderQty = Number(noteGroup.orderQty);
     if (orderId && !(noteGroup.idList && noteGroup.idList.length > 1) && Number(e.order_quantity) > 0) {
-        qty = Math.min(qty, Number(e.order_quantity));
+        qty = Math.min(qty, planQtyOf(e.order_quantity));
     }
     // Projection events have no planning_orders join — recover the buyer from
     // the saved event name ("Buyer | 26XXXX"), otherwise the blank-buyer
@@ -257,7 +266,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         mbmOrder : e.order_code || (projId ? projId.slice(5).replace(/-\d{1,2}$/, '') : ''),
         eventCode : e.event_code || null,
         productType : productTypeFor(e.po_number, e.product_category),
-        qty, orderQty : orderQty || qty, smv,
+        qty, orderQty : orderQty || qty, baseQty : baseQty || undefined, pq3 : true, smv,
         smvMissing : !(Number(e.smv) > 0) && !(Number(noteGroup.smvManual) > 0),
         smvManual  : Number(noteGroup.smvManual) > 0 ? Number(noteGroup.smvManual) : undefined,
         reqMin   : Math.round(qty * smv),
@@ -604,7 +613,8 @@ function mapUnplannedRow(o) {
         orderType : 'confirm',
         mbmOrder : o.order_code || '',
         productType : productTypeFor(o.po_number, o.product_category),
-        qty      : Number(o.remaining_quantity ?? o.order_quantity),
+        qty      : planQtyOf(o.remaining_quantity ?? o.order_quantity),
+        baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
         orderQty : Number(o.order_quantity ?? o.remaining_quantity),
         smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
         smvMissing : !(Number(o.smv) > 0),
@@ -637,6 +647,7 @@ export async function loadErpAllOrders(prodUnit = null) {
         confirmArrived : r.order_type === 'confirm' ? true : !!r.has_confirm,
         orderQty     : Number(r.order_qty   ?? 0),
         qty          : Number(r.po_qty ?? r.order_qty ?? 0),
+        planQty      : planQtyOf(r.po_qty ?? r.order_qty),   // +3% — what the board plans
         po           : r.po_number || '',
         color        : r.color || '',
         garmentColor : r.color || '',
@@ -888,7 +899,8 @@ export async function loadFromApi(unitId = null) {
                 buyer       : r.buyer_name,
                 style       : r.style_no,
                 productType : productTypeFor(r.order_code, r.product_category),
-                qty         : Number(r.order_qty) || 0,
+                qty         : planQtyOf(r.order_qty),
+                baseQty     : Number(r.order_qty) || 0,
                 orderQty    : Number(r.order_qty) || 0,
                 // round: ERP FLOAT smv arrives with float32 artifacts (23.600000381…)
                 smv         : Number(r.smv) > 0 ? Math.round(Number(r.smv) * 100) / 100 : randSmv(r.order_code),
@@ -959,7 +971,8 @@ export async function loadFromApi(unitId = null) {
             poCount  : Number(o.po_count) || 1,
             poDetails : Array.isArray(o.po_details) ? o.po_details : [],
             productType : productTypeFor(o.po_number, o.product_category),
-            qty      : Number(o.remaining_quantity ?? o.order_quantity),
+            qty      : planQtyOf(o.remaining_quantity ?? o.order_quantity),
+            baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
             orderQty : Number(o.order_quantity ?? o.remaining_quantity),
             smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
             smvMissing : !(Number(o.smv) > 0),

@@ -14,7 +14,7 @@ import {
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
-    computeLineUtil, formulaWorkingDays, isLateVsDelivery
+    computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf
 } from './planningData.js';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
@@ -2093,7 +2093,8 @@ function computeSopPlan() {
         const raw = {
             ...src,
             smv : Number(src.smv) > 0 ? Number(src.smv) : 0,
-            qty : Number(src.qty ?? src.orderQty) || 0, orderQty : Number(src.orderQty ?? src.qty) || 0
+            // list rows carry the ERP qty + planQty; unplanned raws already hold the plan qty
+            qty : Number(src.planQty ?? src.qty ?? src.orderQty) || 0, orderQty : Number(src.orderQty ?? src.qty) || 0
         };
         // Line chart: only lines that can run this product; a product the
         // chart does not know may go on any line (flagged)
@@ -3800,7 +3801,7 @@ const ORDER_COLS = [
     'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
     'orderQty', 'smv', 'pcd', 'pcdSource', 'orderDelivery',
     'ppStart', 'prodStart', 'prodEnd',
-    'po', 'color', 'qty', 'poDelivery', 'grouping',
+    'po', 'color', 'qty', 'planQty', 'poDelivery', 'grouping',
     'line', 'start', 'end'
 ];
 const ORDER_COL_LABELS = {
@@ -3825,6 +3826,7 @@ const ORDER_COL_LABELS = {
     po           : 'PO',
     color        : 'Color',
     qty          : 'PO Qty',
+    planQty      : 'Plan Qty (+3%)',
     poDelivery   : 'PO Delivery',
     grouping     : 'Grouping',
     line         : 'Line',
@@ -3858,7 +3860,7 @@ function sopForRow(r) {
     let sp = null;
     try {
         const { manpower, effPct, mins } = sopLineAverages();
-        const qty = Number(r.orderQty) || null;
+        const qty = planQtyOf(r.orderQty) || null;   // the board plans +3%
         const smv = Number(r.smv) > 0 && !r.smvMissing ? Number(r.smv) : null;
         sp = sopPlan({
             exFactoryDate : new Date(ship), orderQuantity : qty, smv,
@@ -3889,6 +3891,7 @@ function orderCellText(r, key) {
         case 'po'            : return hidePoFields ? '' : (r.poCount > 1 ? `[${r.poCount} POs] ${r.po ?? ''}` : String(r.po ?? ''));
         case 'color'         : return hidePoFields ? '' : String(r.garmentColor ?? '');
         case 'qty'           : return fmtQty(r.qty);
+        case 'planQty'       : return fmtQty(r.planQty ?? planQtyOf(r.qty));
         case 'orderQty'      : return fmtQty(r.orderQty);
         case 'smv'           : return r.smvMissing || !(Number(r.smv) > 0) ? 'missing' : String(Math.round(Number(r.smv) * 100) / 100);
         case 'reqMin'        : return fmtQty(r.reqMin);
@@ -3925,7 +3928,7 @@ function toggleGroupExpand(row) {
 // Column filter queries: quantity columns accept >N <N >=N <=N =N;
 // date columns accept the same operators with a date (2026-09-01, 01-09-26,
 // 15-SEP-26, 01/09/2026 …). Anything else falls back to text contains.
-const QTY_FILTER_COLS  = new Set(['orderQty', 'qty', 'smv']);
+const QTY_FILTER_COLS  = new Set(['orderQty', 'qty', 'planQty', 'smv']);
 const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end', 'ppStart', 'prodStart', 'prodEnd']);
 const MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -3962,6 +3965,7 @@ function matchColFilter(r, k, q) {
             if (Number.isFinite(val)) {
                 const cell = k === 'orderQty' ? (Number(r.orderQty) || 0)
                     : k === 'smv' ? (r.smvMissing ? 0 : Number(r.smv) || 0)
+                    : k === 'planQty' ? (Number(r.planQty ?? planQtyOf(r.qty)) || 0)
                     : (Number(r.qty) || 0);
                 return cmpApply(op, cell, val);
             }
@@ -3997,6 +4001,7 @@ function toggleOrderSort(k) {
 function orderSortVal(r, k) {
     if (k === 'orderQty') return Number(r.orderQty) || 0;
     if (k === 'qty') return Number(r.qty) || 0;
+    if (k === 'planQty') return Number(r.planQty ?? planQtyOf(r.qty)) || 0;
     if (k === 'smv') return r.smvMissing ? 0 : Number(r.smv) || 0;
     if (DATE_FILTER_COLS.has(k)) { const d = rowDateVal(r, k); return d instanceof Date ? d.getTime() : 0; }
     return orderCellText(r, k).toLowerCase();
@@ -4605,7 +4610,7 @@ function collectOrders() {
                 color : orderColor(raw.po),
                 garmentColor : raw.color || '',
                 orderQty : raw.orderQty ?? raw.qty,
-                qty : raw.qty, smv, reqMin : Math.round(raw.qty * smv),
+                qty : raw.baseQty ?? raw.qty, planQty : raw.qty, smv, reqMin : Math.round(raw.qty * smv),
                 pcd : raw.pcd ? new Date(raw.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
                 poDelivery : onHold ? null : poDelivery,
                 orderDelivery : poDelivery,
@@ -4642,7 +4647,7 @@ function collectOrders() {
                     color : orderColor(d.po),
                     garmentColor : u.color || '',
                     orderQty : dOrdQty,
-                    qty : dQty, smv, reqMin : Math.round(dQty * smv),
+                    qty : dQty, planQty : planQtyOf(dQty), smv, reqMin : Math.round(planQtyOf(dQty) * smv),
                     pcd : u.pcd ? new Date(u.pcd) : (dShip ? addCalDays(dShip, -30) : null),
                     poDelivery : dShip,
                     orderDelivery : dShip,
@@ -4663,7 +4668,7 @@ function collectOrders() {
                 color : orderColor(u.po),
                 garmentColor : u.color || '',
                 orderQty : u.orderQty ?? u.qty,
-                qty : u.qty, smv, reqMin : Math.round(u.qty * smv),
+                qty : u.baseQty ?? u.qty, planQty : u.qty, smv, reqMin : Math.round(u.qty * smv),
                 pcd : u.pcd ? new Date(u.pcd) : (poDelivery ? addCalDays(poDelivery, -30) : null),
                 poDelivery,
                 orderDelivery : poDelivery,
@@ -4689,7 +4694,7 @@ function collectOrders() {
             productType : u.productType,
             color : u.color,
             orderQty : u.orderQty ?? u.qty,
-            qty : u.qty, smv : u.smv, reqMin : Math.round((u.qty || 0) * (u.smv || 0)),
+            qty : u.baseQty ?? u.qty, planQty : u.qty, smv : u.smv, reqMin : Math.round((u.qty || 0) * (u.smv || 0)),
             pcd : u.pcd ? new Date(u.pcd) : null,
             poDelivery : u.ship ? new Date(u.ship) : null,
             orderDelivery : u.ship ? new Date(u.ship) : null,
@@ -8323,7 +8328,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <thead>
                             <tr>
                                 <th v-for="k in ORDER_COLS" :key="k"
-                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
+                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
                                     :title="k === 'done' ? '' : 'Click to sort (asc → desc → off)'"
                                     @click="k !== 'done' && toggleOrderSort(k)"
                                 >
@@ -8380,7 +8385,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     @dblclick.prevent="odRowDblClick(row)"
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
-                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'orderQty' || k === 'smv', 'st-user' : k === 'po' }]"
+                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv', 'st-user' : k === 'po' }]"
                                         :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null : (orderCellText(row, k) || null)"
                                     >
                                         <input v-if="k === 'done' && row.orderType === 'projected' && row.status !== 'completed'"

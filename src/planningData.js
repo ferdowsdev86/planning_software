@@ -208,6 +208,17 @@ export function workingMinutesBetween(a, b) {
     return mins;
 }
 
+// Plan quantity rule: every order (projection or confirm) is planned for
+// 3% more than the ERP quantity — plan_qty = qty + ROUND(qty * 0.03).
+// This is the ONE place the rule lives; every raw's `qty` is the plan qty
+// (used by the duration formula, SOP sizing, day chips, capacity), while
+// `orderQty` / `baseQty` keep the ERP figure for display.
+export const PLAN_EXTRA = 0.03;
+export function planQtyOf(q) {
+    const n = Number(q) || 0;
+    return n > 0 ? n + Math.round(n * PLAN_EXTRA) : 0;
+}
+
 // Duration units (WORK_MIN_PER_DAY-based, what endOfWork consumes) worth N
 // whole working days of the calendar day the bar starts on — a 5-day SOP run
 // is 5 calendar working days whether the day is 10 or 12 hours long
