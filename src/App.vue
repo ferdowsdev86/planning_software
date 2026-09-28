@@ -980,6 +980,55 @@ function compactBoardNoGaps() {
         : 'Board already compact — no gaps found', 'ok');
 }
 
+// Re-size every open bar to today's capacity figures (line manpower &
+// hours, profile / strip efficiency, plan qty, learning curve) — starts stay
+// where they are. A saved bar keeps its length until the user asks for this,
+// so the schedule dialog (always live) and the bar can drift apart after a
+// calendar / efficiency / quantity change. Extending bars push followers.
+function resyncBarLengths() {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s) { toast('Open a planning board first', 'warn'); return; }
+    if (boardReadOnly.value) { toast('🔒 Read only — bar lengths cannot be changed', 'warn'); return; }
+    const bars = s.eventStore.records
+        .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed'; })
+        .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
+        .filter(x => x.lid && x.lid !== 'hold' && isSewingRes(s.resourceStore.getById(x.lid)))
+        .sort((a, b) => a.ev.startDate - b.ev.startDate);
+    let shrunk = 0, grown = 0, pushed = 0, skipped = 0;
+    beginBoardInteraction(s, 'batch');
+    try {
+        const touched = new Set();
+        for (const { ev, lid } of bars) {
+            const raw = ev.data.raw;
+            if (raw.smvMissing && !(Number(raw.smvManual) > 0)) { skipped++; continue; }
+            const start  = new Date(ev.startDate);
+            const oldEnd = new Date(ev.endDate);
+            raw.start = start;
+            raw.sopMode = !!raw.ship;
+            deriveLcForPlacement(s, raw, lid, start);
+            applyLineFormulaDuration(s, raw, lid);
+            raw.sopMode = false;
+            const end = endOfWork(start, raw.dur || 1);
+            if (Math.abs(end - oldEnd) < 60000) continue;
+            ev.set({ endDate : end, duration : elapsedDays(start, end) });
+            raw.end = end;
+            raw.userPinned = true;
+            if (end > oldEnd) { grown++; pushed += pushFollowers(s, lid, ev) || 0; }
+            else shrunk++;
+            touched.add(lid);
+        }
+        if (touched.size) applyLearningCurves(s, { lineIds : [...touched] });
+    }
+    finally { endBoardInteraction(s); }
+    recalcCapacity(s);
+    s.refreshWithTransition?.();
+    if (shrunk || grown) { markBoardDirty(); touchBoardCache(s); }
+    toast(shrunk || grown
+        ? `Bar lengths re-synced: ${shrunk} shortened, ${grown} extended${pushed ? `, ${pushed} follower(s) shifted` : ''}${skipped ? ` · ${skipped} skipped (no SMV)` : ''} — Save to keep`
+        : `All bars already match the capacity figures${skipped ? ` · ${skipped} skipped (no SMV)` : ''}`, 'ok');
+}
+
 async function planLiveOrders() {
     const s = getInstance();
     if (!s) {
@@ -8151,6 +8200,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openSopPlan">📐 Plan by SOP timeline — backward from ex-factory</div>
                     <div class="fr-dd-item" @click="openPlanGenerator">🧮 Plan generator (S2)</div>
                     <div class="fr-dd-item" @click="compactBoardNoGaps">🧹 Compact lines — remove gaps</div>
+                    <div class="fr-dd-item" @click="resyncBarLengths" title="Re-size every open bar to today's capacity (manpower, hours, efficiency, plan qty, learning curve) — starts stay">📏 Re-sync bar lengths to capacity</div>
                     <div class="fr-dd-sep"></div>
                     <div
                         v-for="b in permittedBoards"
