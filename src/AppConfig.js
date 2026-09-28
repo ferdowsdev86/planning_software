@@ -55,7 +55,7 @@ function tooltipProductType(po, lineId, preferred) {
     return productTypeFor(po, preferred);
 }
 
-function tooltipEfficiency(lineId, productType, fallbackEff) {
+export function tooltipEfficiency(lineId, productType, fallbackEff) {
     const fb = Number(fallbackEff) || LINE_BY_ID[lineId]?.eff || 50;
     try {
         const map = JSON.parse(localStorage.getItem('mbm-line-prof') || '{}');
@@ -1434,15 +1434,6 @@ export const schedulerProConfig = {
             minWidth   : 200,
             htmlEncode : false,
             cellCls    : 'mb-linecell',
-            sum        : () => 0,
-            summaryRenderer : () => `<div class="fr-line-foot fr-gt-head">
-                <span class="fr-gt-title">Grand totals</span>
-                <div class="fr-gt-legend fr-gt-legend-col">
-                    <span class="fr-gt-plan">Day plan</span>
-                    <span class="fr-gt-act">Production</span>
-                    <span>+/-</span>
-                </div>
-            </div>`,
             headerRenderer  : () =>
                 '<div class="fr-clock" id="mb-hover-clock">Fri 2026-08-28 8:00:00 AM<br>0.0 x 0:00 x 0 = 0.000</div>',
             renderer : ({ record : r }) => {
@@ -2000,7 +1991,10 @@ export const schedulerProConfig = {
 
     // Grand totals footer: per day, all lines - Day Plan qty, actual
     // Production (day_production_update_plan) and the +/- difference
-    summaryFeature : {
+    // Grand totals footer removed (the strip legend below the board is the
+    // live order bar now) — grandTotalMaps() still serves the reports
+    summaryFeature : false,
+    summaryFeatureUnused : {
         renderer({ startDate }) {
             const { plan, made } = grandTotalMaps();
             const key = ymdKeyOf(startDate);

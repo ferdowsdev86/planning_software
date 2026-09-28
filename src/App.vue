@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -34,6 +34,46 @@ import { resolveDropPosition, snapToleranceDays, findLineOverlaps } from './snap
 
 const schedRef = ref(null);
 const order = ref(null);
+// Bar under the mouse (FastReact status legend follows the hovered bar,
+// then the selected one, then shows the column labels)
+const hoverBar = ref(null);
+const legendBar = computed(() => {
+    const src = hoverBar.value || (order.value ? { raw : order.value, start : order.value.start, end : order.value.end, id : order.value.id } : null);
+    if (!src?.raw) return null;
+    const r = src.raw;
+    const start = src.start ? new Date(src.start) : (r.start ? new Date(r.start) : null);
+    const end   = src.end   ? new Date(src.end)   : (r.end   ? new Date(r.end)   : null);
+    const ship  = r.ship ? new Date(r.ship) : null;
+    const dd = d => (d && !Number.isNaN(+d) ? fmtDateDdMonRr(d) : '—');
+    const floatDays = ship && end ? Math.round((ship.setHours(0, 0, 0, 0) - new Date(end).setHours(0, 0, 0, 0)) / 864e5) : null;
+    let made = Number(r.made) || 0;
+    if (!made && src.id) { try { made = madeOf(loadProdStore(), String(src.id)); } catch { /* none */ } }
+    const lid  = src.lid || null;
+    const base = Number(r.planEff) > 0 ? Number(r.planEff) : (lid ? tooltipEfficiency(lid, r.productType) : null);
+    const strip = Number(r.stripEff) > 0 ? Number(r.stripEff) : 100;
+    const result = base != null ? Math.round(base * strip / 100) : null;
+    const calDays = start && end ? Math.max(1, Math.round((end - start) / 864e5)) : null;
+    return {
+        order   : r.mbmOrder || mbmOrderNo(r.po, r.mbmOrder) || '—',
+        po      : r.po || (r.orderType === 'projection' || String(r.id || '').startsWith('proj:') ? 'Projection' : '—'),
+        made, started : dd(start),
+        qty     : Number(r.qty) || 0,
+        orderQty: Number(r.baseQty ?? r.orderQty ?? r.qty) || 0,
+        product : r.productType || '—',
+        buyer   : r.buyer || '—',
+        deliv   : dd(ship),
+        floatDays,
+        endDate : dd(end),
+        style   : r.style || '—',
+        color   : r.color || '',
+        smv     : Number(r.smv) > 0 ? Math.round(Number(r.smv) * 100) / 100 : null,
+        reqMin  : Math.round((Number(r.qty) || 0) * (Number(r.smv) || 0)),
+        base, strip, result,
+        workDays: Number(r.dur) || null,
+        calDays,
+        status  : r.status || '—'
+    };
+});
 const unplanned = ref([...UNPLANNED_INIT]);
 const replacedOrders = ref([]);
 const toasts = ref([]);
@@ -7276,10 +7316,14 @@ onMounted(() => {
     // Hover a bar (tooltip-style) → its day-wise quantities appear on the
     // Holding Row band; leaving the bar clears them
     uiHooks.onBarHover = eventRecord => {
+        const raw = eventRecord?.data?.raw;
+        if (raw && !raw.stage) {
+            hoverBar.value = { raw, start : eventRecord.startDate, end : eventRecord.endDate, id : eventRecord.id, lid : lineIdOf(getInstance(), eventRecord) };
+        }
         if (carried.value) return;
         showDayPlanChips(getInstance(), eventRecord);
     };
-    uiHooks.onBarHoverOut = () => clearDayPlanChips();
+    uiHooks.onBarHoverOut = () => { hoverBar.value = null; clearDayPlanChips(); };
     uiHooks.onToast = toast;
 
     // Right-click -> Planned schedule / Properties on a strip
@@ -8242,18 +8286,55 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             </div>
         </div>
 
-        <div class="fr-legendbar">
-            <div class="fr-leg-col"><i class="fr-leg-dot fr-leg-red"></i><b>Product/Order</b><span>Qty made, Started</span></div>
-            <div class="fr-leg-col"><b>Order Quantity</b></div>
-            <div class="fr-leg-col"><b>Product</b><span>Customer</span></div>
-            <div class="fr-leg-col"><b>Earliest load</b><span>Delivery date</span></div>
-            <div class="fr-leg-col"><b>Float</b><span>Float</span></div>
-            <div class="fr-leg-col"><b>Load date</b><span>Production end date</span></div>
-            <div class="fr-leg-col"><b>Order description</b><span>Transport details</span></div>
-            <div class="fr-leg-col fr-leg-last">
-                <b>Change mins, Work &amp; Cal days</b>
-                <span>Eff% Plan, Strip, Order, Result</span>
-            </div>
+        <!-- FastReact status legend: live values of the hovered (or selected) bar, labels otherwise -->
+        <div class="fr-legendbar" :class="{ 'fr-leg-live' : legendBar }">
+            <template v-if="legendBar">
+                <div class="fr-leg-col" title="Product / Order — qty made, started">
+                    <b><i class="fr-leg-dot fr-leg-red"></i>{{ legendBar.order }} <span class="fr-leg-dim">/ {{ legendBar.po }}</span></b>
+                    <span>Made {{ fmtQty(legendBar.made) }} · Started {{ legendBar.started }}</span>
+                </div>
+                <div class="fr-leg-col" title="Order quantity (plan qty = order qty + 3%)">
+                    <b>{{ fmtQty(legendBar.qty) }} pcs</b>
+                    <span>Order {{ fmtQty(legendBar.orderQty) }} · SMV {{ legendBar.smv ?? '—' }}</span>
+                </div>
+                <div class="fr-leg-col" title="Product — customer">
+                    <b>{{ legendBar.product }}</b>
+                    <span>{{ legendBar.buyer }}</span>
+                </div>
+                <div class="fr-leg-col" title="Earliest load — delivery date">
+                    <b>{{ legendBar.deliv }}</b>
+                    <span>Delivery date</span>
+                </div>
+                <div class="fr-leg-col" title="Float — days between production end and delivery">
+                    <b :class="legendBar.floatDays != null && legendBar.floatDays < 0 ? 'fr-leg-neg' : 'fr-leg-pos'">{{ legendBar.floatDays == null ? '—' : (legendBar.floatDays >= 0 ? '+' : '') + legendBar.floatDays + ' d' }}</b>
+                    <span>Float</span>
+                </div>
+                <div class="fr-leg-col" title="Load date — production end date">
+                    <b>{{ legendBar.endDate }}</b>
+                    <span>Production end · {{ legendBar.status }}</span>
+                </div>
+                <div class="fr-leg-col" title="Order description">
+                    <b>{{ legendBar.style }}</b>
+                    <span>{{ legendBar.color || '—' }} · {{ fmtQty(legendBar.reqMin) }} min</span>
+                </div>
+                <div class="fr-leg-col fr-leg-last" title="Efficiency: plan × strip = result · work / calendar days">
+                    <b>Eff {{ legendBar.base ?? '—' }}% × strip {{ legendBar.strip }}% = {{ legendBar.result ?? '—' }}%</b>
+                    <span>{{ legendBar.workDays ?? '—' }} work d · {{ legendBar.calDays ?? '—' }} cal d</span>
+                </div>
+            </template>
+            <template v-else>
+                <div class="fr-leg-col"><i class="fr-leg-dot fr-leg-red"></i><b>Product/Order</b><span>Qty made, Started</span></div>
+                <div class="fr-leg-col"><b>Order Quantity</b><span>Plan qty · Order qty, SMV</span></div>
+                <div class="fr-leg-col"><b>Product</b><span>Customer</span></div>
+                <div class="fr-leg-col"><b>Earliest load</b><span>Delivery date</span></div>
+                <div class="fr-leg-col"><b>Float</b><span>Days to delivery</span></div>
+                <div class="fr-leg-col"><b>Load date</b><span>Production end date</span></div>
+                <div class="fr-leg-col"><b>Order description</b><span>Style, colour, minutes</span></div>
+                <div class="fr-leg-col fr-leg-last">
+                    <b>Change mins, Work &amp; Cal days</b>
+                    <span>Eff% Plan, Strip, Result</span>
+                </div>
+            </template>
         </div>
 
         </div><!-- /fr-boardarea -->
@@ -12428,7 +12509,13 @@ body {
 }
 
 .fr-leg-col span { color : #333; }
+.fr-leg-col b { overflow : hidden; text-overflow : ellipsis; }
 .fr-leg-last { border-right : none; }
+.fr-leg-live { background : #e9e6de; }
+.fr-leg-live .fr-leg-col b { color : #0d2b72; font-size : 11px; }
+.fr-leg-dim { color : #555; font-weight : normal; }
+.fr-leg-pos { color : #0a7a2f !important; }
+.fr-leg-neg { color : #c40000 !important; }
 
 .fr-leg-dot {
     display       : inline-block;
