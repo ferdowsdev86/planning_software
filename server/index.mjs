@@ -2587,8 +2587,9 @@ app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
 
 // --------------------------------------------------------------------------
 // Actual production from the ERP → day_production_update_plan
-//   sources: cuttingedgedb.daily_productions (sewing Out, unit AQL)
-//            mbm_os.os_daily_productions (OS unit 20 = AQL, sewing_qty)
+//   source: cuttingedgedb.daily_productions ONLY (sewing Out, unit AQL);
+//           mbm_os.os_daily_productions is never read (OS production is not
+//           planned on this board)
 //   only orders / POs that exist in the plan order list (planning_orders)
 //   one row per PO per day; rows are matched to the board bar (event_ref)
 //   so "Made so far" in the Daily production update follows automatically.
@@ -2598,23 +2599,23 @@ const PROD_SYNC_TIMES = ['18:00', '23:30'];
 const PROD_SYNC_FROM  = '2026-09-26';        // daily rows start here; before it: one summary row per PO
 const PROD_SUMMARY_TO = '2026-09-25';
 const PROD_BOARD_FROM = '2026-09-16';        // only orders / POs planned on the board from this date are tracked
-const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL
+const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL (order-code map only)
 
 const erpLineToBoard = n => { const m = /^A0?(\d)$/i.exec(String(n || '').trim()); return m ? `Line 0${m[1]}` : null; };
 const erpFloorOf = line => { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; };
 
 // Production per PO per date per sewing line (or per PO only when summary=true).
-//   ERP daily_productions (the ERP "Daily Production" page, status Out) is
-//   AUTHORITATIVE. The OS system (mbm_os.os_daily_productions) is only a
-//   fallback for a PO / date that has NO ERP entry at all — its sewing_qty is a
-//   lump figure (e.g. 1000) that used to overwrite the real line output.
+//   ONLY cuttingedgedb.daily_productions (the ERP "Daily Production" page,
+//   status Out, unit AQL). The OS system (mbm_os.os_daily_productions) is NOT
+//   read: OS production is not planned on this board and its sewing_qty is a
+//   lump figure that overwrote the real line output.
 async function erpProductionRows(from, to, summary = false) {
     const dateSel = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(d.prod_date)';
     const grp     = summary ? 'd.po_id, hl.hr_line_name' : 'd.po_id, DATE(d.prod_date), hl.hr_line_name';
     const [erp] = await pool.query(`
         SELECT d.po_id, MAX(COALESCE(NULLIF(d.e_po_no, ''), po.po_no)) AS po_no, MAX(d.e_order_code) AS order_code, MAX(d.e_stl_no) AS style, MAX(d.e_clr_name) AS color,
                MAX(po.po_qty) AS po_qty, ${dateSel} AS prod_date, SUM(d.prod_qty) AS qty,
-               hl.hr_line_name AS erp_line, 'erp' AS src
+               hl.hr_line_name AS erp_line
         FROM \`${ERP_DB}\`.daily_productions d
         LEFT JOIN \`${ERP_DB}\`.hr_unit u ON u.hr_unit_id = d.prod_unit_id
         LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = d.po_id
@@ -2622,20 +2623,7 @@ async function erpProductionRows(from, to, summary = false) {
         WHERE d.mr_operation_type_id = 2 AND d.status = 'Out' AND u.hr_unit_short_name = 'AQL'
           AND DATE(d.prod_date) BETWEEN ? AND ?
         GROUP BY ${grp}`, [from, to]);
-    const dateSelOs = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(od.prod_date)';
-    const grpOs     = summary ? 'od.mr_order_id, od.po_id' : 'od.mr_order_id, od.po_id, DATE(od.prod_date)';
-    const [os] = await pool.query(`
-        SELECT od.po_id, MAX(od.po_no) AS po_no, MAX(oo.mr_order_code) AS order_code, MAX(oo.os_order_code) AS os_code,
-               MAX(oo.style) AS style, NULL AS color,
-               MAX(oo.order_qty) AS po_qty, ${dateSelOs} AS prod_date, SUM(od.sewing_qty) AS qty, NULL AS erp_line, 'os' AS src
-        FROM \`${OS_DB}\`.os_daily_productions od
-        JOIN \`${OS_DB}\`.os_orders oo ON oo.mr_order_id = od.mr_order_id AND oo.os_unit_id = od.os_unit_id
-        WHERE od.os_unit_id = ? AND DATE(od.prod_date) BETWEEN ? AND ?
-        GROUP BY ${grpOs}`, [OS_PROD_UNIT, from, to]);
-    const dkey = d => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('en-CA'));
-    const erpKeys = new Set(erp.map(r => `${r.po_id}|${dkey(r.prod_date)}`));
-    const osOnly  = os.filter(r => !erpKeys.has(`${r.po_id}|${dkey(r.prod_date)}`));
-    return [...erp, ...osOnly].filter(r => Number(r.qty) > 0);
+    return erp.filter(r => Number(r.qty) > 0);
 }
 
 let prodSyncRunning = false;
@@ -2678,20 +2666,17 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 const poNo = String(r.po_no || '').trim();
                 const code = String(r.order_code || '').trim();
                 const planRow = byPo.get(poNo);
-                const bar   = barByPo.get(poNo) || barByCode.get(code) || barByCode.get(osCodeByMr.get(code))
-                    || (r.os_code ? barByCode.get(String(r.os_code).trim()) : null) || null;
+                const bar   = barByPo.get(poNo) || barByCode.get(code) || barByCode.get(osCodeByMr.get(code)) || null;
                 if (!bar) { skipped++; continue; }   // not planned on the board (from PROD_BOARD_FROM)
-                // Row key: confirm bar (one PO) → plain "db-<id>"; projection bar
-                // (several POs) → "db-<id>:po<po_id>"; output booked on ANOTHER
-                // line than the bar's → ":po<po_id>:<ERP line>" so the line-wise
-                // report shows it under the real line. The app sums everything
-                // after ":po" onto the bar.
-                const isProj  = String(bar.event_code || '').startsWith('ev-proj:');
+                // Row key: ERP rows are always "db-<id>:po<po_id>" (one per PO);
+                // output booked on ANOTHER line than the bar's →
+                // ":po<po_id>:<ERP line>" so the line-wise report shows it under
+                // the real line. The app sums everything after ":po" onto the
+                // bar. A plain "db-<id>" row is a manual entry from the dialog.
                 const erpLine = erpLineToBoard(r.erp_line);
                 const line    = erpLine || bar.line || null;
                 const otherLn = erpLine && bar.line && erpLine !== bar.line;
-                const ref     = otherLn ? `db-${bar.id}:po${r.po_id}:${String(r.erp_line).trim()}`
-                    : isProj ? `db-${bar.id}:po${r.po_id}` : `db-${bar.id}`;
+                const ref     = otherLn ? `db-${bar.id}:po${r.po_id}:${String(r.erp_line).trim()}` : `db-${bar.id}:po${r.po_id}`;
                 const floor = erpFloorOf(line) || (Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : null);
                 const date  = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
                 await conn.query(`
@@ -2719,6 +2704,17 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                     `DELETE FROM day_production_update_plan
                      WHERE save_date = ? AND (event_ref = ? OR event_ref LIKE ?) AND event_ref NOT IN (${keep.map(() => '?').join(',')})`,
                     [date, base, `${base}:po%`, ...keep]);
+            }
+            // Mirror: an ERP-synced row (":po" key) in the synced range that the
+            // ERP no longer reports (deleted entry, OS lump figure of the past,
+            // order dropped from the board) must not survive
+            {
+                const all  = [...writtenRefs.values()].flatMap(set => [...set]);
+                const [gone] = await conn.query(
+                    `DELETE FROM day_production_update_plan
+                     WHERE save_date BETWEEN ? AND ? AND event_ref LIKE '%:po%'${all.length ? ` AND event_ref NOT IN (${all.map(() => '?').join(',')})` : ''}`,
+                    [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...all]);
+                if (gone.affectedRows) console.log(`[prod-sync] removed ${gone.affectedRows} row(s) no longer reported by the ERP`);
             }
             // The summary row (save_date = PROD_SUMMARY_TO) already contains
             // everything up to that date — older daily rows would count twice
