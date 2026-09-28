@@ -2603,14 +2603,18 @@ const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL
 const erpLineToBoard = n => { const m = /^A0?(\d)$/i.exec(String(n || '').trim()); return m ? `Line 0${m[1]}` : null; };
 const erpFloorOf = line => { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; };
 
-// Production per PO per date (or per PO only when summary=true), ERP + OS
+// Production per PO per date per sewing line (or per PO only when summary=true).
+//   ERP daily_productions (the ERP "Daily Production" page, status Out) is
+//   AUTHORITATIVE. The OS system (mbm_os.os_daily_productions) is only a
+//   fallback for a PO / date that has NO ERP entry at all — its sewing_qty is a
+//   lump figure (e.g. 1000) that used to overwrite the real line output.
 async function erpProductionRows(from, to, summary = false) {
     const dateSel = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(d.prod_date)';
-    const grp     = summary ? 'd.po_id' : 'd.po_id, DATE(d.prod_date)';
+    const grp     = summary ? 'd.po_id, hl.hr_line_name' : 'd.po_id, DATE(d.prod_date), hl.hr_line_name';
     const [erp] = await pool.query(`
         SELECT d.po_id, MAX(COALESCE(NULLIF(d.e_po_no, ''), po.po_no)) AS po_no, MAX(d.e_order_code) AS order_code, MAX(d.e_stl_no) AS style, MAX(d.e_clr_name) AS color,
                MAX(po.po_qty) AS po_qty, ${dateSel} AS prod_date, SUM(d.prod_qty) AS qty,
-               SUBSTRING_INDEX(GROUP_CONCAT(hl.hr_line_name ORDER BY d.prod_qty DESC), ',', 1) AS erp_line
+               hl.hr_line_name AS erp_line, 'erp' AS src
         FROM \`${ERP_DB}\`.daily_productions d
         LEFT JOIN \`${ERP_DB}\`.hr_unit u ON u.hr_unit_id = d.prod_unit_id
         LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = d.po_id
@@ -2621,13 +2625,17 @@ async function erpProductionRows(from, to, summary = false) {
     const dateSelOs = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(od.prod_date)';
     const grpOs     = summary ? 'od.mr_order_id, od.po_id' : 'od.mr_order_id, od.po_id, DATE(od.prod_date)';
     const [os] = await pool.query(`
-        SELECT od.po_id, MAX(od.po_no) AS po_no, MAX(oo.os_order_code) AS order_code, MAX(oo.style) AS style, NULL AS color,
-               MAX(oo.order_qty) AS po_qty, ${dateSelOs} AS prod_date, SUM(od.sewing_qty) AS qty, NULL AS erp_line
+        SELECT od.po_id, MAX(od.po_no) AS po_no, MAX(oo.mr_order_code) AS order_code, MAX(oo.os_order_code) AS os_code,
+               MAX(oo.style) AS style, NULL AS color,
+               MAX(oo.order_qty) AS po_qty, ${dateSelOs} AS prod_date, SUM(od.sewing_qty) AS qty, NULL AS erp_line, 'os' AS src
         FROM \`${OS_DB}\`.os_daily_productions od
         JOIN \`${OS_DB}\`.os_orders oo ON oo.mr_order_id = od.mr_order_id AND oo.os_unit_id = od.os_unit_id
         WHERE od.os_unit_id = ? AND DATE(od.prod_date) BETWEEN ? AND ?
         GROUP BY ${grpOs}`, [OS_PROD_UNIT, from, to]);
-    return [...erp, ...os].filter(r => Number(r.qty) > 0);
+    const dkey = d => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('en-CA'));
+    const erpKeys = new Set(erp.map(r => `${r.po_id}|${dkey(r.prod_date)}`));
+    const osOnly  = os.filter(r => !erpKeys.has(`${r.po_id}|${dkey(r.prod_date)}`));
+    return [...erp, ...osOnly].filter(r => Number(r.qty) > 0);
 }
 
 let prodSyncRunning = false;
@@ -2654,21 +2662,37 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
             const code = b.order_code || (String(b.event_code || '').startsWith('ev-proj:') ? String(b.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
             if (code && !barByCode.has(code)) barByCode.set(code, b);
         }
+        // The board plans OS orders under their OS code (GSL-250943) while the
+        // ERP books production under the MR code (26SPJCP054) — map one to the other
+        const osCodeByMr = new Map();
+        try {
+            const [osm] = await pool.query(`SELECT mr_order_code, os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_unit_id = ? AND mr_order_code IS NOT NULL`, [OS_PROD_UNIT]);
+            for (const r of osm) if (!osCodeByMr.has(r.mr_order_code)) osCodeByMr.set(r.mr_order_code, r.os_order_code);
+        }
+        catch (e) { console.warn('[prod-sync] OS code map unavailable:', e.message); }
         let written = 0, skipped = 0;
+        const writtenRefs = new Map();                    // `${base}|${date}` → Set(event_ref) written this run
         const conn = await pool.getConnection();
         try {
             for (const r of rows) {
                 const poNo = String(r.po_no || '').trim();
                 const code = String(r.order_code || '').trim();
                 const planRow = byPo.get(poNo);
-                const bar   = barByPo.get(poNo) || barByCode.get(code) || null;
+                const bar   = barByPo.get(poNo) || barByCode.get(code) || barByCode.get(osCodeByMr.get(code))
+                    || (r.os_code ? barByCode.get(String(r.os_code).trim()) : null) || null;
                 if (!bar) { skipped++; continue; }   // not planned on the board (from PROD_BOARD_FROM)
-                // confirm bar = one PO → plain ref; projection bar covers several
-                // POs → one row per PO ("db-<id>:po<po_id>"), summed by the app
-                const viaPo = barByPo.get(poNo) === bar;
-                const ref   = viaPo ? `db-${bar.id}` : `db-${bar.id}:po${r.po_id}`;
-                const line  = bar.line || erpLineToBoard(r.erp_line) || null;
-                const floor = Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : erpFloorOf(line);
+                // Row key: confirm bar (one PO) → plain "db-<id>"; projection bar
+                // (several POs) → "db-<id>:po<po_id>"; output booked on ANOTHER
+                // line than the bar's → ":po<po_id>:<ERP line>" so the line-wise
+                // report shows it under the real line. The app sums everything
+                // after ":po" onto the bar.
+                const isProj  = String(bar.event_code || '').startsWith('ev-proj:');
+                const erpLine = erpLineToBoard(r.erp_line);
+                const line    = erpLine || bar.line || null;
+                const otherLn = erpLine && bar.line && erpLine !== bar.line;
+                const ref     = otherLn ? `db-${bar.id}:po${r.po_id}:${String(r.erp_line).trim()}`
+                    : isProj ? `db-${bar.id}:po${r.po_id}` : `db-${bar.id}`;
+                const floor = erpFloorOf(line) || (Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : null);
                 const date  = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
                 await conn.query(`
                     INSERT INTO day_production_update_plan
@@ -2681,11 +2705,26 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                     [bar?.id ?? null, ref, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
                      r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
                 written++;
-                // ERP is authoritative for that bar/date — the OTHER key form
-                // for the same bar (plain "db-<id>" vs per-PO "db-<id>:po…")
-                // must not survive, or the day is counted twice
-                if (!viaPo) await conn.query('DELETE FROM day_production_update_plan WHERE event_ref = ? AND save_date = ?', [`db-${bar.id}`, date]);
-                else await conn.query('DELETE FROM day_production_update_plan WHERE event_ref LIKE ? AND save_date = ?', [`db-${bar.id}:po%`, date]);
+                const wk = `db-${bar.id}|${date}`;
+                if (!writtenRefs.has(wk)) writtenRefs.set(wk, new Set());
+                writtenRefs.get(wk).add(ref);
+            }
+            // ERP is authoritative for a bar/date it has output for — every
+            // OTHER row of that bar on that date (old key form, OS lump figure,
+            // a line the PO no longer ran on) must go, or the day is counted twice
+            for (const [wk, refs] of writtenRefs) {
+                const [base, date] = wk.split('|');
+                const keep = [...refs];
+                await conn.query(
+                    `DELETE FROM day_production_update_plan
+                     WHERE save_date = ? AND (event_ref = ? OR event_ref LIKE ?) AND event_ref NOT IN (${keep.map(() => '?').join(',')})`,
+                    [date, base, `${base}:po%`, ...keep]);
+            }
+            // The summary row (save_date = PROD_SUMMARY_TO) already contains
+            // everything up to that date — older daily rows would count twice
+            if (summary) {
+                const [old] = await conn.query('DELETE FROM day_production_update_plan WHERE save_date < ?', [PROD_SUMMARY_TO]);
+                if (old.affectedRows) console.log(`[prod-sync] removed ${old.affectedRows} daily row(s) dated before the ${PROD_SUMMARY_TO} summary`);
             }
             // Keep the table to the tracked board plan only
             const liveRefs = bars.map(b => `db-${b.id}`);

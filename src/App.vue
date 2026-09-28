@@ -5741,6 +5741,20 @@ async function buildPuRows() {
         }
         localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
     }
+    // Output the ERP booked on ANOTHER line than the bar's ("db-<id>:po<po_id>:A04")
+    // is shown as its own read-only row under that line — the bar's row keeps
+    // only what ran on its own line, so the dialog matches the ERP line-wise
+    const otherLine = {};                                   // base ref → qty on other lines (this date)
+    const otherRows = [];
+    for (const r of dbRows) {
+        if (String(r.save_date).slice(0, 10) !== date) continue;
+        const m = /^(.*?):po\d+:([A-Za-z]\d+)$/.exec(String(r.event_ref));
+        if (!m) continue;
+        const key = m[1];
+        otherLine[key] = (otherLine[key] || 0) + (Number(r.prod_qty) || 0);
+        otherRows.push({ base : key, r });
+    }
+    const dayQty = evId => Math.max(0, (store[evId]?.[date] || 0) - (otherLine[evId] || 0));
     const rows = [];
     const listed = new Set();
     if (s) {
@@ -5773,7 +5787,7 @@ async function buildPuRows() {
                 planQty  : dpStripDaily(ev, line)[dpDayKey(day)] || 0,
                 made,
                 rest     : Math.max(0, (Number(raw.qty) || 0) - made),
-                prodQty  : store[String(ev.id)]?.[date] ?? ''
+                prodQty  : store[String(ev.id)]?.[date] == null ? '' : dayQty(String(ev.id))
             });
         }
     }
@@ -5782,6 +5796,7 @@ async function buildPuRows() {
     const extra = new Map();
     for (const r of dbRows) {
         if (String(r.save_date).slice(0, 10) !== date) continue;
+        if (/:po\d+:[A-Za-z]\d+$/.test(String(r.event_ref))) continue;   // other-line rows listed below
         const key = String(r.event_ref).split(':po')[0];
         if (listed.has(key)) continue;
         if (!extra.has(key)) {
@@ -5796,8 +5811,25 @@ async function buildPuRows() {
     }
     for (const c of extra.values()) {
         const made = madeOf(store, c.evId);
-        rows.push({ ...c, made, rest : Math.max(0, c.orderQty - made), prodQty : store[c.evId]?.[date] ?? '' });
+        rows.push({ ...c, made, rest : Math.max(0, c.orderQty - made), prodQty : store[c.evId]?.[date] == null ? '' : dayQty(c.evId) });
     }
+    // Same order / PO produced on another line that day (ERP line-wise) — read only
+    const byLine = new Map();
+    for (const { base, r } of otherRows) {
+        const k = `${base}@${r.line}`;
+        if (!byLine.has(k)) {
+            const made = madeOf(store, base);
+            byLine.set(k, {
+                evId : k, dbId : r.event_id ?? null, fromErp : true,
+                unit : r.unit || 'AQL', floor : r.floor || '—', line : r.line || '—',
+                opType : r.operation_type || 'Sewing', style : r.style || '—',
+                order : r.order_no || '—', po : r.po_number || '—', color : r.color || '—',
+                orderQty : Number(r.order_qty) || 0, planQty : 0, made, rest : Math.max(0, (Number(r.order_qty) || 0) - made), prodQty : 0
+            });
+        }
+        byLine.get(k).prodQty += Number(r.prod_qty) || 0;
+    }
+    rows.push(...byLine.values());
     rows.sort((a, b) => String(a.line).localeCompare(String(b.line)) || String(a.po).localeCompare(String(b.po)));
     puRows.value = rows;
 }
@@ -5813,7 +5845,7 @@ function saveProdUpdate() {
     const s = getInstance();
     if (!s) return;
     const store = loadProdStore();
-    const entries = puRows.value.filter(r => r.prodQty !== '' && r.prodQty != null);
+    const entries = puRows.value.filter(r => !r.fromErp && r.prodQty !== '' && r.prodQty != null);
     if (!entries.length) {
         toast('Prod Qty ঘরে actual production দিন — তারপর Save', 'warn');
         return;
@@ -8648,7 +8680,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in puRows" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb }" :title="r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
+                            <tr v-for="r in puRows" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
                                 <td>{{ r.unit }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ r.line }}</td>
@@ -8662,7 +8694,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td class="od-num">{{ fmtQty(r.made) }}</td>
                                 <td class="od-num pu-rest">{{ fmtQty(r.rest) }}</td>
                                 <td class="od-num">
-                                    <input v-model="r.prodQty" class="cal-in pu-in" type="number" min="0" placeholder="0">
+                                    <input v-model="r.prodQty" class="cal-in pu-in" type="number" min="0" placeholder="0" :disabled="r.fromErp">
                                 </td>
                             </tr>
                         </tbody>
@@ -10554,6 +10586,7 @@ body {
 }
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
+.pu-fromerp td { background : #fff7e6; color : #7a5a00; }
 .pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
 .pu-rtable td, .pu-rtable th { white-space : nowrap; }
 .pu-rtable tr.pu-grp td { background : #dde8f5; border-top : 2px solid #9db3d3; }
