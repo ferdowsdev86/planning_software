@@ -2381,6 +2381,20 @@ const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // line default), × strip efficiency; a plan efficiency set on the bar wins.
 // Used by the board day chips and the Planned schedule so both show the
 // same day output as the duration formula.
+// Share of a calendar day's paid work window that lies INSIDE the bar
+// [start, end): 1 for full days, a fraction on the bar's first / last day
+// (a bar starting 17:05 gets ~3 of 12 hours that day, not a full day) — so
+// the schedule dialog, the day chips and the bar's own start/end agree
+function dayWindowFactor(d, start, end) {
+    const ws = startOfWorkDay(d), we = workEndOfDay(d);
+    const span = we - ws;
+    if (span <= 0) return 0;
+    const a = Math.max(ws.getTime(), new Date(start).getTime());
+    const b = Math.min(we.getTime(), new Date(end).getTime());
+    return Math.max(0, Math.min(1, (b - a) / span));
+}
+const dayWorkMinutes = d => Math.max(1, Math.round(hmToHours(dayCfgOf(d).hours || '10:00') * 60));
+
 function barDayCapacity(raw, lid) {
     // EXACTLY the numbers the duration formula / SOP run use for this bar on
     // this line (board resource manpower & hours, product-profile efficiency,
@@ -2418,17 +2432,20 @@ const plDailyRows = computed(() => {
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        // Changed-hours dates scale the day's capacity by the new hours
+        // Changed-hours dates scale the day's capacity by the new hours;
+        // the bar's first / last day only get the part of the window it covers
         const hrsF = dayCapacityFactor(d, line?.hours);
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        const fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        const winF = off ? 0 : dayWindowFactor(d, rec.startDate, end);
+        const dayTarget = Math.max(1, Math.floor(fullTarget * winF));
         let q = 0;
-        if (!off && remaining > 0) {
+        if (!off && winF > 0 && remaining > 0) {
             q = Math.min(dayTarget, remaining);
             remaining -= q;
         }
         let hours = off || !q ? '0:00' : (cfg.hours || '10:00');
-        if (!off && q > 0 && q < dayTarget) {
-            const clock = Math.max(1, Math.round((q / dayTarget) * WORK_MIN_PER_DAY));
+        if (!off && q > 0 && q < fullTarget) {
+            const clock = Math.max(1, Math.round((q / fullTarget) * dayWorkMinutes(d)));
             hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
         }
         rows.push({
@@ -4972,9 +4989,10 @@ function dpStripDaily(ev, line, planEff = 0) {
         const ramping = lc && !off && rampIdx < period;
         const lcF  = ramping ? lc.pct[rampIdx] / 100 : 1;
         const hrsF = dayCapacityFactor(d, line?.hours);
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * lcF * hrsF));
+        const winF = off ? 0 : dayWindowFactor(d, ev.startDate, end);
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * lcF * hrsF * winF));
         let q = 0;
-        if (!off && remaining > 0) {
+        if (!off && winF > 0 && remaining > 0) {
             q = Math.min(dayTarget, remaining);
             remaining -= q;
         }
@@ -6226,11 +6244,13 @@ function barDayQty(s, rec, day) {
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        // Changed-hours dates scale the day's capacity by the new hours
+        // Changed-hours dates scale the day's capacity by the new hours;
+        // first / last day of the bar: only the covered part of the window
         const hrsF = dayCapacityFactor(d, line?.hours);
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        const winF = off ? 0 : dayWindowFactor(d, rec.startDate, end);
+        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF * winF));
         let q = 0;
-        if (!off && remaining > 0) {
+        if (!off && winF > 0 && remaining > 0) {
             q = Math.min(dayTarget, remaining);
             remaining -= q;
         }
