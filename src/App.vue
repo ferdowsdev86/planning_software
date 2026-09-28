@@ -11597,6 +11597,13 @@ body {
     gap         : 5px;
     height      : 100%;
     min-height  : 42px;
+    /* fill the locked cell: the manpower / machine numbers sit against the
+       scrollbar instead of leaving a blank strip on the right */
+    width       : 100%;
+    flex        : 1 1 auto;
+    min-width   : 0;
+    padding-right : 6px;
+    box-sizing  : border-box;
     font-family : Tahoma, Arial, sans-serif;
 }
 
