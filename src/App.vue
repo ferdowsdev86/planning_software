@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -24,7 +24,7 @@ import {
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
-    resolveApiBase, apiMode, setApiMode
+    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -985,13 +985,12 @@ function compactBoardNoGaps() {
 // where they are. A saved bar keeps its length until the user asks for this,
 // so the schedule dialog (always live) and the bar can drift apart after a
 // calendar / efficiency / quantity change. Extending bars push followers.
-function resyncBarLengths() {
-    openMenu.value = null;
-    const s = getInstance();
-    if (!s) { toast('Open a planning board first', 'warn'); return; }
-    if (boardReadOnly.value) { toast('🔒 Read only — bar lengths cannot be changed', 'warn'); return; }
+// Re-size open sewing bars (start kept) to the production model: the end
+// becomes the moment the plan qty is made with today's line capacity,
+// efficiency, learning ramp and calendar. Extensions push followers.
+function resizeBars(s, keep = () => true) {
     const bars = s.eventStore.records
-        .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed'; })
+        .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
         .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
         .filter(x => x.lid && x.lid !== 'hold' && isSewingRes(s.resourceStore.getById(x.lid)))
         .sort((a, b) => a.ev.startDate - b.ev.startDate);
@@ -1024,9 +1023,19 @@ function resyncBarLengths() {
     recalcCapacity(s);
     s.refreshWithTransition?.();
     if (shrunk || grown) { markBoardDirty(); touchBoardCache(s); }
+    return { shrunk, grown, pushed, skipped };
+}
+
+// Planning menu: every open bar at once (starts stay; Save keeps the result)
+function resyncBarLengths() {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s) { toast('Open a planning board first', 'warn'); return; }
+    if (boardReadOnly.value) { toast('🔒 Read only — bar lengths cannot be changed', 'warn'); return; }
+    const { shrunk, grown, pushed, skipped } = resizeBars(s);
     toast(shrunk || grown
         ? `Bar lengths re-synced: ${shrunk} shortened, ${grown} extended${pushed ? `, ${pushed} follower(s) shifted` : ''}${skipped ? ` · ${skipped} skipped (no SMV)` : ''} — Save to keep`
-        : `All bars already match the capacity figures${skipped ? ` · ${skipped} skipped (no SMV)` : ''}`, 'ok');
+        : `All bars already match the production schedule${skipped ? ` · ${skipped} skipped (no SMV)` : ''}`, 'ok');
 }
 
 async function planLiveOrders() {
@@ -1254,6 +1263,9 @@ async function hydrateBoardFromApi() {
             // out — tooltips, day chips, curves and the duration formula all
             // read them; the localStorage copy stays as the offline fallback
             try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
+            // Changed working hours per date are shared through the DB — every
+            // planner / machine sizes bars on the same calendar
+            await syncCalendarOverrides();
             applyApiBoardData(s, boardUnitCache[unitId].apiData);
             apiReady.value = true;
             setBoardLoad(false);
@@ -1475,14 +1487,25 @@ function chApply() {
         d.setDate(d.getDate() + 1);
     }
     localStorage.setItem('mbm-cal-overrides', JSON.stringify(calendarState.overrides));
+    saveCalendarOverridesDb({ ...calendarState.overrides })
+        .catch(e => toast(`Working hours kept in this browser only — DB save failed: ${e.message}`, 'warn'));
     applyCalendarToBoard();
     const s = getInstance();
+    let rs = null;
     if (s) {
+        // The planner changed the hours → bars running through those dates
+        // follow (start kept, end = when the qty is made on the new hours)
+        const toEnd = new Date(to);
+        toEnd.setDate(toEnd.getDate() + 1);
+        if (!boardReadOnly.value) rs = resizeBars(s, ev => ev.startDate < toEnd && ev.endDate > from);
         recalcCapacity(s);
         refreshGrandTotals(s);
         s.refreshRows?.();
     }
-    toast(`${changed} day(s) updated on calendar "${calendarState.name}" — বিদ্যমান bar গুলো move/re-plan করলে নতুন hours ধরবে`, 'ok');
+    if (rs && (rs.shrunk || rs.grown)) {
+        toast(`${rs.shrunk + rs.grown} bar(s) re-sized to the new hours (${rs.shrunk} shorter, ${rs.grown} longer${rs.pushed ? `, ${rs.pushed} follower(s) shifted` : ''}) — Save to keep`, 'ok');
+    }
+    toast(`${changed} day(s) updated on calendar "${calendarState.name}" — shared with every planner`, 'ok');
     chOpen.value = false;
 }
 
@@ -2430,20 +2453,6 @@ const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // line default), × strip efficiency; a plan efficiency set on the bar wins.
 // Used by the board day chips and the Planned schedule so both show the
 // same day output as the duration formula.
-// Share of a calendar day's paid work window that lies INSIDE the bar
-// [start, end): 1 for full days, a fraction on the bar's first / last day
-// (a bar starting 17:05 gets ~3 of 12 hours that day, not a full day) — so
-// the schedule dialog, the day chips and the bar's own start/end agree
-function dayWindowFactor(d, start, end) {
-    const ws = startOfWorkDay(d), we = workEndOfDay(d);
-    const span = we - ws;
-    if (span <= 0) return 0;
-    const a = Math.max(ws.getTime(), new Date(start).getTime());
-    const b = Math.min(we.getTime(), new Date(end).getTime());
-    return Math.max(0, Math.min(1, (b - a) / span));
-}
-const dayWorkMinutes = d => Math.max(1, Math.round(hmToHours(dayCfgOf(d).hours || '10:00') * 60));
-
 function barDayCapacity(raw, lid) {
     // EXACTLY the numbers the duration formula / SOP run use for this bar on
     // this line (board resource manpower & hours, product-profile efficiency,
@@ -2460,41 +2469,17 @@ const plDailyRows = computed(() => {
     const rec = plRec.value;
     const raw = plRaw.value;
     if (!rec || !raw) return [];
-    const line = plLine.value?.line;
-    const cap  = barDayCapacity(raw, plLine.value?.id);
-    const dailyTarget = Math.max(1, Math.floor(cap.availMin / Math.max(0.1, raw.smv)));
-    const baseEff = Math.round(cap.eff);
-    // Learning-curve ramp for this bar (annotated by applyLearningCurves)
-    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
-    const period = lc ? lc.pct.length : 0;
+    // The SAME day model that sized the bar (simulateStrip) — capacity,
+    // learning ramp, changed-hours dates, part-days at start / end
+    const sim = simulateStrip(getInstance(), raw, plLine.value?.id, rec.startDate, rec.endDate);
+    const baseEff = Math.round(sim.effPct);
     const rows = [];
-    let remaining = raw.qty;
-    let workIdx   = 0;   // working days elapsed inside this bar
-    const d = new Date(rec.startDate);
-    d.setHours(0, 0, 0, 0);
-    const end = new Date(rec.endDate);
-    let guard = 0;
-    while (d < end && guard++ < 120) {
-        const off = isOffDay(d);
+    for (const x of sim.days) {
+        const d = x.date;
         const cfg = dayCfgOf(d); // date-specific hour overrides included
-        // Ramp factor for this working day (holidays don't advance the count)
-        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
-        const ramping = lc && !off && rampIdx < period;
-        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        // Changed-hours dates scale the day's capacity by the new hours;
-        // the bar's first / last day only get the part of the window it covers
-        const hrsF = dayCapacityFactor(d, line?.hours);
-        const fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
-        const winF = off ? 0 : dayWindowFactor(d, rec.startDate, end);
-        const dayTarget = Math.max(1, Math.floor(fullTarget * winF));
-        let q = 0;
-        if (!off && winF > 0 && remaining > 0) {
-            q = Math.min(dayTarget, remaining);
-            remaining -= q;
-        }
-        let hours = off || !q ? '0:00' : (cfg.hours || '10:00');
-        if (!off && q > 0 && q < fullTarget) {
-            const clock = Math.max(1, Math.round((q / fullTarget) * dayWorkMinutes(d)));
+        let hours = x.off || !x.q ? '0:00' : (cfg.hours || '10:00');
+        if (!x.off && x.q > 0 && x.q < x.fullTarget) {
+            const clock = Math.max(1, Math.round((x.q / x.fullTarget) * (x.span / 60000)));
             hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
         }
         rows.push({
@@ -2502,19 +2487,12 @@ const plDailyRows = computed(() => {
             date  : fmtDate(new Date(d)),
             mKey  : `${d.getFullYear()}-${d.getMonth()}`,
             mName : d.toLocaleString('en-US', { month : 'short' }) + ' ' + d.getFullYear(),
-            qty   : q,
-            eff   : off || !q ? 0 : Math.round(baseEff * factor),
-            lcDay : ramping && q > 0 ? rampIdx + 1 : 0,
+            qty   : x.q,
+            eff   : x.off || !x.q ? 0 : Math.round(baseEff * x.factor),
+            lcDay : x.lcDay,
             hours,
-            off
+            off   : x.off
         });
-        if (!off) workIdx++;
-        d.setDate(d.getDate() + 1);
-    }
-    // Any remainder lands on the last working day
-    if (remaining > 0) {
-        const lastW = [...rows].reverse().find(r => !r.off);
-        if (lastW) lastW.qty += remaining;
     }
     let cum = 0;
     for (const r of rows) {
@@ -3675,6 +3653,25 @@ if (!localStorage.getItem('mbm-buildup')) {
     localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
 }
 
+// Date-specific working-hour overrides: the DB copy is shared by everyone;
+// localStorage is only this browser's cache. A browser that still holds
+// overrides nobody has shared yet uploads them once (first planner wins).
+async function syncCalendarOverrides() {
+    try {
+        const db = await loadCalendarOverridesDb();
+        const local = { ...calendarState.overrides };
+        if (Object.keys(db).length) {
+            for (const k of Object.keys(calendarState.overrides)) delete calendarState.overrides[k];
+            Object.assign(calendarState.overrides, db);
+            localStorage.setItem('mbm-cal-overrides', JSON.stringify(db));
+        }
+        else if (Object.keys(local).length && !boardViewOnly.value) {
+            await saveCalendarOverridesDb(local);
+        }
+    }
+    catch { /* offline — this browser's copy stays */ }
+}
+
 // Date-specific working-hour overrides survive reloads (Change working hours)
 try {
     Object.assign(calendarState.overrides, JSON.parse(localStorage.getItem('mbm-cal-overrides') || '{}'));
@@ -4627,7 +4624,9 @@ function replaceProjectionsWithConfirms(s) {
         const grpList = (confirmGroups.get(key) || []).filter(g => !dropUnplanned.has(String(g.id)));
         const evQty   = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.qty) || 0), 0);
         const grpQty  = grpList.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0);
-        const fullQty = Number(raw.orderQty || raw.qty) || 0;
+        // Compare like with like: confirm bars / unplanned confirm groups carry
+        // the PLAN qty (+3%), so the projection's full order is taken as plan qty too
+        const fullQty = Number(raw.orderQty) > 0 ? planQtyOf(raw.orderQty) : (Number(raw.qty) || 0);
         // RULE: the confirm order replaces the projection ONLY when its
         // quantity equals the projection quantity. Unequal → nothing is
         // planned; the projection bar stays and is highlighted until the
@@ -5016,48 +5015,16 @@ function dpCollapseMonths(days) {
 }
 
 function dpStripDaily(ev, line, planEff = 0) {
-    const raw = ev.data.raw;
+    // Same production model as the bar and the schedule dialog
+    const s   = getInstance();
+    const lid = s ? lineIdOf(s, ev) : line?.id;
+    const sim = simulateStrip(s, ev.data.raw, lid, ev.startDate, ev.endDate);
     const map = {}, effMap = {};
-    const availMin = (line?.availMin || Number(line?.data?.availMin) || 12000) * (raw.stripEff || 100) / 100;
-    const smv = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
-    const dailyTarget = Math.max(1, Math.floor(availMin / smv));
-    // Learning-curve ramp + changed-hours dates shape the per-day capacity
-    // and the day's APPLIED efficiency (FastReact's Eff % row)
-    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
-    const period = lc ? lc.pct.length : 0;
-    let remaining = Number(raw.qty) || 0;
-    let workIdx = 0;
-    const d = new Date(ev.startDate);
-    d.setHours(0, 0, 0, 0);
-    const end = new Date(ev.endDate);
-    const days = [];
-    let guard = 0;
-    while (d < end && guard++ < 200) {
-        const off = isOffDay(d);
-        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
-        const ramping = lc && !off && rampIdx < period;
-        const lcF  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        const hrsF = dayCapacityFactor(d, line?.hours);
-        const winF = off ? 0 : dayWindowFactor(d, ev.startDate, end);
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * lcF * hrsF * winF));
-        let q = 0;
-        if (!off && winF > 0 && remaining > 0) {
-            q = Math.min(dayTarget, remaining);
-            remaining -= q;
-        }
-        days.push({ key : dpDayKey(d), q, off, eff : Math.round((Number(planEff) || 0) * lcF) });
-        if (!off) workIdx++;
-        d.setDate(d.getDate() + 1);
-    }
-    if (remaining > 0) {
-        const lastW = [...days].reverse().find(x => !x.off);
-        if (lastW) lastW.q += remaining;
-    }
-    for (const x of days) {
-        if (x.q) {
-            map[x.key]    = x.q;
-            effMap[x.key] = x.eff;
-        }
+    for (const x of sim.days) {
+        if (!x.q) continue;
+        const k = dpDayKey(x.date);
+        map[k]    = x.q;
+        effMap[k] = Math.round((Number(planEff) || 0) * x.factor);
     }
     return { map, effMap };
 }
@@ -6121,7 +6088,8 @@ function resolveCarrySource(row) {
             style       : row.style || '',
             productType : row.productType || '',
             orderType   : 'projection',
-            qty         : Number(row.orderQty ?? row.qty) || 0,
+            qty         : planQtyOf(row.orderQty ?? row.qty),      // plan qty = order qty + 3%
+            baseQty     : Number(row.orderQty ?? row.qty) || 0,
             orderQty    : Number(row.orderQty ?? row.qty) || 0,
             smv         : Number(row.smv) > 0 ? Number(row.smv) : 0,
             ship        : row.orderDelivery || null,
@@ -6274,49 +6242,11 @@ function onSchedMouseMove(e) {
 function barDayQty(s, rec, day) {
     const raw = rec?.data?.raw;
     if (!raw || raw.stage) return null;
-    const lid  = lineIdOf(s, rec);
-    const res  = lid ? s.resourceStore.getById(lid) : null;
-    const line = LINE_BY_ID[lid] || res?.data || {};
-    const dailyTarget = Math.max(1, Math.floor(barDayCapacity(raw, lid).availMin / Math.max(0.1, Number(raw.smv) || 1)));
-    const lc     = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
-    const period = lc ? lc.pct.length : 0;
     const target = new Date(day);
     target.setHours(0, 0, 0, 0);
-    const d = new Date(rec.startDate);
-    d.setHours(0, 0, 0, 0);
-    const end = new Date(rec.endDate);
-    if (target < d || target >= end && target.getTime() !== new Date(end).setHours(0, 0, 0, 0)) return null;
-    let remaining = Number(raw.qty) || 0;
-    let workIdx = 0;
-    for (let guard = 0; d < end && guard < 200; guard++) {
-        const off = isOffDay(d);
-        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
-        const ramping = lc && !off && rampIdx < period;
-        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        // Changed-hours dates scale the day's capacity by the new hours;
-        // first / last day of the bar: only the covered part of the window
-        const hrsF = dayCapacityFactor(d, line?.hours);
-        const winF = off ? 0 : dayWindowFactor(d, rec.startDate, end);
-        const dayTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF * winF));
-        let q = 0;
-        if (!off && winF > 0 && remaining > 0) {
-            q = Math.min(dayTarget, remaining);
-            remaining -= q;
-        }
-        // Any remainder lands on the bar's last working day
-        const next = new Date(d);
-        next.setDate(next.getDate() + 1);
-        if (next >= end && remaining > 0 && !off) {
-            q += remaining;
-            remaining = 0;
-        }
-        if (d.getTime() === target.getTime()) {
-            return { qty : q, off, lcDay : ramping && q > 0 ? rampIdx + 1 : 0 };
-        }
-        if (!off) workIdx++;
-        d.setDate(d.getDate() + 1);
-    }
-    return null;
+    const sim = simulateStrip(s, raw, lineIdOf(s, rec), rec.startDate, rec.endDate);
+    const x = sim.days.find(v => v.date.getTime() === target.getTime());
+    return x ? { qty : x.q, off : x.off, lcDay : x.lcDay } : null;
 }
 
 function updateHoverClock(clientX, clientY) {

@@ -553,6 +553,23 @@ export async function completeOrdersDb(orderCodes) {
 }
 
 // Re-open completed orders (back to projection / confirm stage, unplanned)
+// Date-specific working-hour overrides shared through the DB
+export async function loadCalendarOverridesDb(calId = 1) {
+    const data = await get(`/calendars/${calId}/overrides`, 6000);
+    if (!data.success) throw new Error(data.error || 'load failed');
+    return data.overrides || {};
+}
+export async function saveCalendarOverridesDb(overrides, calId = 1) {
+    const res = await fetch(`${API_BASE}/calendars/${calId}/overrides`, {
+        method  : 'PUT',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ overrides })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'save failed');
+    return data;
+}
+
 export async function reopenOrdersDb(orderCodes, by) {
     const res = await fetch(`${API_BASE}/orders/reopen`, {
         method  : 'POST',

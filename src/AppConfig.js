@@ -10,7 +10,7 @@ import {
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
-, workDayUnits, planQtyOf
+, workDayUnits, planQtyOf, workingMinutesBetween
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -84,6 +84,63 @@ export function lineCalcParams(scheduler, raw, lineId) {
     return { manpower, effPct : baseEff * strip / 100, mins };
 }
 
+// ---------------------------------------------------------------------------
+// THE production model of one strip, day by day from its start: line capacity
+// (manpower × line minutes × efficiency ÷ SMV), learning-curve ramp, changed-
+// hours dates (Change working hours) and only the part of each day's work
+// window the strip actually covers. Bar sizing takes the moment the plan qty
+// is reached as the bar's END, and the Planned-schedule dialog / day chips
+// print these same days — so the board and the schedule can never disagree.
+//   limitEnd = null  → run until the qty is made (sizing)
+//   limitEnd = Date  → only days up to the bar's end (display); anything not
+//                      made by then lands on the last working day
+// ---------------------------------------------------------------------------
+export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
+    const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
+    const smv = Math.max(0.1, Number(raw.smv) || 0.1);
+    const dailyTarget = Math.max(1, Math.floor(manpower * mins * effPct / 100 / smv));
+    const res = scheduler?.resourceStore?.getById?.(lineId);
+    const lineHours = Number(res?.data?.hours) || LINE_BY_ID[lineId]?.hours;
+    const lc = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const period = lc ? lc.pct.length : 0;
+    let remaining = Math.max(0, Number(raw.qty ?? raw.orderQty) || 0);
+    const t0 = new Date(start);
+    const lim = limitEnd ? new Date(limitEnd) : null;
+    const d = new Date(t0);
+    d.setHours(0, 0, 0, 0);
+    const days = [];
+    let workIdx = 0, finish = null;
+    for (let guard = 0; guard < 400; guard++) {
+        if (lim ? d >= lim : remaining <= 0) break;
+        const off = isOffDay(d);
+        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
+        const ramping = !!lc && !off && rampIdx < period;
+        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
+        const hrsF    = dayCapacityFactor(d, lineHours);
+        const fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        const ws0  = startOfWorkDay(d), we0 = workEndOfDay(d);
+        const span = Math.max(60000, we0 - ws0);
+        const ws   = Math.max(ws0.getTime(), t0.getTime());
+        const we   = lim ? Math.min(we0.getTime(), lim.getTime()) : we0.getTime();
+        const winF = off ? 0 : Math.max(0, Math.min(1, (we - ws) / span));
+        const cap  = winF > 0 ? Math.max(1, Math.floor(fullTarget * winF)) : 0;
+        let q = 0;
+        if (cap > 0 && remaining > 0) {
+            q = Math.min(cap, remaining);
+            remaining -= q;
+            if (remaining <= 0) finish = new Date(ws + (q / fullTarget) * span);
+        }
+        days.push({ date : new Date(d), off, q, fullTarget, factor, winF, span, lcDay : ramping && q > 0 ? rampIdx + 1 : 0 });
+        if (!off) workIdx++;
+        d.setDate(d.getDate() + 1);
+    }
+    if (lim && remaining > 0) {
+        const lastW = [...days].reverse().find(x => !x.off);
+        if (lastW) { lastW.q += remaining; remaining = 0; }
+    }
+    return { days, finish, dailyTarget, effPct };
+}
+
 // Whole days a bar OCCUPIES on the board for an SOP-planned order: the
 // capacity run (qty ÷ daily output, ceil) made curve-aware when the bar
 // enters a 3-day learning ramp — NO 5-day floor (the floor belongs to the
@@ -132,6 +189,9 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
         raw.dur     = workDayUnits(raw.start || new Date(), Number(raw.sopDur) + extra);
         raw.workMin = raw.dur * mins;
         raw.reqMin  = Math.round((Number(raw.qty ?? raw.orderQty) || 0) * (Number(raw.smv) || 0));
+        // Capacity-sized run: the bar ends when the plan qty is actually made
+        // (same model as the schedule dialog) — not at a whole-day boundary
+        if (raw.sop?.basis !== 'unconfirmed') fitDurToProduction(scheduler, raw, lineId, mins);
         return raw.dur;
     }
     applyFormulaToRaw(raw, manpower, effPct, mins);
@@ -152,7 +212,26 @@ export function applyLineFormulaDuration(scheduler, raw, lineId) {
         raw.lc.learnFrac = clock > 0 ? Math.min(1, r.learnMin / clock) : 0;
         raw.lc.dayPlan   = r.dayPlan;
     }
+    fitDurToProduction(scheduler, raw, lineId, mins);
     return raw.dur;
+}
+
+// Bar length = working time from its start until simulateStrip() has made the
+// plan qty (learning ramp, changed-hours dates and the part-day at the start
+// included). endOfWork(start, raw.dur) then lands exactly on that moment.
+// Needs a real SMV and a start; otherwise the formula length above stands.
+function fitDurToProduction(scheduler, raw, lineId, mins) {
+    if (!(Number(raw.smv) > 0) || (raw.smvMissing && !(Number(raw.smvManual) > 0))) return;
+    if (!(Number(raw.qty ?? raw.orderQty) > 0)) return;
+    const start = raw.start ? new Date(raw.start) : null;
+    if (!start || Number.isNaN(start.getTime())) return;
+    let sim;
+    try { sim = simulateStrip(scheduler, raw, lineId, start); } catch { return; }
+    if (!sim?.finish) return;
+    const wm = Math.ceil(workingMinutesBetween(start, sim.finish));
+    if (!(wm > 0)) return;
+    raw.dur     = Math.max(1 / 60, wm / WORK_MIN_PER_DAY);
+    raw.workMin = raw.dur * mins;
 }
 
 function setBarTooltipEnabled(scheduler, on) {

@@ -653,6 +653,54 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
 // Calendar configuration (document 4.7 / 4.8): one row per weekday
 // Payload: { name, days : { 0..6 : { start:'08:00', hours:'10:00', ot:'02:00' } } }
 // --------------------------------------------------------------------------
+// Date-specific working-hour overrides (Change working hours dialog) —
+// shared by every planner and every machine. Stored in
+// planning_calendar_intervals without a schema change: interval_type
+// 'overtime', recurrent_rule 'DATE_OVERRIDE', start_date = the date,
+// interval_name 'HOURS=<h>' (0 = that date is off).
+const CAL_OVERRIDE = 'DATE_OVERRIDE';
+app.get(`${BASE}/calendars/:id/overrides`, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT DATE_FORMAT(start_date, '%Y-%m-%d') AS d, interval_name AS n
+             FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?`,
+            [Number(req.params.id), CAL_OVERRIDE]);
+        const overrides = {};
+        for (const r of rows) {
+            const h = Number(String(r.n || '').replace(/^HOURS=/, ''));
+            if (r.d && Number.isFinite(h)) overrides[r.d] = h;
+        }
+        res.json({ success : true, overrides });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+app.put(`${BASE}/calendars/:id/overrides`, async (req, res) => {
+    const calId = Number(req.params.id);
+    const ov = req.body?.overrides || {};
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        await conn.query('DELETE FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?', [calId, CAL_OVERRIDE]);
+        let n = 0;
+        for (const [d, h] of Object.entries(ov)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Number(h)) || Number(h) < 0 || Number(h) > 24) continue;
+            await conn.query(
+                `INSERT INTO planning_calendar_intervals
+                    (calendar_id, interval_type, interval_name, recurrent_rule, start_date, end_date, created_at, updated_at)
+                 VALUES (?, 'overtime', ?, ?, ?, ?, NOW(), NOW())`,
+                [calId, `HOURS=${Number(h)}`, CAL_OVERRIDE, `${d} 00:00:00`, `${d} 23:59:59`]);
+            n++;
+        }
+        await conn.commit();
+        res.json({ success : true, saved : n });
+    }
+    catch (e) {
+        try { await conn.rollback(); } catch { /* gone */ }
+        res.status(500).json({ success : false, error : e.message });
+    }
+    finally { conn.release(); }
+});
+
 app.put(`${BASE}/calendars/:id`, async (req, res) => {
     const calId = Number(req.params.id);
     const { days = {}, name = null } = req.body || {};
@@ -663,7 +711,8 @@ app.put(`${BASE}/calendars/:id`, async (req, res) => {
     const conn = await pool.getConnection();
     try {
         await conn.beginTransaction();
-        await conn.query('DELETE FROM planning_calendar_intervals WHERE calendar_id = ?', [calId]);
+        // weekly pattern only — the date overrides (DATE_OVERRIDE rows) stay
+        await conn.query("DELETE FROM planning_calendar_intervals WHERE calendar_id = ? AND (recurrent_rule IS NULL OR recurrent_rule <> 'DATE_OVERRIDE')", [calId]);
         let workingDays = 0, maxHours = 0;
         for (const [d, c] of Object.entries(days)) {
             const hrs = toMin(c.hours) / 60;
