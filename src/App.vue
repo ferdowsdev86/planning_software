@@ -377,6 +377,8 @@ function finishBoardLoad(uid, data, s) {
         boardUnitCache[uid].ready = true;
         boardUnitCache[uid].dirty = false;
         setBoardBaseline(s);
+        // AFTER the baseline, so Save writes the corrected lengths
+        autoSyncBarLengths(s);
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
@@ -988,42 +990,68 @@ function compactBoardNoGaps() {
 // Re-size open sewing bars (start kept) to the production model: the end
 // becomes the moment the plan qty is made with today's line capacity,
 // efficiency, learning ramp and calendar. Extensions push followers.
-function resizeBars(s, keep = () => true) {
-    const bars = s.eventStore.records
-        .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
-        .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
-        .filter(x => x.lid && x.lid !== 'hold' && isSewingRes(s.resourceStore.getById(x.lid)))
-        .sort((a, b) => a.ev.startDate - b.ev.startDate);
+function resizeBars(s, keep = () => true, { dirty = true } = {}) {
     let shrunk = 0, grown = 0, pushed = 0, skipped = 0;
+    const changed = new Set();
     beginBoardInteraction(s, 'batch');
     try {
-        const touched = new Set();
-        for (const { ev, lid } of bars) {
-            const raw = ev.data.raw;
-            if (raw.smvMissing && !(Number(raw.smvManual) > 0)) { skipped++; continue; }
-            const start  = new Date(ev.startDate);
-            const oldEnd = new Date(ev.endDate);
-            raw.start = start;
-            raw.sopMode = !!raw.ship;
-            deriveLcForPlacement(s, raw, lid, start);
-            applyLineFormulaDuration(s, raw, lid);
-            raw.sopMode = false;
-            const end = endOfWork(start, raw.dur || 1);
-            if (Math.abs(end - oldEnd) < 60000) continue;
-            ev.set({ endDate : end, duration : elapsedDays(start, end) });
-            raw.end = end;
-            raw.userPinned = true;
-            if (end > oldEnd) { grown++; pushed += pushFollowers(s, lid, ev) || 0; }
-            else shrunk++;
-            touched.add(lid);
+        // The learning-curve annotation can change when a follower is pushed,
+        // so repeat until no end moves (normally 1–2 passes)
+        for (let pass = 0; pass < 4; pass++) {
+            const bars = s.eventStore.records
+                .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
+                .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
+                .filter(x => x.lid && x.lid !== 'hold' && isSewingRes(s.resourceStore.getById(x.lid)))
+                .sort((a, b) => a.ev.startDate - b.ev.startDate);
+            let moved = 0;
+            const touched = new Set();
+            skipped = 0;
+            for (const { ev, lid } of bars) {
+                const raw = ev.data.raw;
+                if (raw.smvMissing && !(Number(raw.smvManual) > 0)) { skipped++; continue; }
+                const start  = new Date(ev.startDate);
+                const oldEnd = new Date(ev.endDate);
+                raw.start = start;
+                // uses the bar's CURRENT curve annotation — the same one the
+                // schedule dialog prints
+                applyLineFormulaDuration(s, raw, lid);
+                const end = endOfWork(start, raw.dur || 1);
+                if (Math.abs(end - oldEnd) < 60000) continue;
+                ev.set({ endDate : end, duration : elapsedDays(start, end) });
+                raw.end = end;
+                raw.userPinned = true;
+                if (!changed.has(ev.id)) { changed.add(ev.id); end > oldEnd ? grown++ : shrunk++; }
+                if (end > oldEnd) pushed += pushFollowers(s, lid, ev) || 0;
+                touched.add(lid);
+                moved++;
+            }
+            if (touched.size) applyLearningCurves(s, { lineIds : [...touched] });
+            if (!moved) break;
         }
-        if (touched.size) applyLearningCurves(s, { lineIds : [...touched] });
     }
     finally { endBoardInteraction(s); }
     recalcCapacity(s);
     s.refreshWithTransition?.();
-    if (shrunk || grown) { markBoardDirty(); touchBoardCache(s); }
+    if ((shrunk || grown) && dirty) { markBoardDirty(); touchBoardCache(s); }
     return { shrunk, grown, pushed, skipped };
+}
+
+// RULE (permanent): a bar's START and LINE are the planner's; its END always
+// follows the production schedule — the moment the plan qty is made with the
+// current line capacity, efficiency, learning curve and calendar. Runs on every
+// board load, so the bar, the tooltip and the Planned-schedule dialog always
+// show the same finish. A bar already in production is sized on its REMAINING
+// qty from its current (production-cut) start; a fully made strip is left alone.
+function autoSyncBarLengths(s) {
+    if (!s) return;
+    let r;
+    // finished strips (made ≥ qty) keep their bar until marked complete
+    const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
+    try { r = resizeBars(s, open, { dirty : !boardReadOnly.value }); }
+    catch (e) { console.warn('[bar sync] skipped:', e.message); return; }
+    if (r.shrunk || r.grown) {
+        toast(`${r.shrunk + r.grown} bar(s) matched to the production schedule (${r.shrunk} shorter, ${r.grown} longer${r.pushed ? `, ${r.pushed} follower(s) shifted` : ''})${boardReadOnly.value ? '' : ' — Save to keep'}`, 'ok');
+    }
 }
 
 // Planning menu: every open bar at once (starts stay; Save keeps the result)
@@ -1285,6 +1313,8 @@ async function hydrateBoardFromApi() {
                 }
                 localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
                 applyProdUpdates(s);
+                // fresh made-qty from the DB → re-fit ends on the remaining qty
+                autoSyncBarLengths(s);
                 recalcCapacity(s);
             }).catch(() => { /* endpoint offline - local data stays */ });
         }
@@ -5789,13 +5819,25 @@ function applyProdUpdates(s) {
             if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
             if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
 
-            if (Math.abs(newStart - ev.startDate) > 60000) {
+            // End = when the REMAINING qty is made from the cut start (same
+            // model as the schedule dialog); a finished strip keeps its end
+            let newEnd = end;
+            if ((Number(raw.qty) || 0) - made > 0) {
+                try {
+                    const sim = simulateStrip(s, raw, lid, newStart);
+                    if (sim.finish) newEnd = sim.finish;
+                } catch { /* keep the saved end */ }
+            }
+            if (Math.abs(newStart - ev.startDate) > 60000 || Math.abs(newEnd - ev.endDate) > 60000) {
+                const grew = newEnd > ev.endDate;
                 ev.set({
                     startDate : newStart,
-                    endDate   : end,
-                    duration  : elapsedDays(newStart, end)
+                    endDate   : newEnd,
+                    duration  : elapsedDays(newStart, newEnd)
                 });
                 raw.start = newStart;
+                raw.end   = newEnd;
+                if (grew) pushFollowers(s, lid, ev);
             }
         }
     }

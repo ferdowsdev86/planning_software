@@ -103,7 +103,9 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     const lineHours = Number(res?.data?.hours) || LINE_BY_ID[lineId]?.hours;
     const lc = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
-    let remaining = Math.max(0, Number(raw.qty ?? raw.orderQty) || 0);
+    // Production already made (Daily production update / ERP) has cut the bar
+    // from the left — only the REMAINING qty is still to be sewn from `start`
+    let remaining = Math.max(0, (Number(raw.qty ?? raw.orderQty) || 0) - (Number(raw.made) || 0));
     const t0 = new Date(start);
     const lim = limitEnd ? new Date(limitEnd) : null;
     const d = new Date(t0);
@@ -616,9 +618,6 @@ export function pushFollowers(scheduler, lineId, placed) {
             if (ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
             continue;
         }
-        // A SAVED bar keeps its saved length when it is pushed — only a bar
-        // that has never been saved is still sized by the formula
-        if (!ev.data.raw.dbPinned) applyLineFormulaDuration(scheduler, ev.data.raw, lineId);
         let ns = nextStartAfter(prevEnd);
         // A bar NEVER advances earlier automatically ("plan agabe na") — it
         // keeps its own start and only shifts LATER when the placed bar (or a
@@ -632,7 +631,18 @@ export function pushFollowers(scheduler, lineId, placed) {
             if (!obst) break;
             ns = nextStartAfter(obst.endDate);
         }
-        const ne = endOfWork(ns, ev.data.raw.dur);
+        // The pushed bar's END follows the production schedule at its new
+        // start (hours / learning ramp differ by date) — bar = schedule, always
+        const raw = ev.data.raw;
+        if (ev.startDate?.getTime() !== ns.getTime()) {
+            const oldStart = new Date(ev.startDate);
+            raw.start = ns;
+            applyLineFormulaDuration(scheduler, raw, lineId);
+            // a strip in production is cut from its original start — that
+            // anchor moves with the bar, or the next refresh pulls it back
+            if (raw.origStart) raw.origStart = new Date(new Date(raw.origStart).getTime() + (ns - oldStart));
+        }
+        const ne = endOfWork(ns, raw.dur);
         if (ev.startDate?.getTime() !== ns.getTime() || ev.endDate?.getTime() !== ne.getTime()) {
             ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
             ev.data.raw.start = ns;
