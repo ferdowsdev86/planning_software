@@ -19,7 +19,7 @@ import {
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
-    loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot,
+    loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb, reopenOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
@@ -1043,8 +1043,9 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
 // board load, so the bar, the tooltip and the Planned-schedule dialog always
 // show the same finish. A bar already in production is sized on its REMAINING
 // qty from its current (production-cut) start; a fully made strip is left alone.
+let skipAutoBarSync = false;
 function autoSyncBarLengths(s) {
-    if (!s) return;
+    if (!s || skipAutoBarSync) return;
     let r;
     // finished strips (made ≥ qty) keep their bar until marked complete
     const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
@@ -2414,6 +2415,62 @@ async function bsBackupNow() {
     finally { bsBusy.value = false; }
 }
 
+const boardHasUnsaved = () => !!boardUnitCache[currentUnitId.value]?.dirty;
+
+// Tools → Backup board now
+async function toolsBackupNow() {
+    openMenu.value = null;
+    if (!canBackupRestore.value) { toast('🔒 You do not have permission to back up the board (Settings → Backup / Restore)', 'warn'); return; }
+    if (boardHasUnsaved() && !window.confirm('The board has UNSAVED changes — the backup holds the SAVED plan only.\n\nBack up the saved plan now?')) return;
+    try {
+        const r = await createBoardSnapshot(currentUnitId.value || null, authUser.value?.username || currentUser.value?.username || null);
+        toast(`💾 Board backed up — ${r.bars} bar(s), ${r.snapshotDate}`, 'ok');
+    }
+    catch (e) { toast(`Backup failed: ${e.message}`, 'error'); }
+}
+
+// Tools → Restore board from backup: pick a dated backup, restore it
+const rsOpen = ref(false);
+const rsSel  = ref(null);
+const rsBusy = ref(false);
+const rsSelRow = computed(() => bsList.value.find(b => b.id === rsSel.value) || null);
+const bsSourceLbl = b => b.source === 'auto' ? 'auto 23:30' : b.source === 'pre-restore' ? `before restore · ${b.taken_by || ''}` : `manual · ${b.taken_by || ''}`;
+async function openBoardRestore() {
+    openMenu.value = null;
+    if (!canBackupRestore.value) { toast('🔒 You do not have permission to restore the board (Settings → Backup / Restore)', 'warn'); return; }
+    if (view.value !== 'board' || !currentBoard.value) { toast('Open the planning board you want to restore first', 'warn'); return; }
+    rsSel.value = null;
+    rsOpen.value = true;
+    await bsRefresh();
+}
+async function rsRestore() {
+    const b = rsSelRow.value;
+    if (!b) return;
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot restore this board'
+            : `🔒 ${h?.name || h?.username || 'Another user'} is editing this board — restore is not possible now`, 'warn');
+        return;
+    }
+    const msg = `RESTORE the board to the backup of ${b.snapshot_date} ${String(b.taken_at).slice(11, 16)} (${b.bars} bars)?\n\n`
+        + '• every bar goes back to its line / dates / quantity of that backup\n'
+        + '• bars planned AFTER that backup leave the board (orders return to unplanned)\n'
+        + (boardHasUnsaved() ? '• your UNSAVED changes on screen are discarded\n' : '')
+        + '\nThe current plan is backed up first ("before restore"), so this can be undone.';
+    if (!window.confirm(msg)) return;
+    rsBusy.value = true;
+    try {
+        const r = await restoreBoardSnapshot(b.id, authUser.value?.username || currentUser.value?.username || null);
+        rsOpen.value = false;
+        toast(`♻ Board restored to ${b.snapshot_date}: ${r.restored + r.recreated} bar(s) restored${r.recreated ? ` (${r.recreated} re-created)` : ''}, ${r.cancelled} removed${r.missing?.length ? `, ${r.missing.length} could not be restored` : ''} — reloading…`, r.missing?.length ? 'warn' : 'ok');
+        if (r.missing?.length) console.warn('[restore] not restorable:', r.missing);
+        skipAutoBarSync = true;                // show the plan exactly as backed up
+        await reloadBoardForUnit(currentBoard.value, { force : true });
+    }
+    catch (e) { toast(`Restore failed: ${e.message}`, 'error'); }
+    finally { rsBusy.value = false; skipAutoBarSync = false; }
+}
+
 async function bsCompare() {
     if (!bsSel.value) return;
     bsBusy.value = true;
@@ -2748,6 +2805,12 @@ function setUserPerm(u, perm, on) {
 const canReopenOrders = computed(() =>
     (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
     || userHasPerm(currentUser.value, PERM_REOPEN) || userHasPerm(authUser.value, PERM_REOPEN));
+// Board backup / restore (Tools menu): Planning Manager always, others only
+// when granted in Settings — the server checks the same permission
+const PERM_BACKUP = 'perm:backup';
+const canBackupRestore = computed(() =>
+    (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
+    || userHasPerm(currentUser.value, PERM_BACKUP) || userHasPerm(authUser.value, PERM_BACKUP));
 // View-only session: Management role (§17) or read access to the open board
 const boardViewOnly = computed(() =>
     currentUser.value?.role === 'Management'
@@ -8280,6 +8343,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openLoginStatus">
                         <i class="fa-solid fa-user-group fr-dd-fa" aria-hidden="true"></i> Login status — who is online
                     </div>
+                    <template v-if="canBackupRestore">
+                        <div class="fr-dd-sep"></div>
+                        <div class="fr-dd-item" @click="toolsBackupNow">💾 Backup board now</div>
+                        <div class="fr-dd-item" @click="openBoardRestore">♻️ Restore board from backup…</div>
+                    </template>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
                     <div v-if="canManageUsers" class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
@@ -9574,6 +9642,40 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
         <!-- Board backup & compare: daily 23:30 snapshots vs the live plan -->
         <Teleport to="body">
+        <!-- Tools → Restore board from backup -->
+        <div v-if="rsOpen" class="cal-overlay" @click.self="rsOpen = false">
+            <div class="cal-dialog pf-dialog rs-dialog">
+                <div class="cal-title">
+                    ♻️ Restore board from backup
+                    <span class="cal-title-btns"><span class="cal-x" @click="rsOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <div class="rs-warn">Restoring puts every bar back to its line, dates and quantity of the chosen backup. Bars planned after that backup leave the board. The current plan is backed up first, so a restore can be undone.</div>
+                    <div v-if="bsBusy" class="ls-dim">Loading backups…</div>
+                    <div v-else-if="!bsList.length" class="ls-dim">No backup yet — use Tools → Backup board now, or wait for tonight's 23:30 automatic backup.</div>
+                    <div v-else class="pf-table rs-table">
+                        <table>
+                            <thead><tr><th></th><th>Backup date</th><th>Taken at</th><th>Type</th><th>By</th><th class="od-num">Bars</th></tr></thead>
+                            <tbody>
+                                <tr v-for="b in bsList" :key="b.id" :class="{ 'rs-sel' : rsSel === b.id }" @click="rsSel = b.id">
+                                    <td><input type="radio" :value="b.id" v-model="rsSel"></td>
+                                    <td><b>{{ b.snapshot_date }}</b></td>
+                                    <td>{{ String(b.taken_at).slice(0, 10) }} {{ String(b.taken_at).slice(11, 16) }}</td>
+                                    <td>{{ b.source === 'auto' ? 'Automatic 23:30' : b.source === 'pre-restore' ? 'Before a restore' : 'Manual' }}</td>
+                                    <td>{{ b.taken_by || '—' }}</td>
+                                    <td class="od-num">{{ b.bars }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-actions">
+                        <button class="cal-btn cal-btn-primary st-btn rs-go" :disabled="!rsSel || rsBusy" @click="rsRestore">♻️ {{ rsBusy ? 'Restoring…' : (rsSelRow ? `Restore backup of ${rsSelRow.snapshot_date}` : 'Select a backup') }}</button>
+                        <button class="cal-btn st-btn" :disabled="rsBusy" @click="rsOpen = false">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div v-if="bsOpen" class="cal-overlay" @click.self="bsOpen = false">
             <div class="cal-dialog pf-dialog bs-dialog">
                 <div class="cal-title">
@@ -9585,7 +9687,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <label>Backup
                             <select v-model="bsSel" class="cal-in st-select bs-select">
                                 <option v-for="b in bsList" :key="b.id" :value="b.id">
-                                    {{ b.snapshot_date }} · {{ String(b.taken_at).slice(11, 16) }} · {{ b.source === 'auto' ? 'auto 23:30' : ('manual · ' + (b.taken_by || '')) }} · {{ b.bars }} bars
+                                    {{ b.snapshot_date }} · {{ String(b.taken_at).slice(11, 16) }} · {{ bsSourceLbl(b) }} · {{ b.bars }} bars
                                 </option>
                             </select>
                         </label>
@@ -10005,6 +10107,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <th>Role</th>
                                 <th v-for="b in boards" :key="b.id" class="st-board-h">{{ b.name }}</th>
                                 <th class="st-board-h" title="May send a completed order back to the projection / confirm stage">Re-open completed</th>
+                                <th class="st-board-h" title="Tools menu: back the board up and restore it from a dated backup">Backup / Restore</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -10043,11 +10146,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         @change="setUserPerm(u, PERM_REOPEN, $event.target.checked)"
                                     >
                                 </td>
+                                <td class="st-check">
+                                    <input type="checkbox"
+                                        :checked="u.role === 'Planning Manager' || userHasPerm(u, PERM_BACKUP)"
+                                        :disabled="u.role === 'Planning Manager'"
+                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'Allow Tools → Backup board / Restore board from backup'"
+                                        @change="setUserPerm(u, PERM_BACKUP, $event.target.checked)"
+                                    >
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint"><b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
+                    <div class="st-hint"><b>Backup / Restore</b> = Tools menu-তে "Backup board now" আর "Restore board from backup" দেখাবে ও চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -10886,6 +10997,12 @@ body {
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
+.cal-dialog.rs-dialog { width : 720px; max-width : 96vw; }
+.rs-warn { background : #fff7e6; border : 1px solid #f0c36d; color : #6b4a00; padding : 7px 10px; border-radius : 5px; font-size : 12px; margin-bottom : 8px; }
+.rs-table { max-height : 46vh; overflow : auto; }
+.rs-table tbody tr { cursor : pointer; }
+.rs-table tr.rs-sel td { background : #dbe9ff !important; }
+.rs-go { background : #b45309 !important; border-color : #92400e !important; }
 .ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }
 .pu-filter-row th { padding : 2px 3px !important; background : #f4f6fb !important; }
 .pu-filter { width : 100%; min-width : 0; box-sizing : border-box; font-size : 11px; padding : 2px 4px; height : 22px; }

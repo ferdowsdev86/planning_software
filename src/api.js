@@ -402,6 +402,17 @@ export async function createBoardSnapshot(unitId, by) {
     if (!j.success) throw new Error(j.error || 'backup failed');
     return j;
 }
+// Restore the board to a backup (server checks the permission and takes a
+// 'pre-restore' backup of the current plan first)
+export async function restoreBoardSnapshot(id, by) {
+    const res = await fetch(`${API_BASE}/board-snapshots/${id}/restore`, {
+        method : 'POST', headers : { 'Content-Type' : 'application/json' },
+        body : JSON.stringify({ by })
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'restore failed');
+    return j;
+}
 export async function compareBoardSnapshot(id, unitId) {
     const j = await get(`/board-snapshots/${id}/compare${unitId ? `?unit=${unitId}` : ''}`, 15000);
     if (!j.success) throw new Error(j.error || 'compare failed');

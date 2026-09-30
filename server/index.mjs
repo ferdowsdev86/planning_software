@@ -2593,6 +2593,16 @@ async function liveBoardRows(unitId) {
 
 async function takeBoardSnapshot(unitId, source = 'auto', by = null, dateStr = null) {
     const rows = await liveBoardRows(unitId);
+    // Full event rows ride along (bar.row) so a backup can be RESTORED, not
+    // only compared. Dates as strings → restore is time-zone safe.
+    if (rows.length) {
+        const ids = rows.map(r => r.id);
+        const [full] = await pool.query({
+            sql : `SELECT * FROM planning_events WHERE id IN (${ids.map(() => '?').join(',')})`, dateStrings : true
+        }, ids);
+        const byId = new Map(full.map(f => [f.id, f]));
+        for (const r of rows) r.row = byId.get(r.id) || null;
+    }
     const snapDate = dateStr || new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
     const [ins] = await pool.query(
         `INSERT INTO planning_board_snapshots (snapshot_date, unit_id, source, taken_by, bars, data) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -2632,7 +2642,135 @@ app.get(`${BASE}/board-snapshots`, async (req, res) => {
 
 app.post(`${BASE}/board-snapshots`, async (req, res) => {
     const unitId = req.body?.unit ? Number(req.body.unit) : null;
-    try { res.json({ success : true, ...(await takeBoardSnapshot(unitId, 'manual', req.body?.by || null)) }); }
+    try {
+        if (!(await mayBackupRestore(String(req.body?.by || '').trim()))) {
+            return res.status(403).json({ success : false, error : 'No permission to back up the board' });
+        }
+        res.json({ success : true, ...(await takeBoardSnapshot(unitId, 'manual', req.body?.by || null)) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+// Backup / Restore permission: Planning Manager always; others need the
+// 'perm:backup' token (Settings → users & permissions)
+async function mayBackupRestore(username) {
+    if (!username) return false;
+    const [[u]] = await pool.query('SELECT role, boards FROM planning_users WHERE username = ? AND active = 1', [username]);
+    if (!u) return false;
+    if (u.role === 'Planning Manager') return true;
+    let b = [];
+    try { b = typeof u.boards === 'string' ? JSON.parse(u.boards) : (u.boards || []); } catch { b = []; }
+    return Array.isArray(b) && b.includes('perm:backup');
+}
+
+// RESTORE the board to a backup: every bar of the backup returns to its saved
+// line / start / end / qty / status (and notes when the backup holds full
+// rows); bars created after the backup leave the board (their orders go back
+// to the unplanned list). A 'pre-restore' backup of the CURRENT plan is taken
+// first, so a restore can itself be undone.
+const EVENT_COLS = ['project_id', 'planning_order_id', 'event_code', 'event_name', 'event_type', 'production_stage',
+    'start_date', 'end_date', 'duration', 'duration_unit', 'planned_quantity', 'completed_quantity', 'percent_done',
+    'scheduling_mode', 'manually_scheduled', 'constraint_type', 'constraint_date', 'deadline_date', 'priority',
+    'event_status', 'risk_level', 'notes', 'created_by', 'updated_by', 'created_at'];
+const noteIds = notes => {
+    try { const n = typeof notes === 'string' ? JSON.parse(notes) : notes; return Array.isArray(n?.idList) ? n.idList.map(Number).filter(Boolean) : []; }
+    catch { return []; }
+};
+app.post(`${BASE}/board-snapshots/:id/restore`, async (req, res) => {
+    const by = String(req.body?.by || '').trim();
+    try {
+        if (!(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
+        const [[snap]] = await pool.query('SELECT * FROM planning_board_snapshots WHERE id = ?', [Number(req.params.id)]);
+        if (!snap) return res.status(404).json({ success : false, error : 'backup not found' });
+        let bars = [];
+        try { bars = JSON.parse(snap.data || '[]'); } catch { bars = []; }
+        if (!Array.isArray(bars) || !bars.length) return res.status(400).json({ success : false, error : 'backup holds no bars' });
+        const unitId = snap.unit_id ?? null;
+
+        const pre = await takeBoardSnapshot(unitId, 'pre-restore', by);
+        const live = await liveBoardRows(unitId);
+        const snapIds = new Set(bars.map(b => Number(b.id)));
+        const [resRows] = await pool.query('SELECT id FROM planning_resources WHERE active = TRUE');
+        const resOk = new Set(resRows.map(r => Number(r.id)));
+
+        let restored = 0, recreated = 0, cancelled = 0;
+        const missing = [];
+        const touched = new Set(), planned = new Set();
+        const conn = await pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            // 1. bars that did not exist at backup time leave the board
+            const gone = live.filter(l => !snapIds.has(Number(l.id))).map(l => Number(l.id));
+            if (gone.length) {
+                const ph = gone.map(() => '?').join(',');
+                const [gr] = await conn.query(`SELECT planning_order_id, notes FROM planning_events WHERE id IN (${ph})`, gone);
+                for (const g of gr) { if (g.planning_order_id) touched.add(Number(g.planning_order_id)); noteIds(g.notes).forEach(i => touched.add(i)); }
+                await conn.query(`UPDATE planning_events SET event_status = 'cancelled', updated_at = NOW() WHERE id IN (${ph})`, gone);
+                await conn.query(`DELETE FROM planning_assignments WHERE event_id IN (${ph})`, gone);
+                cancelled = gone.length;
+            }
+            // 2. every bar of the backup returns to its saved state
+            for (const b of bars) {
+                const id = Number(b.id);
+                if (!resOk.has(Number(b.lineId))) { missing.push({ order : b.order, reason : `line ${b.line} no longer exists` }); continue; }
+                const [[cur]] = await conn.query('SELECT id, planning_order_id, notes FROM planning_events WHERE id = ?', [id]);
+                if (cur) { if (cur.planning_order_id) touched.add(Number(cur.planning_order_id)); noteIds(cur.notes).forEach(i => touched.add(i)); }
+                if (b.row) {
+                    const cols = EVENT_COLS.filter(c => c in b.row);
+                    const vals = cols.map(c => b.row[c]);
+                    if (cur) {
+                        await conn.query(`UPDATE planning_events SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`, [...vals, id]);
+                        restored++;
+                    }
+                    else {
+                        await conn.query(`INSERT INTO planning_events (id, ${cols.join(', ')}, updated_at) VALUES (?, ${cols.map(() => '?').join(', ')}, NOW())`, [id, ...vals]);
+                        recreated++;
+                    }
+                    if (b.row.planning_order_id) planned.add(Number(b.row.planning_order_id));
+                    noteIds(b.row.notes).forEach(i => planned.add(i));
+                }
+                else {
+                    // older backup (summary only): position, quantity and status
+                    if (!cur) { missing.push({ order : b.order, reason : 'bar was deleted and this older backup has no full copy of it' }); continue; }
+                    await conn.query(
+                        `UPDATE planning_events SET start_date = ?, end_date = ?,
+                                duration = ROUND(TIMESTAMPDIFF(MINUTE, ?, ?) / 1440, 2),
+                                planned_quantity = ?, event_status = ?, updated_at = NOW() WHERE id = ?`,
+                        [`${b.start}:00`, `${b.end}:00`, `${b.start}:00`, `${b.end}:00`, Number(b.qty) || 0, b.status || 'draft', id]);
+                    restored++;
+                    if (cur.planning_order_id) planned.add(Number(cur.planning_order_id));
+                    noteIds(cur.notes).forEach(i => planned.add(i));
+                }
+                await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [id]);
+                await conn.query(
+                    'INSERT INTO planning_assignments (event_id, resource_id, units, assigned_quantity, created_at) VALUES (?, ?, 100, ?, NOW())',
+                    [id, Number(b.lineId), Number(b.qty) || 0]);
+            }
+            // 3. order list status follows the restored board
+            const setStatus = async (ids, status) => {
+                if (!ids.length) return;
+                await conn.query(
+                    `UPDATE planning_orders SET planning_status = ?, updated_at = NOW()
+                     WHERE id IN (${ids.map(() => '?').join(',')}) AND planning_status NOT IN ('completed', 'cancelled')`, [status, ...ids]);
+            };
+            await setStatus([...planned], 'fully_planned');
+            await setStatus([...touched].filter(i => !planned.has(i)), 'unplanned');
+            await conn.query(`
+                UPDATE planning_orders po
+                LEFT JOIN planning_events pe
+                  ON (pe.event_code = CONCAT('ev-proj:', po.order_code)
+                      OR pe.event_code LIKE CONCAT('ev-proj:', po.order_code, '-%'))
+                 AND pe.event_status != 'cancelled'
+                SET po.planning_status = IF(pe.id IS NULL, 'unplanned', 'fully_planned'), po.updated_at = NOW()
+                WHERE po.erp_po_id LIKE 'proj-%' AND po.planning_status NOT IN ('completed', 'cancelled')`);
+            await conn.commit();
+        }
+        catch (e) { try { await conn.rollback(); } catch { /* gone */ } throw e; }
+        finally { conn.release(); }
+        bumpRev(1);
+        console.log(`[restore] backup ${snap.id} (${snap.snapshot_date}) restored by ${by}: ${restored} updated, ${recreated} re-created, ${cancelled} removed, ${missing.length} not restorable; pre-restore backup ${pre.id}`);
+        res.json({ success : true, restored, recreated, cancelled, missing, preRestoreId : pre.id, bars : bars.length });
+    }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 
