@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -1001,7 +1001,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
             const bars = s.eventStore.records
                 .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
                 .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
-                .filter(x => x.lid && x.lid !== 'hold' && isSewingRes(s.resourceStore.getById(x.lid)))
+                .filter(x => x.lid && (x.lid === 'hold' ? holdCapacitySet(s) : isSewingRes(s.resourceStore.getById(x.lid))))
                 .sort((a, b) => a.ev.startDate - b.ev.startDate);
             let moved = 0;
             const touched = new Set();
@@ -1021,6 +1021,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 raw.end = end;
                 raw.userPinned = true;
                 if (!changed.has(ev.id)) { changed.add(ev.id); end > oldEnd ? grown++ : shrunk++; }
+                if (lid === 'hold') { moved++; continue; }      // parked bars never push / ramp
                 if (end > oldEnd) pushed += pushFollowers(s, lid, ev) || 0;
                 touched.add(lid);
                 moved++;
@@ -3664,6 +3665,12 @@ async function saveLineEffForm() {
             }
         }
         localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
+        // New capacity figures → every open bar (lines and Holding Row) is
+        // re-fitted to them; Save keeps the result
+        if (s && !boardReadOnly.value) {
+            const r = resizeBars(s);
+            if (r.shrunk || r.grown) toast(`${r.shrunk + r.grown} bar(s) re-sized to the new capacity (${r.shrunk} shorter, ${r.grown} longer) — Save to keep`, 'ok');
+        }
         recalcCapacity(s);
         s?.refreshWithTransition?.();
         s?.refreshRows?.();
@@ -7019,15 +7026,19 @@ async function placeCarried(date, resourceRecord) {
         // Changeover check at the drop point: ONLY this bar takes a
         // curve-aware duration; no other bar is resized by the curve
         deriveLcForPlacement(s, raw, targetId, date);
-        // A SAVED bar keeps its saved length when the user moves it — its
-        // length changes only through Recalculate duration. Only a bar that
-        // has never been saved is sized (SOP / formula / curve) at placement.
-        if (!raw.dbPinned) applyLineFormulaDuration(s, raw, targetId);
+        // The bar's length always follows the capacity of the row it lands
+        // on, from the point it lands at (bar end = production schedule)
+        raw.start = clampIntoWorkWindow(new Date(date));
+        applyLineFormulaDuration(s, raw, targetId);
     }
 
     let start, end, note = null;
     if (parkHold) {
         start = startOfWorkDay(date);
+        // Holding Row with its own capacity → the bar takes only the space
+        // that capacity needs (else it keeps the length it arrived with)
+        raw.start = start;
+        applyLineFormulaDuration(s, raw, 'hold');
         end   = endOfWork(start, raw.dur || 1);
         raw.status = 'unplanned';
         raw.parked = true;
@@ -7044,6 +7055,13 @@ async function placeCarried(date, resourceRecord) {
         const inserted = computeInsertStart(s, targetId, date, raw.dur, rec.id);
         start = inserted.start;
         end   = inserted.end;
+        // the insert point may differ from the pointed spot (off day, a bar
+        // running across it) — hours / ramp differ by date, so re-fit there
+        if (Math.abs(start - raw.start) > 60000) {
+            raw.start = start;
+            applyLineFormulaDuration(s, raw, targetId);
+            end = endOfWork(start, raw.dur || 1);
+        }
         noteManualGap(s, targetId, rec, start);
         if (inserted.snapped)   note = 'off day — starts at the next working day\'s first hour';
         if (inserted.blockedBy) note = `${inserted.blockedBy} runs across that point — placed right after it (it stays put)`;

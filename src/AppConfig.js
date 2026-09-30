@@ -73,6 +73,16 @@ export function tooltipEfficiency(lineId, productType, fallbackEff) {
 // both the plain duration formula and the learning-curve calculation.
 export function lineCalcParams(scheduler, raw, lineId) {
     const res = scheduler?.resourceStore?.getById(lineId);
+    // Holding Row with its own capacity (Setup → Line eff & hours): exactly
+    // the manpower × hours × efficiency typed there — no product profile,
+    // no plan / strip efficiency
+    if (lineId === 'hold' && res?.data?.capSet) {
+        return {
+            manpower : Math.max(1, Number(res.data.manpower) || 1),
+            effPct   : Math.max(1, Number(res.data.eff) || 1),
+            mins     : Math.max(60, (Number(res.data.hours) || 10) * 60)
+        };
+    }
     const manpower = Number(res?.data?.manpower ?? LINE_BY_ID[lineId]?.manpower) || 50;
     const lineEff  = Number(res?.data?.eff ?? LINE_BY_ID[lineId]?.eff) || 50;
     const profileEff = tooltipEfficiency(lineId, raw.productType, lineEff);
@@ -101,7 +111,7 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     const dailyTarget = Math.max(1, Math.floor(manpower * mins * effPct / 100 / smv));
     const res = scheduler?.resourceStore?.getById?.(lineId);
     const lineHours = Number(res?.data?.hours) || LINE_BY_ID[lineId]?.hours;
-    const lc = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const lc = lineId !== 'hold' && raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
     // Production already made (Daily production update / ERP) has cut the bar
     // from the left — only the REMAINING qty is still to be sewn from `start`
@@ -143,6 +153,8 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     return { days, finish, dailyTarget, effPct };
 }
 
+export const holdCapacitySet = scheduler => !!scheduler?.resourceStore?.getById?.('hold')?.data?.capSet;
+
 // Whole days a bar OCCUPIES on the board for an SOP-planned order: the
 // capacity run (qty ÷ daily output, ceil) made curve-aware when the bar
 // enters a 3-day learning ramp — NO 5-day floor (the floor belongs to the
@@ -169,7 +181,17 @@ export function sopBoardDays(scheduler, raw, lineId) {
 
 // (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
 export function applyLineFormulaDuration(scheduler, raw, lineId) {
-    if (!raw || !lineId || lineId === 'hold') return raw?.dur || 1;
+    if (!raw || !lineId) return raw?.dur || 1;
+    if (lineId === 'hold') {
+        // A bar on the Holding Row is sized by the Holding Row's OWN capacity
+        // once one is set (no learning ramp, no SOP whole-day run); without
+        // it the bar keeps the length it arrived with
+        if (!holdCapacitySet(scheduler)) return raw.dur || 1;
+        const hp = lineCalcParams(scheduler, raw, 'hold');
+        applyFormulaToRaw(raw, hp.manpower, hp.effPct, hp.mins);
+        fitDurToProduction(scheduler, raw, 'hold', hp.mins);
+        return raw.dur;
+    }
     const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
     // SOP-PLN-01 §3: a bar planned by the SOP timeline keeps its capacity-
     // derived WHOLE-day production run (ceil, ≥5 days) — the fractional
