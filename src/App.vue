@@ -2417,43 +2417,11 @@ async function bsBackupNow() {
 
 const boardHasUnsaved = () => !!boardUnitCache[currentUnitId.value]?.dirty;
 
-// Tools → Backup board now
-async function toolsBackupNow() {
-    openMenu.value = null;
-    if (!canBackupRestore.value) { toast('🔒 You do not have permission to back up the board (Settings → Backup / Restore)', 'warn'); return; }
-    if (boardHasUnsaved() && !window.confirm('The board has UNSAVED changes — the backup holds the SAVED plan only.\n\nBack up the saved plan now?')) return;
-    try {
-        const r = await createBoardSnapshot(currentUnitId.value || null, authUser.value?.username || currentUser.value?.username || null);
-        toast(`💾 Board backed up — ${r.bars} bar(s), ${r.snapshotDate}`, 'ok');
-    }
-    catch (e) { toast(`Backup failed: ${e.message}`, 'error'); }
-}
-
-// Tools → Restore board from backup: pick a dated backup, restore it
-const rsOpen = ref(false);
+// Restore the board to a backup (Reports → Board backup & compare)
 const rsSel  = ref(null);
 const rsBusy = ref(false);
 const rsSelRow = computed(() => bsList.value.find(b => b.id === rsSel.value) || null);
-// Restore date selection: the dates that have a backup (newest first) and the
-// backups of the chosen date (the latest one is preselected)
-const rsDate  = ref('');
-const rsDates = computed(() => [...new Set(bsList.value.map(b => b.snapshot_date))].sort().reverse());
-const rsOfDate = computed(() => bsList.value.filter(b => b.snapshot_date === rsDate.value));
-watch(rsDate, () => { rsSel.value = rsOfDate.value[0]?.id ?? null; });
-const rsDateLbl = d => {
-    const x = new Date(d + 'T00:00:00');
-    return Number.isNaN(+x) ? d : `${fmtDateDdMonRr(x)} (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][x.getDay()]})`;
-};
 const bsSourceLbl = b => b.source === 'auto' ? 'auto 23:30' : b.source === 'pre-restore' ? `before restore · ${b.taken_by || ''}` : `manual · ${b.taken_by || ''}`;
-async function openBoardRestore() {
-    openMenu.value = null;
-    if (!canBackupRestore.value) { toast('🔒 You do not have permission to restore the board (Settings → Backup / Restore)', 'warn'); return; }
-    if (view.value !== 'board' || !currentBoard.value) { toast('Open the planning board you want to restore first', 'warn'); return; }
-    rsSel.value = null;
-    rsDate.value = '';
-    rsOpen.value = true;
-    await bsRefresh();
-}
 async function rsRestore() {
     const b = rsSelRow.value;
     if (!b) return;
@@ -2472,7 +2440,6 @@ async function rsRestore() {
     rsBusy.value = true;
     try {
         const r = await restoreBoardSnapshot(b.id, authUser.value?.username || currentUser.value?.username || null);
-        rsOpen.value = false;
         bsOpen.value = false;
         toast(`♻ Board restored to ${b.snapshot_date}: ${r.restored + r.recreated} bar(s) restored${r.recreated ? ` (${r.recreated} re-created)` : ''}, ${r.cancelled} removed${r.missing?.length ? `, ${r.missing.length} could not be restored` : ''} — reloading…`, r.missing?.length ? 'warn' : 'ok');
         if (r.missing?.length) console.warn('[restore] not restorable:', r.missing);
@@ -8364,11 +8331,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openLoginStatus">
                         <i class="fa-solid fa-user-group fr-dd-fa" aria-hidden="true"></i> Login status — who is online
                     </div>
-                    <template v-if="canBackupRestore">
-                        <div class="fr-dd-sep"></div>
-                        <div class="fr-dd-item" @click="toolsBackupNow">💾 Backup board now</div>
-                        <div class="fr-dd-item" @click="openBoardRestore">♻️ Restore board from backup…</div>
-                    </template>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
                     <div v-if="canManageUsers" class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
@@ -9663,47 +9625,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
         <!-- Board backup & compare: daily 23:30 snapshots vs the live plan -->
         <Teleport to="body">
-        <!-- Tools → Restore board from backup -->
-        <div v-if="rsOpen" class="cal-overlay" @click.self="rsOpen = false">
-            <div class="cal-dialog pf-dialog rs-dialog">
-                <div class="cal-title">
-                    ♻️ Restore board from backup
-                    <span class="cal-title-btns"><span class="cal-x" @click="rsOpen = false">✕</span></span>
-                </div>
-                <div class="st-body">
-                    <div class="rs-warn">Restoring puts every bar back to its line, dates and quantity of the chosen backup. Bars planned after that backup leave the board. The current plan is backed up first, so a restore can be undone.</div>
-                    <div v-if="bsBusy" class="ls-dim">Loading backups…</div>
-                    <div v-else-if="!bsList.length" class="ls-dim">No backup yet — use Tools → Backup board now, or wait for tonight's 23:30 automatic backup.</div>
-                    <div v-else class="rs-pick">
-                        <label class="rs-field">
-                            <span>Restore date</span>
-                            <select v-model="rsDate" class="cal-in st-select rs-select">
-                                <option value="" disabled>— select a date —</option>
-                                <option v-for="d in rsDates" :key="d" :value="d">{{ rsDateLbl(d) }}</option>
-                            </select>
-                        </label>
-                        <label v-if="rsOfDate.length > 1" class="rs-field">
-                            <span>Backup of that date</span>
-                            <select v-model="rsSel" class="cal-in st-select rs-select">
-                                <option v-for="b in rsOfDate" :key="b.id" :value="b.id">
-                                    {{ String(b.taken_at).slice(11, 16) }} · {{ b.source === 'auto' ? 'Automatic 23:30' : b.source === 'pre-restore' ? 'Before a restore' : 'Manual' }} · {{ b.taken_by || '—' }} · {{ b.bars }} bars
-                                </option>
-                            </select>
-                        </label>
-                        <div v-if="rsSelRow" class="rs-info">
-                            Backup taken <b>{{ String(rsSelRow.taken_at).slice(0, 10) }} {{ String(rsSelRow.taken_at).slice(11, 16) }}</b>
-                            · {{ rsSelRow.source === 'auto' ? 'automatic 23:30' : rsSelRow.source === 'pre-restore' ? 'taken before a restore' : 'manual' }}
-                            · by {{ rsSelRow.taken_by || '—' }} · <b>{{ rsSelRow.bars }} bars</b>
-                        </div>
-                    </div>
-                    <div class="st-actions">
-                        <button class="cal-btn cal-btn-primary st-btn rs-go" :disabled="!rsSel || rsBusy" @click="rsRestore">♻️ {{ rsBusy ? 'Restoring…' : (rsSelRow ? `Restore board to ${rsDateLbl(rsSelRow.snapshot_date)}` : 'Select a restore date') }}</button>
-                        <button class="cal-btn st-btn" :disabled="rsBusy" @click="rsOpen = false">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <div v-if="bsOpen" class="cal-overlay" @click.self="bsOpen = false">
             <div class="cal-dialog pf-dialog bs-dialog">
                 <div class="cal-title">
@@ -10137,7 +10058,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <th>Role</th>
                                 <th v-for="b in boards" :key="b.id" class="st-board-h">{{ b.name }}</th>
                                 <th class="st-board-h" title="May send a completed order back to the projection / confirm stage">Re-open completed</th>
-                                <th class="st-board-h" title="Tools menu: back the board up and restore it from a dated backup">Backup / Restore</th>
+                                <th class="st-board-h" title="Reports → Board backup & compare: back the board up and restore it from a dated backup">Backup / Restore</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -10180,7 +10101,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <input type="checkbox"
                                         :checked="u.role === 'Planning Manager' || userHasPerm(u, PERM_BACKUP)"
                                         :disabled="u.role === 'Planning Manager'"
-                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'Allow Tools → Backup board / Restore board from backup'"
+                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'Allow Backup now / Restore this backup (Reports → Board backup & compare)'"
                                         @change="setUserPerm(u, PERM_BACKUP, $event.target.checked)"
                                     >
                                 </td>
@@ -10188,7 +10109,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint"><b>Backup / Restore</b> = Tools menu-তে "Backup board now" আর "Restore board from backup" দেখাবে ও চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
+                    <div class="st-hint"><b>Backup / Restore</b> = Reports → Board backup & compare-এ "Backup now" আর "Restore this backup" চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -11027,13 +10948,6 @@ body {
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
-.cal-dialog.rs-dialog { width : 560px; max-width : 96vw; }
-.rs-warn { background : #fff7e6; border : 1px solid #f0c36d; color : #6b4a00; padding : 7px 10px; border-radius : 5px; font-size : 12px; margin-bottom : 8px; }
-.rs-pick { display : flex; flex-direction : column; gap : 10px; padding : 4px 2px 8px; }
-.rs-field { display : flex; align-items : center; gap : 10px; font-size : 12.5px; }
-.rs-field > span { flex : 0 0 140px; font-weight : 600; color : #17356b; }
-.rs-select { flex : 1 1 auto; min-width : 0; height : 28px; }
-.rs-info { background : #eef4ff; border : 1px solid #c5d4ea; border-radius : 5px; padding : 7px 10px; font-size : 12px; }
 .rs-go { background : #b45309 !important; border-color : #92400e !important; color : #fff !important; }
 .rs-go:disabled { opacity : .45; }
 .ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }
