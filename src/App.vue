@@ -2404,6 +2404,7 @@ async function openBoardBackup() {
 }
 
 async function bsBackupNow() {
+    if (!canBackupRestore.value) { toast('🔒 You do not have permission to back up the board (Settings → Backup / Restore)', 'warn'); return; }
     bsBusy.value = true;
     try {
         const r = await createBoardSnapshot(currentUnitId.value || null, authUser.value?.username || null);
@@ -2453,6 +2454,7 @@ async function rsRestore() {
 // Reports → Board backup & compare: restore the backup chosen in the dropdown
 async function bsRestoreSelected() {
     if (!bsSel.value) return;
+    if (!canBackupRestore.value) { toast('🔒 You do not have permission to restore the board (Settings → Backup / Restore)', 'warn'); return; }
     if (view.value !== 'board' || !currentBoard.value) { toast('Open the planning board you want to restore first', 'warn'); return; }
     rsSel.value = bsSel.value;
     await rsRestore();
@@ -9641,9 +9643,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </select>
                         </label>
                         <button class="cal-btn cal-btn-primary st-btn" :disabled="!bsSel || bsBusy" @click="bsCompare">🔍 Compare with current plan</button>
-                        <button class="cal-btn st-btn" :disabled="bsBusy" @click="bsBackupNow">💾 Backup now</button>
-                        <button v-if="canBackupRestore" class="cal-btn st-btn rs-go" :disabled="!bsSel || bsBusy || rsBusy"
-                                title="Restore the board to the backup selected on the left" @click="bsRestoreSelected">♻️ {{ rsBusy ? 'Restoring…' : 'Restore this backup' }}</button>
+                        <button class="cal-btn st-btn" :disabled="bsBusy || !canBackupRestore"
+                                :title="canBackupRestore ? 'Take a backup of the saved plan now' : '🔒 Needs the Backup / Restore permission (Setup → Settings — users & permissions)'"
+                                @click="bsBackupNow">💾 Backup now</button>
+                        <button class="cal-btn st-btn rs-go" :disabled="!bsSel || bsBusy || rsBusy || !canBackupRestore"
+                                :title="canBackupRestore ? 'Restore the board to the backup selected on the left' : '🔒 Needs the Backup / Restore permission (Setup → Settings — users & permissions)'"
+                                @click="bsRestoreSelected">♻️ {{ rsBusy ? 'Restoring…' : 'Restore this backup' }}</button>
                         <button class="cal-btn st-btn" :disabled="!bsResult" @click="bsPrint">🖨 Print</button>
                         <button class="cal-btn st-btn" @click="bsOpen = false">Close</button>
                     </div>
@@ -9672,7 +9677,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                         <div v-else class="ls-dim">No difference — the current plan is identical to this backup.</div>
                     </template>
-                    <div class="st-hint">প্রতিদিন রাত 23:30-এ (Asia/Dhaka) server নিজে board-এর backup নেয় (তারিখ ধরে) · যেকোনো backup বেছে Compare দিলে current plan-এর সাথে পার্থক্য দেখায় · Backup now = এখনই একটা backup</div>
+                    <div class="st-hint">প্রতিদিন রাত 23:30-এ (Asia/Dhaka) server নিজে board-এর backup নেয় (তারিখ ধরে) · যেকোনো backup বেছে Compare দিলে current plan-এর সাথে পার্থক্য দেখায় · Backup now = এখনই একটা backup · Restore this backup = বাছা backup-এ board ফিরিয়ে নেওয়া (আগে এখনকার plan-এর backup নেয়) · <b>Backup now</b> ও <b>Restore</b> চালু থাকে শুধু যার Setup → Settings-এ <b>Backup / Restore</b> টিক আছে (Planning Manager সবসময়)</div>
                 </div>
             </div>
         </div>
