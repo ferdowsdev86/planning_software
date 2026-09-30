@@ -24,7 +24,7 @@ import {
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
-    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb
+    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -3576,6 +3576,8 @@ function effUpdate() {
 const lineEffOpen   = ref(false);
 const lineEffRows   = ref([]);
 const lineEffSaving = ref(false);
+// Holding Row capacity (own manpower / efficiency / hours — not a sewing line)
+const holdEffRow    = ref(null);
 
 function openLineEffForm() {
     openMenu.value = null;
@@ -3598,6 +3600,15 @@ function openLineEffForm() {
         toast('Open a planning board first — lines load from the board', 'warn');
         return;
     }
+    // Holding Row: its saved capacity, or the line totals as a starting point
+    const hold = s.resourceStore.getById('hold');
+    const hd = hold?.data || {};
+    holdEffRow.value = hold ? {
+        name     : hd.name || 'Holding Row',
+        manpower : hd.capSet ? Number(hd.manpower) || 0 : rows.reduce((a, r) => a + r.manpower, 0),
+        eff      : hd.capSet ? Number(hd.eff) || 0 : Math.round(rows.reduce((a, r) => a + r.eff, 0) / rows.length),
+        hours    : hd.capSet ? Number(hd.hours) || 10 : Math.max(...rows.map(r => r.hours))
+    } : null;
     lineEffRows.value = rows;
     lineEffOpen.value = true;
 }
@@ -3611,9 +3622,25 @@ async function saveLineEffForm() {
         row.manpower = Math.max(1, Math.min(1000, Number(row.manpower) || 1));
         updates.push({ resourceId : row.dbId, eff : row.eff, hours : row.hours, manpower : row.manpower });
     }
+    const h = holdEffRow.value;
+    if (h) {
+        h.eff      = Math.max(1, Math.min(200, Number(h.eff) || 0));
+        h.hours    = Math.max(1, Math.min(24, Number(h.hours) || 10));
+        h.manpower = Math.max(0, Math.min(5000, Number(h.manpower) || 0));
+    }
     lineEffSaving.value = true;
     try {
         await saveLineEfficiencyDb(updates);
+        if (h) {
+            await saveHoldingCapacityDb(currentUnitId.value || currentBoard.value?.unitId || 3, h);
+            const hold = s?.resourceStore.getById('hold');
+            if (hold) {
+                hold.set({
+                    manpower : h.manpower, eff : h.eff, hours : h.hours, capSet : true,
+                    availMin : Math.round(h.manpower * h.hours * 60 * h.eff / 100)
+                });
+            }
+        }
         // Apply to the live board, fallback line table and profile _Default
         for (const row of lineEffRows.value) {
             const availMin = Math.round(row.manpower * row.hours * 60 * row.eff / 100);
@@ -3639,7 +3666,8 @@ async function saveLineEffForm() {
         localStorage.setItem('mbm-eff-list', JSON.stringify(effList.value));
         recalcCapacity(s);
         s?.refreshWithTransition?.();
-        toast(`Line efficiency & hours saved for ${updates.length} line(s)`, 'ok');
+        s?.refreshRows?.();
+        toast(`Line efficiency & hours saved for ${updates.length} line(s)${h ? ' + Holding Row capacity' : ''}`, 'ok');
         lineEffOpen.value = false;
     }
     catch (e) {
@@ -9045,6 +9073,13 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
+                            <tr v-if="holdEffRow" class="ef-hold-row" title="Holding Row capacity — its own manpower, efficiency and hours (not a sewing line)">
+                                <td><b>{{ holdEffRow.name }}</b></td>
+                                <td><input v-model.number="holdEffRow.manpower" type="number" min="0" max="5000" class="cal-in ef-in"></td>
+                                <td><input v-model.number="holdEffRow.eff" type="number" min="1" max="200" class="cal-in ef-in"></td>
+                                <td><input v-model.number="holdEffRow.hours" type="number" min="1" max="24" step="0.5" class="cal-in ef-in"></td>
+                                <td class="od-num"><b>{{ Math.round(holdEffRow.manpower * (holdEffRow.hours || 0) * 60 * (holdEffRow.eff || 0) / 100).toLocaleString() }}</b></td>
+                            </tr>
                             <tr v-for="row in lineEffRows" :key="row.dbId">
                                 <td>{{ row.name }}</td>
                                 <td><input v-model.number="row.manpower" type="number" min="1" max="1000" class="cal-in ef-in"></td>
@@ -9058,7 +9093,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn st-btn" :disabled="lineEffSaving" @click="saveLineEffForm">💾 Update</button>
                         <button class="cal-btn st-btn" @click="lineEffOpen = false">Close</button>
                     </div>
-                    <div class="st-hint">Line efficiency = planning_resources.default_efficiency — save করলে DB, board আর profile _Default একসাথে update হয় · hours/day দিয়ে daily capacity হিসাব হয়</div>
+                    <div class="st-hint">Line efficiency = planning_resources.default_efficiency — save করলে DB, board আর profile _Default একসাথে update হয় · hours/day দিয়ে daily capacity হিসাব হয় · Holding Row-এর নিজের manpower / efficiency / hours এখান থেকে দিন (না দিলে সব line-এর যোগফল দেখায়)</div>
                 </div>
             </div>
         </div>
@@ -10783,6 +10818,7 @@ body {
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
+.ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }
 .pu-total td { text-align : right; }
 .pu-total td:first-child { text-align : left; }
 .pu-total .pu-total-prod { font-size : 13px; }

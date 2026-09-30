@@ -102,15 +102,22 @@ const unitLabel = id => UNIT_NAMES[Number(id)] || (id ? `Unit ${id}` : 'AQL');
 
 const asDate = v => (v ? new Date(String(v).replace(' ', 'T')) : null);
 
-function buildBoardResources(sewing, stages, effUnitId, effUnitName) {
+function buildBoardResources(sewing, stages, effUnitId, effUnitName, holding = null) {
     const firstLine = sewing[0];
     const unit = firstLine?.unit || effUnitName || unitLabel(effUnitId) || 'AQL';
     const floor = firstLine?.floor || 'F1';
+    // Holding Row capacity set in Setup → Line eff & hours (else the row
+    // shows the sum of the lines)
+    const hMp  = Number(holding?.manpower) || 0;
+    const hEff = Number(holding?.eff) || 0;
+    const hHrs = Number(holding?.hours) || 0;
     return [
         {
             id : 'hold', name : 'Holding Row',
             unit, floor,
-            manpower : 0, machines : 0, eff : 0, availMin : 0,
+            manpower : hMp, machines : Number(holding?.machines) || 0, eff : hEff, hours : hHrs || undefined,
+            availMin : Math.round(hMp * hHrs * 60 * hEff / 100),
+            capSet   : !!holding,
             holdingRow : true, cls : 'mb-hold-row'
         },
         ...sewing,
@@ -582,6 +589,18 @@ export async function reopenOrdersDb(orderCodes, by) {
 }
 
 // Persist line efficiency (profile _Default) to planning_resources
+// Holding Row capacity (manpower / efficiency / hours) → hidden HOLD-<unit> row
+export async function saveHoldingCapacityDb(unitId, { manpower, eff, hours }) {
+    const res = await fetch(`${API_BASE}/resources/holding`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ unitId, manpower, eff, hours })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'save failed');
+    return data;
+}
+
 export async function saveLineEfficiencyDb(updates) {
     const res = await fetch(`${API_BASE}/resources/efficiency`, {
         method  : 'POST',
@@ -793,7 +812,7 @@ export async function loadFromApi(unitId = null) {
         sewing = fallbackSewingLines(effUnitId, effUnitName);
         if (!stages.length) stages = fallbackStageLines(effUnitId, effUnitName);
     }
-    const resources = buildBoardResources(sewing, stages, effUnitId, effUnitName);
+    const resources = buildBoardResources(sewing, stages, effUnitId, effUnitName, data.holding || null);
 
     setLineResourceDbMap(Object.fromEntries(
         sewing.filter(l => l.dbId != null).map(l => [l.id, l.dbId])

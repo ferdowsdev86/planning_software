@@ -223,8 +223,20 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
              WHERE c.active = TRUE`
         );
 
+        // Holding Row capacity (Setup → Line eff & hours): a hidden
+        // planning_resources row 'HOLD-<unit>' (active = 0, never a line)
+        let holding = null;
+        try {
+            const [[h]] = await pool.query(
+                `SELECT id, manpower, default_efficiency AS eff, working_hours_per_day AS hours, machine_count AS machines
+                 FROM planning_resources WHERE resource_code = ? LIMIT 1`, [`HOLD-${effUnit || 3}`]);
+            if (h) holding = h;
+        }
+        catch { /* optional */ }
+
         res.json({
             success  : true,
+            holding,
             project  : {
                 id      : project.id,
                 name    : project.project_name,
@@ -818,6 +830,36 @@ app.post(`${BASE}/production-updates`, async (req, res) => {
 // Persist line efficiency and daily working hours to planning_resources so
 // they survive reloads — profile _Default IS the line efficiency.
 // capacity_minutes_per_day is recomputed as manpower × hours × 60 × eff%.
+// Holding Row capacity: upsert the hidden 'HOLD-<unit>' resource row
+app.post(`${BASE}/resources/holding`, async (req, res) => {
+    const b = req.body || {};
+    const unit = Number(b.unitId) || 3;
+    const mp = Number(b.manpower), eff = Number(b.eff), hrs = Number(b.hours);
+    if (!(mp >= 0 && mp <= 5000) || !(eff > 0 && eff <= 200) || !(hrs > 0 && hrs <= 24)) {
+        return res.status(400).json({ success : false, error : 'manpower 0–5000, efficiency 1–200, hours 1–24' });
+    }
+    const cap = Math.round(mp * hrs * 60 * eff / 100 * 100) / 100;
+    try {
+        const code = `HOLD-${unit}`;
+        const [[row]] = await pool.query('SELECT id FROM planning_resources WHERE resource_code = ? LIMIT 1', [code]);
+        if (row) {
+            await pool.query(
+                `UPDATE planning_resources SET manpower = ?, default_efficiency = ?, working_hours_per_day = ?,
+                        capacity_minutes_per_day = ?, updated_at = NOW() WHERE id = ?`, [mp, eff, hrs, cap, row.id]);
+        }
+        else {
+            await pool.query(
+                `INSERT INTO planning_resources
+                    (resource_code, resource_name, resource_type, unit_id, default_efficiency, manpower, machine_count,
+                     capacity_minutes_per_day, working_hours_per_day, active, sort_order, created_at, updated_at)
+                 VALUES (?, 'Holding Row', 'sewing_line', ?, ?, ?, 0, ?, ?, 0, 0, NOW(), NOW())`,
+                [code, unit, eff, mp, cap, hrs]);
+        }
+        res.json({ success : true, manpower : mp, eff, hours : hrs, availMin : cap });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 app.post(`${BASE}/resources/efficiency`, async (req, res) => {
     const updates = Array.isArray(req.body?.updates) ? req.body.updates : [];
     const valid = updates.filter(u =>

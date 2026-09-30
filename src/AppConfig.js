@@ -1541,8 +1541,16 @@ export const schedulerProConfig = {
                     const lines = s
                         ? s.resourceStore.records.filter(x => x.data?.lineRow)
                         : LINES;
-                    const mp = lines.reduce((a, x) => a + Number(x.manpower ?? x.data?.manpower ?? 0), 0);
+                    let mp = lines.reduce((a, x) => a + Number(x.manpower ?? x.data?.manpower ?? 0), 0);
                     const mc = lines.reduce((a, x) => a + Number(x.machines ?? x.data?.machines ?? 0), 0);
+                    // Holding Row with its own capacity (Setup → Line eff & hours):
+                    // manpower / efficiency / capacity minutes instead of the line sums
+                    let blue = 0, black = mc;
+                    if (d.holdingRow && d.capSet) {
+                        mp    = Number(d.manpower) || 0;
+                        blue  = `${Number(d.eff) || 0}%`;
+                        black = fmtQty(Number(d.availMin) || 0);
+                    }
                     const id = d.holdingRow ? String(50000 + mc) : String(mc);
                     return `<div class="fr-line">
                         <span class="fr-line-chip fr-line-chip-red">${enc(id)}</span>
@@ -1550,7 +1558,7 @@ export const schedulerProConfig = {
                             <div class="fr-line-name">${enc(d.name)}</div>
                             <div class="fr-line-sub">${enc(code)}</div>
                         </div>
-                        ${nums(mp, 0, mc)}
+                        ${nums(mp, blue, black)}
                     </div>`;
                 }
                 const n = String(d.id || '').replace(/\D/g, '') || '0';
