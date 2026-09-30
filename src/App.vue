@@ -5718,9 +5718,55 @@ const puMin  = ref(false);
 const puDate = ref(isoInputDate(new Date()));
 const puRows = ref([]);
 // Totals of the "Update a date" table (Prod Qty follows what is typed)
+// Planned output of one bar on one date: the production model run from the
+// bar's ORIGINAL start (before saved production cut it from the left) with
+// the full plan qty — so past dates keep their plan figure
+function puDayPlan(s, ev, ymd) {
+    const raw = ev?.data?.raw;
+    if (!s || !raw || raw.stage) return 0;
+    const lid = lineIdOf(s, ev);
+    if (!lid || lid === 'hold') return 0;
+    try {
+        const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
+        const sim = simulateStrip(s, { ...raw, made : 0 }, lid, start);
+        const t = new Date(ymd + 'T00:00:00').getTime();
+        return sim.days.find(x => x.date.getTime() === t)?.q || 0;
+    }
+    catch { return 0; }
+}
+
+// Column filters of the "Update a date" table: text = contains; number
+// columns also take >, <, >=, <=, = (e.g. ">500")
+const PU_COLS = [
+    { k : 'unit', label : 'Unit' }, { k : 'floor', label : 'Floor' }, { k : 'line', label : 'Line' },
+    { k : 'opType', label : 'Operation type' }, { k : 'style', label : 'Style' }, { k : 'order', label : 'Order' },
+    { k : 'po', label : 'PO' }, { k : 'color', label : 'Color' },
+    { k : 'orderQty', label : 'Order Qty', num : true }, { k : 'made', label : 'Made so far', num : true },
+    { k : 'rest', label : 'Remaining', num : true }, { k : 'planQty', label : 'Day Plan Qty', num : true },
+    { k : 'prodQty', label : 'Prod Qty', num : true }
+];
+const puFilters = ref(Object.fromEntries(PU_COLS.map(c => [c.k, ''])));
+const puFiltered = computed(() => PU_COLS.some(c => String(puFilters.value[c.k] || '').trim()));
+function puClearFilters() { for (const c of PU_COLS) puFilters.value[c.k] = ''; }
+const puView = computed(() => {
+    const active = PU_COLS.map(c => ({ c, q : String(puFilters.value[c.k] || '').trim() })).filter(x => x.q);
+    if (!active.length) return puRows.value;
+    return puRows.value.filter(r => active.every(({ c, q }) => {
+        if (c.num) {
+            const m = /^(>=|<=|>|<|=)?\s*(-?[\d,.]+)$/.exec(q);
+            if (m) {
+                const val = Number(m[2].replace(/,/g, ''));
+                if (Number.isFinite(val)) return cmpApply(m[1] || '=', Number(r[c.k]) || 0, val);
+            }
+        }
+        return String(r[c.k] ?? '').toLowerCase().includes(q.toLowerCase());
+    }));
+});
+
+// Totals of the visible (filtered) rows — Prod Qty follows what is typed
 const puTotals = computed(() => {
     const t = { orderQty : 0, planQty : 0, made : 0, rest : 0, prodQty : 0 };
-    for (const r of puRows.value) {
+    for (const r of puView.value) {
         t.orderQty += Number(r.orderQty) || 0;
         t.planQty  += Number(r.planQty) || 0;
         t.made     += Number(r.made) || 0;
@@ -5953,7 +5999,7 @@ async function buildPuRows() {
                 po       : raw.po || '—',
                 color    : orderColor(raw.po),
                 orderQty : raw.qty,
-                planQty  : dpStripDaily(ev, line)[dpDayKey(day)] || 0,
+                planQty  : puDayPlan(s, ev, date),
                 made,
                 rest     : Math.max(0, (Number(raw.qty) || 0) - made),
                 prodQty  : store[String(ev.id)]?.[date] == null ? '' : dayQty(String(ev.id))
@@ -5974,7 +6020,7 @@ async function buildPuRows() {
                 unit : r.unit || 'AQL', floor : r.floor || '—', line : r.line || '—',
                 opType : r.operation_type || 'Sewing', style : r.style || '—',
                 order : r.order_no || '—', po : r.po_number || '—', color : r.color || '—',
-                orderQty : Number(r.order_qty) || 0, planQty : 0, fromDb : true
+                orderQty : Number(r.order_qty) || 0, planQty : puDayPlan(s, s?.eventStore.getById(key), date), fromDb : true
             });
         }
     }
@@ -8904,17 +8950,18 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <table v-if="puRows.length" class="st-table dp-table">
                         <thead>
                             <tr>
-                                <th>Unit</th><th>Floor</th><th>Line</th><th>Operation type</th>
-                                <th>Style</th><th>Order</th><th>PO</th><th>Color</th>
-                                <th class="od-num">Order Qty</th>
-                                <th class="od-num">Day Plan Qty</th>
-                                <th class="od-num">Made so far</th>
-                                <th class="od-num">Remaining</th>
-                                <th class="od-num">Prod Qty</th>
+                                <th v-for="c in PU_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th>
+                            </tr>
+                            <tr class="pu-filter-row">
+                                <th v-for="c in PU_COLS" :key="c.k">
+                                    <input v-model="puFilters[c.k]" class="cal-in pu-filter" type="text"
+                                           :placeholder="c.num ? '>, <, =' : '🔍'"
+                                           :title="c.num ? 'Number filter: 500, >500, <=1000' : 'Contains…'">
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in puRows" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
+                            <tr v-for="r in puView" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
                                 <td>{{ r.unit }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ r.line }}</td>
@@ -8924,19 +8971,22 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td>{{ r.po }}</td>
                                 <td>{{ r.color }}</td>
                                 <td class="od-num">{{ fmtQty(r.orderQty) }}</td>
-                                <td class="od-num">{{ fmtQty(r.planQty) }}</td>
                                 <td class="od-num">{{ fmtQty(r.made) }}</td>
                                 <td class="od-num pu-rest">{{ fmtQty(r.rest) }}</td>
+                                <td class="od-num pu-plan">{{ fmtQty(r.planQty) }}</td>
                                 <td class="od-num">
                                     <input v-model="r.prodQty" class="cal-in pu-in" type="number" min="0" placeholder="0" :disabled="r.fromErp">
                                 </td>
                             </tr>
+                            <tr v-if="!puView.length">
+                                <td :colspan="PU_COLS.length" class="dp-empty">No row matches the filters — <a href="#" @click.prevent="puClearFilters">clear filters</a></td>
+                            </tr>
                             <tr class="dp-grand pu-total">
-                                <td colspan="8">Total ({{ puRows.length }} rows)</td>
+                                <td colspan="8">Total ({{ puView.length }}{{ puFiltered ? ' of ' + puRows.length : '' }} rows)<a v-if="puFiltered" href="#" class="pu-clear" @click.prevent="puClearFilters">✕ clear filters</a></td>
                                 <td class="od-num">{{ fmtQty(puTotals.orderQty) }}</td>
-                                <td class="od-num">{{ fmtQty(puTotals.planQty) }}</td>
                                 <td class="od-num">{{ fmtQty(puTotals.made) }}</td>
                                 <td class="od-num">{{ fmtQty(puTotals.rest) }}</td>
+                                <td class="od-num">{{ fmtQty(puTotals.planQty) }}</td>
                                 <td class="od-num pu-total-prod">{{ fmtQty(puTotals.prodQty) }}</td>
                             </tr>
                         </tbody>
@@ -10837,6 +10887,10 @@ body {
 .pu-fromdb td { background : #f3f7ff; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
 .ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }
+.pu-filter-row th { padding : 2px 3px !important; background : #f4f6fb !important; }
+.pu-filter { width : 100%; min-width : 0; box-sizing : border-box; font-size : 11px; padding : 2px 4px; height : 22px; }
+.pu-plan { color : #17356b; font-weight : 600; }
+.pu-clear { margin-left : 12px; font-weight : normal; font-size : 11px; }
 .pu-total td { text-align : right; }
 .pu-total td:first-child { text-align : left; }
 .pu-total .pu-total-prod { font-size : 13px; }
