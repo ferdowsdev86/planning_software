@@ -180,6 +180,38 @@ function setBoardBaseline(s) {
     boardBaseline = snapshotBoardState(s);
 }
 
+// Automatic adjustments made while a board loads (bar ends fitted to the
+// production schedule, production cut, followers pushed by those) are NOT the
+// planner's changes: they are re-derived identically on every load, so they
+// must never show up in the Save dialog. Run the adjustment through this and
+// the baseline follows every bar the adjustment moved — unless the planner
+// had already changed that bar, which stays a change.
+const sameBarState = (a, b) => !!a && !!b && a.line === b.line && a.start === b.start && a.end === b.end
+    && a.qty === b.qty && a.eff === b.eff && a.peff === b.peff && a.lcm === b.lcm;
+function absorbAuto(s, before) {
+    if (!s || !boardBaseline || !before) return;
+    const after = snapshotBoardState(s);
+    for (const id of Object.keys(after)) {
+        const b = before[id], a = after[id], base = boardBaseline[id];
+        if (b && base && sameBarState(base, b) && !sameBarState(b, a)) boardBaseline[id] = a;
+    }
+}
+// Bars strictly one after another on every line — an engine-settled (async)
+// pass. What it nudges is derived, so it is absorbed into the baseline and
+// never listed as a change. Starts in a microtask so the caller's own
+// baseline snapshot is already in place.
+function settleSequential(s) {
+    return Promise.resolve().then(() => {
+        const before = snapshotBoardState(s);
+        return enforceSequentialLines(s).then(() => { absorbAuto(s, before); pendingRepairIds.clear(); });
+    }).catch(() => { /* board closed meanwhile */ });
+}
+function withAutoAbsorb(s, fn) {
+    const before = boardBaseline ? snapshotBoardState(s) : null;
+    try { return fn(); }
+    finally { absorbAuto(s, before); }
+}
+
 // Events whose PROJECTION was replaced in place by a confirm order — the swap
 // keeps line/start/end, so the baseline diff alone cannot see it (the baseline
 // is snapshotted after the swap has already run on load)
@@ -376,9 +408,13 @@ function finishBoardLoad(uid, data, s) {
     if (countSewingEvents(data) > 0) {
         boardUnitCache[uid].ready = true;
         boardUnitCache[uid].dirty = false;
-        setBoardBaseline(s);
-        // AFTER the baseline, so Save writes the corrected lengths
+        // Bar ends are fitted to the production schedule BEFORE the baseline:
+        // a derived figure, identical on every load — never a "change"
         autoSyncBarLengths(s);
+        setBoardBaseline(s);
+        // Load-time overlap repairs are part of that derived picture — the
+        // same on every load — so they are not force-listed as changes
+        pendingRepairIds.clear();
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
@@ -1019,7 +1055,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 if (Math.abs(end - oldEnd) < 60000) continue;
                 ev.set({ endDate : end, duration : elapsedDays(start, end) });
                 raw.end = end;
-                raw.userPinned = true;
+                if (dirty) raw.userPinned = true;
                 if (!changed.has(ev.id)) { changed.add(ev.id); end > oldEnd ? grown++ : shrunk++; }
                 if (lid === 'hold') { moved++; continue; }      // parked bars never push / ramp
                 if (end > oldEnd) pushed += pushFollowers(s, lid, ev) || 0;
@@ -1046,14 +1082,13 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
 let skipAutoBarSync = false;
 function autoSyncBarLengths(s) {
     if (!s || skipAutoBarSync) return;
-    let r;
     // finished strips (made ≥ qty) keep their bar until marked complete
     const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
-    try { r = resizeBars(s, open, { dirty : !boardReadOnly.value }); }
-    catch (e) { console.warn('[bar sync] skipped:', e.message); return; }
-    if (r.shrunk || r.grown) {
-        toast(`${r.shrunk + r.grown} bar(s) matched to the production schedule (${r.shrunk} shorter, ${r.grown} longer${r.pushed ? `, ${r.pushed} follower(s) shifted` : ''})${boardReadOnly.value ? '' : ' — Save to keep'}`, 'ok');
+    try {
+        const r = withAutoAbsorb(s, () => resizeBars(s, open, { dirty : false }));
+        if (r.shrunk || r.grown) console.info(`[bar sync] ${r.shrunk} shorter, ${r.grown} longer, ${r.pushed} follower(s) shifted — derived, not a change`);
     }
+    catch (e) { console.warn('[bar sync] skipped:', e.message); }
 }
 
 // Planning menu: every open bar at once (starts stay; Save keeps the result)
@@ -1158,6 +1193,12 @@ function applyApiBoardData(s, data) {
     let swapped = 0;
     try {
         swapped = replaceProjectionsWithConfirms(s);
+        // ORDER MATTERS: first every bar takes its real span (production cut,
+        // then end = production-schedule finish), and only THEN are overlaps
+        // looked for. Repairing on the stale saved ends pushed bars away from
+        // the point the planner had saved them at.
+        applyProdUpdates(s);
+        autoSyncBarLengths(s);
         packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
@@ -1166,10 +1207,11 @@ function applyApiBoardData(s, data) {
         toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
     }
     syncOrdersListFromBoard();
-    // Engine-settled pass (async): bars must sit strictly one after another
-    enforceSequentialLines(s);
+    // Engine-settled pass (async): bars must sit strictly one after another.
+    // Runs after the caller has taken the load baseline (microtask), and what
+    // it nudges is derived, not a planner change → absorbed into the baseline.
+    settleSequential(s);
     if (ordersOpen.value) ordersRows.value = collectOrders();
-    applyProdUpdates(s);
     recalcCapacity(s);
     scrollBoardToToday(s);
     installFrVScroll(s);
@@ -1314,9 +1356,11 @@ async function hydrateBoardFromApi() {
                     store[key][date] = (store[key][date] || 0) + (Number(r.prod_qty) || 0);
                 }
                 localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
-                applyProdUpdates(s);
-                // fresh made-qty from the DB → re-fit ends on the remaining qty
+                // fresh made-qty from the DB → production cut + ends re-fitted
+                // on the remaining qty (derived — absorbed into the baseline)
+                withAutoAbsorb(s, () => applyProdUpdates(s));
                 autoSyncBarLengths(s);
+                settleSequential(s);
                 recalcCapacity(s);
             }).catch(() => { /* endpoint offline - local data stays */ });
         }
@@ -5781,7 +5825,7 @@ function puDayPlan(s, ev, ymd) {
     if (!lid || lid === 'hold') return 0;
     try {
         const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
-        const sim = simulateStrip(s, { ...raw, made : 0 }, lid, start);
+        const sim = simulateStrip(s, { ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0 }, lid, start);
         const t = new Date(ymd + 'T00:00:00').getTime();
         return sim.days.find(x => x.date.getTime() === t)?.q || 0;
     }
@@ -5923,15 +5967,26 @@ function applyProdUpdates(s) {
             const line = LINE_BY_ID[lid];
             if (!line || made <= 0) continue;
 
+            // The bar is cut from `origStart`, where `madeBase` pieces were
+            // ALREADY cut off (0 for a bar never saved in production). A saved
+            // bar stores its cut start + madeBase, so a reload never cuts the
+            // same production twice. If someone moved the bar since the last
+            // cut (drag, push, pull-forward, compact), it re-anchors where it
+            // now stands.
+            if (raw._cutStart != null && Math.abs(ev.startDate - raw._cutStart) > 60000) {
+                raw.origStart = new Date(ev.startDate);
+                raw.madeBase  = Number(raw._cutMade ?? made) || 0;
+            }
             if (!raw.origStart) raw.origStart = new Date(ev.startDate);
+            const madeBase = Math.min(made, Math.max(0, Number(raw.madeBase) || 0));
 
             const availMin = (line.availMin || 12000) * (raw.stripEff || 100) / 100;
             const smv      = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
             const target   = Math.max(1, Math.floor(availMin / smv));
 
             const end = new Date(ev.endDate);
-            let rem = made;
-            let newStart = null;
+            let rem = made - madeBase;
+            let newStart = rem > 0 ? null : new Date(raw.origStart);
             const d = new Date(raw.origStart);
             let guard = 0;
             while (rem > 0 && guard++ < 200) {
@@ -5973,6 +6028,8 @@ function applyProdUpdates(s) {
                 raw.end   = newEnd;
                 if (grew) pushFollowers(s, lid, ev);
             }
+            raw._cutStart = ev.startDate.getTime();
+            raw._cutMade  = made;
         }
     }
     finally {
@@ -7530,7 +7587,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 

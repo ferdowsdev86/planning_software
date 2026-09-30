@@ -168,6 +168,9 @@ function eventNotesPayload(raw, onHold) {
     };
     if (Number(raw.orderQty) > 0) notes.orderQty = Number(raw.orderQty);
     if (Number(raw.baseQty) > 0)  notes.baseQty  = Number(raw.baseQty);   // ERP qty behind the plan qty
+    // Production already cut off the SAVED start — a reload must not cut it again
+    const cutMade = Number(raw._cutMade ?? raw.madeBase) || 0;
+    notes.madeBase = cutMade;       // explicit, 0 included — no server inference
     // Strip/profile efficiency edits from the properties dialog must survive
     // a reload — without them the duration formula re-runs on the old values
     // and the bar snaps back to its pre-edit length
@@ -274,6 +277,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         eventCode : e.event_code || null,
         productType : productTypeFor(e.po_number, e.product_category),
         qty, orderQty : orderQty || qty, baseQty : baseQty || undefined, pq3 : true, smv,
+        // production already cut off the saved start: explicit (saved by this
+        // version) or inferred by the server for bars saved before it
+        madeBase : noteGroup.madeBase != null ? (Number(noteGroup.madeBase) || 0)
+            : (Number(e.made_at_save) > 0 ? Number(e.made_at_save) : undefined),
         smvMissing : !(Number(e.smv) > 0) && !(Number(noteGroup.smvManual) > 0),
         smvManual  : Number(noteGroup.smvManual) > 0 ? Number(noteGroup.smvManual) : undefined,
         reqMin   : Math.round(qty * smv),

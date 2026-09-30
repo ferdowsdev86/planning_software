@@ -657,12 +657,10 @@ export function pushFollowers(scheduler, lineId, placed) {
         // start (hours / learning ramp differ by date) — bar = schedule, always
         const raw = ev.data.raw;
         if (ev.startDate?.getTime() !== ns.getTime()) {
-            const oldStart = new Date(ev.startDate);
             raw.start = ns;
             applyLineFormulaDuration(scheduler, raw, lineId);
-            // a strip in production is cut from its original start — that
-            // anchor moves with the bar, or the next refresh pulls it back
-            if (raw.origStart) raw.origStart = new Date(new Date(raw.origStart).getTime() + (ns - oldStart));
+            // (a strip in production re-anchors itself where it now stands on
+            // the next production refresh — see applyProdUpdates)
         }
         const ne = endOfWork(ns, raw.dur);
         if (ev.startDate?.getTime() !== ns.getTime() || ev.endDate?.getTime() !== ne.getTime()) {

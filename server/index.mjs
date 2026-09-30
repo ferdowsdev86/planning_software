@@ -123,7 +123,13 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                     COALESCE(o.smv, p.smv) AS smv,
                     COALESCE(o.product_category, p.product_category) AS product_category, COALESCE(o.pcd, p.pcd) AS pcd,
                     COALESCE(o.shipment_date, p.shipment_date) AS shipment_date, o.material_ready_date, o.priority,
-                    COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color
+                    COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color,
+                    /* production that already existed when this bar was last
+                       saved: a saved start is the production-CUT start, so
+                       that quantity must not be cut off again on load (used
+                       when the bar's notes carry no explicit madeBase) */
+                    (SELECT COALESCE(SUM(d.prod_qty), 0) FROM day_production_update_plan d
+                      WHERE d.event_id = e.id AND d.created_at <= e.updated_at) AS made_at_save
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
              /* saved projection bars (ev-proj:<code>[-n]) carry no order link —
@@ -2719,11 +2725,11 @@ app.post(`${BASE}/board-snapshots/:id/restore`, async (req, res) => {
                     const cols = EVENT_COLS.filter(c => c in b.row);
                     const vals = cols.map(c => b.row[c]);
                     if (cur) {
-                        await conn.query(`UPDATE planning_events SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`, [...vals, id]);
+                        await conn.query(`UPDATE planning_events SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [...vals, b.row.updated_at || snap.taken_at, id]);
                         restored++;
                     }
                     else {
-                        await conn.query(`INSERT INTO planning_events (id, ${cols.join(', ')}, updated_at) VALUES (?, ${cols.map(() => '?').join(', ')}, NOW())`, [id, ...vals]);
+                        await conn.query(`INSERT INTO planning_events (id, ${cols.join(', ')}, updated_at) VALUES (?, ${cols.map(() => '?').join(', ')}, ?)`, [id, ...vals, b.row.updated_at || snap.taken_at]);
                         recreated++;
                     }
                     if (b.row.planning_order_id) planned.add(Number(b.row.planning_order_id));
@@ -2735,8 +2741,10 @@ app.post(`${BASE}/board-snapshots/:id/restore`, async (req, res) => {
                     await conn.query(
                         `UPDATE planning_events SET start_date = ?, end_date = ?,
                                 duration = ROUND(TIMESTAMPDIFF(MINUTE, ?, ?) / 1440, 2),
-                                planned_quantity = ?, event_status = ?, updated_at = NOW() WHERE id = ?`,
-                        [`${b.start}:00`, `${b.end}:00`, `${b.start}:00`, `${b.end}:00`, Number(b.qty) || 0, b.status || 'draft', id]);
+                                planned_quantity = ?, event_status = ?,
+                                notes = JSON_REMOVE(COALESCE(NULLIF(notes, ''), '{}'), '$.madeBase'),
+                                updated_at = ? WHERE id = ?`,
+                        [`${b.start}:00`, `${b.end}:00`, `${b.start}:00`, `${b.end}:00`, Number(b.qty) || 0, b.status || 'draft', snap.taken_at, id]);
                     restored++;
                     if (cur.planning_order_id) planned.add(Number(cur.planning_order_id));
                     noteIds(cur.notes).forEach(i => planned.add(i));
