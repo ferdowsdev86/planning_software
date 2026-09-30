@@ -2473,6 +2473,7 @@ async function rsRestore() {
     try {
         const r = await restoreBoardSnapshot(b.id, authUser.value?.username || currentUser.value?.username || null);
         rsOpen.value = false;
+        bsOpen.value = false;
         toast(`♻ Board restored to ${b.snapshot_date}: ${r.restored + r.recreated} bar(s) restored${r.recreated ? ` (${r.recreated} re-created)` : ''}, ${r.cancelled} removed${r.missing?.length ? `, ${r.missing.length} could not be restored` : ''} — reloading…`, r.missing?.length ? 'warn' : 'ok');
         if (r.missing?.length) console.warn('[restore] not restorable:', r.missing);
         skipAutoBarSync = true;                // show the plan exactly as backed up
@@ -2480,6 +2481,15 @@ async function rsRestore() {
     }
     catch (e) { toast(`Restore failed: ${e.message}`, 'error'); }
     finally { rsBusy.value = false; skipAutoBarSync = false; }
+}
+
+// Reports → Board backup & compare: restore the backup chosen in the dropdown
+async function bsRestoreSelected() {
+    if (!bsSel.value) return;
+    if (view.value !== 'board' || !currentBoard.value) { toast('Open the planning board you want to restore first', 'warn'); return; }
+    rsSel.value = bsSel.value;
+    await rsRestore();
+    if (!rsBusy.value && !bsList.value.some(b => b.id === rsSel.value)) return;
 }
 
 async function bsCompare() {
@@ -9711,6 +9721,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </label>
                         <button class="cal-btn cal-btn-primary st-btn" :disabled="!bsSel || bsBusy" @click="bsCompare">🔍 Compare with current plan</button>
                         <button class="cal-btn st-btn" :disabled="bsBusy" @click="bsBackupNow">💾 Backup now</button>
+                        <button v-if="canBackupRestore" class="cal-btn st-btn rs-go" :disabled="!bsSel || bsBusy || rsBusy"
+                                title="Restore the board to the backup selected on the left" @click="bsRestoreSelected">♻️ {{ rsBusy ? 'Restoring…' : 'Restore this backup' }}</button>
                         <button class="cal-btn st-btn" :disabled="!bsResult" @click="bsPrint">🖨 Print</button>
                         <button class="cal-btn st-btn" @click="bsOpen = false">Close</button>
                     </div>
@@ -11022,7 +11034,8 @@ body {
 .rs-field > span { flex : 0 0 140px; font-weight : 600; color : #17356b; }
 .rs-select { flex : 1 1 auto; min-width : 0; height : 28px; }
 .rs-info { background : #eef4ff; border : 1px solid #c5d4ea; border-radius : 5px; padding : 7px 10px; font-size : 12px; }
-.rs-go { background : #b45309 !important; border-color : #92400e !important; }
+.rs-go { background : #b45309 !important; border-color : #92400e !important; color : #fff !important; }
+.rs-go:disabled { opacity : .45; }
 .ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }
 .pu-filter-row th { padding : 2px 3px !important; background : #f4f6fb !important; }
 .pu-filter { width : 100%; min-width : 0; box-sizing : border-box; font-size : 11px; padding : 2px 4px; height : 22px; }
