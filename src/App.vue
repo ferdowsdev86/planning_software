@@ -209,6 +209,23 @@ function setBoardBaseline(s) {
     boardBaseline = snapshotBoardState(s);
 }
 
+// Positions exactly as the DB stores them (taken right after the raw board
+// data is loaded, before production cut / end fit / pushes). The screen shows
+// the DERIVED picture; Save writes every bar whose on-screen position differs
+// from what the DB holds — not only the planner's own changes — so the DB is
+// always the picture that was on screen. Otherwise the server (overlap check
+// at save, reports, backups) works on stale neighbours and shifts saved bars.
+let boardDbState = null;
+function derivedUnsavedIds(s) {
+    if (!boardDbState) return [];
+    const now = snapshotBoardState(s);
+    return Object.keys(now).filter(id => {
+        if (!String(id).startsWith('db-')) return false;      // new bars are user changes already
+        const d = boardDbState[id], n = now[id];
+        return d && (d.line !== n.line || d.start !== n.start || d.end !== n.end || d.qty !== n.qty);
+    });
+}
+
 // Automatic adjustments made while a board loads (bar ends fitted to the
 // production schedule, production cut, followers pushed by those) are NOT the
 // planner's changes: they are re-derived identically on every load, so they
@@ -1208,6 +1225,7 @@ function applyApiBoardData(s, data) {
             resourceTimeRanges : data.resourceTimeRanges
         });
     });
+    boardDbState = snapshotBoardState(s);
     unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
     currentUnitId.value = data.unitId || currentBoard.value?.unitId || null;
     syncProfileDefaultsFromLines(data.resources);
@@ -7630,7 +7648,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -7775,12 +7793,15 @@ async function saveToDbInner(s) {
     }
     if (!window.confirm(formatSaveConfirm(changes))) return;
     toast(`Saving ${changes.length} change(s)…`, 'ok');
-    const eventIds = changes.map(c => c.eventId).filter(Boolean);
-    for (const id of eventIds) {
+    const userIds = changes.map(c => c.eventId).filter(Boolean).map(String);
+    for (const id of userIds) {
         const ev = s.eventStore.getById(id);
         const raw = ev?.data?.raw;
         if (raw && !raw.stage) raw.userPinned = true;
     }
+    // …plus the bars the board itself re-fitted / pushed (shown, never yet
+    // written): the DB must hold the whole picture that is on screen
+    const eventIds = [...new Set([...userIds, ...derivedUnsavedIds(s)])];
     const missingLine = eventIds.filter(id => {
         const ev = s.eventStore.getById(id);
         if (!ev) return false;
@@ -7817,9 +7838,17 @@ async function saveToDbInner(s) {
             }
             markBoardSaved();
             setBoardBaseline(s);
+            boardDbState = snapshotBoardState(s);
             pendingSwapIds.clear();
             pendingRepairIds.clear();
-            toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'})`, 'ok');
+            const synced = eventIds.length - userIds.length;
+            toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
+            // The server moved something it found overlapping (another planner's
+            // bar saved meanwhile) — show what is really stored
+            if (res.adjusted?.length) {
+                toast(`⚠ ${res.adjusted.length} bar(s) were shifted by the server to avoid an overlap — reloading the saved plan`, 'warn');
+                await reloadBoardForUnit(currentBoard.value, { force : true });
+            }
         }
         else toast(`Save failed: ${res.error}`, 'error');
     }
