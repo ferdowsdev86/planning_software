@@ -2100,9 +2100,12 @@ function nextDayStartAfter(end) {
     return ns >= workEndOfDay(ns) ? startOfNextWorkDay(ns) : ns;
 }
 
-// Completed / production-started bars are fixed anchors — never pulled
+// Only COMPLETED bars are fixed anchors. A bar whose production has started
+// is pulled like any other (its remaining quantity simply continues from the
+// earlier point) — left fixed, it kept a gap in front of it that nothing
+// could close.
 function pfIsFixed(ev, raw) {
-    return raw.status === 'completed' || (Number(ev.percentDone) || 0) > 0;
+    return raw.status === 'completed';
 }
 
 function computePullForward() {
@@ -9789,8 +9792,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
                     <div class="st-hint">
                         প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
-                        কোনো bar কখনো পরে যায় না, line/sequence/duration বদলায় না · completed/production-started bar
-                        fixed anchor · Save and Apply = সরানোর পর সাথে সাথে DB-তে save হয়
+                        কোনো bar কখনো পরে যায় না, line/sequence বদলায় না · শুধু completed bar স্থির থাকে
+                        (production চলা bar-ও টেনে আনা হয়) · Save and Apply = সরানোর পর সাথে সাথে DB-তে save হয়
                     </div>
                 </div>
             </div>
