@@ -5099,8 +5099,10 @@ function overlayBoardPlacements(rows) {
             confirmBars.push({
                 ev, lid,
                 order : String(raw.mbmOrder || '').trim(),
+                color : String(raw.color || '').trim().toLowerCase(),
                 pos   : new Set((raw.poList || []).map(String).concat(raw.po ? [String(raw.po)] : [])),
-                ids   : new Set((raw.idList || []).map(String))
+                // PO-row ids this bar carries: its colour group, or its single PO
+                ids   : new Set((raw.idList || []).map(String).concat(raw.dbId != null ? [String(raw.dbId)] : []))
             });
         }
         else if (pid.startsWith('proj:')) byProj.set(pid.slice(5), ev);
@@ -5118,12 +5120,22 @@ function overlayBoardPlacements(rows) {
         if (r.orderType === 'confirm') {
             const cands = confirmByOrder.get(String(r.mbmOrder)) || [];
             const rowPos = (r.poList || []).map(String).concat(r.po ? [String(r.po)] : []);
-            const hit = cands.find(c => rowPos.some(p => c.pos.has(p)))
-                || cands.find(c => (r.poDetails || []).some(d => c.ids.has(String(d.id))));
-            if (!hit) continue;
-            r.line  = lineName(hit.lid);
-            r.start = hit.ev.startDate ? new Date(hit.ev.startDate) : r.start;
-            r.end   = hit.ev.endDate   ? new Date(hit.ev.endDate)   : r.end;
+            const rowIds = (r.poDetails || []).map(d => String(d.id)).filter(Boolean);
+            const rowClr = String(r.garmentColor || r.color || '').trim().toLowerCase();
+            // One PO number can carry several COLOURS, each planned as its own
+            // bar on its own line — a PO-number match alone put every row of
+            // the order on the first bar's line. Match the row's own PO-row
+            // ids first, then PO number + colour, and only then PO number.
+            let hits = rowIds.length ? cands.filter(c => rowIds.some(id => c.ids.has(id))) : [];
+            if (!hits.length && rowClr) hits = cands.filter(c => c.color === rowClr && rowPos.some(p => c.pos.has(p)));
+            if (!hits.length) hits = cands.filter(c => rowPos.some(p => c.pos.has(p))).slice(0, 1);
+            if (!hits.length) continue;
+            // A colour group split over several strips / lines: every line it
+            // runs on, from its first start to its last end
+            hits.sort((a, b) => a.ev.startDate - b.ev.startDate);
+            r.line  = [...new Set(hits.map(h => lineName(h.lid)))].join(', ');
+            r.start = new Date(Math.min(...hits.map(h => +h.ev.startDate)));
+            r.end   = new Date(Math.max(...hits.map(h => +h.ev.endDate)));
             if (r.status !== 'completed') { r.status = 'planned'; r.planned = true; r.replaced = false; }
             continue;
         }
