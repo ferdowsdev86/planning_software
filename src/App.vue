@@ -138,6 +138,35 @@ function markBoardDirty() {
     const uid = currentUnitId.value;
     if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = true;
     syncOrdersListFromBoard();
+    scheduleBoardSettle();
+}
+
+// After ANY edit the whole board is brought back to the production model
+// right away: a move changes which bars carry a learning-curve ramp, and a
+// bar whose ramp changed gets its real end (pushing its followers) NOW —
+// while the planner is looking — instead of silently on the next reload.
+// What you plan is exactly what a reload shows.
+let settleTimer = null, boardSettling = false, loadQuietUntil = 0;
+function scheduleBoardSettle() {
+    if (boardSettling) return;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+        const s = getInstance();
+        if (!s || boardSettling || carried.value || skipAutoBarSync) return;
+        // Still inside a board load (a load-time swap marks the board dirty):
+        // whatever is re-fitted now is derived, not the planner's change
+        if (Date.now() < loadQuietUntil) { autoSyncBarLengths(s); return; }
+        boardSettling = true;
+        try {
+            const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
+            const r = resizeBars(s, open, { dirty : true });
+            if (r.grown || r.pushed) {
+                toast(`${r.grown + r.shrunk} bar(s) re-fitted to the production schedule${r.pushed ? `, ${r.pushed} follower(s) shifted later` : ''}`, 'ok');
+            }
+        }
+        catch (e) { console.warn('[board settle] skipped:', e.message); }
+        finally { boardSettling = false; }
+    }, 80);
 }
 
 function markBoardSaved() {
@@ -203,7 +232,12 @@ function absorbAuto(s, before) {
 function settleSequential(s) {
     return Promise.resolve().then(() => {
         const before = snapshotBoardState(s);
-        return enforceSequentialLines(s).then(() => { absorbAuto(s, before); pendingRepairIds.clear(); });
+        return enforceSequentialLines(s).then(() => {
+            absorbAuto(s, before);
+            pendingRepairIds.clear();
+            // a nudged bar's end is re-fitted at its new start (derived too)
+            autoSyncBarLengths(s);
+        });
     }).catch(() => { /* board closed meanwhile */ });
 }
 function withAutoAbsorb(s, fn) {
@@ -412,6 +446,7 @@ function finishBoardLoad(uid, data, s) {
         // a derived figure, identical on every load — never a "change"
         autoSyncBarLengths(s);
         setBoardBaseline(s);
+        loadQuietUntil = Date.now() + 3000;
         // Load-time overlap repairs are part of that derived picture — the
         // same on every load — so they are not force-listed as changes
         pendingRepairIds.clear();
@@ -1248,6 +1283,30 @@ function scheduleBackgroundPlan(s) {
     requestAnimationFrame(() => ensureBoardPlanned(s));
 }
 
+// The made-qty of every bar, fresh from the DB, BEFORE a board is laid out.
+// Laying bars out on the browser's cached (older) figures made a strip in
+// production look longer than it is; it pushed its followers later, and when
+// the real figures arrived a few seconds later the strip shrank back but the
+// pushed bars stayed where they had been pushed — a reload showed the plan
+// days later than it was saved (and the period totals dropped).
+async function refreshProdStoreFromDb() {
+    try {
+        const rows = await loadProdUpdatesDb();
+        // ERP rows of a projection bar come per PO as "db-<id>:po<po_id>" —
+        // summed onto the bar ("db-<id>")
+        const store = {};
+        for (const r of rows) {
+            const key  = String(r.event_ref).split(':po')[0];
+            const date = String(r.save_date).slice(0, 10);
+            if (!store[key]) store[key] = {};
+            store[key][date] = (store[key][date] || 0) + (Number(r.prod_qty) || 0);
+        }
+        localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+        return true;
+    }
+    catch { return false; }   // endpoint offline — the cached figures stay
+}
+
 async function reloadBoardForUnit(b, { force = false } = {}) {
     const s = getInstance();
     if (!s || !b) return;
@@ -1290,6 +1349,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
             unitName           : data.unitName
         });
         try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
+        await refreshProdStoreFromDb();
         applyApiBoardData(s, boardUnitCache[uid].apiData);
         apiReady.value = true;
         applyBoardFilter();
@@ -1338,31 +1398,14 @@ async function hydrateBoardFromApi() {
             // Changed working hours per date are shared through the DB — every
             // planner / machine sizes bars on the same calendar
             await syncCalendarOverrides();
+            // Production figures first — bars are laid out ONCE, on real data
+            await refreshProdStoreFromDb();
             applyApiBoardData(s, boardUnitCache[unitId].apiData);
             apiReady.value = true;
             setBoardLoad(false);
             finishBoardLoad(unitId, data, s);
             setTimeout(() => syncMasterData(s), 3000);
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
-
-            loadProdUpdatesDb().then(rows => {
-                // Rebuild from the DB: ERP rows of a projection bar come per PO
-                // as "db-<id>:po<po_id>" — sum them onto the bar ("db-<id>")
-                const store = {};
-                for (const r of rows) {
-                    const key  = String(r.event_ref).split(':po')[0];
-                    const date = String(r.save_date).slice(0, 10);
-                    if (!store[key]) store[key] = {};
-                    store[key][date] = (store[key][date] || 0) + (Number(r.prod_qty) || 0);
-                }
-                localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
-                // fresh made-qty from the DB → production cut + ends re-fitted
-                // on the remaining qty (derived — absorbed into the baseline)
-                withAutoAbsorb(s, () => applyProdUpdates(s));
-                autoSyncBarLengths(s);
-                settleSequential(s);
-                recalcCapacity(s);
-            }).catch(() => { /* endpoint offline - local data stays */ });
         }
         catch (err) {
             dataSource.value = 'demo';
@@ -7587,7 +7630,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
