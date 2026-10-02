@@ -1224,6 +1224,13 @@ export async function syncToApi(scheduler, { eventIds = null } = {}) {
             // Replacement stage: confirm orders take their projection's slot
             // on the board, so confirm blocks are now authorized
             allowConfirmPlanning : true,
+            // Every DB bar on THIS board: the server's overlap check may only
+            // treat these as obstacles (bars the board hides are not there
+            // as far as the planner is concerned)
+            visibleIds : scheduler.eventStore.records
+                .filter(e => e.data?.raw && !e.data.raw.stage)
+                .map(e => e.data.dbId ?? (String(e.id).startsWith('db-') ? Number(String(e.id).slice(3)) : null))
+                .filter(v => v != null),
             events    : { updated, added, removed }
         })
     });

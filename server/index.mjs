@@ -405,9 +405,18 @@ async function upsertEventAssignment(conn, eventId, ev) {
     }
     if (ev.onHold) {
         await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [eventId]);
+        // Keep the bar's own notes (PO group idList / poList, plan-qty flag,
+        // base qty …) — writing only {parked:true} turned a parked colour
+        // group into a single-PO bar with that one PO's quantity
+        let notes = { parked : true };
+        try {
+            const n = typeof ev.notes === 'string' ? JSON.parse(ev.notes) : ev.notes;
+            if (n && typeof n === 'object') notes = { ...n, parked : true };
+        }
+        catch { /* malformed notes — plain parked flag */ }
         await conn.query(
             `UPDATE planning_events SET notes = ?, updated_at = NOW() WHERE id = ?`,
-            [JSON.stringify({ parked : true }), eventId]
+            [JSON.stringify(notes), eventId]
         );
         if (ev.orderId) {
             await conn.query(
@@ -501,7 +510,12 @@ async function upsertPlanningEvent(conn, projectId, ev) {
 // right after the conflicting bar — the saved bar is never moved. Duration is
 // preserved (calendar shift). Events in the same batch are skipped: their own
 // incoming positions are already client-validated and about to be written.
-async function shiftIfOverlapping(conn, projectId, ev, batchIds) {
+// `visibleIds` (when the client sends it) = every DB bar that is on the saving
+// planner's board. Bars the board does not show — events of completed orders
+// the board hides, projection strips already replaced by their confirm order —
+// still sit on the line in the DB; counting them as obstacles threw a freshly
+// placed bar weeks or months later on Save.
+async function shiftIfOverlapping(conn, projectId, ev, batchIds, visibleIds = null) {
     if (!ev || ev.onHold || !ev.resourceId || !ev.startDate || !ev.endDate) return null;
     let start = new Date(ev.startDate);
     let end   = new Date(ev.endDate);
@@ -515,11 +529,12 @@ async function shiftIfOverlapping(conn, projectId, ev, batchIds) {
              WHERE a.resource_id = ? AND e.project_id = ?
                AND e.event_status != 'cancelled'
                AND e.start_date < ? AND e.end_date > ?
-             ORDER BY e.end_date DESC LIMIT 10`,
+             ORDER BY e.end_date DESC LIMIT 200`,
             [ev.resourceId, projectId, end, start]
         );
         const hit = rows.find(r =>
-            String(r.id) !== String(ev.id ?? '') && !batchIds.has(String(r.id)));
+            String(r.id) !== String(ev.id ?? '') && !batchIds.has(String(r.id))
+            && (!visibleIds || visibleIds.has(String(r.id))));
         if (!hit) break;
         start = new Date(hit.end_date);
         end   = new Date(start.getTime() + durMs);
@@ -534,6 +549,7 @@ async function shiftIfOverlapping(conn, projectId, ev, batchIds) {
 app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     const projectId = Number(req.params.id);
     const { events = {}, requestId = null, allowConfirmPlanning = false } = req.body || {};
+    const visibleIds = Array.isArray(req.body?.visibleIds) ? new Set(req.body.visibleIds.map(String)) : null;
 
     // Initial projection-planning stage: NEW board blocks for Confirm Orders
     // (rows carrying a planning_orders orderId) are rejected at backend level.
@@ -568,7 +584,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
         ]);
         const adjusted = [];
         for (const ev of [...(events.updated || []), ...(events.added || [])]) {
-            const adj = await shiftIfOverlapping(conn, projectId, ev, batchIds);
+            const adj = await shiftIfOverlapping(conn, projectId, ev, batchIds, visibleIds);
             if (adj) adjusted.push(adj);
         }
 
