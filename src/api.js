@@ -772,7 +772,13 @@ export async function loadUnplannedDbPaged(firstLimit, onBatch, unitId = null) {
 // Load scheduler data + unplanned orders and map them to the shapes the
 // board uses (see AppConfig.js / planningData.js)
 // unitId — when set, only resources/events/orders for that unit are returned
+// Saved bars the last board load could NOT show (their order has no buyer).
+// The board hands them to the next Save, which cancels them — the DB keeps no
+// live bar that is not on the screen.
+export const skippedDbEvents = [];
+
 export async function loadFromApi(unitId = null) {
+    skippedDbEvents.length = 0;
     const unitQ = unitId ? `?unit_id=${unitId}` : '';
     const data = await get(`/projects/1/scheduler-data${unitQ}`);
     if (!data.success) throw new Error(data.error || 'load failed');
@@ -867,7 +873,10 @@ export async function loadFromApi(unitId = null) {
             || (isProjEvent && String(e.event_name || '').trim());
 
         // Sewing orders with no buyer stay off the list and off the board
-        if (!isStage && !hasBuyer) continue;
+        if (!isStage && !hasBuyer) {
+            skippedDbEvents.push({ id : e.id, name : e.event_name || e.event_code || `bar ${e.id}` });
+            continue;
+        }
 
         const parked = eventParked(e.notes);
         const unassigned = !known;
@@ -1211,7 +1220,11 @@ export async function syncToApi(scheduler, { eventIds = null } = {}) {
     }
     // Strips merged back into their order (or otherwise dropped from the
     // board) must be cancelled in the DB or they resurrect on reload
-    const removed = [...removedDbEventIds].map(id => ({ id }));
+    // — and never a bar that is on the screen (a removal noted before a
+    // reload brought the bar back must not delete it now)
+    const removed = [...removedDbEventIds]
+        .filter(id => !scheduler.eventStore.getById(`db-${id}`))
+        .map(id => ({ id }));
     // A dead connection must fail fast with a clear error, not hang the save
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);

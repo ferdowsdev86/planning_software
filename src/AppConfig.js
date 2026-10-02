@@ -1607,6 +1607,11 @@ export const schedulerProConfig = {
     // scroll already does). Presses on bars are excluded via onBeforePan.
     panFeature                : true,
 
+    // A bar leaves the board only through the app's own flows (hold, merge,
+    // mark complete, confirm replacement) — never by a stray Delete/Backspace
+    // on a selected bar
+    enableDeleteKey : false,
+
     // FastReact-style strip context menu (right-click on a bar)
     eventMenuFeature : {
         items : {

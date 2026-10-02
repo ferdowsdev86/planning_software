@@ -24,7 +24,8 @@ import {
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
-    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb
+    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
+    skippedDbEvents
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -216,6 +217,24 @@ function setBoardBaseline(s) {
 // always the picture that was on screen. Otherwise the server (overlap check
 // at save, reports, backups) works on stale neighbours and shifts saved bars.
 let boardDbState = null;
+// …and the other half of the same rule: a bar the DB holds that is NOT on the
+// screen any more (a projection strip its confirm order replaced, a bar whose
+// order lost its data, a merged strip) is cancelled by the next Save. Left
+// live, such an invisible bar keeps its line slot in the DB and pushes the
+// planner's bars on a later load.
+function goneDbBars(s) {
+    const out = [];
+    if (!s) return out;
+    for (const [id, was] of Object.entries(boardDbState || {})) {
+        // '-sp' ids are split pieces created in this session — no DB row of their own
+        if (!id.startsWith('db-') || id.includes('-sp')) continue;
+        if (!s.eventStore.getById(id)) out.push({ id, dbId : Number(id.slice(3)), po : was.po, name : was.name, lineName : was.lineName });
+    }
+    for (const k of skippedDbEvents) {
+        if (!s.eventStore.getById(`db-${k.id}`)) out.push({ id : `db-${k.id}`, dbId : Number(k.id), po : '', name : k.name, lineName : '—' });
+    }
+    return out.filter(g => g.dbId > 0);
+}
 function derivedUnsavedIds(s) {
     if (!boardDbState) return [];
     const now = snapshotBoardState(s);
@@ -371,6 +390,12 @@ function collectPendingChanges(s) {
             });
         }
     }
+    // DB bars that left the screen without being a planner's own removal
+    const listed = new Set(changes.map(c => String(c.eventId)));
+    for (const g of goneDbBars(s)) {
+        if (listed.has(g.id)) continue;
+        changes.push({ eventId : g.id, type : 'retired', po : g.po, name : g.name, fromLine : g.lineName, toLine : '—' });
+    }
     return changes;
 }
 
@@ -382,6 +407,7 @@ function formatSaveConfirm(changes) {
     const lines = shown.map(ch => {
         const label = ch.po || ch.name || 'Order';
         if (ch.type === 'removed') return `• ${label}: removed from ${ch.fromLine}`;
+        if (ch.type === 'retired') return `• ${label}: hidden bar (not on the board) removed from the saved plan — ${ch.fromLine}`;
         if (ch.type === 'new') return `• ${label}: placed on ${ch.toLine}`;
         if (ch.type === 'rescheduled') return `• ${label}: rescheduled on ${ch.toLine}`;
         if (ch.type === 'replaced') return `• ${label}: confirm order replaced its projection on ${ch.toLine}`;
@@ -1212,6 +1238,9 @@ let boardLoadedUnitId = null;
 
 function applyApiBoardData(s, data) {
     boardLoadedUnitId = data.unitId || null;
+    // The board is rebuilt from the DB: a removal noted on the previous
+    // picture but never saved is void — its bar is back on the screen
+    removedDbEventIds.clear();
     clearDayPlanChips();
     // Every board open (fresh or cached) refreshes the shared efficiency
     // profiles from the DB; bars re-render once they arrive
@@ -4655,6 +4684,7 @@ async function saveMarkedComplete() {
             }
             // Persist the removals (cancels the events server-side)
             await syncToApi(s, { eventIds : [] });
+            if (boardDbState) for (const ev of drop) delete boardDbState[String(ev.id)];
             setBoardBaseline(s);
             recalcCapacity(s);
             touchBoardCache(s);
@@ -7858,6 +7888,8 @@ async function saveToDbInner(s) {
     // …plus the bars the board itself re-fitted / pushed (shown, never yet
     // written): the DB must hold the whole picture that is on screen
     const eventIds = [...new Set([...userIds, ...derivedUnsavedIds(s)])];
+    // …and nothing the screen no longer shows stays live in the DB
+    for (const g of goneDbBars(s)) removedDbEventIds.add(g.dbId);
     const missingLine = eventIds.filter(id => {
         const ev = s.eventStore.getById(id);
         if (!ev) return false;
@@ -7895,6 +7927,7 @@ async function saveToDbInner(s) {
             markBoardSaved();
             setBoardBaseline(s);
             boardDbState = snapshotBoardState(s);
+            skippedDbEvents.length = 0;
             pendingSwapIds.clear();
             pendingRepairIds.clear();
             const synced = eventIds.length - userIds.length;

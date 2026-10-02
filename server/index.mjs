@@ -652,7 +652,13 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
         }
 
         for (const ev of events.removed || []) {
+            const [[gone]] = await conn.query('SELECT planning_order_id, notes FROM planning_events WHERE id = ?', [ev.id]);
             await conn.query("UPDATE planning_events SET event_status = 'cancelled', updated_at = NOW() WHERE id = ?", [ev.id]);
+            if (gone) {
+                let ng = {};
+                try { ng = JSON.parse(gone.notes || '{}') || {}; } catch { /* no group */ }
+                await releaseOrderRows(conn, [gone.planning_order_id, ...(Array.isArray(ng.idList) ? ng.idList : [])]);
+            }
             await conn.query(
                 `INSERT INTO planning_change_logs (project_id, event_id, action_type, changed_by, changed_at, ip_address)
                  VALUES (?, ?, 'remove', 1, NOW(), ?)`,
@@ -1181,6 +1187,8 @@ app.post(`${BASE}/orders/complete`, async (req, res) => {
             await conn.query(
                 `UPDATE planning_orders SET planning_status = 'completed', updated_at = NOW()
                  WHERE order_code IN (${codes.map(() => '?').join(',')})`, codes);
+            // …and its bars leave the plan with it (not only the screen)
+            await retireHiddenEvents(conn, 'order complete');
             await conn.commit();
             conn.release();
             return res.json({ success : true, completed : codes.length });
@@ -1234,6 +1242,131 @@ async function completedOrderCodes() {
     const [rows] = await pool.query('SELECT order_code FROM planning_completed_orders');
     return new Set(rows.map(r => r.order_code));
 }
+
+// --------------------------------------------------------------------------
+// RULE: the DB keeps no live bar that the board does not show.
+// The board hides a bar when its order was marked complete, is unknown to
+// ERP, lost its order row, or now belongs to another production unit than the
+// line it sits on. Hidden-but-live bars kept occupying their line: overlap
+// checks, backups and the next reload worked on bars nobody could see or move.
+// findHiddenEvents lists them (read only); retireHiddenEvents cancels them —
+// soft (event_status), with a change-log row — and returns their PO rows to
+// the unplanned pool.
+// --------------------------------------------------------------------------
+async function findHiddenEvents(conn) {
+    const [rows] = await conn.query(`
+        SELECT e.id, e.project_id, e.event_code, e.planning_order_id, e.notes,
+               e.start_date, e.end_date, e.planned_quantity,
+               o.id AS o_id, o.order_code, COALESCE(o.prod_unit, o.unit_id) AS order_unit,
+               r.unit_id AS line_unit, r.resource_name
+        FROM planning_events e
+        LEFT JOIN planning_orders o ON o.id = e.planning_order_id
+        LEFT JOIN planning_assignments a ON a.event_id = e.id
+        LEFT JOIN planning_resources r ON r.id = a.resource_id
+        WHERE e.event_status != 'cancelled'
+          AND (e.production_stage IS NULL OR e.production_stage = 'sewing')`);
+    const events = [...new Map(rows.map(r => [r.id, r])).values()];
+    const codeOf = e => e.order_code
+        || (String(e.event_code || '').startsWith('ev-proj:')
+            ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+
+    const [comp] = await conn.query('SELECT order_code FROM planning_completed_orders');
+    const completed = new Set(comp.map(r => r.order_code));
+
+    // Projection bars without an order link: known to ERP / OS by order code.
+    // An ERP lookup that fails or finds nothing proves nothing — skip the check.
+    const projCodes = [...new Set(events.filter(e => e.planning_order_id == null).map(codeOf).filter(Boolean))];
+    let known = null;
+    if (projCodes.length) {
+        try {
+            const ph = projCodes.map(() => '?').join(',');
+            const [erp] = await conn.query(
+                `SELECT DISTINCT order_code FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph})`, projCodes);
+            const [os] = await conn.query(
+                `SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, projCodes);
+            const set = new Set([...erp.map(r => r.order_code), ...os.map(r => r.os_order_code)]);
+            if (set.size) known = set;
+        }
+        catch (e) { console.warn(`[board-hygiene] ERP lookup skipped: ${e.message}`); }
+    }
+
+    // A line's unit hosts its own orders. Only where that clearly holds is a
+    // bar of ANOTHER unit's order a leftover (the order was moved in ERP) —
+    // a deployment whose lines are stored under a legacy unit is left alone.
+    const own = new Map(), foreign = new Map();
+    for (const e of events) {
+        if (e.o_id == null || e.line_unit == null || e.order_unit == null) continue;
+        const m = Number(e.order_unit) === Number(e.line_unit) ? own : foreign;
+        m.set(e.line_unit, (m.get(e.line_unit) || 0) + 1);
+    }
+    const unitRuleOn = u => (own.get(u) || 0) > (foreign.get(u) || 0);
+
+    const hidden = [];
+    for (const e of events) {
+        const code = codeOf(e);
+        let reason = null;
+        if (code && completed.has(code)) reason = 'order marked complete';
+        else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
+        else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
+        else if (e.o_id != null && e.line_unit != null && e.order_unit != null
+            && Number(e.order_unit) !== Number(e.line_unit) && unitRuleOn(e.line_unit)) {
+            reason = `order moved to production unit ${e.order_unit} (line belongs to unit ${e.line_unit})`;
+        }
+        if (reason) hidden.push({ ...e, order_code : code, reason });
+    }
+    return hidden;
+}
+
+// PO rows of cancelled bars go back to the unplanned pool — unless another
+// live bar still carries them (as its anchor or inside its PO group)
+async function releaseOrderRows(conn, ids) {
+    const list = [...new Set(ids.map(Number).filter(Boolean))];
+    if (!list.length) return;
+    await conn.query(
+        `UPDATE planning_orders po
+            SET po.planning_status = 'unplanned', po.updated_at = NOW()
+          WHERE po.id IN (${list.map(() => '?').join(',')})
+            AND po.planning_status IN ('fully_planned', 'partially_planned')
+            AND NOT EXISTS (
+                SELECT 1 FROM planning_events e
+                 WHERE e.event_status != 'cancelled'
+                   AND (e.planning_order_id = po.id OR e.notes LIKE CONCAT('%', po.id, '%')))`,
+        list);
+}
+
+async function retireHiddenEvents(conn, tag = 'sync') {
+    const hidden = await findHiddenEvents(conn);
+    for (const e of hidden) {
+        await conn.query(
+            "UPDATE planning_events SET event_status = 'cancelled', updated_at = NOW() WHERE id = ?", [e.id]);
+        await conn.query(
+            `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, reason, changed_by, changed_at)
+             VALUES (?, ?, 'remove', ?, ?, 1, NOW())`,
+            [e.project_id, e.id,
+                JSON.stringify({ line : e.resource_name, start_date : e.start_date, end_date : e.end_date,
+                    planned_quantity : e.planned_quantity, order_code : e.order_code }),
+                `hidden bar retired (${tag}): ${e.reason}`]);
+        let ng = {};
+        try { ng = JSON.parse(e.notes || '{}') || {}; } catch { /* no group */ }
+        await releaseOrderRows(conn, [e.planning_order_id, ...(Array.isArray(ng.idList) ? ng.idList : [])]);
+    }
+    if (hidden.length) {
+        console.log(`[board-hygiene] ${tag}: retired ${hidden.length} hidden bar(s) — `
+            + hidden.map(e => `${e.id} ${e.order_code || e.event_code} on ${e.resource_name || 'no line'} (${e.reason})`).join('; '));
+    }
+    return hidden;
+}
+
+// What the rule above would retire right now — read only
+app.get(`${BASE}/board-hygiene`, async (req, res) => {
+    try {
+        const hidden = await findHiddenEvents(pool);
+        res.json({ success : true, count : hidden.length,
+            hidden : hidden.map(e => ({ id : e.id, order : e.order_code, eventCode : e.event_code, line : e.resource_name,
+                start : e.start_date, end : e.end_date, qty : Number(e.planned_quantity) || 0, reason : e.reason })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
 
 // --------------------------------------------------------------------------
 // Projected orders for the initial Planning Board (projection-only stage).
@@ -2420,6 +2553,11 @@ async function runAutoSync() {
             `, params);
             synced += chunk.length;
         }
+
+        // Orders that left this unit / ERP in this sync take their bars along
+        // (before the status pass below, so their rows read unplanned at once)
+        try { await retireHiddenEvents(conn, 'ERP sync'); }
+        catch (e) { console.warn(`[board-hygiene] skipped: ${e.message}`); }
 
         // Projection row status follows its board bar (ev-proj event), the
         // same way confirm rows follow their anchored events
