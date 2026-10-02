@@ -1238,7 +1238,9 @@ function applyApiBoardData(s, data) {
     if (data.calendarDays) {
         Object.assign(calendarState.days, data.calendarDays);
         if (data.calendarName) calendarState.name = data.calendarName;
-        applyCalendarToBoard();
+        // No overlap repair here: the board is not ready for it yet (see the
+        // ORDER MATTERS note below) — packBoardGaps runs once, further down
+        applyCalendarToBoard({ pack : false });
     }
     removeOrdersWithoutBuyer(s);
     expandTimeAxisForEvents(s);
@@ -7469,7 +7471,11 @@ const totalHours = () => {
 
 // Push the configured calendar onto the board: off-day hatching, event
 // rescheduling, line capacity and the day-wise manpower band
-function applyCalendarToBoard() {
+// pack:false while a board is LOADING. Repairing overlaps at that point runs on
+// the raw DB rows: a projection strip that its confirm order has already
+// replaced is still in the store, so it pushed the planner's saved bars later
+// and then vanished — the bar came back days after the point it was saved at.
+function applyCalendarToBoard({ pack = true } = {}) {
     calendarState.offDays = new Set(
         Object.keys(calendarState.days)
             .filter(d => hmToHours(calendarState.days[d].hours) <= 0)
@@ -7576,9 +7582,11 @@ function applyCalendarToBoard() {
         toast(`${reflowed} order bar(s) rescheduled around the off days`, 'ok');
     }
 
-    beginBoardInteraction(s, 'batch');
-    try { packBoardGaps(s); }
-    finally { endBoardInteraction(s); }
+    if (pack) {
+        beginBoardInteraction(s, 'batch');
+        try { packBoardGaps(s); }
+        finally { endBoardInteraction(s); }
+    }
 
     recalcCapacity(s);
     s.refreshWithTransition?.();
