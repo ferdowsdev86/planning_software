@@ -2070,6 +2070,9 @@ const pfScope = ref('entire');          // 'entire' | 'range'
 const pfFrom  = ref(isoInputDate(new Date()));
 const pfTo    = ref(isoInputDate(addCalDays(new Date(), 30)));
 const pfPrev  = shallowRef(null);       // preview { summary, changes }
+// Line scope: 'all' or one sewing line id — only that line's gaps are closed
+const pfLine     = ref('all');
+const pfLineList = ref([]);              // [{ id, name }] filled when the dialog opens
 
 const pfRangeValid = computed(() =>
     pfScope.value !== 'range'
@@ -2081,6 +2084,11 @@ function openPullForward() {
         return;
     }
     pfPrev.value = null;
+    const s = getInstance();
+    pfLineList.value = (s?.resourceStore.records || [])
+        .filter(r => r.data?.lineRow || LINE_BY_ID[r.id])
+        .map(r => ({ id : r.id, name : r.data?.name || r.name || r.id }));
+    if (pfLine.value !== 'all' && !pfLineList.value.some(l => l.id === pfLine.value)) pfLine.value = 'all';
     pfOpen.value = true;
 }
 
@@ -2107,6 +2115,8 @@ function computePullForward() {
     let unchanged = 0, skipped = 0;
     for (const res of s.resourceStore.records) {
         if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+        // Line scope: one chosen line, or every line
+        if (pfLine.value !== 'all' && res.id !== pfLine.value) continue;
         const bars = s.eventStore.records
             .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
             .sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
@@ -2202,6 +2212,7 @@ function applyPullForward() {
         oldStart : c.oldStart.toISOString(), newStart : c.newStart.toISOString(),
         oldEnd : c.oldEnd.toISOString(), newEnd : c.newEnd.toISOString(),
         scope : pfScope.value,
+        lineScope : pfLine.value === 'all' ? 'all lines' : (pfLineList.value.find(l => l.id === pfLine.value)?.name || pfLine.value),
         from : pfScope.value === 'range' ? pfFrom.value : null,
         to   : pfScope.value === 'range' ? pfTo.value : null,
         user : authUser.value?.username, at : new Date().toISOString()
@@ -7650,7 +7661,7 @@ onMounted(() => {
     // Dev-console access for diagnostics
     window.__mbm = { save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
-        pf  : { open : openPullForward, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
+        pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
     const s = getInstance();
     uiHooks.instance = s;
@@ -9713,6 +9724,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label>To <input type="date" v-model="pfTo" :disabled="pfScope !== 'range'"></label>
                             <div v-if="!pfRangeValid" class="pf-err">From date must not be after To date</div>
                         </fieldset>
+                        <fieldset class="pf-dates pf-lines">
+                            <legend>Line</legend>
+                            <label>Line
+                                <select v-model="pfLine" class="cal-in st-select pf-line-select" @change="pfPrev = null">
+                                    <option value="all">All lines</option>
+                                    <option v-for="l in pfLineList" :key="l.id" :value="l.id">{{ l.name }}</option>
+                                </select>
+                            </label>
+                            <div class="pf-line-hint">{{ pfLine === 'all' ? 'Gaps are closed on every line' : 'Only this line is pulled forward — other lines stay untouched' }}</div>
+                        </fieldset>
                     </div>
 
                     <div class="st-actions">
@@ -11081,6 +11102,8 @@ body {
 }
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
+.pf-line-select { min-width : 150px; height : 28px; margin-left : 6px; }
+.pf-line-hint { font-size : 11px; color : #5b6b84; margin-top : 6px; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
 .rs-go { background : #b45309 !important; border-color : #92400e !important; color : #fff !important; }
 .rs-go:disabled { opacity : .45; }
