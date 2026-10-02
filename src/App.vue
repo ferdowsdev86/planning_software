@@ -2135,14 +2135,23 @@ function computePullForward() {
             let ns = nextDayStartAfter(anchorEnd);
             // Range rule: a pulled bar never crosses BEFORE the From date
             if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
-            if (oldStart.getTime() - ns.getTime() < 30 * 60000) {
-                // already continuous (sub-30-min micro gaps don't count) —
+            if (oldStart.getTime() - ns.getTime() < 5 * 60000) {
+                // already continuous (a few minutes of rounding don't count) —
                 // and never later: pull only!
                 unchanged++;
                 if (oldEnd > anchorEnd) anchorEnd = oldEnd;
                 continue;
             }
-            const ne = endOfWork(ns, raw.dur || elapsedDays(oldStart, oldEnd) || 1);
+            // End at the NEW start by the production model (hours and
+            // learning ramp differ by date). Anchoring the next bar on the old
+            // length left a gap as soon as the board re-fitted this bar.
+            let ne;
+            try {
+                const tmp = { ...raw, start : ns, lc : raw.lc ? { ...raw.lc } : raw.lc, sop : raw.sop ? { ...raw.sop } : raw.sop };
+                applyLineFormulaDuration(s, tmp, res.id);
+                ne = endOfWork(ns, tmp.dur || raw.dur || elapsedDays(oldStart, oldEnd) || 1);
+            }
+            catch { ne = endOfWork(ns, raw.dur || elapsedDays(oldStart, oldEnd) || 1); }
             changes.push({
                 id : ev.id, line : res.id, lineName : res.name,
                 order : mbmOrderNo(raw.po, raw.mbmOrder),
@@ -2221,9 +2230,22 @@ function applyPullForward() {
     markBoardDirty();
     touchBoardCache(s);
     s.refreshRows?.();
-    toast(`Plan pulled forward successfully. ${p.summary.moved} bars updated across ${p.summary.lines} lines — Save to keep it (Undo reverses it).`, 'ok');
     pfOpen.value = false;
+    if (boardReadOnly.value) {
+        toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s) — NOT saved (this board is read only for you)`, 'warn');
+        return;
+    }
+    toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s) — saving…`, 'ok');
+    // "Save and Apply": the button saves. Wait for the board's own re-fit of
+    // the moved bars (scheduleBoardSettle), then save without a second
+    // confirmation — the pull was already confirmed above.
+    setTimeout(async () => {
+        pfSaveNoConfirm = true;
+        try { await saveToDb(); }
+        finally { pfSaveNoConfirm = false; }
+    }, 400);
 }
+let pfSaveNoConfirm = false;
 
 // ---------------------------------------------------------------------------
 // Plan by SOP timeline (SOP-PLN-01): every unplanned projection / confirm
@@ -7802,7 +7824,7 @@ async function saveToDbInner(s) {
     if (pingFailed) {
         if (!window.confirm(`⚠ The planning API (${API_BASE}) did not answer in time.\n\nTry to save anyway?`)) return;
     }
-    if (!window.confirm(formatSaveConfirm(changes))) return;
+    if (!pfSaveNoConfirm && !window.confirm(formatSaveConfirm(changes))) return;
     toast(`Saving ${changes.length} change(s)…`, 'ok');
     const userIds = changes.map(c => c.eventId).filter(Boolean).map(String);
     for (const id of userIds) {
@@ -9768,7 +9790,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">
                         প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
                         কোনো bar কখনো পরে যায় না, line/sequence/duration বদলায় না · completed/production-started bar
-                        fixed anchor · Apply-র পর Undo (↺) দিয়ে ফেরানো যায় · স্থায়ী করতে Save
+                        fixed anchor · Save and Apply = সরানোর পর সাথে সাথে DB-তে save হয়
                     </div>
                 </div>
             </div>
