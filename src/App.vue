@@ -3613,9 +3613,12 @@ function availableProductTypes(lineId) {
     return PRODUCT_TYPES.filter(t => t.name !== '_Default').map(t => t.name);
 }
 
-function productTypeFromProfile(po, lineId) {
-    return stripProfileType({ po }, lineId);
+// The ERP product when the order has one; '_Default' marks a bar that runs
+// on the line's default route (shown as '—')
+function productTypeFromProfile(po, lineId, preferred = '') {
+    return stripProfileType({ po, productType : preferred }, lineId);
 }
+const showType = t => (t && t !== '_Default') ? t : '—';
 
 const effRows = computed(() => {
     const p = selProfile.value;
@@ -4080,7 +4083,7 @@ function buildEffProfileRows(s) {
             if (!raw || raw.stage) continue;
             const lid = lineIdOf(s, ev);
             if (!LINE_BY_ID[lid]) continue;
-            const pt = productTypeFromProfile(raw.po, lid);
+            const pt = productTypeFromProfile(raw.po, lid, raw.productType);
             const smv = Number(raw.smv) || 0;
             if (smv > 0) (smvAgg[`${lid}|${pt}`] ||= []).push(smv);
         }
@@ -5002,7 +5005,7 @@ function collectOrders() {
                 unit : raw.unitName || currentBoard.value?.unitName || 'AQL',
                 po : raw.po, mbmOrder : mbmOrderNo(raw.po, raw.mbmOrder),
                 buyer : raw.buyer, style : raw.style,
-                productType : productTypeFromProfile(raw.po, onHold ? null : lid),
+                productType : showType(productTypeFromProfile(raw.po, onHold ? null : lid, raw.productType)),
                 color : orderColor(raw.po),
                 garmentColor : raw.color || '',
                 orderQty : raw.orderQty ?? raw.qty,
@@ -5039,7 +5042,7 @@ function collectOrders() {
                     unit : u.unitName || unitLabel(u.unitId) || '—',
                     po : d.po, mbmOrder : mbmOrderNo(d.po, u.mbmOrder),
                     buyer : u.buyer, style : u.style,
-                    productType : productTypeFromProfile(d.po, u.suitable?.[0]),
+                    productType : showType(productTypeFromProfile(d.po, u.suitable?.[0], u.productType)),
                     color : orderColor(d.po),
                     garmentColor : u.color || '',
                     orderQty : dOrdQty,
@@ -5060,7 +5063,7 @@ function collectOrders() {
                 unit : u.unitName || unitLabel(u.unitId) || '—',
                 po : u.po, mbmOrder : mbmOrderNo(u.po, u.mbmOrder),
                 buyer : u.buyer, style : u.style,
-                productType : productTypeFromProfile(u.po, u.suitable?.[0]),
+                productType : showType(productTypeFromProfile(u.po, u.suitable?.[0], u.productType)),
                 color : orderColor(u.po),
                 garmentColor : u.color || '',
                 orderQty : u.orderQty ?? u.qty,
@@ -5617,7 +5620,7 @@ function generateDayPlan() {
             ? qty
             : (Number(raw.orderQty ?? raw.qty) || 0);
         const cmPc = dpCmPerPc(raw.po);
-        const pType = productTypeFromProfile(raw.po, lid);
+        const pType = showType(productTypeFromProfile(raw.po, lid, raw.productType));
         const orderType = orderTypeOf(raw.po, raw.orderType);
         const status = raw.status === 'completed' ? 'Completed'
             : orderType === 'confirm' ? 'Confirmed' : 'Provisional';

@@ -549,10 +549,13 @@ export function resolveProfileType(po, profileValues, preferred) {
         const fuzzy = typed.find(t => want.includes(t.toLowerCase()) || t.toLowerCase().includes(want));
         if (fuzzy) return fuzzy;
     }
-    if (!typed.length) return preferred || productTypeFor(po);
-    let h = 0;
-    for (const c of String(po || '')) h = ((h << 5) - h) + c.charCodeAt(0);
-    return typed[Math.abs(h) % typed.length];
+    // No efficiency entered for this product on the line: the bar keeps its
+    // ERP product name and runs on the line's default efficiency. (Picking an
+    // arbitrary typed product by PO hash showed a pant as "Basic Shirt" and
+    // sized the bar with that product's efficiency.)
+    if (preferred) return String(preferred).trim();
+    if (typed.length) return '_Default';
+    return productTypeFor(po);
 }
 
 // Planning rule: line efficiency is the floor. If the product (profile)

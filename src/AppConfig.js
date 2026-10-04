@@ -1237,9 +1237,12 @@ export function tryMergeAdjacent(scheduler, rec, targetLineId = null) {
     // code, and at least one of po/order must be non-empty (otherwise two
     // DIFFERENT projection orders would merge into one corrupted bar).
     const lineId = targetLineId ?? lineIdOf(scheduler, rec);
+    // One PO number can belong to several COLOUR groups of the same order —
+    // strips join only within one colour group, never across colours
     const sameOrder = o =>
         String(o.po || '') === String(raw.po || '')
         && String(o.mbmOrder || '') === String(raw.mbmOrder || '')
+        && String(o.color || '').trim().toLowerCase() === String(raw.color || '').trim().toLowerCase()
         && (String(raw.po || '') !== '' || String(raw.mbmOrder || '') !== '');
     const same = barsOnLine(scheduler, lineId, rec.id).filter(ev =>
         sameOrder(ev.data.raw));
@@ -1942,8 +1945,8 @@ export const schedulerProConfig = {
       <div class="tip4-rows">
         <div class="tip4-2col">
           ${R('Style No', `<b>${enc(s.stl_no || r.style || '—')}</b>`)}
-          ${R('Type', enc(ptype || s.stl_type || '—'))}
-          ${R('Product', enc(s.stl_product_name || ptype || '—'))}
+          ${R('Type', enc((ptype !== '_Default' && ptype) || s.stl_type || '—'))}
+          ${R('Product', enc(s.stl_product_name || (ptype !== '_Default' && ptype) || '—'))}
           ${R('Wash', washLbl)}
         </div>
         ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(s.stl_description || s.stl_garment_description)}</i>`, 't4-full') : ''}
