@@ -2899,6 +2899,11 @@ const DEFAULT_BOARDS = [
     { id : 'b2', name : 'AQL Floor 1 Board',             floors : ['F1'],       stages : false, unitId : 3, unitName : 'AQL' },
     { id : 'b3', name : 'AQL Floor 2 Board',             floors : ['F2'],       stages : false, unitId : 3, unitName : 'AQL' }
 ];
+// Planning menu (2026-10-04): only the All-Floors board and "Add planning
+// board" are listed — the planning tools and the per-floor boards stay in the
+// code but off the menu
+const SHOW_PLANNING_TOOLS = false;
+const MENU_HIDDEN_BOARDS  = new Set(['b2', 'b3']);
 const DEFAULT_USERS = [
     { id : 'u1', name : 'Ferdows',           role : 'Planner',    boards : ['b1', 'b2', 'b3'] },
     { id : 'u2', name : 'Unit Head — F1',    role : 'Unit Head',  boards : ['b2'] },
@@ -2955,6 +2960,8 @@ function setBoardPerm(u, boardId, level) {
     else if (level === 'read') u.boards.push(`${boardId}:read`);
 }
 const permittedBoards = computed(() => boards.value.filter(b => boardAccessOf(currentUser.value, b.id)));
+// …minus the boards kept off the Planning menu
+const menuBoards = computed(() => permittedBoards.value.filter(b => !MENU_HIDDEN_BOARDS.has(b.id)));
 // Extra permissions ride in the same list as "perm:<name>" tokens
 const PERM_REOPEN = 'perm:reopen';
 const userHasPerm = (u, perm) => (u?.boards || []).includes(perm);
@@ -8531,22 +8538,26 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Planning'" class="fr-dropdown">
-                    <div class="fr-dd-item" @click="planLiveOrders">
-                        <i class="fa-solid fa-route fr-dd-fa" aria-hidden="true"></i>
-                        Plan live orders (PCD / delivery / critical path)
-                    </div>
-                    <div class="fr-dd-item" @click="openSopPlan">📐 Plan by SOP timeline — backward from ex-factory</div>
-                    <div class="fr-dd-item" @click="openPlanGenerator">🧮 Plan generator (S2)</div>
-                    <div class="fr-dd-item" @click="compactBoardNoGaps">🧹 Compact lines — remove gaps</div>
-                    <div class="fr-dd-item" @click="resyncBarLengths" title="Re-size every open bar to today's capacity (manpower, hours, efficiency, plan qty, learning curve) — starts stay">📏 Re-sync bar lengths to capacity</div>
-                    <div class="fr-dd-sep"></div>
+                    <!-- Planning tools are hidden from the menu (2026-10-04): the
+                         menu shows only the All-Floors board and Add board -->
+                    <template v-if="SHOW_PLANNING_TOOLS">
+                        <div class="fr-dd-item" @click="planLiveOrders">
+                            <i class="fa-solid fa-route fr-dd-fa" aria-hidden="true"></i>
+                            Plan live orders (PCD / delivery / critical path)
+                        </div>
+                        <div class="fr-dd-item" @click="openSopPlan">📐 Plan by SOP timeline — backward from ex-factory</div>
+                        <div class="fr-dd-item" @click="openPlanGenerator">🧮 Plan generator (S2)</div>
+                        <div class="fr-dd-item" @click="compactBoardNoGaps">🧹 Compact lines — remove gaps</div>
+                        <div class="fr-dd-item" @click="resyncBarLengths" title="Re-size every open bar to today's capacity (manpower, hours, efficiency, plan qty, learning curve) — starts stay">📏 Re-sync bar lengths to capacity</div>
+                        <div class="fr-dd-sep"></div>
+                    </template>
                     <div
-                        v-for="b in permittedBoards"
+                        v-for="b in menuBoards"
                         :key="b.id"
                         class="fr-dd-item"
                         @click="openBoard(b)"
                     >🗓 {{ b.name }}</div>
-                    <div v-if="!permittedBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
+                    <div v-if="!menuBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
                     <div class="fr-dd-sep"></div>
                     <div class="fr-dd-item" @click="addBoard">➕ Add planning board</div>
                 </div>
