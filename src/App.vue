@@ -1199,10 +1199,13 @@ function resyncBarLengths() {
 // whose delivery is after today and whose PCD is today − 5 days or later,
 // from today, by the board's own rules. The AQL board is never touched.
 const AUTO_PLAN_PCD_BACK_DAYS = 5;
-const canAutoPlanBoard = computed(() => view.value === 'board' && !!currentBoard.value && Number(currentBoard.value.unitId) !== 3);
+// Auto-plan is switched OFF (user, 2026-10-05): no menu item on any board
+const AUTO_PLAN_ENABLED = false;
+const canAutoPlanBoard = computed(() => AUTO_PLAN_ENABLED && view.value === 'board' && !!currentBoard.value && Number(currentBoard.value.unitId) !== 3);
 async function autoPlanUnitBoard(opts = {}) {
     openMenu.value = null;
     const s = getInstance();
+    if (!AUTO_PLAN_ENABLED) { toast('Auto-plan is switched off', 'warn'); return null; }
     if (!s || !currentBoard.value) { toast('Open a planning board first', 'warn'); return null; }
     if (Number(currentBoard.value.unitId) === 3) { toast('Auto-plan from today is for the MBM / CEIL boards — the AQL board stays as it is', 'warn'); return null; }
     if (boardReadOnly.value) { toast('🔒 Read only — this board cannot be planned', 'warn'); return null; }
