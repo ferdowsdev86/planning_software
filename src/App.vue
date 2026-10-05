@@ -3628,6 +3628,9 @@ function defaultEffFor(name, base) {
 const effOpen     = ref(false);
 const effTab      = ref('define');   // 'define' | 'types'
 const effSearch   = ref('');
+const lsUnit      = ref('');          // Lines tab unit filter: '' = all units
+const lsUnits     = computed(() => [...new Set((allUnitLines.value.length ? allUnitLines.value : LINES).map(l => l.unit).filter(Boolean))]);
+const lineEffSummaryShown = computed(() => lsUnit.value ? lineEffSummary.value.filter(r => r.line.unit === lsUnit.value) : lineEffSummary.value);
 const effSelected = ref(0);
 const effNameInput = ref('');
 
@@ -9500,6 +9503,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
                 <!-- Lines tab: per-line product capability (line chart) with efficiency % -->
                 <div v-if="effTab === 'lines'" class="st-body ls-body">
+                    <div class="ef-row ls-filter">
+                        <label>Unit</label>
+                        <select v-model="lsUnit" class="cal-in st-select">
+                            <option value="">All units</option>
+                            <option v-for="u in lsUnits" :key="u" :value="u">{{ u }}</option>
+                        </select>
+                        <span class="ls-dim">{{ lineEffSummaryShown.length }} line(s)</span>
+                    </div>
+                    <div class="ef-table-wrap ls-wrap">
                     <table class="st-table ls-table">
                         <thead>
                             <tr>
@@ -9508,7 +9520,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="row in lineEffSummary" :key="row.line.id">
+                            <tr v-for="row in lineEffSummaryShown" :key="row.line.id">
                                 <td class="ls-line"><strong>{{ row.line.name }}</strong><div class="ls-dim">{{ row.line.unit }}</div></td>
                                 <td class="ls-top">
                                     <span v-if="!row.products.length" class="ls-dim">— not in the line chart —</span>
@@ -9526,6 +9538,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </tbody>
                     </table>
+                    </div>
                     <div class="st-hint">Line chart: AQL-A1…A9 = Line 01…09 · % = ওই product-এর profile efficiency (Define tab-এ না থাকলে line efficiency)</div>
                 </div>
             </div>
@@ -11477,6 +11490,10 @@ body {
 /* Lines tab (line-wise efficiency summary) */
 .ef-dialog { width : 740px; }   /* widen dialog for Lines tab */
 .ls-body { padding : 0; }
+.ls-filter { padding : 8px 10px; gap : 10px; border-bottom : 1px solid #dde3ee; background : #f6f7fb; }
+/* the window keeps its size — the line list scrolls inside it */
+.ls-wrap { max-height : 60vh; border : none; }
+.ls-wrap .ls-table thead th { position : sticky; top : 0; z-index : 1; }
 
 .ls-table { width : 100%; border-collapse : collapse; }
 .ls-table th,
