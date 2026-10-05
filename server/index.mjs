@@ -940,6 +940,19 @@ app.post(`${BASE}/resources/efficiency`, async (req, res) => {
     finally { conn.release(); }
 });
 
+// Every unit's sewing lines (Setup dialogs list all units, not only the open board)
+app.get(`${BASE}/lines`, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT id, resource_code, resource_name, unit_id, floor_id, manpower, machine_count,
+                    default_efficiency, working_hours_per_day, sort_order
+               FROM planning_resources WHERE resource_type = 'sewing_line' AND active = 1
+              ORDER BY unit_id, sort_order, id`);
+        res.json({ success : true, rows : rows.map(r => ({ ...r, unit_name : unitLabel(r.unit_id) })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 app.get(`${BASE}/efficiency-profiles`, async (req, res) => {
     try {
         const [rows] = await pool.query(

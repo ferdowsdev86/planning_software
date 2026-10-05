@@ -25,7 +25,7 @@ import {
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
-    skippedDbEvents, registerBoardLines
+    skippedDbEvents, registerBoardLines, loadAllLinesDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -3592,6 +3592,17 @@ const LINE_CAN_DO = {
     8 : ['5 Pocket Long', 'Shorts Chino'],
     9 : ['Pant', 'Trouser (Uniform)', 'Blouse', 'Jacket', 'Scarf', 'Hat', 'Shorts Chino']
 };
+// The profile of ANY unit's line — the open board's map first, else the
+// profile named after the line ("MBM Line 03+04", "AQL Line 01" for "Line 01")
+function profileForLine(line) {
+    if (!line) return null;
+    const pid = lineProfileMap.value[line.id];
+    const byMap = pid && effList.value.find(p => p.id === pid);
+    if (byMap) return byMap;
+    const n1 = String(line.name || '').trim().toLowerCase();
+    const n2 = `${String(line.unit || '').trim()} ${line.name}`.trim().toLowerCase();
+    return effList.value.find(p => { const pn = String(p.name || '').trim().toLowerCase(); return pn === n1 || pn === n2; }) || null;
+}
 function lineCanDo(line) {
     if (!line) return [];
     // AQL keeps its fixed line chart; a unit line (MBM / CEIL) can run every
@@ -3601,7 +3612,7 @@ function lineCanDo(line) {
         const n = Number(String(line.name || '').replace(/\D/g, '')) || Number(String(line.id || '').replace(/\D/g, ''));
         return LINE_CAN_DO[n] || [];
     }
-    const values = profileOfLine(line.id)?.values || {};
+    const values = profileForLine(line)?.values || {};
     return Object.keys(values).filter(k => k !== '_Default' && Number(values[k]) > 0);
 }
 
@@ -3718,14 +3729,16 @@ const effRows = computed(() => {
 // Line-wise summary: the products each line can run (line capability chart)
 // with the line's effective efficiency for each — profile figure when set,
 // else the line efficiency
+// Lines tab: EVERY unit's lines (AQL, MBM, CEIL), not only the open board's
+const allUnitLines = ref([]);
 const lineEffSummary = computed(() => {
-    return LINES.map(l => {
-        const pid     = lineProfileMap.value[l.id];
-        const profile = effList.value.find(p => p.id === pid) || effList.value[0];
+    const lines = allUnitLines.value.length ? allUnitLines.value : LINES;
+    return lines.map(l => {
+        const profile = profileForLine(l);
         if (profile) ensureProfileValues(profile);
         const products = lineCanDo(l).map(name => ({
             name,
-            eff   : Math.round(lineEfficiencyOf(l.id, name)),
+            eff   : Math.round(resolveProfileEfficiency(profile?.values, name, Number(l.eff) || LINE_BY_ID[l.id]?.eff) || 50),
             color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
         }));
         return { line : l, products };
@@ -3794,6 +3807,7 @@ function openEffProfiles() {
     openMenu.value = null;
     // Show the shared (DB) values, not a stale local copy
     loadEffProfilesDb().then(applyEffProfilesFromDb).catch(() => { /* offline */ });
+    loadAllLinesDb().then(rows => { allUnitLines.value = rows; }).catch(() => { /* offline — the open board's lines */ });
     effTab.value = 'define';
     if (!effSelectedProfileId.value && effList.value[0]) {
         effSelectedProfileId.value = effList.value[0].id;
@@ -9495,7 +9509,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </thead>
                         <tbody>
                             <tr v-for="row in lineEffSummary" :key="row.line.id">
-                                <td class="ls-line"><strong>{{ row.line.name }}</strong></td>
+                                <td class="ls-line"><strong>{{ row.line.name }}</strong><div class="ls-dim">{{ row.line.unit }}</div></td>
                                 <td class="ls-top">
                                     <span v-if="!row.products.length" class="ls-dim">— not in the line chart —</span>
                                     <span

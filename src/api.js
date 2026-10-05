@@ -409,6 +409,20 @@ async function postRows(path, rows) {
 
 export const saveEffProfilesDb     = rows => postRows('/efficiency-profiles', rows);
 // Line / product-type efficiency rows as saved in the DB (efficiency_profile)
+// All units' sewing lines, as board line objects (id l6 / m3 / c17 like the board)
+export async function loadAllLinesDb() {
+    const j = await get('/lines', 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return (j.rows || []).map(r => {
+        const lm = /^([LMC])(\d+)$/.exec(String(r.resource_code || ''));
+        return {
+            id : CODE_TO_ID[r.resource_code] || (lm ? `${lm[1].toLowerCase()}${Number(lm[2])}` : `r${r.id}`),
+            dbId : r.id, name : r.resource_name, unit : r.unit_name, unitId : r.unit_id,
+            floor : `F${r.floor_id}`, manpower : r.manpower, machines : r.machine_count,
+            eff : Number(r.default_efficiency), hours : Number(r.working_hours_per_day) || 10
+        };
+    });
+}
 export async function loadEffProfilesDb() {
     const j = await get('/efficiency-profiles', 8000);
     if (!j.success) throw new Error(j.error || 'load failed');
