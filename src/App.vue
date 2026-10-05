@@ -738,9 +738,17 @@ async function runLiveOrderPlan(s, {
     showToasts = true,
     onProgress = null,
     mode = 'incremental',
-    orderTypes = null
+    orderTypes = null,
+    // date window (unit boards' "auto-plan from today"): delivery strictly
+    // after shipAfter, PCD on/after pcdFrom — orders outside stay unplanned
+    shipAfter = null,
+    pcdFrom = null
 } = {}) {
     const typeFilter = orderTypes?.length ? new Set(orderTypes) : null;
+    const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+    const shipGate = shipAfter ? dayStart(shipAfter) : null;
+    const pcdGate  = pcdFrom ? dayStart(pcdFrom) : null;
+    let windowSkipped = 0;
     if (!s) return { planned : 0, late : 0, tight : 0, skipped : true };
     if (uiHooks.boardUserActive || isBoardInteracting()) {
         return { planned : 0, late : 0, tight : 0, skipped : true };
@@ -808,6 +816,9 @@ async function runLiveOrderPlan(s, {
         if (u.pcdStatus === 'missing' || u.planWarning) { noPcdCount++; continue; }
         const qty = Number(u.qty ?? u.orderQty) || 0;
         if (qty <= 0) continue;
+        if (!(Number(u.smv) > 0)) continue;                        // no SMV → nothing to size
+        if (shipGate && (!u.ship || dayStart(u.ship) <= shipGate)) { windowSkipped++; continue; }
+        if (pcdGate  && (!u.pcd  || dayStart(u.pcd)  <  pcdGate))  { windowSkipped++; continue; }
         const lidHint = u.suitable?.[0] || lineStates[0].id;
         orders.push({
             ...u,
@@ -819,6 +830,9 @@ async function runLiveOrderPlan(s, {
 
     if (noPcdCount && showToasts) {
         toast(`${noPcdCount} order(s) skipped — cannot auto-plan (missing PCD or zero order quantity)`, 'warn');
+    }
+    if (windowSkipped && showToasts) {
+        toast(`${windowSkipped} order(s) outside the window (delivery after ${fmtDateDdMonRr(shipGate)}, PCD from ${fmtDateDdMonRr(pcdGate)}) left unplanned`, 'ok');
     }
 
     if (!orders.length) {
@@ -1179,6 +1193,32 @@ function resyncBarLengths() {
     toast(shrunk || grown
         ? `Bar lengths re-synced: ${shrunk} shortened, ${grown} extended${pushed ? `, ${pushed} follower(s) shifted` : ''}${skipped ? ` · ${skipped} skipped (no SMV)` : ''} — Save to keep`
         : `All bars already match the production schedule${skipped ? ` · ${skipped} skipped (no SMV)` : ''}`, 'ok');
+}
+
+// Unit boards (MBM / CEIL): plan every unplanned projection / confirm order
+// whose delivery is after today and whose PCD is today − 5 days or later,
+// from today, by the board's own rules. The AQL board is never touched.
+const AUTO_PLAN_PCD_BACK_DAYS = 5;
+const canAutoPlanBoard = computed(() => view.value === 'board' && !!currentBoard.value && Number(currentBoard.value.unitId) !== 3);
+async function autoPlanUnitBoard(opts = {}) {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s || !currentBoard.value) { toast('Open a planning board first', 'warn'); return null; }
+    if (Number(currentBoard.value.unitId) === 3) { toast('Auto-plan from today is for the MBM / CEIL boards — the AQL board stays as it is', 'warn'); return null; }
+    if (boardReadOnly.value) { toast('🔒 Read only — this board cannot be planned', 'warn'); return null; }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const pcdFrom = addCalDays(today, -AUTO_PLAN_PCD_BACK_DAYS);
+    setBoardLoad(true, 'Auto-planning this board from today…', 0);
+    let r = null;
+    try {
+        r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress, shipAfter : today, pcdFrom, ...opts });
+        if (r && !r.skipped) {
+            markBoardDirty();
+            toast(`Planned ${r.planned} order(s) from today — ${r.tight} tight, ${r.late} past critical path — Save to keep`, r.late ? 'warn' : 'ok');
+        }
+    }
+    finally { setBoardLoad(false); }
+    return r;
 }
 
 async function planLiveOrders() {
@@ -7870,7 +7910,7 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => pickUp(rec, null);
 
     // Dev-console access for diagnostics
-    window.__mbm = { save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -8669,6 +8709,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div v-if="openMenu === m.label && m.label === 'Planning'" class="fr-dropdown">
                     <!-- Planning tools are hidden from the menu (2026-10-04): the
                          menu shows only the All-Floors board and Add board -->
+                    <div v-if="canAutoPlanBoard" class="fr-dd-item" @click="autoPlanUnitBoard()" title="Unplanned projection / confirm orders with delivery after today and PCD from today − 5 days, planned from today on this board's lines">
+                        <i class="fa-solid fa-route fr-dd-fa" aria-hidden="true"></i>
+                        Auto-plan {{ currentBoard?.unitName }} board from today
+                    </div>
+                    <div v-if="canAutoPlanBoard" class="fr-dd-sep"></div>
                     <template v-if="SHOW_PLANNING_TOOLS">
                         <div class="fr-dd-item" @click="planLiveOrders">
                             <i class="fa-solid fa-route fr-dd-fa" aria-hidden="true"></i>
