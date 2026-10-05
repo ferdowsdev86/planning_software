@@ -3098,6 +3098,11 @@ function doLogout() {
     stopPresence();
     authUser.value = null;
     localStorage.removeItem('mbm-auth');
+    // the next login starts on the home screen, not on this user's board
+    localStorage.removeItem('mbm-board-view');
+    view.value = 'home';
+    currentBoard.value = null;
+    boardMin.value = false;
     loginP.value = '';
     loginErr.value = '';
     openMenu.value = null;
@@ -7790,25 +7795,28 @@ onMounted(() => {
         requestAnimationFrame(() => fitBoardView(s));
     }
 
-    // Try the MySQL-backed API (172.16.101.70 / fastreact); fall back to demo
-    hydrateBoardFromApi();
-
-    // Reopen the board that was open before the reload (until the user
-    // closes or minimizes it explicitly)
+    // A RELOAD of a signed-in session reopens the board that was open (the
+    // same one — its unit is fixed BEFORE the first data load, so the AQL
+    // default cannot race it). A fresh login starts on the home screen: no
+    // board opens until the user picks one from the Planning menu.
     try {
-        const saved = JSON.parse(localStorage.getItem('mbm-board-view') || 'null');
+        const saved = authUser.value ? JSON.parse(localStorage.getItem('mbm-board-view') || 'null') : null;
         if (saved?.boardId) {
             const b = permittedBoards.value.find(x => x.id === saved.boardId);
             if (b && saved.min) {
                 currentBoard.value = b;
+                currentUnitId.value = b.unitId ?? 3;
                 boardMin.value = true;
             }
             else if (b && saved.view === 'board') {
-                openBoard(b);
+                openBoard(b);   // starts the first data load for THIS board's unit
             }
         }
     }
     catch { /* corrupt saved state - stay on home */ }
+
+    // Try the MySQL-backed API (172.16.101.70 / fastreact); fall back to demo
+    if (!boardHydratePromise) hydrateBoardFromApi();
 });
 
 let saveInFlight = false;
