@@ -10,7 +10,8 @@ import {
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
-, workDayUnits, planQtyOf, workingMinutesBetween
+, workDayUnits, planQtyOf, workingMinutesBetween,
+    buyerDefaultEff
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -85,7 +86,8 @@ export function lineCalcParams(scheduler, raw, lineId) {
     }
     const manpower = Number(res?.data?.manpower ?? LINE_BY_ID[lineId]?.manpower) || 50;
     const lineEff  = Number(res?.data?.eff ?? LINE_BY_ID[lineId]?.eff) || 50;
-    const profileEff = tooltipEfficiency(lineId, raw.productType, lineEff);
+    // buyer rule (G-Star 40%) sits between the planner's own figure and the profile
+    const profileEff = buyerDefaultEff(raw.buyer) ?? tooltipEfficiency(lineId, raw.productType, lineEff);
     const baseEff = Number(raw.planEff) > 0
         ? Number(raw.planEff)
         : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
@@ -487,7 +489,7 @@ function grandTotalMaps() {
                         sah[key]  = (sah[key]  || 0) + q * smv / 60;
                         effW[key] = (effW[key] || 0) + q * (Number(raw.planEff) > 0
                             ? Number(raw.planEff)
-                            : (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0));
+                            : (buyerDefaultEff(raw.buyer) ?? (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0)));
                         lastKey = key;
                     }
                 }
@@ -498,7 +500,7 @@ function grandTotalMaps() {
                 sah[lastKey]  = (sah[lastKey] || 0) + remaining * smv / 60;
                 effW[lastKey] = (effW[lastKey] || 0) + remaining * (Number(raw.planEff) > 0
                     ? Number(raw.planEff)
-                    : (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0));
+                    : (buyerDefaultEff(raw.buyer) ?? (tooltipEfficiency(lid, raw.productType, line.eff) || line.eff || 0)));
             }
         }
     }
@@ -1135,7 +1137,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const orig = { ...raw };
     const manpower = Number(res?.data?.manpower ?? line.manpower) || 50;
     const lineEff  = Number(res?.data?.eff ?? line.eff) || 50;
-    const profileEff = tooltipEfficiency(rid, orig.productType, lineEff);
+    const profileEff = buyerDefaultEff(orig.buyer) ?? tooltipEfficiency(rid, orig.productType, lineEff);
     const baseEff = Number(orig.planEff) > 0
         ? Number(orig.planEff)
         : (Number(profileEff) > 0 ? Number(profileEff) : lineEff);
@@ -1341,7 +1343,7 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     const hint = line || LINE_BY_ID[order.suitable?.[0]] || LINES[0];
     const manpower = Number(resourceRecord.data?.manpower ?? hint?.manpower) || 50;
     const lineEff  = Number(resourceRecord.data?.eff ?? hint?.eff) || 50;
-    const profileEff = tooltipEfficiency(resourceRecord.id, order.productType, lineEff);
+    const profileEff = buyerDefaultEff(order.buyer) ?? tooltipEfficiency(resourceRecord.id, order.productType, lineEff);
     const dropWorkMin = Number(resourceRecord.data?.hours) > 0
         ? Number(resourceRecord.data.hours) * 60 : WORK_MIN_PER_DAY;
     const reqMin = Math.round(order.qty * order.smv);
@@ -1809,7 +1811,7 @@ export const schedulerProConfig = {
             const smv   = Math.round((Number(r.smv) || randSmv(r.po)) * 100) / 100;
             // The efficiency the bar is actually sized with: plan / product
             // profile efficiency × strip efficiency (same as the formula)
-            const baseEffT = Number(r.planEff) > 0 ? Number(r.planEff) : tooltipEfficiency(lid, ptype);
+            const baseEffT = Number(r.planEff) > 0 ? Number(r.planEff) : (buyerDefaultEff(r.buyer) ?? tooltipEfficiency(lid, ptype));
             const stripT   = Number(r.stripEff) > 0 ? Number(r.stripEff) : 100;
             const eff      = stripT !== 100
                 ? `${Math.round(baseEffT * stripT / 100)}% (${baseEffT}% × strip ${stripT}%)`

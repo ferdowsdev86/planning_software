@@ -565,6 +565,16 @@ export function resolveProfileType(po, profileValues, preferred) {
 // The product type is matched against profile keys the same way the tooltip
 // does (exact, then case-insensitive, then fuzzy) so an ERP category like
 // "Pant" finds a profile row named "5 Pkt Pant".
+// Buyer rule (all boards, 2026-10-05): G-Star orders are planned at 40%
+// efficiency by default — before any line / product profile figure. A
+// strip's own plan efficiency (set by the planner) still overrides it.
+export const BUYER_DEFAULT_EFF = [{ match : /g[\s-]?star/i, eff : 40 }];
+export function buyerDefaultEff(buyer) {
+    const b = String(buyer || '');
+    const hit = BUYER_DEFAULT_EFF.find(x => x.match.test(b));
+    return hit ? hit.eff : null;
+}
+
 export function resolveProfileEfficiency(profileValues, productType, fallback) {
     const lineEff = Number(fallback) || 0;
     let tv = Number(profileValues?.[productType]);

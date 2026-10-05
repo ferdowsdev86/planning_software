@@ -14,7 +14,7 @@ import {
     elapsedDays, isOffDay, calcRisk, fmtQty, fmtDate, fmtDateDdMonRr,
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
-    computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf
+    computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
@@ -50,7 +50,7 @@ const legendBar = computed(() => {
     let made = Number(r.made) || 0;
     if (!made && src.id) { try { made = madeOf(loadProdStore(), String(src.id)); } catch { /* none */ } }
     const lid  = src.lid || null;
-    const base = Number(r.planEff) > 0 ? Number(r.planEff) : (lid ? tooltipEfficiency(lid, r.productType) : null);
+    const base = Number(r.planEff) > 0 ? Number(r.planEff) : (buyerDefaultEff(r.buyer) ?? (lid ? tooltipEfficiency(lid, r.productType) : null));
     const strip = Number(r.stripEff) > 0 ? Number(r.stripEff) : 100;
     const result = base != null ? Math.round(base * strip / 100) : null;
     const calDays = start && end ? Math.max(1, Math.round((end - start) / 864e5)) : null;
@@ -1571,6 +1571,8 @@ function stripProfileType(raw, lid) {
 }
 
 function readProfileEff(raw, lid) {
+    const buyerEff = buyerDefaultEff(raw?.buyer);
+    if (buyerEff) return buyerEff;
     const profile = profileOfLine(lid);
     const pType = stripProfileType(raw, lid);
     return resolveProfileEfficiency(profile?.values, pType, LINE_BY_ID[lid]?.eff) || 55;
@@ -5799,7 +5801,7 @@ function generateDayPlan() {
         const typeEff = Number(profile?.values?.[pType]);
         const defEff  = Number(profile?.values?._Default);
         const productEff = typeEff > 0 ? typeEff : (defEff > 0 ? defEff : 0);
-        const baseEff = Math.max(productEff, Number(line.eff) || 0);
+        const baseEff = buyerDefaultEff(raw.buyer) ?? Math.max(productEff, Number(line.eff) || 0);
         const planEff = Math.round(baseEff * (raw.stripEff || 100) / 100);
 
         // Only the quantity actually planned INSIDE the range counts as
