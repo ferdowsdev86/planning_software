@@ -125,6 +125,10 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                     COALESCE(o.shipment_date, p.shipment_date) AS shipment_date, o.material_ready_date, o.priority,
                     COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color,
                     COALESCE(o.prod_unit, o.unit_id) AS order_prod_unit, COALESCE(p.prod_unit, p.unit_id) AS proj_prod_unit,
+                    /* the whole order (every confirm PO / colour) behind a colour piece */
+                    (SELECT SUM(x.order_quantity) FROM planning_orders x
+                      WHERE x.order_code = COALESCE(o.order_code, p.order_code)
+                        AND (x.erp_po_id IS NULL OR x.erp_po_id NOT LIKE 'proj-%')) AS order_total_qty,
                     /* production that already existed when this bar was last
                        saved: a saved start is the production-CUT start, so
                        that quantity must not be cut off again on load (used

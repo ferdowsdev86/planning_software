@@ -181,6 +181,7 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     };
     if (Number(raw.orderQty) > 0) notes.orderQty = Number(raw.orderQty);
     if (Number(raw.baseQty) > 0)  notes.baseQty  = Number(raw.baseQty);   // ERP qty behind the plan qty
+    if (Number(raw.fullOrderQty) > 0) notes.fullOrderQty = Number(raw.fullOrderQty);   // whole order (all colours)
     // Production already cut off the SAVED start — a reload must not cut it again
     const cutMade = Number(raw._cutMade ?? raw.madeBase) || 0;
     notes.madeBase = cutMade;       // explicit, 0 included — no server inference
@@ -271,6 +272,9 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
     let baseQty = Number(noteGroup.baseQty) > 0 ? Number(noteGroup.baseQty) : null;
     if (!noteGroup.pq3) { baseQty = qty; qty = planQtyOf(qty); }
     if (Number(noteGroup.orderQty) > 0) orderQty = Number(noteGroup.orderQty);
+    // A colour piece of a replaced projection inherited the projection's
+    // whole-order base qty — its own base is its colour group's ERP qty
+    if (orderId && baseQty > 0 && orderQty > 0 && baseQty > orderQty) baseQty = orderQty;
     if (orderId && !(noteGroup.idList && noteGroup.idList.length > 1) && Number(e.order_quantity) > 0) {
         qty = Math.min(qty, planQtyOf(e.order_quantity));
     }
@@ -282,6 +286,9 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
     const rawOut = {
         // floor whose Holding Row the bar was parked on
         holdFloor : noteGroup.holdFloor || null,
+        // whole-order quantity of a colour piece (all colour groups together)
+        fullOrderQty : Number(noteGroup.fullOrderQty) > 0 ? Number(noteGroup.fullOrderQty)
+            : (orderId && Number(e.order_total_qty) > 0 ? Number(e.order_total_qty) : undefined),
         id       : projId || orderRowId(orderId),
         buyer    : e.buyer_name || projBuyer || (projId ? 'Projection' : ''),
         style    : e.style_no || '',

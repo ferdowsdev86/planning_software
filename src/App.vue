@@ -4895,30 +4895,43 @@ function replaceProjectionsWithConfirms(s) {
         risk : { score : 0, level : 'low', label : 'On track', reasons : [] }
     });
 
-    // Several colour groups of one order share the projection's SAVED span
-    // by quantity — the first group keeps the swapped bar, the rest are new
-    // bars inside the same span, so no other bar on the line moves
-    const splitSpanAmong = (ev, groups) => {
+    // Several colour groups of one order: the first group keeps the swapped
+    // bar, the rest follow it FLUSH on the same line — each piece sized by
+    // its own colour quantity (line capacity), no gap between pieces. Every
+    // piece carries the full order quantity (fullOrderQty) beside its own.
+    const splitSpanAmong = (ev, groups, fullOrderQty) => {
         const raw = ev.data.raw;
         const lid = lineIdOf(s, ev);
         const start0 = new Date(ev.startDate), end0 = new Date(ev.endDate);
         const totalUnits = Number(raw.dur) > 0 ? Number(raw.dur) : elapsedDays(start0, end0);
         const totalQty = groups.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0) || 1;
+        // on the Holding Row (no capacity) the pieces share the saved span
+        const sizePiece = (r, share) => {
+            if (isHoldId(lid)) { r.dur = Math.max(1 / 60, totalUnits * share); return; }
+            applyLineFormulaDuration(s, r, lid);
+            if (!(Number(r.dur) > 0)) r.dur = Math.max(1 / 60, totalUnits * share);
+        };
         let cursor = start0;
         groups.forEach((g, i) => {
             const share = (Number(g.qty ?? g.orderQty) || 0) / totalQty;
-            const units = Math.max(1 / 60, totalUnits * share);
-            const end   = i === groups.length - 1 ? end0 : endOfWork(cursor, units);
             if (i === 0) {
-                raw.dur = units;
-                raw.start = cursor; raw.end = end;
+                raw.start = cursor;
+                sizePiece(raw, share);
+                const end = endOfWork(cursor, raw.dur);
+                raw.end = end;
                 ev.set({ endDate : end, duration : elapsedDays(cursor, end) });
+                cursor = end;
+                return;
             }
-            else {
-                const evId = `ev-${g.id}`;
+            const evId = `ev-${g.id}`;
+            {
                 if (!s.eventStore.getById(evId)) {
                     const raw2 = confirmRawFor(g, raw);
-                    raw2.dur = units; raw2.start = cursor; raw2.end = end;
+                    raw2.fullOrderQty = fullOrderQty || undefined;
+                    raw2.start = cursor;
+                    sizePiece(raw2, share);
+                    const end = endOfWork(cursor, raw2.dur);
+                    raw2.end = end;
                     raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
                     s.eventStore.add({
                         id : evId, resourceId : lid,
@@ -4930,9 +4943,10 @@ function replaceProjectionsWithConfirms(s) {
                         raw : raw2
                     });
                     pendingSwapIds.add(evId);
+                    cursor = end;
                 }
+                else cursor = new Date(s.eventStore.getById(evId).endDate);
             }
-            cursor = end;
         });
     };
 
@@ -4974,6 +4988,10 @@ function replaceProjectionsWithConfirms(s) {
         delete raw.confirmMismatch;
         const c = grpList[0];
         rememberReplaced(raw, c);
+        // the projection's quantity = the whole order; every colour piece keeps it
+        const fullOrderQty = Number(raw.orderQty) || grpList.reduce((t, g) => t + (Number(g.orderQty ?? g.qty) || 0), 0);
+        raw.fullOrderQty = fullOrderQty || undefined;
+        raw.baseQty      = Number(c.orderQty ?? c.qty) || undefined;   // this colour's ERP qty
         raw.orderType = 'confirm';
         raw.replaced  = false;
         raw.po        = c.po || raw.po;
@@ -5003,7 +5021,7 @@ function replaceProjectionsWithConfirms(s) {
         ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
         pendingSwapIds.add(String(ev.id));
         for (const g of grpList) dropUnplanned.add(String(g.id));
-        if (grpList.length > 1) splitSpanAmong(ev, grpList);
+        if (grpList.length > 1) splitSpanAmong(ev, grpList, fullOrderQty);
         n++;
     }
 

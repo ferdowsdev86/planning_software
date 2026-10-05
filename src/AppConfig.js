@@ -1975,7 +1975,7 @@ export const schedulerProConfig = {
         <div class="tip4-2col">
           ${R('Color', colorHtml)}
           ${R('PO', `<b>${poCell}</b>`)}
-          ${R('Order Qty', `<b>${enc(fmtQty(r.baseQty ?? r.orderQty ?? r.qty))}</b>`)}
+          ${R('Order Qty', `<b>${enc(fmtQty(r.fullOrderQty || r.baseQty || r.orderQty || r.qty))}</b>${Number(r.fullOrderQty) > 0 && Number(r.baseQty ?? r.orderQty) > 0 && Number(r.fullOrderQty) !== Number(r.baseQty ?? r.orderQty) ? ` <span class="t4dim" title="this colour's quantity">(colour ${enc(fmtQty(r.baseQty ?? r.orderQty))})</span>` : ''}`)}
           ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>${Number(r.made) > 0 ? ` <span class="t4dim">(${fmtQty(r.made)} done)</span>` : ''}`)}
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
