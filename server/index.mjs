@@ -225,12 +225,20 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         );
 
         const [calendars] = await pool.query(
-            `SELECT c.id, c.calendar_code, c.calendar_name, i.interval_type, i.recurrent_rule,
+            `SELECT c.id, c.unit_id, c.calendar_code, c.calendar_name, i.interval_type, i.recurrent_rule,
                     i.weekday_no, i.start_time, i.end_time, i.interval_name
              FROM planning_calendars c
              LEFT JOIN planning_calendar_intervals i ON i.calendar_id = c.id
-             WHERE c.active = TRUE`
+             WHERE c.active = TRUE
+             ORDER BY (c.unit_id = ?) DESC, c.id`
+        ,
+            [effUnit || 0]
         );
+        // One factory calendar per production unit: the unit's own calendar,
+        // else the first active one (its working hours never mix with another unit's)
+        const calIds = [...new Set(calendars.map(r => r.id))];
+        const calId  = calendars.find(r => Number(r.unit_id) === Number(effUnit))?.id ?? calIds[0] ?? null;
+        const unitCalendar = calendars.filter(r => r.id === calId);
 
         // Holding Row capacity (Setup → Line eff & hours): a hidden
         // planning_resources row 'HOLD-<unit>' (active = 0, never a line)
@@ -259,7 +267,7 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             events       : { rows : events },
             assignments  : { rows : assignments },
             dependencies : { rows : dependencies },
-            calendars    : { rows : calendars }
+            calendars    : { rows : unitCalendar }
         });
     }
     catch (e) {

@@ -1078,10 +1078,11 @@ export async function loadFromApi(unitId = null) {
     };
     const fmtHM = mm => `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
     const calendarDays = {};
-    let calendarName = null;
+    let calendarName = null, calendarId = null;
     for (const row of data.calendars.rows) {
         if (row.weekday_no === null || row.weekday_no === undefined) continue;
         calendarName = row.calendar_name;
+        calendarId   = row.id;
         const start = fmtHM(toMin((row.start_time || '08:00').slice(0, 5)));
         let hours = '00:00';
         if (row.interval_type === 'working' && row.end_time) {
@@ -1098,6 +1099,7 @@ export async function loadFromApi(unitId = null) {
         unplanned, lineById,
         calendarDays : Object.keys(calendarDays).length ? calendarDays : null,
         calendarName,
+        calendarId,
         unitId   : effUnitId,
         unitName : effUnitName
     };

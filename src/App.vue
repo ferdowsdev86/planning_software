@@ -1268,6 +1268,7 @@ function applyApiBoardData(s, data) {
     };
     dataSource.value = 'db';
     if (data.calendarDays) {
+        if (data.calendarId) calendarState.id = data.calendarId;
         Object.assign(calendarState.days, data.calendarDays);
         if (data.calendarName) calendarState.name = data.calendarName;
         // No overlap repair here: the board is not ready for it yet (see the
@@ -1374,6 +1375,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
     }
 
     if (!force && boardUnitCache[uid]?.ready && !boardUnitCache[uid]?.dirty && cacheHasLines(boardUnitCache[uid])) {
+        await syncCalendarOverrides(boardUnitCache[uid].apiData.calendarId || 1);
         applyApiBoardData(s, boardUnitCache[uid].apiData);
         unplanned.value = cloneData(boardUnitCache[uid].unplanned);
         setBoardBaseline(s);
@@ -1397,10 +1399,13 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
             project            : data.project,
             calendarDays       : data.calendarDays,
             calendarName       : data.calendarName,
+            calendarId         : data.calendarId,
             unitId             : data.unitId,
             unitName           : data.unitName
         });
         try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
+        // this unit's own calendar overrides (Change working hours)
+        await syncCalendarOverrides(data.calendarId || 1);
         await refreshProdStoreFromDb();
         applyApiBoardData(s, boardUnitCache[uid].apiData);
         apiReady.value = true;
@@ -1440,6 +1445,7 @@ async function hydrateBoardFromApi() {
                 project            : data.project,
                 calendarDays       : data.calendarDays,
                 calendarName       : data.calendarName,
+                calendarId         : data.calendarId,
                 unitId             : data.unitId,
                 unitName           : data.unitName
             });
@@ -1448,8 +1454,8 @@ async function hydrateBoardFromApi() {
             // read them; the localStorage copy stays as the offline fallback
             try { applyEffProfilesFromDb(await loadEffProfilesDb()); } catch { /* offline — local copy */ }
             // Changed working hours per date are shared through the DB — every
-            // planner / machine sizes bars on the same calendar
-            await syncCalendarOverrides();
+            // planner / machine sizes bars on the same calendar (per unit)
+            await syncCalendarOverrides(data.calendarId || 1);
             // Production figures first — bars are laid out ONCE, on real data
             await refreshProdStoreFromDb();
             applyApiBoardData(s, boardUnitCache[unitId].apiData);
@@ -1657,8 +1663,8 @@ function chApply() {
         }
         d.setDate(d.getDate() + 1);
     }
-    localStorage.setItem('mbm-cal-overrides', JSON.stringify(calendarState.overrides));
-    saveCalendarOverridesDb({ ...calendarState.overrides })
+    localStorage.setItem(calOverridesKey(calendarState.id || 1), JSON.stringify(calendarState.overrides));
+    saveCalendarOverridesDb({ ...calendarState.overrides }, calendarState.id || 1)
         .catch(e => toast(`Working hours kept in this browser only — DB save failed: ${e.message}`, 'warn'));
     applyCalendarToBoard();
     const s = getInstance();
@@ -3967,27 +3973,32 @@ if (!localStorage.getItem('mbm-buildup')) {
 // Date-specific working-hour overrides: the DB copy is shared by everyone;
 // localStorage is only this browser's cache. A browser that still holds
 // overrides nobody has shared yet uploads them once (first planner wins).
-async function syncCalendarOverrides() {
+// Every unit has its own factory calendar: the overrides of the board being
+// opened replace whatever the previous board left in calendarState.
+const calOverridesKey = calId => `mbm-cal-overrides:${calId}`;
+async function syncCalendarOverrides(calId = calendarState.id || 1) {
+    calendarState.id = calId;
+    let local = {};
     try {
-        const db = await loadCalendarOverridesDb();
-        const local = { ...calendarState.overrides };
+        // (the un-suffixed key is the AQL cache from before per-unit calendars)
+        local = JSON.parse(localStorage.getItem(calOverridesKey(calId))
+            || (calId === 1 ? localStorage.getItem('mbm-cal-overrides') : null) || '{}') || {};
+    }
+    catch { /* corrupt store — start clean */ }
+    for (const k of Object.keys(calendarState.overrides)) delete calendarState.overrides[k];
+    try {
+        const db = await loadCalendarOverridesDb(calId);
         if (Object.keys(db).length) {
-            for (const k of Object.keys(calendarState.overrides)) delete calendarState.overrides[k];
             Object.assign(calendarState.overrides, db);
-            localStorage.setItem('mbm-cal-overrides', JSON.stringify(db));
+            localStorage.setItem(calOverridesKey(calId), JSON.stringify(db));
         }
         else if (Object.keys(local).length && !boardViewOnly.value) {
-            await saveCalendarOverridesDb(local);
+            Object.assign(calendarState.overrides, local);
+            await saveCalendarOverridesDb(local, calId);
         }
     }
-    catch { /* offline — this browser's copy stays */ }
+    catch { Object.assign(calendarState.overrides, local); }   // offline — this browser's copy
 }
-
-// Date-specific working-hour overrides survive reloads (Change working hours)
-try {
-    Object.assign(calendarState.overrides, JSON.parse(localStorage.getItem('mbm-cal-overrides') || '{}'));
-}
-catch { /* corrupt store — start clean */ }
 const bcOpen       = ref(false);
 const bcMin        = ref(false);
 const bcTab        = ref('define');
@@ -7655,7 +7666,7 @@ async function updateCalendar() {
 
     if (dataSource.value === 'db') {
         try {
-            const res = await fetch(`${API_BASE}/calendars/1`, {
+            const res = await fetch(`${API_BASE}/calendars/${calendarState.id || 1}`, {
                 method  : 'PUT',
                 headers : { 'Content-Type' : 'application/json' },
                 body    : JSON.stringify({ name : calendarState.name, days : calendarState.days })

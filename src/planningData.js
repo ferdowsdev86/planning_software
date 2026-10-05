@@ -54,6 +54,7 @@ const UTIL_TO   = AUG(15);
 // days keyed by JS getDay(): 0=Sunday .. 6=Saturday; hours '00:00' = off day
 // ---------------------------------------------------------------------------
 export const calendarState = {
+    id   : 1,            // planning_calendars.id of the open board's unit
     name : 'Sew_MBM',
     days : {
         1 : { start : '08:00', hours : '10:00', ot : '02:00' },
