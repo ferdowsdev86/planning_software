@@ -25,7 +25,7 @@ import {
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
-    skippedDbEvents
+    skippedDbEvents, registerBoardLines
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1238,6 +1238,9 @@ let boardLoadedUnitId = null;
 
 function applyApiBoardData(s, data) {
     boardLoadedUnitId = data.unitId || null;
+    // this board's lines become THE line table (another unit's board may
+    // have been open before — cached data, same browser session)
+    registerBoardLines(data.resources);
     // The board is rebuilt from the DB: a removal noted on the previous
     // picture but never saved is void — its bar is back on the screen
     removedDbEventIds.clear();
@@ -2897,7 +2900,12 @@ function removePlanningRole(name) {
 const DEFAULT_BOARDS = [
     { id : 'b1', name : 'AQL Sewing Board — All Floors', floors : ['F1', 'F2'], stages : true, unitId : 3, unitName : 'AQL' },
     { id : 'b2', name : 'AQL Floor 1 Board',             floors : ['F1'],       stages : false, unitId : 3, unitName : 'AQL' },
-    { id : 'b3', name : 'AQL Floor 2 Board',             floors : ['F2'],       stages : false, unitId : 3, unitName : 'AQL' }
+    { id : 'b3', name : 'AQL Floor 2 Board',             floors : ['F2'],       stages : false, unitId : 3, unitName : 'AQL' },
+    // One board per production unit (2026-10-05): a board shows only the
+    // orders of its unit (mr_order_entry.prod_unit) on that unit's own lines;
+    // every AQL board rule applies unchanged
+    { id : 'b4', name : 'MBM Sewing Board',              floors : [],           stages : false, unitId : 1, unitName : 'MBM' },
+    { id : 'b5', name : 'CEIL Sewing Board',             floors : [],           stages : false, unitId : 2, unitName : 'CEIL' }
 ];
 // Planning menu (2026-10-04): only the All-Floors board and "Add planning
 // board" are listed — the planning tools and the per-floor boards stay in the
@@ -2936,11 +2944,14 @@ const loadLS = (k, d) => {
 
 const planningRoles = ref(loadLS('mbm-planning-roles', DEFAULT_ROLES));
 
-const boards = ref(loadLS('mbm-boards', DEFAULT_BOARDS).map(b => ({
-    ...b,
-    unitId   : b.unitId ?? 3,
-    unitName : b.unitName ?? 'AQL'
-})));
+// A browser's saved board list never hides a built-in board: the defaults
+// are merged in (by id), saved boards keep their own settings
+const boards = ref((() => {
+    const saved = loadLS('mbm-boards', []);
+    const list  = saved.filter(b => b && b.id);
+    for (const d of DEFAULT_BOARDS) if (!list.some(b => b.id === d.id)) list.push({ ...d });
+    return list.map(b => ({ ...b, unitId : b.unitId ?? 3, unitName : b.unitName ?? 'AQL' }));
+})());
 const users         = ref(loadLS('mbm-users', DEFAULT_USERS));
 const currentUserId = ref(localStorage.getItem('mbm-current-user') || 'u1');
 
@@ -3428,7 +3439,7 @@ function addBoard() {
         .split(',').map(x => x.trim()).filter(Boolean);
     // Production unit drives which orders this board sees (mr_order_entry
     // prod_unit; OS orders of mapped os_units arrive automatically)
-    const unitId = Number(window.prompt('Production unit id (3 = AQL):', '3')) || 3;
+    const unitId = Number(window.prompt('Production unit id (1 = MBM, 2 = CEIL, 3 = AQL):', '3')) || 3;
     const b = { id : `b${Date.now()}`, name, floors, stages : floors.length > 1, unitId, unitName : name };
     boards.value.push(b);
     currentUser.value.boards.push(b.id);
@@ -5115,7 +5126,7 @@ function collectOrders() {
 }
 
 function unitLabel(id) {
-    const m = { 1 : 'AQL', 2 : 'MBM', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
+    const m = { 1 : 'MBM', 2 : 'CEIL', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
     return m[Number(id)] || (id ? `Unit ${id}` : '—');
 }
 
@@ -8608,9 +8619,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly && boardViewOnly">🔒 AQL — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
-                <template v-else-if="boardReadOnly">🔒 AQL — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
-                <template v-else>AQL (Planning — in use by {{ authUser?.name || currentUser?.name }})</template>
+                <template v-if="boardReadOnly && boardViewOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
+                <template v-else-if="boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
+                <template v-else>{{ currentBoard?.unitName || 'AQL' }} (Planning — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
             <span class="mb-banner-sub">{{ planMeta.name }} · {{ currentBoard?.unitName || 'Unit' }}</span>
             <span class="fr-banner-btns">

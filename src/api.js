@@ -97,7 +97,7 @@ const STAGE_NAME = {
     packing : 'Packing', inspection : 'Inspection', shipment : 'Shipment'
 };
 
-const UNIT_NAMES = { 1 : 'AQL', 2 : 'MBM', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
+const UNIT_NAMES = { 1 : 'MBM', 2 : 'CEIL', 3 : 'AQL', 4 : 'Cutting', 5 : 'Finishing' };
 const unitLabel = id => UNIT_NAMES[Number(id)] || (id ? `Unit ${id}` : 'AQL');
 
 const asDate = v => (v ? new Date(String(v).replace(' ', 'T')) : null);
@@ -790,10 +790,11 @@ export async function loadFromApi(unitId = null) {
 
     const dbIdToBoardId = {};
     const mapped = data.resources.rows.map(r => {
-        // Any 'L<n>' sewing line maps to board id 'l<n>' — new lines (L09,
-        // L10, …) work without touching the static CODE_TO_ID table
-        const lm = /^L(\d+)$/.exec(String(r.resource_code || ''));
-        const boardId = CODE_TO_ID[r.resource_code] || (lm ? `l${Number(lm[1])}` : `r${r.id}`);
+        // A sewing line's board id follows its code: AQL 'L<n>' → 'l<n>',
+        // MBM 'M<n>' → 'm<n>', CEIL 'C<n>' → 'c<n>' — ids stay unique across
+        // the units' boards (profiles, line maps and caches are keyed by them)
+        const lm = /^([LMC])(\d+)$/.exec(String(r.resource_code || ''));
+        const boardId = CODE_TO_ID[r.resource_code] || (lm ? `${lm[1].toLowerCase()}${Number(lm[2])}` : `r${r.id}`);
         dbIdToBoardId[r.id] = boardId;
         const isLine = r.resource_type === 'sewing_line';
         return isLine
@@ -817,20 +818,7 @@ export async function loadFromApi(unitId = null) {
     const firstLine = mapped.find(r => r.lineRow);
     let sewing = mapped.filter(r => r.lineRow);
 
-    // Register DB lines the demo table doesn't know (e.g. a newly added
-    // Line 09) so every LINE_BY_ID-gated feature — reports, auto-plan
-    // seeding, capacity — treats them like any other line
-    for (const l of sewing) {
-        if (!LINE_BY_ID[l.id]) {
-            const entry = {
-                id : l.id, name : l.name, unit : l.unit, floor : l.floor,
-                manpower : l.manpower, eff : l.eff, hours : l.hours,
-                availMin : l.availMin
-            };
-            LINES.push(entry);
-            LINE_BY_ID[l.id] = entry;
-        }
-    }
+    registerBoardLines(sewing);
     let stages = mapped.filter(r => !r.lineRow);
     if (!sewing.length) {
         sewing = fallbackSewingLines(effUnitId, effUnitName);
@@ -1097,6 +1085,27 @@ export async function loadFromApi(unitId = null) {
         unitId   : effUnitId,
         unitName : effUnitName
     };
+}
+
+// The open board's sewing lines ARE the line table: LINES / LINE_BY_ID feed
+// every line-gated feature (reports, capacity, profiles, auto-plan). One
+// board is open at a time, so another unit's board replaces them wholesale —
+// AQL's Line 01 must not sit in an MBM report. The demo table stays only
+// while no DB line is known.
+export function registerBoardLines(resources) {
+    const lines = (resources || []).filter(r => r && r.lineRow);
+    if (!lines.length) return;
+    for (const k of Object.keys(LINE_BY_ID)) delete LINE_BY_ID[k];
+    LINES.length = 0;
+    for (const l of lines) {
+        const entry = {
+            id : l.id, name : l.name, unit : l.unit, unitId : l.unitId, floor : l.floor,
+            manpower : l.manpower, machines : l.machines, eff : l.eff, hours : l.hours,
+            availMin : l.availMin
+        };
+        LINES.push(entry);
+        LINE_BY_ID[l.id] = entry;
+    }
 }
 
 let lineResourceDbMap = {};

@@ -46,8 +46,8 @@ const BASE = '/api/v1/planning';
 
 // ERP hr_unit_id -> display name (extend as more units are onboarded)
 const UNIT_NAMES = {
-    1 : 'AQL',
-    2 : 'MBM',
+    1 : 'MBM',
+    2 : 'CEIL',
     3 : 'AQL',
     4 : 'Cutting',
     5 : 'Finishing'
@@ -150,8 +150,11 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             // THIS board — the resources themselves may live under a legacy
             // unit_id (see the resource fallback above), so filtering them by
             // r.unit_id = effUnit would silently drop every saved projection.
-            eventSql += ' AND (COALESCE(o.prod_unit, o.unit_id) = ? OR o.id IS NULL)';
-            eventParams.push(effUnit);
+            // A projection bar follows its projection row's unit (a parked AQL
+            // projection must not surface in another unit's Holding Row)
+            eventSql += ` AND (COALESCE(o.prod_unit, o.unit_id) = ?
+                           OR (o.id IS NULL AND (p.id IS NULL OR COALESCE(p.prod_unit, p.unit_id) = ?)))`;
+            eventParams.push(effUnit, effUnit);
         }
         let [events] = await pool.query(eventSql, eventParams);
 
@@ -2992,8 +2995,27 @@ const PROD_SUMMARY_TO = '2026-09-25';
 const PROD_BOARD_FROM = '2026-09-16';        // only orders / POs planned on the board from this date are tracked
 const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL (order-code map only)
 
-const erpLineToBoard = n => { const m = /^A0?(\d)$/i.exec(String(n || '').trim()); return m ? `Line 0${m[1]}` : null; };
-const erpFloorOf = line => { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; };
+// ERP sewing line → planning_resources row, by resource_code: the unit's
+// code letter + the ERP line number (AQL 'A01' → L01, MBM '3' → M03,
+// CEIL '17' → C17). One board per production unit; every unit's output is
+// synced to its own lines.
+const PROD_UNITS   = { AQL : 'L', MBM : 'M', CEIL : 'C' };   // hr_unit_short_name → code prefix
+let   lineByCode   = new Map();                               // resource_code → { name, floor_id, unit_id }
+async function loadLineCodes() {
+    const [rows] = await pool.query(`SELECT resource_code, resource_name, floor_id, unit_id FROM planning_resources WHERE resource_type = 'sewing_line'`);
+    lineByCode = new Map(rows.map(r => [String(r.resource_code).toUpperCase(), { name : r.resource_name, floor_id : r.floor_id, unit_id : r.unit_id }]));
+}
+const erpLineToBoard = (unitShort, n) => {
+    const num = /^[A-Z]?0*(\d{1,2})$/i.exec(String(n || '').trim());
+    const pfx = PROD_UNITS[String(unitShort || '').toUpperCase()];
+    if (!num || !pfx) return null;
+    return lineByCode.get(`${pfx}${String(num[1]).padStart(2, '0')}`) || null;
+};
+// AQL floors are the two F1/F2 halves of the line list; other units carry the ERP floor id
+const erpFloorOf = (unitShort, line) => {
+    if (String(unitShort).toUpperCase() === 'AQL') { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; }
+    return null;
+};
 
 // Production per PO per date per sewing line (or per PO only when summary=true).
 //   ONLY cuttingedgedb.daily_productions (the ERP "Daily Production" page,
@@ -3002,18 +3024,19 @@ const erpFloorOf = line => { const n = Number(String(line || '').replace(/\D/g, 
 //   lump figure that overwrote the real line output.
 async function erpProductionRows(from, to, summary = false) {
     const dateSel = summary ? `'${PROD_SUMMARY_TO}'` : 'DATE(d.prod_date)';
-    const grp     = summary ? 'd.po_id, hl.hr_line_name' : 'd.po_id, DATE(d.prod_date), hl.hr_line_name';
+    const grp     = summary ? 'd.po_id, u.hr_unit_short_name, hl.hr_line_name' : 'd.po_id, DATE(d.prod_date), u.hr_unit_short_name, hl.hr_line_name';
     const [erp] = await pool.query(`
         SELECT d.po_id, MAX(COALESCE(NULLIF(d.e_po_no, ''), po.po_no)) AS po_no, MAX(d.e_order_code) AS order_code, MAX(d.e_stl_no) AS style, MAX(d.e_clr_name) AS color,
                MAX(po.po_qty) AS po_qty, ${dateSel} AS prod_date, SUM(d.prod_qty) AS qty,
-               hl.hr_line_name AS erp_line
+               hl.hr_line_name AS erp_line, u.hr_unit_short_name AS erp_unit
         FROM \`${ERP_DB}\`.daily_productions d
         LEFT JOIN \`${ERP_DB}\`.hr_unit u ON u.hr_unit_id = d.prod_unit_id
         LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = d.po_id
         LEFT JOIN \`${ERP_DB}\`.hr_line hl ON hl.hr_line_id = d.hr_line_id
-        WHERE d.mr_operation_type_id = 2 AND d.status = 'Out' AND u.hr_unit_short_name = 'AQL'
+        WHERE d.mr_operation_type_id = 2 AND d.status = 'Out'
+          AND u.hr_unit_short_name IN (${Object.keys(PROD_UNITS).map(() => '?').join(',')})
           AND DATE(d.prod_date) BETWEEN ? AND ?
-        GROUP BY ${grp}`, [from, to]);
+        GROUP BY ${grp}`, [...Object.keys(PROD_UNITS), from, to]);
     return erp.filter(r => Number(r.qty) > 0);
 }
 
@@ -3022,6 +3045,7 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
     if (prodSyncRunning) return { skipped : true };
     prodSyncRunning = true;
     try {
+        await loadLineCodes();
         const rows = await erpProductionRows(from, to, summary);
         // plan order list: PO → order code, order code set
         const [plan] = await pool.query(`SELECT order_code, po_number, style_no, color, order_quantity FROM planning_orders`);
@@ -3030,7 +3054,7 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
         // board bars planned from PROD_BOARD_FROM: PO → confirm bar, order code →
         // projection bar (with line / floor). ONLY production of these is kept.
         const [bars] = await pool.query(`
-            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.floor_id
+            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.floor_id, pr.unit_id AS line_unit
             FROM planning_events pe JOIN planning_assignments pa ON pa.event_id = pe.id
             JOIN planning_resources pr ON pr.id = pa.resource_id
             LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
@@ -3064,21 +3088,24 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 // ":po<po_id>:<ERP line>" so the line-wise report shows it under
                 // the real line. The app sums everything after ":po" onto the
                 // bar. A plain "db-<id>" row is a manual entry from the dialog.
-                const erpLine = erpLineToBoard(r.erp_line);
+                const erpRes  = erpLineToBoard(r.erp_unit, r.erp_line);
+                const erpLine = erpRes?.name || null;
                 const line    = erpLine || bar.line || null;
                 const otherLn = erpLine && bar.line && erpLine !== bar.line;
                 const ref     = otherLn ? `db-${bar.id}:po${r.po_id}:${String(r.erp_line).trim()}` : `db-${bar.id}:po${r.po_id}`;
-                const floor = erpFloorOf(line) || (Number(bar.floor_id) === 2 ? 'F2' : Number(bar.floor_id) === 1 ? 'F1' : null);
+                const floorId = erpRes?.floor_id ?? bar.floor_id;
+                const floor = erpFloorOf(r.erp_unit, line) || (floorId != null ? `F${floorId}` : null);
+                const unit  = String(r.erp_unit || unitLabel(bar.line_unit) || 'AQL').toUpperCase();
                 const date  = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
                 await conn.query(`
                     INSERT INTO day_production_update_plan
                         (event_id, event_ref, unit, floor, line, operation_type, style, order_no, po_number, color, order_qty, day_plan_qty, prod_qty, save_date, created_at, updated_at)
-                    VALUES (?, ?, 'AQL', ?, ?, 'Sewing', ?, ?, ?, ?, ?, 0, ?, ?, NOW(), NOW())
+                    VALUES (?, ?, ?, ?, ?, 'Sewing', ?, ?, ?, ?, ?, 0, ?, ?, NOW(), NOW())
                     ON DUPLICATE KEY UPDATE
-                        event_id = VALUES(event_id), line = COALESCE(VALUES(line), line), floor = COALESCE(VALUES(floor), floor),
+                        event_id = VALUES(event_id), unit = VALUES(unit), line = COALESCE(VALUES(line), line), floor = COALESCE(VALUES(floor), floor),
                         style = COALESCE(VALUES(style), style), order_no = VALUES(order_no), po_number = VALUES(po_number),
                         color = COALESCE(VALUES(color), color), order_qty = VALUES(order_qty), prod_qty = VALUES(prod_qty), updated_at = NOW()`,
-                    [bar?.id ?? null, ref, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
+                    [bar?.id ?? null, ref, unit, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
                      r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
                 written++;
                 const wk = `db-${bar.id}|${date}`;
