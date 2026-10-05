@@ -3005,11 +3005,21 @@ async function loadLineCodes() {
     const [rows] = await pool.query(`SELECT resource_code, resource_name, floor_id, unit_id FROM planning_resources WHERE resource_type = 'sewing_line'`);
     lineByCode = new Map(rows.map(r => [String(r.resource_code).toUpperCase(), { name : r.resource_name, floor_id : r.floor_id, unit_id : r.unit_id }]));
 }
-const erpLineToBoard = (unitShort, n) => {
+// MBM runs paired lines as one board row ("Line 01+02" = M01): output the
+// ERP books on the second line of a pair lands on that row
+const MBM_PAIR = { 2 : 1, 4 : 3, 7 : 6, 9 : 8, 12 : 11, 15 : 14, 17 : 16, 19 : 18 };
+const erpLineCode = (unitShort, n) => {
     const num = /^[A-Z]?0*(\d{1,2})$/i.exec(String(n || '').trim());
-    const pfx = PROD_UNITS[String(unitShort || '').toUpperCase()];
+    const u   = String(unitShort || '').toUpperCase();
+    const pfx = PROD_UNITS[u];
     if (!num || !pfx) return null;
-    return lineByCode.get(`${pfx}${String(num[1]).padStart(2, '0')}`) || null;
+    let k = Number(num[1]);
+    if (u === 'MBM' && MBM_PAIR[k]) k = MBM_PAIR[k];
+    return `${pfx}${String(k).padStart(2, '0')}`;
+};
+const erpLineToBoard = (unitShort, n) => {
+    const code = erpLineCode(unitShort, n);
+    return code ? (lineByCode.get(code) || null) : null;
 };
 // AQL floors are the two F1/F2 halves of the line list; other units carry the ERP floor id
 const erpFloorOf = (unitShort, line) => {
@@ -3054,7 +3064,7 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
         // board bars planned from PROD_BOARD_FROM: PO → confirm bar, order code →
         // projection bar (with line / floor). ONLY production of these is kept.
         const [bars] = await pool.query(`
-            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.floor_id, pr.unit_id AS line_unit
+            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.resource_code AS line_code, pr.floor_id, pr.unit_id AS line_unit
             FROM planning_events pe JOIN planning_assignments pa ON pa.event_id = pe.id
             JOIN planning_resources pr ON pr.id = pa.resource_id
             LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
@@ -3088,7 +3098,11 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 // ":po<po_id>:<ERP line>" so the line-wise report shows it under
                 // the real line. The app sums everything after ":po" onto the
                 // bar. A plain "db-<id>" row is a manual entry from the dialog.
-                const erpRes  = erpLineToBoard(r.erp_unit, r.erp_line);
+                // A shift row of the same ERP line (M03N = night of M03) is
+                // the bar's own line, not "another line"
+                const erpCode = erpLineCode(r.erp_unit, r.erp_line);
+                const ownRow  = erpCode && bar.line_code && String(bar.line_code).toUpperCase().startsWith(erpCode);
+                const erpRes  = ownRow ? { name : bar.line, floor_id : bar.floor_id } : erpLineToBoard(r.erp_unit, r.erp_line);
                 const erpLine = erpRes?.name || null;
                 const line    = erpLine || bar.line || null;
                 const otherLn = erpLine && bar.line && erpLine !== bar.line;
