@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
 } from './AppConfig.js';
@@ -178,7 +178,7 @@ function markBoardSaved() {
 let boardBaseline = null;
 
 function lineLabel(s, lid) {
-    if (lid === 'hold') return 'Holding Row';
+    if (isHoldId(lid)) return s.resourceStore.getById(lid)?.name || 'Holding Row';
     return s.resourceStore.getById(lid)?.name || lid || '—';
 }
 
@@ -1115,7 +1115,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
             const bars = s.eventStore.records
                 .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
                 .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
-                .filter(x => x.lid && (x.lid === 'hold' ? holdCapacitySet(s) : isSewingRes(s.resourceStore.getById(x.lid))))
+                .filter(x => x.lid && (isHoldId(x.lid) ? holdCapacitySet(s) : isSewingRes(s.resourceStore.getById(x.lid))))
                 .sort((a, b) => a.ev.startDate - b.ev.startDate);
             let moved = 0;
             const touched = new Set();
@@ -1135,7 +1135,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 raw.end = end;
                 if (dirty) raw.userPinned = true;
                 if (!changed.has(ev.id)) { changed.add(ev.id); end > oldEnd ? grown++ : shrunk++; }
-                if (lid === 'hold') { moved++; continue; }      // parked bars never push / ramp
+                if (isHoldId(lid)) { moved++; continue; }      // parked bars never push / ramp
                 if (end > oldEnd) pushed += pushFollowers(s, lid, ev) || 0;
                 touched.add(lid);
                 moved++;
@@ -1713,7 +1713,7 @@ function recalcBarDuration(rec) {
     const s = getInstance();
     const raw = eventRawOf(rec);
     const lid = rec ? lineIdOf(s, rec) : null;
-    if (!s || !raw || !lid || lid === 'hold') { toast('Place the bar on a line first', 'warn'); return; }
+    if (!s || !raw || !lid || isHoldId(lid)) { toast('Place the bar on a line first', 'warn'); return; }
     if (raw.status === 'completed') { toast('Completed bar — nothing to recalculate', 'warn'); return; }
     if (raw.smvMissing && !(Number(raw.smvManual) > 0)) {
         const v = window.prompt(`${mbmOrderNo(raw.po, raw.mbmOrder)}: ERP has no SMV for this style. Enter the SMV (minutes) to plan with:`, '');
@@ -1754,7 +1754,7 @@ uiHooks.onRecalcDuration = recalcBarDuration;
 function applyCurveSnapshotToRec(s, rec, snap) {
     const raw = eventRawOf(rec);
     const lid = lineIdOf(s, rec);
-    if (!raw || !lid || lid === 'hold') return -1;
+    if (!raw || !lid || isHoldId(lid)) return -1;
     if (snap) {
         raw.lcManual = { name : snap.name, period : Number(snap.period) || snap.pct.length, pct : snap.pct.map(Number) };
     }
@@ -1804,7 +1804,7 @@ function applyCurveDialog() {
     const s   = getInstance();
     if (!rec || !raw || !s) return;
     const lid = lineIdOf(s, rec);
-    if (!lid || lid === 'hold') {
+    if (!lid || isHoldId(lid)) {
         toast('Bar is on the Holding Row — plan it on a line first', 'warn');
         lcDlgOpen.value = false;
         return;
@@ -2041,7 +2041,7 @@ function mshImplement() {
         if (raw.status === 'completed')          { skipped.push(`${name}: completed bar cannot be modified`); continue; }
         if (String(refRaw.lcLink?.refId || '') === String(ev.id)) { skipped.push(`${name}: circular link (reference already follows this bar)`); continue; }
         if (masters.has(String(ev.id)))          { skipped.push(`${name}: already the MASTER of another linked group`); continue; }
-        if (lineIdOf(s, ev) === 'hold')          { skipped.push(`${name}: on the Holding Row — plan it first`); continue; }
+        if (isHoldId(lineIdOf(s, ev)))          { skipped.push(`${name}: on the Holding Row — plan it first`); continue; }
         valid.push(ev);
     }
     if (!valid.length) {
@@ -2402,7 +2402,7 @@ function computeSopPlan() {
             skipped.push({ order, po : r.po, reason : 'confirm PO — its projection row is the planning row' });
             continue;
         }
-        if (findOrderEventOnBoard(s, r) && lineIdOf(s, findOrderEventOnBoard(s, r)) !== 'hold') {
+        if (findOrderEventOnBoard(s, r) && !isHoldId(lineIdOf(s, findOrderEventOnBoard(s, r)))) {
             skipped.push({ order, po : r.po, reason : 'already on a line' });
             continue;
         }
@@ -2819,7 +2819,7 @@ function propsUpdate() {
         saveEffState();
     }
 
-    if (lid && lid !== 'hold' && raw.status !== 'completed') {
+    if (lid && !isHoldId(lid) && raw.status !== 'completed') {
         // An efficiency edit re-sizes THIS bar by the SOP run with the new
         // figures (curve-aware, whole days) — a saved bar's fixed SOP run
         // must not swallow the change, or the schedule and the bar disagree
@@ -3247,7 +3247,7 @@ function applyBoardFilter() {
         id       : 'boardFilter',
         filterBy : r => {
             const d = r.data || {};
-            if (d.holdingRow || d.subtotalRow || r.id === 'hold' || r.id === 'subtot') return true;
+            if (d.holdingRow || d.subtotalRow || isHoldId(r.id) || r.id === 'subtot') return true;
             if (d.lineRow || LINE_BY_ID[r.id]) {
                 if (!b.floors?.length || !d.floor) return true;
                 return b.floors.includes(d.floor);
@@ -3848,7 +3848,7 @@ function openLineEffForm() {
         return;
     }
     // Holding Row: its saved capacity, or the line totals as a starting point
-    const hold = s.resourceStore.getById('hold');
+    const hold = s.resourceStore.records.find(r => r.data?.holdingRow);
     const hd = hold?.data || {};
     holdEffRow.value = hold ? {
         name     : hd.name || 'Holding Row',
@@ -3880,8 +3880,8 @@ async function saveLineEffForm() {
         await saveLineEfficiencyDb(updates);
         if (h) {
             await saveHoldingCapacityDb(currentUnitId.value || currentBoard.value?.unitId || 3, h);
-            const hold = s?.resourceStore.getById('hold');
-            if (hold) {
+            // the unit's Holding Row capacity applies to every floor's row
+            for (const hold of (s?.resourceStore.records || []).filter(r => r.data?.holdingRow)) {
                 hold.set({
                     manpower : h.manpower, eff : h.eff, hours : h.hours, capSet : true,
                     availMin : Math.round(h.manpower * h.hours * 60 * h.eff / 100)
@@ -5014,7 +5014,7 @@ function collectOrders() {
             if (!raw || raw.stage) continue;
             if (!String(raw.buyer || '').trim()) continue;
             const lid = lineIdOf(s, ev);
-            const onHold = lid === 'hold' || !LINE_BY_ID[lid];
+            const onHold = isHoldId(lid) || !LINE_BY_ID[lid];
             const poDelivery = raw.ship ? new Date(raw.ship) : null;
             const smv  = Number(raw.smv) > 0 ? Number(raw.smv) : randSmv(raw.po);
             if (raw.po) onBoardPos.add(String(raw.po));
@@ -5146,7 +5146,7 @@ function overlayBoardPlacements(rows) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
         const lid = lineIdOf(s, ev);
-        if (!lid || lid === 'hold') continue;
+        if (!lid || isHoldId(lid)) continue;
         const pid = String(raw.id || '');
         if (orderTypeOf(raw.po, raw.orderType) === 'confirm') {
             confirmBars.push({
@@ -5432,7 +5432,7 @@ const dpGrand = computed(() => {
 const dpView = ref('report');   // 'report' | 'summary' | 'floors'
 
 const dpSummary = computed(() => {
-    const lineGroups = dpGroups.value.filter(g => g.lineId !== 'hold');
+    const lineGroups = dpGroups.value.filter(g => !isHoldId(g.lineId));
     const rows = lineGroups.flatMap(g => g.rows);
     const planQty = rows.reduce((a, r) => a + r.planQty, 0);
     const sah     = rows.reduce((a, r) => a + r.planQty * (Number(r.smv) || 0), 0) / 60;
@@ -5488,7 +5488,7 @@ const dpSummary = computed(() => {
 const dpFloorMatrix = computed(() => {
     const floors = new Map();
     for (const g of dpGroups.value) {
-        if (g.lineId === 'hold') continue;
+        if (isHoldId(g.lineId)) continue;
         const key = g.floor || '—';
         if (!floors.has(key)) floors.set(key, { floor : key, days : {}, total : 0 });
         const f = floors.get(key);
@@ -5614,7 +5614,7 @@ function generateDayPlan() {
         if (!raw || raw.stage) continue;
         if (!String(raw.buyer || '').trim()) continue;
         const lid = lineIdOf(s, ev);
-        const isHold = lid === 'hold';
+        const isHold = isHoldId(lid);
         // Range report: planned line bars only. Board report: everything on
         // the board exactly as placed — Holding Row included.
         if (dpScope.value === 'board') {
@@ -5984,7 +5984,7 @@ function puDayPlan(s, ev, ymd) {
     const raw = ev?.data?.raw;
     if (!s || !raw || raw.stage) return 0;
     const lid = lineIdOf(s, ev);
-    if (!lid || lid === 'hold') return 0;
+    if (!lid || isHoldId(lid)) return 0;
     try {
         const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
         const sim = simulateStrip(s, { ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0 }, lid, start);
@@ -6518,7 +6518,7 @@ function buildDraftRec(s, src, u) {
         risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
     };
     s.eventStore.add({
-        id : evId, resourceId : 'hold',
+        id : evId, resourceId : firstHoldId(s),
         startDate : start, endDate : end,
         duration : elapsedDays(start, end), durationUnit : 'day',
         manuallyScheduled : true,
@@ -6690,7 +6690,7 @@ function showDayPlanChips(s, rec) {
         if (info) {
             ranges.push({
                 id         : `dq-${guard}`,
-                resourceId : 'hold',
+                resourceId : firstHoldId(s),
                 startDate  : new Date(d),
                 endDate    : next,
                 name       : info.off
@@ -6945,7 +6945,7 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     const pointerAt = pointerDateOnTimeline(s, clientX);
     if (!pointerAt) return floatingCarrySnap(clientX, clientY);
 
-    const lineId = isHoldingRes(res) ? 'hold' : res.id;
+    const lineId = res.id;
     const dur = raw.dur || 1;
     const { start, end } = previewSpanAtPointer(pointerAt, dur);
 
@@ -7335,7 +7335,7 @@ async function placeCarried(date, resourceRecord) {
         toast(`${resourceRecord.name} is not the usual line for ${raw.po} — placed anyway`, 'warn');
     }
 
-    const targetId = parkHold ? 'hold' : resourceRecord.id;
+    const targetId = resourceRecord.id;   // a Holding Row keeps its own (per-floor) id
     // Line the bar is leaving — its ramp re-derives after the move (rule: a
     // moved bar compares against the previous order on the NEW line)
     const sourceLid = lineIdOf(s, rec);
@@ -7356,7 +7356,7 @@ async function placeCarried(date, resourceRecord) {
         // Holding Row with its own capacity → the bar takes only the space
         // that capacity needs (else it keeps the length it arrived with)
         raw.start = start;
-        applyLineFormulaDuration(s, raw, 'hold');
+        applyLineFormulaDuration(s, raw, targetId);
         end   = endOfWork(start, raw.dur || 1);
         raw.status = 'unplanned';
         raw.parked = true;
@@ -7428,7 +7428,7 @@ async function placeCarried(date, resourceRecord) {
             // Refresh ramp badges/tooltips on both lines (annotation only —
             // never resizes other bars)
             const lcLines = [targetId];
-            if (sourceLid && sourceLid !== targetId && sourceLid !== 'hold') lcLines.push(sourceLid);
+            if (sourceLid && sourceLid !== targetId && !isHoldId(sourceLid)) lcLines.push(sourceLid);
             applyLearningCurves(s, { lineIds : lcLines });
         }
         finally {
@@ -7915,7 +7915,7 @@ async function saveToDbInner(s) {
         const ev = s.eventStore.getById(id);
         if (!ev) return false;
         const rid = lineIdOf(s, ev);
-        return rid !== 'hold' && !resolveResourceDbId(s, rid);
+        return !isHoldId(rid) && !resolveResourceDbId(s, rid);
     });
     if (missingLine.length) {
         toast('Cannot save — sewing line is not linked to the database. Reload the board and try again.', 'error');

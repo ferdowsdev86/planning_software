@@ -9,7 +9,7 @@ import {
     addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
     workingMinutesBetween, planQtyOf
 } from './planningData.js';
-import { lineIdOf, removedDbEventIds } from './AppConfig.js';
+import { lineIdOf, removedDbEventIds, isHoldId, floorLabelOf } from './AppConfig.js';
 
 // API base resolution with a Local / AWS switch.
 //
@@ -111,16 +111,25 @@ function buildBoardResources(sewing, stages, effUnitId, effUnitName, holding = n
     const hMp  = Number(holding?.manpower) || 0;
     const hEff = Number(holding?.eff) || 0;
     const hHrs = Number(holding?.hours) || 0;
+    const holdRow = (id, name, fl, holdFloor) => ({
+        id, name,
+        unit, floor : fl, holdFloor,
+        manpower : hMp, machines : Number(holding?.machines) || 0, eff : hEff, hours : hHrs || undefined,
+        availMin : Math.round(hMp * hHrs * 60 * hEff / 100),
+        capSet   : !!holding,
+        holdingRow : true, cls : 'mb-hold-row'
+    });
+    // One Holding Row per floor, at the start of that floor's lines (a
+    // single-floor board keeps the one 'hold' row at the top)
+    const floors = [...new Set(sewing.map(l => l.floor))];
+    const body = floors.length > 1
+        ? floors.flatMap(fl => [
+            holdRow(`hold-${fl}`, `Holding Row ${floorLabelOf(unit, fl)}`, fl, fl),
+            ...sewing.filter(l => l.floor === fl)
+        ])
+        : [holdRow('hold', 'Holding Row', floor, null), ...sewing];
     return [
-        {
-            id : 'hold', name : 'Holding Row',
-            unit, floor,
-            manpower : hMp, machines : Number(holding?.machines) || 0, eff : hEff, hours : hHrs || undefined,
-            availMin : Math.round(hMp * hHrs * 60 * hEff / 100),
-            capSet   : !!holding,
-            holdingRow : true, cls : 'mb-hold-row'
-        },
-        ...sewing,
+        ...body,
         {
             id : 'subtot', name : 'Subtotal Row',
             unit, floor : firstLine?.floor || floor,
@@ -159,6 +168,7 @@ function eventParked(notes) {
 function eventNotesPayload(raw, onHold) {
     const notes = {
         parked     : !!(onHold || raw.parked),
+        holdFloor  : onHold && raw.holdFloor ? raw.holdFloor : undefined,
         // dbPinned = the pin as loaded from DB; keeps saved positions pinned
         // even when load-time processing has cleared the working flag
         userPinned : !!(raw.userPinned || raw.dbPinned),
@@ -267,6 +277,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
     const projBuyer = projId && e.event_name && String(e.event_name).includes('|')
         ? String(e.event_name).split('|')[0].trim() : '';
     const rawOut = {
+        // floor whose Holding Row the bar was parked on
+        holdFloor : noteGroup.holdFloor || null,
         id       : projId || orderRowId(orderId),
         buyer    : e.buyer_name || projBuyer || (projId ? 'Projection' : ''),
         style    : e.style_no || '',
@@ -843,7 +855,7 @@ export async function loadFromApi(unitId = null) {
         const isStage = e.production_stage && e.production_stage !== 'sewing';
         const mappedId = resourceOfEvent[e.id]
             || (e.resource_id != null ? dbIdToBoardId[e.resource_id] : null);
-        const known = mappedId && resources.some(r => r.id === mappedId && r.id !== 'hold');
+        const known = mappedId && resources.some(r => r.id === mappedId && !r.holdingRow);
         const orderQty = Number(e.order_quantity) || Number(e.planned_quantity) || 0;
         const qty   = Number(e.planned_quantity ?? e.order_quantity) || 0;
         const noteSmv = Number(parseEventNotes(e.notes).smvManual) || 0;
@@ -869,12 +881,16 @@ export async function loadFromApi(unitId = null) {
         const parked = eventParked(e.notes);
         const unassigned = !known;
 
-        // Parked (saved hold) or unassigned sewing events → Holding Row
+        // Parked (saved hold) or unassigned sewing events → the Holding Row
+        // of the floor they were parked on (notes.holdFloor), else the first
         if (!isStage && (parked || unassigned)) {
+            const holdRows = resources.filter(r => r.holdingRow);
+            const hf = parseEventNotes(e.notes).holdFloor;
+            const holdId = (hf && holdRows.find(r => r.holdFloor === hf)?.id) || holdRows[0]?.id || 'hold';
             events.push({
                 id         : `db-${e.id}`,
                 dbId       : e.id,
-                resourceId : 'hold',
+                resourceId : holdId,
                 startDate  : start,
                 endDate    : end,
                 duration   : elapsedDays(start, end),
@@ -1115,7 +1131,7 @@ export function setLineResourceDbMap(map) {
 }
 
 export function resolveResourceDbId(scheduler, boardLineId) {
-    if (!boardLineId || boardLineId === 'hold') return null;
+    if (!boardLineId || isHoldId(boardLineId)) return null;
     const res = scheduler.resourceStore?.getById(boardLineId);
     const fromRec = res?.data?.dbId ?? res?.get?.('dbId');
     if (fromRec != null) return Number(fromRec);
@@ -1180,8 +1196,10 @@ export async function syncToApi(scheduler, { eventIds = null } = {}) {
         };
 
         const rid = lineIdOf(scheduler, ev);
-        const onHold = rid === 'hold';
+        const onHold = isHoldId(rid);
         if (!onHold) raw.parked = false;
+        // which floor's Holding Row the bar sits on — a reload puts it back there
+        raw.holdFloor = onHold ? (scheduler.resourceStore.getById(rid)?.data?.holdFloor || null) : null;
         const resourceDbId = resolveResourceDbId(scheduler, rid);
         const eventCode = eventCodeOf(ev, raw);
         if (!raw.eventCode) raw.eventCode = eventCode;

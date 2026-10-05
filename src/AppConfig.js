@@ -76,7 +76,7 @@ export function lineCalcParams(scheduler, raw, lineId) {
     // Holding Row with its own capacity (Setup → Line eff & hours): exactly
     // the manpower × hours × efficiency typed there — no product profile,
     // no plan / strip efficiency
-    if (lineId === 'hold' && res?.data?.capSet) {
+    if (isHoldId(lineId) && res?.data?.capSet) {
         return {
             manpower : Math.max(1, Number(res.data.manpower) || 1),
             effPct   : Math.max(1, Number(res.data.eff) || 1),
@@ -111,7 +111,7 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     const dailyTarget = Math.max(1, Math.floor(manpower * mins * effPct / 100 / smv));
     const res = scheduler?.resourceStore?.getById?.(lineId);
     const lineHours = Number(res?.data?.hours) || LINE_BY_ID[lineId]?.hours;
-    const lc = lineId !== 'hold' && raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    const lc = !isHoldId(lineId) && raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
     const period = lc ? lc.pct.length : 0;
     // Production already made (Daily production update / ERP) has cut the bar
     // from the left — only the REMAINING qty is still to be sewn from `start`
@@ -153,7 +153,7 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     return { days, finish, dailyTarget, effPct };
 }
 
-export const holdCapacitySet = scheduler => !!scheduler?.resourceStore?.getById?.('hold')?.data?.capSet;
+export const holdCapacitySet = scheduler => !!scheduler?.resourceStore?.records?.some(r => r.data?.holdingRow && r.data.capSet);
 
 // Whole days a bar OCCUPIES on the board for an SOP-planned order: the
 // capacity run (qty ÷ daily output, ceil) made curve-aware when the bar
@@ -182,14 +182,14 @@ export function sopBoardDays(scheduler, raw, lineId) {
 // (Quantity × SMV) ÷ (Manpower × 10h minutes × Efficiency). Writes raw.dur / reqMin.
 export function applyLineFormulaDuration(scheduler, raw, lineId) {
     if (!raw || !lineId) return raw?.dur || 1;
-    if (lineId === 'hold') {
+    if (isHoldId(lineId)) {
         // A bar on the Holding Row is sized by the Holding Row's OWN capacity
         // once one is set (no learning ramp, no SOP whole-day run); without
         // it the bar keeps the length it arrived with
         if (!holdCapacitySet(scheduler)) return raw.dur || 1;
-        const hp = lineCalcParams(scheduler, raw, 'hold');
+        const hp = lineCalcParams(scheduler, raw, lineId);
         applyFormulaToRaw(raw, hp.manpower, hp.effPct, hp.mins);
-        fitDurToProduction(scheduler, raw, 'hold', hp.mins);
+        fitDurToProduction(scheduler, raw, lineId, hp.mins);
         return raw.dur;
     }
     const { manpower, effPct, mins } = lineCalcParams(scheduler, raw, lineId);
@@ -611,7 +611,17 @@ export function lineIdOf(scheduler, ev) {
 }
 
 export function isHoldingRes(res) {
-    return !!(res && (res.id === 'hold' || res.data?.holdingRow));
+    return !!(res && (isHoldId(res.id) || res.data?.holdingRow));
+}
+
+// One Holding Row per floor: 'hold' (single-floor board) or 'hold-<floor>'
+export const isHoldId = id => id === 'hold' || String(id || '').startsWith('hold-');
+export const firstHoldId = scheduler =>
+    scheduler?.resourceStore?.records.find(r => r.data?.holdingRow)?.id || 'hold';
+// "Floor-02" (MBM's floors are its two sub-units: "Unit-1")
+export function floorLabelOf(unit, floor) {
+    const n = String(floor || '1').replace(/\D/g, '') || '1';
+    return String(unit || '').toUpperCase() === 'MBM' ? `Unit-${Number(n)}` : `Floor-${n.padStart(2, '0')}`;
 }
 
 export function isSewingRes(res) {
@@ -905,7 +915,7 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
  * BEFORE the bar is inserted. Only the placed bar's geometry ever changes.
  */
 export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
-    if (!scheduler || !raw || !lineId || lineId === 'hold' || !startDate) return;
+    if (!scheduler || !raw || !lineId || isHoldId(lineId) || !startDate) return;
     lcProfCache = null;
     // A manually applied Build up curve travels with the bar — moving it
     // never clears or re-derives the manual ramp
@@ -1382,7 +1392,7 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
         progress : 0, status : parkHold ? 'unplanned' : 'draft'
     };
 
-    const targetId = parkHold ? 'hold' : line.id;
+    const targetId = parkHold ? firstHoldId(scheduler) : line.id;
     scheduler.eventStore.add({
         id : `ev-${order.id}`,
         resourceId : targetId,
@@ -1551,8 +1561,7 @@ export const schedulerProConfig = {
             renderer : ({ record : r }) => {
                 const enc  = StringHelper.encodeHtml;
                 const d    = r.data || r;
-                const floorN = String(d.floor || '1').replace(/\D/g, '') || '1';
-                const code = `${d.unit || 'AQL'}-${floorN.padStart(2, '0')}`;
+                const code = floorLabelOf(d.unit, d.floor);
                 const ico = '<span class="fr-line-ico"></span>';
                 const nums = (red, blue, black) =>
                     `<div class="fr-line-nums">
@@ -1561,9 +1570,10 @@ export const schedulerProConfig = {
                     </div>`;
                 if (d.holdingRow || d.subtotalRow) {
                     const s = uiHooks.instance;
-                    const lines = s
+                    // a floor's Holding Row sums that floor's lines only
+                    const lines = (s
                         ? s.resourceStore.records.filter(x => x.data?.lineRow)
-                        : LINES;
+                        : LINES).filter(x => !d.holdFloor || (x.data?.floor ?? x.floor) === d.holdFloor);
                     let mp = lines.reduce((a, x) => a + Number(x.manpower ?? x.data?.manpower ?? 0), 0);
                     const mc = lines.reduce((a, x) => a + Number(x.machines ?? x.data?.machines ?? 0), 0);
                     // Holding Row with its own capacity (Setup → Line eff & hours):
@@ -2286,8 +2296,8 @@ export const schedulerProConfig = {
                 if (!raw || raw.stage) continue;
                 const origStart = startOfWorkDay(DateHelper.clearTime(rec.startDate));
                 const rid = lineIdOf(s, rec);
-                if (rid === 'hold' || !LINE_BY_ID[rid]) {
-                    const targetId = rid === 'hold' ? 'hold' : rid;
+                if (isHoldId(rid) || !LINE_BY_ID[rid]) {
+                    const targetId = rid;
                     const start = startOfWorkDay(DateHelper.clearTime(rec.startDate));
                     const end   = endOfWork(start, raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1);
                     const a = s.assignmentStore.records.find(x =>
@@ -2303,7 +2313,7 @@ export const schedulerProConfig = {
                     });
                     raw.start = start;
                     raw.end   = end;
-                    if (rid === 'hold' && (raw.status === 'planned' || raw.status === 'draft')) {
+                    if (isHoldId(rid) && (raw.status === 'planned' || raw.status === 'draft')) {
                         raw.status = 'unplanned';
                     }
                     continue;
