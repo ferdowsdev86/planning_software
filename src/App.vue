@@ -4720,7 +4720,7 @@ async function saveMarkedComplete() {
                 s.refreshRows?.();
             }
             // Persist the removals (cancels the events server-side)
-            await syncToApi(s, { eventIds : [] });
+            await syncToApi(s, { eventIds : [], unitId : currentUnitId.value });
             if (boardDbState) for (const ev of drop) delete boardDbState[String(ev.id)];
             setBoardBaseline(s);
             recalcCapacity(s);
@@ -6510,6 +6510,11 @@ function resolveCarrySource(row) {
         };
     }
     if (!src) return { err : `${row.mbmOrder || row.po} — not in the unplanned pool (try ⟳ refresh, or its POs may not be synced yet)` };
+    // Nothing to plan without a quantity and an SMV — such an order never
+    // reaches the board (a 0-qty bar occupies a line slot for nothing)
+    const srcQty = Number(src.planQty ?? src.qty ?? src.orderQty) || 0;
+    if (!(srcQty > 0)) return { err : `${src.mbmOrder || src.po} — order quantity is 0, cannot be planned` };
+    if (!(Number(src.smv) > 0)) return { err : `${src.mbmOrder || src.po} — SMV is 0 / missing in ERP, cannot be planned` };
     return { src, u };
 }
 
@@ -7139,6 +7144,9 @@ function pickUp(rec, domEvent) {
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
     if (!s) return;
+    // qty 0 / no SMV → the bar cannot be moved onto a line
+    if (!(Number(raw.qty) > 0)) { toast(`${raw.mbmOrder || raw.po} — quantity is 0, cannot be planned`, 'warn'); return; }
+    if (!(Number(raw.smv) > 0) || (raw.smvMissing && !(Number(raw.smvManual) > 0))) { toast(`${raw.mbmOrder || raw.po} — SMV is 0 / missing, cannot be planned (right-click → Recalculate duration to enter it)`, 'warn'); return; }
 
     const els = ensureCarryDom();
     els.layer.style.display = 'block';
@@ -7941,7 +7949,7 @@ async function saveToDbInner(s) {
         return;
     }
     try {
-        const res = await syncToApi(s, { eventIds });
+        const res = await syncToApi(s, { eventIds, unitId : currentUnitId.value });
         if (res.success) {
             if (res.mapped?.length) {
                 for (const m of res.mapped) {

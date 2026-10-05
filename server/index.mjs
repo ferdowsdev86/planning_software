@@ -124,6 +124,7 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                     COALESCE(o.product_category, p.product_category) AS product_category, COALESCE(o.pcd, p.pcd) AS pcd,
                     COALESCE(o.shipment_date, p.shipment_date) AS shipment_date, o.material_ready_date, o.priority,
                     COALESCE(o.unit_id, p.unit_id) AS order_unit_id, COALESCE(o.color, p.color) AS color,
+                    COALESCE(o.prod_unit, o.unit_id) AS order_prod_unit, COALESCE(p.prod_unit, p.unit_id) AS proj_prod_unit,
                     /* production that already existed when this bar was last
                        saved: a saved start is the production-CUT start, so
                        that quantity must not be cut off again on load (used
@@ -143,19 +144,7 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                               ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
              WHERE e.project_id = ? AND e.event_status != 'cancelled'`;
         const eventParams = [projectId];
-        if (effUnit) {
-            // Order-linked events filter by the order's unit. Events with no
-            // planning_orders row (saved PROJECTION bars, event_code
-            // 'ev-proj:…') are kept when they are assigned to any resource of
-            // THIS board — the resources themselves may live under a legacy
-            // unit_id (see the resource fallback above), so filtering them by
-            // r.unit_id = effUnit would silently drop every saved projection.
-            // A projection bar follows its projection row's unit (a parked AQL
-            // projection must not surface in another unit's Holding Row)
-            eventSql += ` AND (COALESCE(o.prod_unit, o.unit_id) = ?
-                           OR (o.id IS NULL AND (p.id IS NULL OR COALESCE(p.prod_unit, p.unit_id) = ?)))`;
-            eventParams.push(effUnit, effUnit);
-        }
+        // (unit filtering happens below, once the assignments are known)
         let [events] = await pool.query(eventSql, eventParams);
 
         // Board hygiene: a bar must never load for an order that is absent
@@ -204,19 +193,28 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         );
 
         if (effUnit) {
-            const boardResIds = new Set(resources.map(r => r.id));
             const evResource = new Map();
             for (const a of assignments) {
                 if (!evResource.has(a.event_id)) evResource.set(a.event_id, a.resource_id);
             }
-            // Keep: order-linked events (unit-filtered in SQL), projection
-            // events assigned to a resource of this board, and parked events
-            // (Holding Row — their assignment is deleted on save, so having
-            // NO assignment must not drop them)
-            events = events.filter(e =>
-                e.planning_order_id != null
-                || !evResource.has(e.id)
-                || boardResIds.has(evResource.get(e.id)));
+            const [allRes] = await pool.query('SELECT id, unit_id FROM planning_resources');
+            const resUnit = new Map(allRes.map(r => [r.id, r.unit_id]));
+            // A bar belongs to ONE unit's board: its order's production unit,
+            // else its projection row's, else the unit the board wrote into
+            // its notes when it was saved, else the unit of the line it sits
+            // on. A parked bar nothing knows about predates the unit boards —
+            // it is AQL's. One board's data never shows on another board.
+            events = events.filter(e => {
+                let u = e.order_prod_unit ?? e.proj_prod_unit ?? null;
+                if (u == null) {
+                    let n = {};
+                    try { n = JSON.parse(e.notes || '{}') || {}; } catch { /* no notes */ }
+                    if (Number(n.unit) > 0) u = Number(n.unit);
+                }
+                if (u == null && evResource.has(e.id)) u = resUnit.get(evResource.get(e.id)) ?? null;
+                if (u == null) u = 3;
+                return Number(u) === Number(effUnit);
+            });
         }
 
         const [dependencies] = await pool.query(
@@ -1316,7 +1314,8 @@ async function findHiddenEvents(conn) {
     for (const e of events) {
         const code = codeOf(e);
         let reason = null;
-        if (code && completed.has(code)) reason = 'order marked complete';
+        if (!(Number(e.planned_quantity) > 0)) reason = 'zero quantity';
+        else if (code && completed.has(code)) reason = 'order marked complete';
         else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
         else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
         else if (e.o_id != null && e.line_unit != null && e.order_unit != null

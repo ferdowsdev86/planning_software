@@ -165,9 +165,12 @@ function eventParked(notes) {
     return !!parseEventNotes(notes).parked;
 }
 
-function eventNotesPayload(raw, onHold) {
+function eventNotesPayload(raw, onHold, unitId = null) {
     const notes = {
         parked     : !!(onHold || raw.parked),
+        // the board (production unit) this bar was saved from — a parked bar
+        // has no line, so this is what keeps it on its own unit's board
+        unit       : Number(unitId) > 0 ? Number(unitId) : undefined,
         holdFloor  : onHold && raw.holdFloor ? raw.holdFloor : undefined,
         // dbPinned = the pin as loaded from DB; keeps saved positions pinned
         // even when load-time processing has cleared the working flag
@@ -1179,7 +1182,7 @@ export async function pingApi(timeoutMs = 10000) {
     catch { return await get('/health', timeoutMs); }
 }
 
-export async function syncToApi(scheduler, { eventIds = null } = {}) {
+export async function syncToApi(scheduler, { eventIds = null, unitId = null } = {}) {
     const updated = [];
     const added   = [];
     const idFilter = eventIds ? new Set(eventIds.map(String)) : null;
@@ -1230,7 +1233,7 @@ export async function syncToApi(scheduler, { eventIds = null } = {}) {
             idList             : Array.isArray(raw.idList) && raw.idList.length > 1 ? raw.idList : undefined,
             eventCode,
             status,
-            notes              : eventNotesPayload(raw, onHold)
+            notes              : eventNotesPayload(raw, onHold, unitId)
         };
 
         if (eventDbId) {
