@@ -3530,7 +3530,53 @@ const PRODUCT_TYPES = [
     { name : 'Shirt',                color : '#26a69a' },
     { name : 'Shorts Cargo',         color : '#8d6e63' },
     { name : 'Shorts Chino',         color : '#d4b483' },
-    { name : 'Trouser (Uniform)',    color : '#37474f' }
+    { name : 'Trouser (Uniform)',    color : '#37474f' },
+    // Garment types of the unit line charts (MBM / CEIL efficiency sheet, 2026-10-05)
+    { name : 'Chino Shorts', color : '#5d6d7e' },
+    { name : 'Denim Skirt', color : '#7d3c98' },
+    { name : 'Dress Pant', color : '#1f618d' },
+    { name : 'Elasticated Shorts', color : '#117a65' },
+    { name : 'Jeggings', color : '#9a7d0a' },
+    { name : 'Jogger', color : '#a04000' },
+    { name : 'Pajama', color : '#884ea0' },
+    { name : 'Shorts 5 Pkt', color : '#2874a6' },
+    { name : 'Shorts Swim', color : '#148f77' },
+    { name : 'Shorts Utility', color : '#b7950b' },
+    { name : 'Skirt', color : '#ba4a00' },
+    { name : 'Skirt Long', color : '#633974' },
+    { name : 'Skirt Short', color : '#1a5276' },
+    { name : 'WIDE LEG', color : '#0e6655' },
+    { name : 'G-Star 5 pocket', color : '#7e5109' },
+    { name : 'G-Star Chino', color : '#6e2c00' },
+    { name : 'G-Star Cargo', color : '#5d6d7e' },
+    { name : 'Coverall', color : '#7d3c98' },
+    { name : 'Dungaree', color : '#1f618d' },
+    { name : 'Dungaree Short', color : '#117a65' },
+    { name : 'Overall', color : '#9a7d0a' },
+    { name : 'G-Star Overall', color : '#a04000' },
+    { name : 'Apron', color : '#884ea0' },
+    { name : 'G-Star Overcoat', color : '#2874a6' },
+    { name : 'Denim Dress', color : '#148f77' },
+    { name : 'Dress', color : '#b7950b' },
+    { name : 'Dress Shirt', color : '#ba4a00' },
+    { name : 'G-Star Jacket', color : '#633974' },
+    { name : 'Jacket Hooded', color : '#1a5276' },
+    { name : 'Jacket Padding', color : '#0e6655' },
+    { name : 'Jacket Rain', color : '#7e5109' },
+    { name : 'Jacket Regular', color : '#6e2c00' },
+    { name : 'Lined Jacket', color : '#5d6d7e' },
+    { name : 'Long Shirt', color : '#7d3c98' },
+    { name : 'Shacket', color : '#1f618d' },
+    { name : 'G-Star Shirt', color : '#117a65' },
+    { name : 'Shirt Lined', color : '#9a7d0a' },
+    { name : 'Shirt Long Sleeve', color : '#a04000' },
+    { name : 'Shirt Short Sleeve', color : '#884ea0' },
+    { name : 'Shirt Sleeve Less', color : '#2874a6' },
+    { name : 'Trucker', color : '#148f77' },
+    { name : 'Vest Denim', color : '#b7950b' },
+    { name : 'Vest Non Demin', color : '#ba4a00' },
+    { name : 'Vest Padding', color : '#633974' },
+    { name : 'Vest Regular', color : '#1a5276' },
 ];
 
 // Line capability chart (planning team's line / product matrix, Sep 2026):
@@ -3548,8 +3594,15 @@ const LINE_CAN_DO = {
 };
 function lineCanDo(line) {
     if (!line) return [];
-    const n = Number(String(line.name || '').replace(/\D/g, '')) || Number(String(line.id || '').replace(/\D/g, ''));
-    return LINE_CAN_DO[n] || [];
+    // AQL keeps its fixed line chart; a unit line (MBM / CEIL) can run every
+    // product its efficiency profile holds a figure for (the unit's sheet)
+    const isAql = String(line.id || '').startsWith('l') || String(line.unit || '').toUpperCase() === 'AQL';
+    if (isAql) {
+        const n = Number(String(line.name || '').replace(/\D/g, '')) || Number(String(line.id || '').replace(/\D/g, ''));
+        return LINE_CAN_DO[n] || [];
+    }
+    const values = profileOfLine(line.id)?.values || {};
+    return Object.keys(values).filter(k => k !== '_Default' && Number(values[k]) > 0);
 }
 
 // FastReact-style defaults: pocket family runs hotter, several types unset (0)
@@ -3610,8 +3663,11 @@ const selProfile = computed(() =>
 
 function ensureProfileValues(p) {
     if (!p.values) p.values = {};
+    // A unit line's profile (MBM / CEIL — from the unit's efficiency sheet)
+    // runs ONLY the products it holds a figure for: no demo defaults
+    const unitProfile = /^(MBM|CEIL) /i.test(String(p.name || ''));
     for (const t of PRODUCT_TYPES) {
-        if (p.values[t.name] === undefined) p.values[t.name] = defaultEffFor(t.name, 50);
+        if (p.values[t.name] === undefined) p.values[t.name] = unitProfile ? (t.name === '_Default' ? 60 : 0) : defaultEffFor(t.name, 50);
     }
     // Products the chart says this profile's line(s) can run get the line
     // efficiency when the profile has no figure for them yet
