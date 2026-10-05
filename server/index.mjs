@@ -3029,11 +3029,8 @@ const erpLineToBoard = (unitShort, n) => {
     const code = erpLineCode(unitShort, n);
     return code ? (lineByCode.get(code) || null) : null;
 };
-// AQL floors are the two F1/F2 halves of the line list; other units carry the ERP floor id
-const erpFloorOf = (unitShort, line) => {
-    if (String(unitShort).toUpperCase() === 'AQL') { const n = Number(String(line || '').replace(/\D/g, '')); return n >= 1 && n <= 4 ? 'F1' : n >= 5 ? 'F2' : null; }
-    return null;
-};
+// Floor of a production row = the floor of the line it lands on (AQL is one floor)
+const erpFloorOf = () => null;
 
 // Production per PO per date per sewing line (or per PO only when summary=true).
 //   ONLY cuttingedgedb.daily_productions (the ERP "Daily Production" page,
