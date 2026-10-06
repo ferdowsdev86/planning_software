@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
 } from './AppConfig.js';
@@ -5546,7 +5546,45 @@ const dpReportTitle = computed(() => dpScope.value === 'board' ? 'Board Plan Rep
 const dpGroups      = ref([]);
 const dpGeneratedAt = ref('');
 
-const dpUnitName = computed(() => dpGroups.value[0]?.floor || 'AQL');
+const dpUnitName = computed(() => currentBoard.value?.unitName || dpGroups.value[0]?.unit || 'AQL');
+
+// Unit filter: only the units whose board the user may open (read or write)
+const dpUnits = computed(() => {
+    const seen = new Map();
+    for (const b of permittedBoards.value) {
+        const uid = Number(b.unitId ?? 3);
+        if (!seen.has(uid)) seen.set(uid, { unitId : uid, name : b.unitName || unitLabel(uid), board : b });
+        else if (!b.floors?.length || b.floors.length > 1) seen.get(uid).board = b;   // prefer the all-floors board
+    }
+    return [...seen.values()].sort((a, b) => a.unitId - b.unitId);
+});
+const dpUnit = ref(null);
+// Picking a unit opens that unit's board (the report reads the board) and regenerates
+async function dpSelectUnit(uid) {
+    const u = dpUnits.value.find(x => x.unitId === Number(uid));
+    if (!u) { toast('You have no access to that unit\'s board', 'warn'); return; }
+    dpUnit.value = u.unitId;
+    if (Number(currentBoard.value?.unitId) !== u.unitId) {
+        openBoard(u.board);
+        setBoardLoad(true, `Loading ${u.name} board for the report…`, 0);
+        try {
+            for (let i = 0; i < 300 && boardLoadedUnitId !== u.unitId; i++) await new Promise(r => setTimeout(r, 100));
+        }
+        finally { setBoardLoad(false); }
+        if (boardLoadedUnitId !== u.unitId) { toast(`${u.name} board did not load — try again`, 'warn'); return; }
+    }
+    generateDayPlan();
+}
+
+// A board's floors as the report groups them: "Floor-02" (CEIL), "Unit-1"
+// (MBM); a single-floor unit (AQL) is its own one group
+function dpFloorLabel(res, line) {
+    const s = getInstance();
+    const unit = res?.data?.unit || line?.unit || currentBoard.value?.unitName || 'AQL';
+    const floors = new Set((s?.resourceStore?.records || []).filter(r => r.data?.lineRow).map(r => r.data.floor));
+    if (floors.size <= 1) return unit;
+    return floorLabelOf(unit, res?.data?.floor || line?.floor);
+}
 
 const dpRangeLabel = computed(() =>
     `${fmtDdMmYy(new Date(dpFrom.value + 'T00:00:00'))} — ${fmtDdMmYy(new Date(dpTo.value + 'T00:00:00'))}`);
@@ -5662,7 +5700,7 @@ const dpFloorMatrix = computed(() => {
 const dpHoursMatrix = computed(() => {
     const s = getInstance();
     if (!s) return { rows : [], avg : {}, manpower : 0 };
-    const lines = s.resourceStore.records.filter(r => /^l\d+$/.test(String(r.id)));
+    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
     const rows = lines.map(r => {
         const hours = Number(r.data?.hours) || 11;
         const days = {};
@@ -5670,7 +5708,7 @@ const dpHoursMatrix = computed(() => {
             days[dpColKey(d)] = (dpMode.value !== 'month' && isOffDay(d)) ? null : hours;
         }
         return {
-            floor    : r.data?.unit || 'AQL',
+            floor    : dpFloorLabel(r, LINE_BY_ID[r.id]),
             line     : dpLineCode(r),
             manpower : Number(r.data?.manpower) || 0,
             days
@@ -5683,6 +5721,33 @@ const dpHoursMatrix = computed(() => {
         avg[k] = vals.length ? Math.round(vals.reduce((a, v) => a + v, 0) * 100 / vals.length) / 100 : null;
     }
     return { rows, avg, manpower : rows.reduce((a, x) => a + x.manpower, 0) };
+});
+
+// Plan Efficiency matrix: every sewing line × date with the plan-qty-weighted
+// planned efficiency % of that day (blank when nothing is planned)
+const dpEffMatrix = computed(() => {
+    const s = getInstance();
+    if (!s) return { rows : [], avg : {}, manpower : 0 };
+    const byLine = new Map(dpGroups.value.map(g => [g.lineId, g]));
+    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    const rows = lines.map(r => {
+        const g = byLine.get(r.id);
+        const days = {};
+        for (const d of dpDates.value) {
+            const k = dpColKey(d);
+            const q = g?.totals?.dayEffQ?.[k] || 0;
+            days[k] = q > 0 ? Math.round((g.totals.dayEffW[k] || 0) / q) : null;
+        }
+        return { floor : dpFloorLabel(r, LINE_BY_ID[r.id]), line : dpLineCode(r), manpower : Number(r.data?.manpower) || 0, days, _g : g };
+    });
+    const avg = {};
+    for (const d of dpDates.value) {
+        const k = dpColKey(d);
+        let w = 0, q = 0;
+        for (const x of rows) { const g = x._g; if (!g) continue; w += g.totals.dayEffW?.[k] || 0; q += g.totals.dayEffQ?.[k] || 0; }
+        avg[k] = q > 0 ? Math.round(w / q) : null;
+    }
+    return { rows : rows.map(({ _g, ...x }) => x), avg, manpower : rows.reduce((a, x) => a + x.manpower, 0) };
 });
 
 // Click a day column (Floor Target view) → single-day Day Plan report
@@ -5817,7 +5882,8 @@ function generateDayPlan() {
 
         const row = {
             _start      : +start,   // board plan sequence within the line
-            floor       : res?.data?.unit || line.unit || 'AQL',
+            unit        : res?.data?.unit || line.unit || currentBoard.value?.unitName || 'AQL',
+            floor       : isHold ? (res?.data?.holdFloor ? dpFloorLabel(res, line) : (res?.data?.unit || 'AQL')) : dpFloorLabel(res, line),
             line        : isHold ? 'Holding Row' : dpLineCode(res),
             buyer       : raw.buyer,
             mbm         : raw.mbmOrder || mbmOrderNo(raw.po),
@@ -6041,7 +6107,17 @@ function dpBuildHoursHtml() {
     return `<table border="1" cellspacing="0" cellpadding="3"><thead>${th}</thead><tbody>${rows}${avg}</tbody></table>`;
 }
 
-const DP_VIEW_NAMES = { report : '', summary : 'Summary', floors : 'Floor Target', hours : 'Plan Hours' };
+function dpBuildEffHtml() {
+    const m = dpEffMatrix.value;
+    const th = `<tr><th>Factory</th><th>Line</th><th>Man Power</th>${dpDates.value.map(d => `<th>${dpColLabel(d)}</th>`).join('')}</tr>`;
+    const cell = v => v == null ? '-' : `${v}%`;
+    const rows = m.rows.map(r =>
+        `<tr><td>${dpEsc(r.floor)}</td><td>${dpEsc(r.line)}</td><td style="text-align:right">${r.manpower}</td>${dpDates.value.map(d => `<td style="text-align:right">${cell(r.days[dpColKey(d)])}</td>`).join('')}</tr>`).join('');
+    const avg = `<tr class="dp-grand"><td>Avg</td><td></td><td style="text-align:right">${fmtQty(m.manpower)}</td>${dpDates.value.map(d => `<td style="text-align:right">${cell(m.avg[dpColKey(d)])}</td>`).join('')}</tr>`;
+    return `<table border="1" cellspacing="0" cellpadding="3"><thead>${th}</thead><tbody>${rows}${avg}</tbody></table>`;
+}
+
+const DP_VIEW_NAMES = { report : '', summary : 'Summary', floors : 'Floor Target', hours : 'Plan Hours', eff : 'Plan Efficiency' };
 
 function dpBuildViewHtml() {
     const base = dpBuildTableHtml();
@@ -6049,6 +6125,7 @@ function dpBuildViewHtml() {
     if (dpView.value === 'summary') return { ...base, table : dpBuildSummaryHtml(), viewName };
     if (dpView.value === 'floors')  return { ...base, table : dpBuildFloorsHtml(),  viewName };
     if (dpView.value === 'hours')   return { ...base, table : dpBuildHoursHtml(),   viewName };
+    if (dpView.value === 'eff')     return { ...base, table : dpBuildEffHtml(),     viewName };
     return { ...base, viewName };
 }
 
@@ -9144,6 +9221,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </span>
                 </div>
                 <div class="dp-toolbar">
+                    <label class="dp-range" title="Only the units whose board you may open">Unit
+                        <select class="cal-in dp-unit" :value="dpUnit ?? currentBoard?.unitId ?? 3" @change="dpSelectUnit($event.target.value)">
+                            <option v-for="u in dpUnits" :key="u.unitId" :value="u.unitId">{{ u.name }}</option>
+                        </select>
+                    </label>
                     <label v-if="dpScope !== 'board'" class="dp-range">From
                         <input v-model="dpFrom" class="cal-in dp-date" type="date">
                     </label>
@@ -9160,6 +9242,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @click="dpView = dpView === 'floors' ? 'report' : 'floors'">🏭 Floor Target</button>
                     <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'hours' }"
                         @click="dpView = dpView === 'hours' ? 'report' : 'hours'">🕐 Plan Hours</button>
+                    <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'eff' }"
+                        @click="dpView = dpView === 'eff' ? 'report' : 'eff'">📈 Plan Efficiency</button>
                     <span class="dp-flex"></span>
                     <button class="dp-act dp-act-close" @click="dpOpen = false">✕ Close</button>
                 </div>
@@ -9244,6 +9328,30 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td>Avg</td><td></td>
                                     <td class="od-num">{{ fmtQty(dpHoursMatrix.manpower) }}</td>
                                     <td v-for="d in dpDates" :key="'ha'+dpDayKey(d)" class="od-num">{{ dpHoursMatrix.avg[dpColKey(d)] ?? '-' }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <!-- Plan Efficiency view: line × day planned efficiency % matrix -->
+                        <table v-else-if="dpView === 'eff'" class="st-table dp-table">
+                            <thead>
+                                <tr>
+                                    <th>Factory</th><th>Line</th><th class="od-num">Man Power</th>
+                                    <th v-for="d in dpDates" :key="dpDayKey(d)" class="od-num dp-dayh dp-day-click"
+                                        title="Click: Day Plan report for this day" @click="dpPickDay(d)">{{ dpColLabel(d) }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="r in dpEffMatrix.rows" :key="'e' + r.line">
+                                    <td>{{ r.floor }}</td>
+                                    <td>{{ r.line }}</td>
+                                    <td class="od-num">{{ r.manpower }}</td>
+                                    <td v-for="d in dpDates" :key="r.line + dpDayKey(d)" class="od-num">{{ r.days[dpColKey(d)] == null ? '-' : r.days[dpColKey(d)] + '%' }}</td>
+                                </tr>
+                                <tr class="dp-grand">
+                                    <td>Avg</td><td></td>
+                                    <td class="od-num">{{ fmtQty(dpEffMatrix.manpower) }}</td>
+                                    <td v-for="d in dpDates" :key="'ea'+dpDayKey(d)" class="od-num">{{ dpEffMatrix.avg[dpColKey(d)] == null ? '-' : dpEffMatrix.avg[dpColKey(d)] + '%' }}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -11259,6 +11367,7 @@ body {
     color       : #17356b;
 }
 .dp-date { width : 138px; }
+.dp-unit { width : 96px; }
 .dp-flex { flex : 1 1 auto; }
 
 .dp-act {
