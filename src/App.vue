@@ -1675,22 +1675,23 @@ watch([chCalId, chCalendars], async () => {
     try { chTargetOv.value = await loadCalendarOverridesDb(id); }
     catch { chTargetOv.value = {}; }
 });
-// Hours the target calendar currently has on that weekday inside the chosen
-// period (overrides included) — "10:00 / 11:00" when they differ by date
+// Hours the planner has SET for that weekday inside the chosen period
+// (Change working hours overrides only) — "11:00 / 12:00" when they differ
+// by date. Blank = no override: the day runs on its Normal hours.
 const chPeriodHours = wd => {
     const from = new Date(chFrom.value + 'T00:00:00'), to = new Date(chTo.value + 'T00:00:00');
-    if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) return '—';
+    if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) return '';
     const ov = chTargetOv.value || {};
     const seen = [];
     const d = new Date(from);
     for (let g = 0; d <= to && g < 400; g++, d.setDate(d.getDate() + 1)) {
         if (d.getDay() !== wd) continue;
         const v = ov[ymdOf(d)];
-        const h = v != null && v !== '' ? (Number(v) || 0) : hmToHours(chNormalHours(wd));
-        const t = hoursToHm(h);
+        if (v == null || v === '') continue;
+        const t = hoursToHm(Number(v) || 0);
         if (!seen.includes(t)) seen.push(t);
     }
-    if (!seen.length) return '—';
+    if (!seen.length) return '';
     return seen.length <= 2 ? seen.join(' / ') : `${seen[0]} …`;
 };
 
@@ -4197,15 +4198,12 @@ async function syncCalendarOverrides(calId = calendarState.id || 1) {
     catch { /* corrupt store — start clean */ }
     for (const k of Object.keys(calendarState.overrides)) delete calendarState.overrides[k];
     try {
+        // The DB is the truth, an empty answer included: overrides cleared
+        // there (back to Normal hours) must not come back from a browser's
+        // stale cache. The cache only serves this browser while offline.
         const db = await loadCalendarOverridesDb(calId);
-        if (Object.keys(db).length) {
-            Object.assign(calendarState.overrides, db);
-            localStorage.setItem(calOverridesKey(calId), JSON.stringify(db));
-        }
-        else if (Object.keys(local).length && !boardViewOnly.value) {
-            Object.assign(calendarState.overrides, local);
-            await saveCalendarOverridesDb(local, calId);
-        }
+        Object.assign(calendarState.overrides, db);
+        localStorage.setItem(calOverridesKey(calId), JSON.stringify(db));
     }
     catch { Object.assign(calendarState.overrides, local); }   // offline — this browser's copy
 }
