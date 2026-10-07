@@ -7109,9 +7109,9 @@ function flushCarryPreview() {
     const snap = computeCarryPreview(s, rec, p.clientX, p.clientY);
     carryPreview.value = snap;
 
-    // the dashed slot marks the landing spot on the target line; the solid
-    // bar follows the pointer
-    paintCarryBox(els.vacancy, snap.targetBox);
+    // only the solid bar under the pointer — no landing-slot "shadow"
+    // (user, 2026-10-07); the header clock still tells the landing time
+    paintCarryBox(els.vacancy, null);
     paintCarryBox(els.bar, snap.barBox);
 
     const raw = rec.data.raw;
