@@ -429,6 +429,12 @@ export async function loadEffProfilesDb() {
     return j.rows || [];
 }
 export const saveLearningCurvesDb  = rows => postRows('/learning-curves', rows);
+// Build up curves as saved in the DB (learning_curve): one row per curve day
+export async function loadLearningCurvesDb() {
+    const j = await get('/learning-curves', 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return j.rows || [];
+}
 
 // Board snapshots (daily 23:30 auto backup + manual) and compare with the live plan
 export async function loadBoardSnapshots(unitId) {

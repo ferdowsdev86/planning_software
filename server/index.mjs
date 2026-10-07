@@ -1030,7 +1030,7 @@ app.post(`${BASE}/efficiency-profiles`, async (req, res) => {
 app.get(`${BASE}/learning-curves`, async (req, res) => {
     try {
         const [rows] = await pool.query(
-            `SELECT id, curve_name, period_days, day_number, efficiency_pct
+            `SELECT id, curve_name, period_days, unit_id, day_number, efficiency_pct
              FROM learning_curve ORDER BY curve_name, day_number`
         );
         res.json({ success : true, rows });
@@ -1049,10 +1049,12 @@ app.post(`${BASE}/learning-curves`, async (req, res) => {
         for (const r of rows) {
             await conn.query(
                 `INSERT INTO learning_curve
-                    (curve_name, period_days, day_number, efficiency_pct,
+                    (curve_name, period_days, unit_id, day_number, efficiency_pct,
                      created_at, updated_at)
-                 VALUES (?, ?, ?, ?, NOW(), NOW())`,
+                 VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
                 [String(r.curveName), Number(r.periodDays) || 1,
+                 // unit_id NULL = the curve serves every unit's board
+                 Number(r.unitId) > 0 ? Number(r.unitId) : null,
                  Number(r.dayNumber) || 1, Number(r.efficiency) || 0]
             );
         }

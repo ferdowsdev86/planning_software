@@ -18,7 +18,7 @@ import {
 } from './planningData.js';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
-    saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
+    saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb, reopenOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
@@ -1303,6 +1303,7 @@ function applyApiBoardData(s, data) {
     boardDbState = snapshotBoardState(s);
     unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
     currentUnitId.value = data.unitId || currentBoard.value?.unitId || null;
+    uiHooks.unitId = currentUnitId.value;   // the engine picks this unit's Build up curve
     syncProfileDefaultsFromLines(data.resources);
     planMeta.value = {
         name    : data.project.name,
@@ -1505,7 +1506,7 @@ async function hydrateBoardFromApi() {
             apiReady.value = true;
             setBoardLoad(false);
             finishBoardLoad(unitId, data, s);
-            setTimeout(() => syncMasterData(s), 3000);
+            syncMasterData();
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
         }
         catch (err) {
@@ -4187,6 +4188,49 @@ const bcList       = ref(loadBuildUps() || seedBuildUps());
 if (!localStorage.getItem('mbm-buildup')) {
     localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
 }
+// Unit-wise curves: a curve belongs to one production unit (unitId 3 AQL /
+// 1 MBM / 2 CEIL) or to every unit (unitId null — the seeded ones). A board
+// offers its own unit's curves plus the shared ones; the automatic
+// product-change rule (AppConfig) picks the unit's 3-day curve first.
+const BC_UNITS = [{ id : 3, name : 'AQL' }, { id : 1, name : 'MBM' }, { id : 2, name : 'CEIL' }];
+const bcUnit   = ref(null);         // unit of the curve being defined (null = all units)
+const bcFilter = ref('board');      // list filter: 'board' (open board's unit + shared) | 'all' | unit id
+const bcUnitOf = c => (Number(c?.unitId) > 0 ? Number(c.unitId) : null);
+const bcUnitTag = c => { const u = bcUnitOf(c); return u ? (BC_UNITS.find(x => x.id === u)?.name || `Unit ${u}`) : 'All units'; };
+// Curves the OPEN board may use: its unit's own + the shared ones
+const bcUnitList = computed(() => {
+    const uid = Number(currentUnitId.value) || 0;
+    return bcList.value.filter(c => { const u = bcUnitOf(c); return !u || u === uid; });
+});
+const bcVisible = computed(() => {
+    const f = bcFilter.value;
+    if (f === 'all') return bcList.value;
+    if (f === 'board') return bcUnitList.value;
+    return bcList.value.filter(c => bcUnitOf(c) === Number(f));
+});
+// ➕ New: an empty form for a curve of the open board's unit
+function bcNew() {
+    bcSelectedId.value = null;
+    bcName.value   = '';
+    bcPeriod.value = 3;
+    bcPct.value    = [0, 0, 0];
+    bcUnit.value   = Number(currentUnitId.value) || null;
+}
+// DB rows (one per curve day) -> curve list, in the dialog's shape
+function curvesFromDbRows(rows) {
+    const byName = new Map();
+    for (const r of rows || []) {
+        const name = String(r.curve_name || '').trim();
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, { id : `bc-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name, period : Number(r.period_days) || 1, unitId : Number(r.unit_id) > 0 ? Number(r.unit_id) : null, days : [] });
+        byName.get(name).days.push({ n : Number(r.day_number) || 1, v : Number(r.efficiency_pct) || 0 });
+    }
+    return [...byName.values()].map(c => {
+        c.days.sort((a, b) => a.n - b.n);
+        const pct = c.days.map(d => d.v);
+        return { id : c.id, name : c.name, period : Math.max(c.period, pct.length) || 1, pct : pct.length ? pct : [0], unitId : c.unitId };
+    });
+}
 
 // Date-specific working-hour overrides: the DB copy is shared by everyone;
 // localStorage is only this browser's cache. A browser that still holds
@@ -4245,7 +4289,9 @@ function openBuildUps() {
     bcTab.value = 'define';
     bcOpen.value = true;
     bcMin.value = false;
-    if (!bcSelectedId.value && bcList.value[0]) selectBuildUp(bcList.value[0]);
+    bcFilter.value = 'board';
+    const first = bcVisible.value[0] || bcList.value[0];
+    if (!bcSelectedId.value && first) selectBuildUp(first);
 }
 
 function selectBuildUp(c) {
@@ -4253,6 +4299,7 @@ function selectBuildUp(c) {
     bcName.value   = c.name;
     bcPeriod.value = c.period;
     bcPct.value    = [...c.pct];
+    bcUnit.value   = bcUnitOf(c);
 }
 
 function bcUpdate() {
@@ -4262,18 +4309,25 @@ function bcUpdate() {
         return;
     }
     const pct = bcPct.value.map(v => Math.max(0, Math.min(100, Number(v) || 0)));
+    const unitId = Number(bcUnit.value) > 0 ? Number(bcUnit.value) : null;
     const existing = bcList.value.find(c => c.name.toLowerCase() === name.toLowerCase());
+    // ➕ New with a name that already exists: never silently overwrite it
+    if (existing && !bcSelectedId.value) {
+        toast(`"${name}" নামে curve আগে থেকেই আছে (${bcUnitTag(existing)}) — অন্য নাম দিন`, 'warn');
+        return;
+    }
     if (existing) {
         existing.period = bcPeriod.value;
         existing.pct = pct;
+        existing.unitId = unitId;
         bcSelectedId.value = existing.id;
-        toast(`Build up curve "${name}" updated`, 'ok');
+        toast(`Build up curve "${name}" updated (${bcUnitTag(existing)})`, 'ok');
     }
     else {
-        const c = { id : `bc${Date.now()}`, name, period : bcPeriod.value, pct };
+        const c = { id : `bc${Date.now()}`, name, period : bcPeriod.value, pct, unitId };
         bcList.value.push(c);
         bcSelectedId.value = c.id;
-        toast(`Build up curve "${name}" added`, 'ok');
+        toast(`Build up curve "${name}" added for ${bcUnitTag(c)}`, 'ok');
     }
     saveBuildUps();
 }
@@ -4282,13 +4336,9 @@ function bcDelete() {
     const c = bcList.value.find(x => x.id === bcSelectedId.value);
     if (!c) return;
     bcList.value = bcList.value.filter(x => x.id !== c.id);
-    bcSelectedId.value = bcList.value[0]?.id || null;
-    if (bcList.value[0]) selectBuildUp(bcList.value[0]);
-    else {
-        bcName.value = '';
-        bcPeriod.value = 1;
-        bcPct.value = [0];
-    }
+    const next = bcVisible.value[0] || bcList.value[0];
+    if (next) selectBuildUp(next);
+    else bcNew();
     saveBuildUps();
     toast(`Build up curve "${c.name}" deleted`, 'ok');
 }
@@ -4360,6 +4410,7 @@ function buildLearningCurveRows() {
         (c.pct || []).forEach((v, i) => rows.push({
             curveName  : c.name,
             periodDays : Number(c.period) || (c.pct?.length ?? 1),
+            unitId     : bcUnitOf(c),
             dayNumber  : i + 1,
             efficiency : Number(v) || 0
         }));
@@ -4367,20 +4418,27 @@ function buildLearningCurveRows() {
     return rows;
 }
 
-function syncMasterData(s) {
-    // NEVER push this browser's copy of the efficiency profiles to the DB on
-    // load — the DB is the shared source of truth (loaded on every board
-    // open) and is written only by an explicit Update in the profiles dialog.
-    // A read-only / test session must not write master data at all.
-    if (boardReadOnly.value) return;
-    Promise.allSettled([
-        saveLearningCurvesDb(buildLearningCurveRows())
-    ]).then(results => {
-        const failed = results.filter(r => r.status === 'rejected');
-        if (failed.length) {
-            console.warn('Master data sync failed:', failed.map(f => f.reason?.message));
+async function syncMasterData() {
+    // The DB is the shared source of truth for the Build up curves (every
+    // planner of a unit sees the same curves): on every board open the list
+    // comes from the DB; this browser's copy is only the offline fallback
+    // and seeds the DB once when it holds no curve yet. The efficiency
+    // profiles are never pushed on load — only by an explicit Update.
+    try {
+        const rows = await loadLearningCurvesDb();
+        if (rows.length) {
+            bcList.value = curvesFromDbRows(rows);
+            localStorage.setItem('mbm-buildup', JSON.stringify(bcList.value));
+            if (bcSelectedId.value && !bcList.value.some(c => c.id === bcSelectedId.value)) bcSelectedId.value = null;
+            return;
         }
-    });
+        // A read-only / test session must not write master data at all
+        if (boardReadOnly.value) return;
+        await saveLearningCurvesDb(buildLearningCurveRows());
+    }
+    catch (e) {
+        console.warn('Master data sync failed:', e?.message);
+    }
 }
 
 // SVG polyline for the build up percentage chart
@@ -10234,7 +10292,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             — No manual curve (automatic product-change rule) —
                         </div>
                         <div
-                            v-for="c in bcList"
+                            v-for="c in bcUnitList"
                             :key="c.id"
                             :class="{ 'cal-sel' : lcDlgSel === c.id }"
                             @click="lcDlgSel = c.id"
@@ -10556,7 +10614,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div class="cal-label">Select build</div>
                             <select v-model="mshCurveSel" class="msh-build-sel">
                                 <option value="ref">Reference bar's current curve</option>
-                                <option v-for="c in bcList" :key="c.id" :value="c.id">📈 {{ c.name }}</option>
+                                <option v-for="c in bcUnitList" :key="c.id" :value="c.id">📈 {{ c.name }}</option>
                             </select>
                             <div v-if="mshCurve" class="msh-curve-prev">
                                 <table>
@@ -10721,18 +10779,35 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label>Period (days)</label>
                             <input v-model.number="bcPeriod" class="cal-in ef-in" type="number" min="1" max="60">
                         </div>
+                        <div class="ef-row">
+                            <label>Unit</label>
+                            <select v-model="bcUnit" class="cal-in ef-in bc-unit-sel">
+                                <option :value="null">All units</option>
+                                <option v-for="u in BC_UNITS" :key="u.id" :value="u.id">{{ u.name }}</option>
+                            </select>
+                        </div>
                         <div class="cal-label">Build up name</div>
-                        <input v-model="bcName" class="cal-name ef-name" placeholder="e.g. MBM 3 Days">
+                        <input v-model="bcName" class="cal-name ef-name" placeholder="e.g. CEIL 3 Days">
+                        <div class="bc-filter">
+                            <span>Show</span>
+                            <select v-model="bcFilter" class="cal-in bc-unit-sel">
+                                <option value="board">This board ({{ unitLabel(currentUnitId) }} + shared)</option>
+                                <option value="all">All curves</option>
+                                <option v-for="u in BC_UNITS" :key="u.id" :value="u.id">{{ u.name }} only</option>
+                            </select>
+                        </div>
                         <div class="cal-list bc-list">
                             <div
-                                v-for="c in bcList"
+                                v-for="c in bcVisible"
                                 :key="c.id"
                                 :class="{ 'cal-sel' : c.id === bcSelectedId }"
                                 @click="selectBuildUp(c)"
-                            >{{ c.name }}</div>
+                            >{{ c.name }} <span class="bc-tag">{{ bcUnitTag(c) }}</span></div>
+                            <div v-if="!bcVisible.length" class="bc-empty">এই unit-এর কোনো curve নেই — ➕ New দিয়ে বানান</div>
                         </div>
                         <div class="st-actions">
-                            <button class="cal-btn st-btn" :disabled="!bcName.trim()" @click="bcUpdate">💾 Update</button>
+                            <button class="cal-btn st-btn" @click="bcNew">➕ New</button>
+                            <button class="cal-btn st-btn" :disabled="!bcName.trim()" @click="bcUpdate">💾 {{ bcSelectedId ? 'Update' : 'Add' }}</button>
                             <button class="cal-btn st-btn" :disabled="!bcSelectedId" @click="bcDelete">✖ Delete</button>
                         </div>
                     </div>
@@ -10783,7 +10858,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 :key="c.id"
                                 :class="{ 'cal-sel' : c.id === bcRenameSelId }"
                                 @click="bcRenameSelId = c.id; bcRenameInput = ''"
-                            >{{ c.name }}</div>
+                            >{{ c.name }} <span class="bc-tag">{{ bcUnitTag(c) }}</span></div>
                         </div>
                     </div>
                     <div class="bc-mid bc-renamecol">
@@ -12093,7 +12168,12 @@ body {
 .bc-mid   { flex : 0 0 170px; max-height : 420px; overflow-y : auto; }
 .bc-right { flex : 1; }
 
-.bc-list { height : 280px; margin : 4px 0 10px; }
+.bc-list { height : 240px; margin : 4px 0 10px; }
+.bc-tag   { font-size : 10px; color : #777; margin-left : 4px; }
+.bc-empty { padding : 8px; color : #777; font-size : 12px; }
+.bc-filter { display : flex; align-items : center; gap : 6px; margin-top : 6px; font-size : 12px; }
+.bc-filter select { flex : 1; min-width : 0; }
+.bc-unit-sel { width : auto; min-width : 120px; }
 
 .bc-chart-title {
     color       : #1b3fde;

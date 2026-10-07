@@ -287,6 +287,7 @@ export const searchState = { query : '' };
 // Bridge between the scheduler config and App.vue
 export const uiHooks = {
     instance         : null,
+    unitId           : null,   // production unit of the open board (1 MBM / 2 CEIL / 3 AQL)
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -766,9 +767,15 @@ export function invalidateWorkDayCache() {
     workDayIdxCache.clear();
 }
 
+// The automatic product-change curve of the OPEN board: that unit's own
+// 3-day Build up curve when one is defined, else a 3-day curve shared by
+// every unit (unitId empty). Curves of another unit never apply here.
 function configuredLearningCurve() {
     try {
-        return pickLearningCurve(JSON.parse(localStorage.getItem('mbm-buildup') || '[]'), 3);
+        const list = JSON.parse(localStorage.getItem('mbm-buildup') || '[]');
+        const uid  = Number(uiHooks.unitId) || 0;
+        return (uid && pickLearningCurve(list.filter(c => Number(c?.unitId) === uid), 3))
+            || pickLearningCurve(list.filter(c => !(Number(c?.unitId) > 0)), 3);
     }
     catch { return null; }
 }
