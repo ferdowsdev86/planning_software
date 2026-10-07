@@ -7872,6 +7872,102 @@ function boardArrowKeys(e) {
 }
 document.addEventListener('keydown', boardArrowKeys, true);
 
+// ---------------------------------------------------------------------------
+// Consolidate orders (toolbar toggle): the group of a bar = the side-by-side
+// bars of the SAME order on its line (a projection replaced by its confirm
+// POs, one order split into several bars) with no other order between them.
+// Picking one bar up carries the whole group; on the drop the others follow
+// it onto the target row in their original order. Nothing is merged — the
+// bars stay separate bars.
+// ---------------------------------------------------------------------------
+let carryGroup = [];   // the other bars of the carried bar's group (in order)
+
+function groupMembersOf(s, rec) {
+    const raw = rec?.data?.raw;
+    if (!raw || raw.stage) return [];
+    const lid = lineIdOf(s, rec);
+    if (!lid || isHoldId(lid)) return [];
+    const key = orderFamilyKey(raw);
+    if (!key) return [];
+    const bars = s.eventStore.records
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === lid)
+        .sort((a, b) => a.startDate - b.startDate);
+    const i = bars.indexOf(rec);
+    if (i < 0) return [];
+    const same = ev => ev.data.raw.status !== 'completed' && ev.draggable !== false && orderFamilyKey(ev.data.raw) === key;
+    let lo = i, hi = i;
+    while (lo > 0 && same(bars[lo - 1])) lo--;
+    while (hi < bars.length - 1 && same(bars[hi + 1])) hi++;
+    return bars.slice(lo, hi + 1).filter(ev => ev !== rec);
+}
+
+function releaseCarryGroup() {
+    for (const m of carryGroup) {
+        const r = m.data?.raw;
+        if (!r) continue;
+        r._carryGroup = false;
+        if (r._prevCls !== undefined) {
+            m.set('cls', r._prevCls);
+            delete r._prevCls;
+        }
+    }
+    carryGroup = [];
+}
+
+// The carried bar is placed: its group follows, one after another, on the
+// same target row (each member resolves collisions like a dropped bar)
+function placeGroupMembers(s, rec, targetId, parkHold) {
+    const members = carryGroup;
+    carryGroup = [];
+    if (!members.length) return 0;
+    let prevEnd = new Date(rec.endDate);
+    let placed = 0;
+    beginBoardInteraction(s, 'light');
+    try {
+        for (const m of members) {
+            const mraw = m.data?.raw;
+            if (!mraw) continue;
+            mraw._carryGroup = false;
+            m.set('cls', mraw._prevCls || '');
+            delete mraw._prevCls;
+            let start, end;
+            if (parkHold) {
+                start = startOfWorkDay(prevEnd);
+                mraw.start = start;
+                applyLineFormulaDuration(s, mraw, targetId);
+                end = endOfWork(start, mraw.dur || 1);
+                mraw.status = 'unplanned';
+                mraw.parked = true;
+            }
+            else {
+                const ins = computeInsertStart(s, targetId, prevEnd, mraw.dur, m.id);
+                start = ins.start;
+                mraw.start = start;
+                applyLineFormulaDuration(s, mraw, targetId);
+                end = endOfWork(start, mraw.dur || 1);
+                mraw.parked = false;
+                if (mraw.status === 'unplanned') mraw.status = 'draft';
+                mraw.userPinned = true;
+            }
+            if (!(start instanceof Date) || Number.isNaN(+start) || !(end instanceof Date) || Number.isNaN(+end) || end <= start) continue;
+            mraw.latePlan = !parkHold && !!mraw.ship && end > new Date(mraw.ship);
+            assignEventToLine(s, m, targetId);
+            m.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : targetId });
+            m.data.resourceId = targetId;
+            mraw.start = start;
+            mraw.end   = end;
+            if (!parkHold) pushFollowers(s, targetId, m);
+            prevEnd = new Date(end);
+            placed++;
+        }
+    }
+    finally {
+        endBoardInteraction(s);
+    }
+    if (placed) toast(`Consolidated: ${placed} more bar(s) of ${rec.data.raw?.mbmOrder || rec.data.raw?.po} moved along`, 'ok');
+    return placed;
+}
+
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
     const raw = rec?.data?.raw;
@@ -7893,7 +7989,15 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
 
     const els = ensureCarryDom();
     els.layer.style.display = 'block';
-    els.label.textContent = rec.name || '';
+    // Consolidate orders ON: the bar's group leaves the line with it
+    carryGroup = consolidate.value ? groupMembersOf(s, rec) : [];
+    for (const m of carryGroup) {
+        const r = m.data.raw;
+        r._carryGroup = true;
+        r._prevCls = String(m.data.cls || '');
+        m.set('cls', `${r._prevCls} mb-carried-away`.trim());
+    }
+    els.label.textContent = `${rec.name || ''}${carryGroup.length ? ` (+${carryGroup.length})` : ''}`;
 
     carried.value = rec;
     pickStamp     = performance.now();
@@ -7932,6 +8036,7 @@ function cancelCarry() {
     pressPick = null;
     setBarTooltipEnabled(getInstance(), true);
     restoreCarriedCls();
+    releaseCarryGroup();
     carried.value = null;
     carryPreview.value = emptyCarrySnap();
     carryOrigin.value  = { valid : false, left : 0, top : 0, width : 0, height : 0 };
@@ -8236,6 +8341,8 @@ async function placeCarried(date, resourceRecord) {
         finally {
             endBoardInteraction(s);
         }
+        // Consolidated group: the other bars of the order follow onto the row
+        placeGroupMembers(s, rec, targetId, false);
         // Rule: a bar pushed past the visible range must stay real & visible —
         // extend the timeline instead of letting it render nowhere
         let maxEnd = end;
@@ -8247,6 +8354,7 @@ async function placeCarried(date, resourceRecord) {
         }
     }
 
+    if (parkHold) placeGroupMembers(s, rec, targetId, true);   // the group parks together
     const util = computeLineUtil(s.eventStore.records);
     raw.risk = calcRisk({
         start, end,
@@ -9207,6 +9315,7 @@ function syncRowHeightVar(s) {
 }
 
 const act = name => {
+    if (name === 'consolidate') { toggleConsolidate(); return; }
     if (name === 'colorMenu') {
         colorMenuOpen.value = !colorMenuOpen.value;
         return;
@@ -9285,8 +9394,23 @@ const toolbar = [
     { sep : true },
     // fa-left-from-line is FA Pro — compose the same look from the free
     // long-left arrow + a vertical line drawn in CSS (::after)
-    { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', tip : 'Plan Pull Forward', action : 'pullForward' }
+    { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', tip : 'Plan Pull Forward', action : 'pullForward' },
+    { sep : true },
+    // Consolidate orders: ON = an order's side-by-side bars on a line (a
+    // projection replaced by its confirm POs, splits of one order) move as
+    // one group; OFF = every bar moves alone
+    { fa : 'fa-object-group', cls : 'fr-tb-consol', toggle : 'consolidate',
+        title : 'Consolidate orders — একই order-এর পাশাপাশি bar গুলো এক group হয়ে একসাথে move করবে (আবার click = ungroup)', action : 'consolidate' }
 ];
+
+const consolidate = ref(localStorage.getItem('mbm-consolidate') === '1');
+function toggleConsolidate() {
+    consolidate.value = !consolidate.value;
+    localStorage.setItem('mbm-consolidate', consolidate.value ? '1' : '0');
+    toast(consolidate.value
+        ? 'Consolidate orders ON — একই order-এর পাশাপাশি bar গুলো group হয়ে একসাথে move করবে'
+        : 'Consolidate orders OFF — প্রতিটি bar আলাদা move করবে', 'ok');
+}
 
 const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3';
 </script>
@@ -9477,7 +9601,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="b.cls" :title="b.title" :aria-label="b.tip || b.title" @click="b.action && act(b.action)">
+                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : b.toggle === 'consolidate' && consolidate }]" :title="b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : undefined" @click="b.action && act(b.action)">
                     <i class="fa-solid fr-tb-fa" :class="b.fa" aria-hidden="true"></i>
                 </button>
             </template>
@@ -12171,6 +12295,9 @@ body {
 }
 .dp-empty { text-align : center; color : #666; padding : 18px !important; }
 .dp-hint { padding : 18px 8px; }
+
+/* Consolidate orders toggle (toolbar) — pressed look while ON */
+.fr-tb-btn.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
 
 /* Production update of one strip (right-click) */
 .sp-dialog { width : 840px; max-width : 96vw; }

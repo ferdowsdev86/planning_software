@@ -361,7 +361,9 @@ function rebuildBarsCache(scheduler) {
 
 function barsOnLine(scheduler, lineId, excludeId = null) {
     const byLine = barsByLineCache || rebuildBarsCache(scheduler);
-    const list = byLine[lineId] || [];
+    // bars travelling with a carried bar (Consolidate orders) are not on any
+    // line while the group is in the air — never an obstacle, never pushed
+    const list = (byLine[lineId] || []).filter(ev => !ev.data?.raw?._carryGroup);
     return excludeId ? list.filter(ev => ev.id !== excludeId) : list;
 }
 
