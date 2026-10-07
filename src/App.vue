@@ -5086,10 +5086,25 @@ async function saveMarkedComplete() {
     }
     const codes = [...markedComplete.value];
     if (!codes.length) return;
-    const s = getInstance();
     markSaving.value = true;
     try {
-        await completeOrdersDb(codes);
+        await completeOrders(codes);
+        markedComplete.value = new Set();
+    }
+    catch (e) {
+        toast(`Mark complete failed: ${e.message}`, 'error');
+    }
+    finally {
+        markSaving.value = false;
+    }
+}
+
+// Complete orders (Orders list tick / strip Production update "Mark
+// complete"): DB (orders/complete), every bar of theirs off the board
+// (cancelled server-side), out of the unplanned pool, Orders list flipped
+async function completeOrders(codes) {
+    const s = getInstance();
+    await completeOrdersDb(codes);
         // Remove every bar of these orders — slot stays empty, nothing repacks
         if (s) {
             const codeSet = new Set(codes);
@@ -5127,7 +5142,6 @@ async function saveMarkedComplete() {
         // Drop them from the unplanned pool too so nothing replans them
         unplanned.value = unplanned.value.filter(u => !codes.includes(String(u.mbmOrder || '')));
         toast(`${codes.length} order(s) marked complete — removed from the board`, 'ok');
-        markedComplete.value = new Set();
         // INSTANT list update — the server already confirmed, so flip the
         // rows locally instead of re-downloading the whole order book
         const codeSet2 = new Set(codes);
@@ -5139,13 +5153,6 @@ async function saveMarkedComplete() {
             }
         }
         syncOrdersListFromBoard();
-    }
-    catch (e) {
-        toast(`Mark complete failed: ${e.message}`, 'error');
-    }
-    finally {
-        markSaving.value = false;
-    }
 }
 
 // Export the filtered rows to Excel (same .xls HTML approach as Day Plan)
@@ -6893,11 +6900,13 @@ const spRec  = shallowRef(null);
 const spRows = ref([]);
 const spHead = ref(null);
 const spBusy = ref(false);
+const spComplete = ref(false);   // "Mark order complete" tick — Save then completes the order
 
 async function openStripProd(rec) {
     const raw = eventRawOf(rec);
     if (!raw || raw.stage) { toast('Production update শুধু sewing strip-এর জন্য', 'warn'); return; }
     spRec.value = rec;
+    spComplete.value = false;
     spOpen.value = true;
     spMin.value = false;
     await spBuild();
@@ -6950,6 +6959,7 @@ async function spBuild() {
             floor : res?.data?.floor || line?.floor || '—',
             line  : res?.name || lid || '—',
             style : raw.style || '—', order : mbmOrderNo(raw.po, raw.mbmOrder), po : raw.po || '—',
+            mbmOrder : String(raw.mbmOrder || ''),
             color : orderColor(raw.po), orderQty : Number(raw.qty) || 0
         };
         let cumPlan = 0;
@@ -6966,8 +6976,9 @@ async function spBuild() {
                 off : !!p?.off && !has, planQ, cumPlan,
                 prodQty : has ? a.qty : '', saved : has ? a.qty : null,
                 status, has,
-                // only days up to today can be reported; ERP-fed days stay the ERP's
-                editable : d <= today && !a?.erp,
+                // every day of the strip takes a figure (FastReact: the planner
+                // reports whichever day they like); ERP-fed days stay the ERP's
+                editable : !a?.erp,
                 lines : a ? [...a.lines].join(', ') : ''
             };
         });
@@ -7001,22 +7012,42 @@ async function spSave() {
     if (!s || !head) return;
     // days whose figure was typed / changed — a blank stays unreported, 0 is a real zero
     const changed = spRows.value.filter(r => r.editable && r.prodQty !== '' && r.prodQty != null && Number(r.prodQty) !== Number(r.saved));
-    if (!changed.length) { toast('কোনো দিনের Prod qty বদলায়নি', 'warn'); return; }
-    const store = loadProdStore();
-    store[head.evId] ||= {};
-    for (const r of changed) store[head.evId][r.d] = Math.max(0, Number(r.prodQty) || 0);
-    localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
-    applyProdUpdates(s);
-    const payload = changed.map(r => ({
-        eventId : head.dbId, eventRef : head.evId, unit : head.unit, floor : head.floor, line : head.line,
-        operationType : 'Sewing', style : head.style, orderNo : head.order, po : head.po, color : head.color,
-        orderQty : head.orderQty, dayPlanQty : r.planQ, prodQty : Math.max(0, Number(r.prodQty) || 0), saveDate : r.d
-    }));
-    try {
-        const res = await saveProdUpdatesDb(payload);
-        toast(`Production saved — ${res.saved} day(s) of ${head.po} (day_production_update_plan), strip updated`, 'ok');
+    if (!changed.length && !spComplete.value) { toast('কোনো দিনের Prod qty বদলায়নি', 'warn'); return; }
+    if (changed.length) {
+        const store = loadProdStore();
+        store[head.evId] ||= {};
+        for (const r of changed) store[head.evId][r.d] = Math.max(0, Number(r.prodQty) || 0);
+        localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+        applyProdUpdates(s);
+        const payload = changed.map(r => ({
+            eventId : head.dbId, eventRef : head.evId, unit : head.unit, floor : head.floor, line : head.line,
+            operationType : 'Sewing', style : head.style, orderNo : head.order, po : head.po, color : head.color,
+            orderQty : head.orderQty, dayPlanQty : r.planQ, prodQty : Math.max(0, Number(r.prodQty) || 0), saveDate : r.d
+        }));
+        try {
+            const res = await saveProdUpdatesDb(payload);
+            toast(`Production saved — ${res.saved} day(s) of ${head.po} (day_production_update_plan), strip updated`, 'ok');
+        }
+        catch (e) { toast(`DB save failed (${e.message}) — saved locally only`, 'warn'); }
     }
-    catch (e) { toast(`DB save failed (${e.message}) — saved locally only`, 'warn'); }
+    // "Mark order complete": the order is completed in the DB, every bar of
+    // it leaves the board (cancelled server-side) and the Orders list shows
+    // it completed — the same path as the Orders list tick
+    if (spComplete.value) {
+        if (!head.mbmOrder) {
+            toast('এই strip-এর ERP order code নেই — Orders list থেকে complete করুন', 'warn');
+        }
+        else {
+            try {
+                await completeOrders([head.mbmOrder]);
+                spComplete.value = false;
+                spOpen.value = false;
+                if (puOpen.value) buildPuRows();
+                return;
+            }
+            catch (e) { toast(`Mark complete failed: ${e.message}`, 'error'); }
+        }
+    }
     await spBuild();
     if (puOpen.value) buildPuRows();
 }
@@ -10051,11 +10082,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tfoot>
                         </table>
                     </div>
+                    <label class="sp-complete">
+                        <input v-model="spComplete" type="checkbox">
+                        Mark order complete — Save করলে order complete হবে, bar board থেকে সরে যাবে, Orders list-এ completed দেখাবে
+                        <span v-if="spHead?.mbmOrder" class="ls-dim">({{ spHead.mbmOrder }})</span>
+                    </label>
                     <div class="st-actions">
-                        <button class="cal-btn cal-btn-primary st-btn" :disabled="spBusy" @click="spSave">💾 Save</button>
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="spBusy" @click="spSave">{{ spComplete ? '💾 Save & complete' : '💾 Save' }}</button>
                         <button class="cal-btn st-btn" @click="spOpen = false">✕ Close</button>
                     </div>
-                    <div class="st-hint">Prod qty = ওই দিনের actual output · আজ পর্যন্ত দিনগুলো update করা যায় · ERP থেকে আসা দিন read-only · Save করলে strip-এর remaining qty board-এ কমে · Cum. = শুরু থেকে জমা · Variance = cum. actual − cum. plan</div>
+                    <div class="st-hint">Prod qty = ওই দিনের actual output · strip-এর যেকোনো দিনে দেওয়া যায় · ERP থেকে আসা দিন read-only · Save করলে strip-এর remaining qty board-এ কমে · Cum. = শুরু থেকে জমা · Variance = cum. actual − cum. plan</div>
                 </div>
             </div>
         </div>
@@ -12151,6 +12187,7 @@ body {
 .sp-st-ok { background : #dcedc8; }
 .sp-st-pend { background : #ffe0b2; }
 .sp-st-fut { background : #eee; }
+.sp-complete { display : flex; align-items : center; gap : 6px; font-size : 12px; margin : 10px 0 2px; }
 
 /* Daily production update */
 .pu-in {
