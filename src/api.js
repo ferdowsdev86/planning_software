@@ -813,6 +813,39 @@ export async function loadUnplannedDbPaged(firstLimit, onBatch, unitId = null) {
 // live bar that is not on the screen.
 export const skippedDbEvents = [];
 
+// Weekly calendar rows (planning_calendar_intervals) → { weekday : { start, hours, ot } }
+export function calendarDaysFromRows(rows) {
+    const toMin = t => {
+        const [h, m] = String(t || '0').split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+    };
+    const fmtHM = mm => `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+    const calendarDays = {};
+    let calendarName = null, calendarId = null;
+    for (const row of rows || []) {
+        if (row.weekday_no === null || row.weekday_no === undefined) continue;
+        calendarName = row.calendar_name;
+        calendarId   = row.id;
+        const start = fmtHM(toMin((row.start_time || '08:00').slice(0, 5)));
+        let hours = '00:00';
+        if (row.interval_type === 'working' && row.end_time) {
+            let diff = toMin(row.end_time.slice(0, 5)) - toMin((row.start_time || '08:00').slice(0, 5));
+            if (diff <= 0) diff += 1440;
+            hours = fmtHM(diff);
+        }
+        const ot = String(row.interval_name || '').startsWith('OT=') ? row.interval_name.slice(3) : '02:00';
+        calendarDays[row.weekday_no] = { start, hours, ot };
+    }
+    return { calendarDays, calendarName, calendarId };
+}
+
+// Every unit's factory calendar: { id, unitId, unitName, name, days }
+export async function loadCalendarsDb() {
+    const j = await get('/calendars', 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return (j.calendars || []).map(c => ({ id : c.id, unitId : c.unitId, unitName : c.unitName, name : c.name, days : calendarDaysFromRows(c.rows).calendarDays }));
+}
+
 export async function loadFromApi(unitId = null) {
     skippedDbEvents.length = 0;
     const unitQ = unitId ? `?unit_id=${unitId}` : '';
@@ -1096,27 +1129,7 @@ export async function loadFromApi(unitId = null) {
     const resourceTimeRanges = buildManpowerRanges(resources.filter(r => r.lineRow));
 
     // Weekday calendar rows (document 4.8) -> Calendars dialog config
-    const toMin = t => {
-        const [h, m] = String(t || '0').split(':').map(Number);
-        return (h || 0) * 60 + (m || 0);
-    };
-    const fmtHM = mm => `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
-    const calendarDays = {};
-    let calendarName = null, calendarId = null;
-    for (const row of data.calendars.rows) {
-        if (row.weekday_no === null || row.weekday_no === undefined) continue;
-        calendarName = row.calendar_name;
-        calendarId   = row.id;
-        const start = fmtHM(toMin((row.start_time || '08:00').slice(0, 5)));
-        let hours = '00:00';
-        if (row.interval_type === 'working' && row.end_time) {
-            let diff = toMin(row.end_time.slice(0, 5)) - toMin((row.start_time || '08:00').slice(0, 5));
-            if (diff <= 0) diff += 1440;
-            hours = fmtHM(diff);
-        }
-        const ot = String(row.interval_name || '').startsWith('OT=') ? row.interval_name.slice(3) : '02:00';
-        calendarDays[row.weekday_no] = { start, hours, ot };
-    }
+    const { calendarDays, calendarName, calendarId } = calendarDaysFromRows(data.calendars.rows);
 
     return {
         project : data.project, resources, events, assignments, dependencies, resourceTimeRanges,

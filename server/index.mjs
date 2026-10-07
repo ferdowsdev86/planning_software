@@ -712,6 +712,27 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
 // 'overtime', recurrent_rule 'DATE_OVERRIDE', start_date = the date,
 // interval_name 'HOURS=<h>' (0 = that date is off).
 const CAL_OVERRIDE = 'DATE_OVERRIDE';
+// Every active factory calendar (one per production unit) with its weekly
+// rows — the Change working hours dialog lets a planner pick the unit
+app.get(`${BASE}/calendars`, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT c.id, c.unit_id, c.calendar_code, c.calendar_name, i.interval_type, i.recurrent_rule,
+                    i.weekday_no, i.start_time, i.end_time, i.interval_name
+               FROM planning_calendars c
+               LEFT JOIN planning_calendar_intervals i ON i.calendar_id = c.id
+              WHERE c.active = TRUE AND (i.recurrent_rule IS NULL OR i.recurrent_rule <> 'DATE_OVERRIDE')
+              ORDER BY c.id`);
+        const byId = new Map();
+        for (const r of rows) {
+            if (!byId.has(r.id)) byId.set(r.id, { id : r.id, unitId : r.unit_id, unitName : unitLabel(r.unit_id), name : r.calendar_name, rows : [] });
+            byId.get(r.id).rows.push(r);
+        }
+        res.json({ success : true, calendars : [...byId.values()] });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 app.get(`${BASE}/calendars/:id/overrides`, async (req, res) => {
     try {
         const [rows] = await pool.query(

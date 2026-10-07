@@ -25,7 +25,7 @@ import {
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
-    skippedDbEvents, registerBoardLines, loadAllLinesDb
+    skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1655,9 +1655,19 @@ const chFrom    = ref(isoInputDate(new Date()));
 const chTo      = ref(isoInputDate(addCalDays(new Date(), 6)));
 
 const CH_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday-first like FastReact
-const chNormalHours = wd => calendarState.days[wd]?.hours || '0:00';
+
+// "Apply changes to": every unit's factory calendar the user may plan on
+// (the units of their boards); the open board's calendar is preselected
+const chCalendars = ref([]);
+const chCalId     = ref(null);
+const chTargetCal = computed(() => chCalendars.value.find(c => c.id === Number(chCalId.value)) || null);
+const chTargetIsOpenBoard = computed(() => !chTargetCal.value || Number(chTargetCal.value.id) === Number(calendarState.id || 1));
+const chTargetName = computed(() => chTargetIsOpenBoard.value ? calendarState.name : chTargetCal.value.name);
+// weekly hours of the target calendar (open board: the live calendarState)
+const chNormalHours = wd => (chTargetIsOpenBoard.value ? calendarState.days : (chTargetCal.value?.days || {}))[wd]?.hours || '0:00';
 
 function openWorkHours(rec) {
+    openMenu.value = null;
     // Prefill the period with the clicked bar's span when opened from a bar
     const raw = eventRawOf(rec);
     if (rec?.startDate) chFrom.value = isoInputDate(rec.startDate);
@@ -1666,6 +1676,11 @@ function openWorkHours(rec) {
         chFrom.value = isoInputDate(new Date());
         chTo.value   = isoInputDate(addCalDays(new Date(), 6));
     }
+    chCalId.value = calendarState.id || 1;
+    const allowed = new Set(dpUnits.value.map(u => u.unitId));
+    loadCalendarsDb()
+        .then(list => { chCalendars.value = list.filter(c => allowed.has(Number(c.unitId))); })
+        .catch(() => { chCalendars.value = [{ id : calendarState.id || 1, unitId : currentBoard.value?.unitId, unitName : currentBoard.value?.unitName, name : calendarState.name, days : calendarState.days }]; });
     chOpen.value = true;
 }
 uiHooks.onOpenWorkHours = openWorkHours;
@@ -1688,6 +1703,9 @@ function chApply() {
         toast('কোন কোন দিন বদলাবে — অন্তত একটা দিন select করুন', 'warn');
         return;
     }
+    // Another unit's calendar: its own weekly hours + DB overrides, saved to
+    // that calendar; the open board is not touched
+    if (!chTargetIsOpenBoard.value) { chApplyToOtherUnit(from, to, timeH); return; }
     let changed = 0;
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
@@ -1729,6 +1747,47 @@ function chApply() {
     }
     toast(`${changed} day(s) updated on calendar "${calendarState.name}" — shared with every planner`, 'ok');
     chOpen.value = false;
+}
+
+// Same change on another unit's calendar (picked under "Apply changes to"):
+// read that calendar's overrides, apply the period/day/action rule on its
+// weekly hours, write them back. That unit's board sizes its bars on the new
+// hours the next time it loads.
+async function chApplyToOtherUnit(from, to, timeH) {
+    const cal = chTargetCal.value;
+    if (!cal) return;
+    if (boardReadOnly.value) { toast('🔒 Read only — working hours cannot be changed', 'warn'); return; }
+    let ov = {};
+    try { ov = { ...(await loadCalendarOverridesDb(cal.id)) }; }
+    catch (e) { toast(`Could not read the ${cal.name}: ${e.message}`, 'error'); return; }
+    const weekly = wd => hmToHours(cal.days?.[wd]?.hours || '0');
+    const hoursOf = d => { const v = ov[ymdOf(d)]; return v != null && v !== '' ? (Number(v) || 0) : weekly(d.getDay()); };
+    let changed = 0;
+    const d = new Date(from);
+    for (let guard = 0; d <= to && guard < 400; guard++) {
+        const wd = d.getDay();
+        const include =
+            chDayMode.value === 'selected'    ? !!chDays.value[wd]
+            : chDayMode.value === 'normalOnly' ? weekly(wd) > 0
+            : chDayMode.value === 'all'        ? true
+            : /* workingOnly */                  hoursOf(d) > 0;
+        if (include) {
+            const k = ymdOf(d);
+            if (chAction.value === 'resetNormal')  delete ov[k];
+            else if (chAction.value === 'zero')    ov[k] = 0;
+            else if (chAction.value === 'setNew')  ov[k] = timeH;
+            else /* addTime */                     ov[k] = hoursOf(d) + timeH;
+            changed++;
+        }
+        d.setDate(d.getDate() + 1);
+    }
+    try {
+        await saveCalendarOverridesDb(ov, cal.id);
+        localStorage.setItem(calOverridesKey(cal.id), JSON.stringify(ov));
+        toast(`${changed} day(s) updated on calendar "${cal.name}" (${cal.unitName}) — the ${cal.unitName} board takes the new hours when it opens`, 'ok');
+        chOpen.value = false;
+    }
+    catch (e) { toast(`DB save failed: ${e.message}`, 'error'); }
 }
 
 // ---------------------------------------------------------------------------
@@ -8933,6 +8992,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openPlanningRoles">👤 Planning roles &amp; plan criteria</div>
                     <div class="fr-dd-item" @click="openEffProfiles">📊 Efficiency profiles</div>
                     <div class="fr-dd-item" @click="openLineEffForm">🏭 Line eff &amp; hours</div>
+                    <div class="fr-dd-item" @click="openWorkHours(null)">🕐 Change working hours — per unit calendar</div>
                     <div class="fr-dd-item" @click="openBuildUps">📈 Build up / Learning curves</div>
                 </div>
             </span>
@@ -10088,12 +10148,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pr-box ch-target">
                             <legend>Apply changes to</legend>
-                            <label class="ch-opt"><input type="radio" checked> {{ calendarState.name }}</label>
+                            <label v-for="c in chCalendars" :key="c.id" class="ch-opt">
+                                <input type="radio" name="ch-cal" :value="c.id" v-model="chCalId"> {{ c.name }}<span class="ls-dim"> · {{ c.unitName }}</span>
+                            </label>
+                            <label v-if="!chCalendars.length" class="ch-opt"><input type="radio" checked> {{ calendarState.name }}</label>
                         </fieldset>
                     </div>
                     <div class="ch-actions">
                         <button class="cal-btn cal-btn-primary st-btn ch-apply" @click="chApply">✔ Apply</button>
-                        <span class="ch-note">these changes to calendar ⇒ <b>{{ calendarState.name }}</b></span>
+                        <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetName }}</b></span>
                     </div>
                     <div class="st-hint">Zero hours = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
                 </div>
