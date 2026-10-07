@@ -260,7 +260,7 @@ function fitDurToProduction(scheduler, raw, lineId, mins) {
     raw.workMin = raw.dur * mins;
 }
 
-function setBarTooltipEnabled(scheduler, on) {
+export function setBarTooltipEnabled(scheduler, on) {
     const tip = scheduler?.features?.eventTooltip;
     if (!tip) return;
     tip.disabled = !on;
@@ -1507,13 +1507,13 @@ export const schedulerProConfig = {
     viewPreset : {
         base              : 'dayAndWeek',
         tickWidth         : 72,
-        displayDateFormat : 'YY-MM-DD',
+        displayDateFormat : 'DD/MM/YY',
         headers           : [
             {
                 unit     : 'week',
                 renderer : (start, end) => {
                     const last = new Date(end.getTime() - 864e5); // week's last visible day
-                    return `<span class="mb-hdr-week">${DateHelper.format(last, 'YY-MM-DD')}</span>`;
+                    return `<span class="mb-hdr-week">${DateHelper.format(last, 'DD/MM/YY')}</span>`;
                 }
             },
             {
@@ -1526,7 +1526,7 @@ export const schedulerProConfig = {
                     const dd = DateHelper.format(start, 'DD');
                     if (w < 72)  return `${dow2} ${dd}`;
                     if (w < 112) return `${DateHelper.format(start, 'ddd')} ${dd}`;
-                    return `<div class="mb-hdr-day2"><div>${DateHelper.format(start, 'dddd')}</div><div>${DateHelper.format(start, 'DD-MMM-YYYY')}</div></div>`;
+                    return `<div class="mb-hdr-day2"><div>${DateHelper.format(start, 'dddd')}</div><div>${DateHelper.format(start, 'DD/MM/YY')}</div></div>`;
                 }
             }
         ]
@@ -1559,7 +1559,7 @@ export const schedulerProConfig = {
             htmlEncode : false,
             cellCls    : 'mb-linecell',
             headerRenderer  : () =>
-                '<div class="fr-clock" id="mb-hover-clock">Fri 2026-08-28 8:00:00 AM<br>0.0 x 0:00 x 0 = 0.000</div>',
+                '<div class="fr-clock" id="mb-hover-clock">Fri 28/08/26 8:00:00 AM<br>0.0 x 0:00 x 0 = 0.000</div>',
             renderer : ({ record : r }) => {
                 const enc  = StringHelper.encodeHtml;
                 const d    = r.data || r;
@@ -2219,6 +2219,13 @@ export const schedulerProConfig = {
             ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center">
                 <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
             </div>`;
+    },
+
+    // Press-and-hold: the bar attaches to the pointer on mouse DOWN (the
+    // board's own pick & place carry); release after a drag drops it there,
+    // a plain click keeps it on the pointer until the next click
+    onEventMouseDown(ev) {
+        uiHooks.onBarMouseDown?.(ev);
     },
 
     onEventClick(ev) {

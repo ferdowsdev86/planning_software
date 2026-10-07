@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
 } from './AppConfig.js';
@@ -5412,7 +5412,7 @@ function isoInputDate(d) {
 function fmtDdMmYy(d) {
     if (!d) return '—';
     const x = new Date(d);
-    return `${String(x.getDate()).padStart(2, '0')}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getFullYear()).slice(-2)}`;
+    return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${String(x.getFullYear()).slice(-2)}`;
 }
 
 function dpEsc(v) {
@@ -6822,6 +6822,14 @@ let carriedPrevCls = '';
 let pickStamp      = 0;
 let ignorePickUntil = 0;
 const PLACE_GUARD_MS = 150;
+// Press-and-hold drag: the mouse-down that picked the bar up, where it was
+// pressed, and whether the pointer has moved since (6 px = a drag, not a click)
+let pressPick = null;
+let skipNextBarClick = false;
+const DRAG_PX = 6;
+// Where on the bar it was grabbed (ms into the bar) so the bar stays under
+// the hand while carried instead of jumping its start to the pointer
+let carryGrabMs = 0;
 const lastMouse    = { x : 400, y : 300 };
 let clockRaf       = 0;
 
@@ -6843,7 +6851,7 @@ const fmtClock = d => {
     const am = h >= 12 ? 'PM' : 'AM';
     h = h % 12 || 12;
     const p2 = n => String(n).padStart(2, '0');
-    return `${W} ${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${h}:${p2(d.getMinutes())}:${p2(d.getSeconds())} ${am}`;
+    return `${W} ${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${h}:${p2(d.getMinutes())}:${p2(d.getSeconds())} ${am}`;
 };
 
 const idleFormula = '0.0 x 0:00 x 0 = 0.000';
@@ -7176,8 +7184,9 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     const res = resourceFromY(s, clientY, clientX);
     if (!isPlannableResource(res)) return floatingCarrySnap(clientX, clientY);
 
-    const pointerAt = pointerDateOnTimeline(s, clientX);
-    if (!pointerAt) return floatingCarrySnap(clientX, clientY);
+    const pointerAtRaw = pointerDateOnTimeline(s, clientX);
+    if (!pointerAtRaw) return floatingCarrySnap(clientX, clientY);
+    const pointerAt = carryGrabMs ? new Date(pointerAtRaw.getTime() - carryGrabMs) : pointerAtRaw;
 
     const lineId = res.id;
     const dur = raw.dur || 1;
@@ -7270,6 +7279,10 @@ function detachCarryScroll() {
 }
 
 function trackGhost(e) {
+    if (pressPick && !pressPick.moved
+        && (Math.abs(e.clientX - pressPick.x) > DRAG_PX || Math.abs(e.clientY - pressPick.y) > DRAG_PX)) {
+        pressPick.moved = true;
+    }
     updateCarryPreview(e.clientX, e.clientY);
 }
 
@@ -7351,12 +7364,46 @@ function escCancel(e) {
     if (e.key === 'Escape') cancelCarry();
 }
 
-function pickUp(rec, domEvent) {
+// Arrow keys scroll the board (← → one day, ↑ ↓ one line; Shift = a week /
+// five lines) whenever the board is on screen and no text control or dialog
+// has the keyboard. Handled on capture so the grid's own cell navigation and
+// the page never see the key.
+const EDITABLE_SEL = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+function boardArrowKeys(e) {
+    if (!e.key?.startsWith('Arrow') || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (view.value !== 'board') return;
+    const s = getInstance();
+    if (!s?.element) return;
+    const ae = document.activeElement;
+    if (ae && (ae.matches?.(EDITABLE_SEL) || ae.closest?.('.b-popup, .b-menu, .cal-dialog, .od-dialog, .b-editor'))) return;
+    if (document.querySelector('.cal-overlay, .b-popup:not(.b-hidden) .b-textfield input:focus')) return;
+    const axis = s.timeAxisSubGrid?.scrollable;
+    const body = s.scrollable;
+    const stepX = (s.tickSize || 72) * (e.shiftKey ? 7 : 1);
+    const stepY = (s.rowHeight || 48) * (e.shiftKey ? 5 : 1);
+    if (e.key === 'ArrowLeft'  && axis) axis.x = Math.max(0, axis.x - stepX);
+    else if (e.key === 'ArrowRight' && axis) axis.x += stepX;
+    else if (e.key === 'ArrowUp'    && body) body.y = Math.max(0, body.y - stepY);
+    else if (e.key === 'ArrowDown'  && body) body.y += stepY;
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (carried.value) requestAnimationFrame(() => updateCarryPreview(lastMouse.x, lastMouse.y));
+}
+document.addEventListener('keydown', boardArrowKeys, true);
+
+function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
     if (!s) return;
+    // grabbed on the board: keep the pointer at the same spot of the bar
+    carryGrabMs = 0;
+    if (grab && domEvent && rec.startDate && rec.endDate) {
+        const at = pointerDateOnTimeline(s, domEvent.clientX);
+        if (at) carryGrabMs = Math.max(0, Math.min(at - rec.startDate, rec.endDate - rec.startDate));
+    }
     // qty 0 / no SMV → the bar cannot be moved onto a line
     if (!(Number(raw.qty) > 0)) { toast(`${raw.mbmOrder || raw.po} — quantity is 0, cannot be planned`, 'warn'); return; }
     if (!(Number(raw.smv) > 0) || (raw.smvMissing && !(Number(raw.smvManual) > 0))) { toast(`${raw.mbmOrder || raw.po} — SMV is 0 / missing, cannot be planned (right-click → Recalculate duration to enter it)`, 'warn'); return; }
@@ -7368,6 +7415,10 @@ function pickUp(rec, domEvent) {
     carried.value = rec;
     pickStamp     = performance.now();
     uiHooks.boardUserActive = true;
+    // no bar tooltip under the pointer while a bar is carried (it would sit
+    // between the pointer and the line at release)
+    setBarTooltipEnabled(s, false);
+    s.features?.eventTooltip?.hide?.();
     clearDayPlanChips();
     document.body.classList.add('mb-carry-active');
     // The bar leaves its old place entirely while carried — it exists only
@@ -7395,6 +7446,9 @@ function restoreCarriedCls() {
 }
 
 function cancelCarry() {
+    pressPick = null;
+    carryGrabMs = 0;
+    setBarTooltipEnabled(getInstance(), true);
     restoreCarriedCls();
     carried.value = null;
     carryPreview.value = emptyCarrySnap();
@@ -7423,7 +7477,7 @@ function canPlaceCarry() {
 function hitElementIgnoringCarry(clientX, clientY) {
     const stack = document.elementsFromPoint(clientX, clientY);
     for (const el of stack) {
-        if (el.closest?.('.mb-carry-layer')) continue;
+        if (el.closest?.('.mb-carry-layer, .mb-tip4, .b-tooltip')) continue;
         return el;
     }
     return null;
@@ -7485,8 +7539,8 @@ function isSchedPlaceTarget(el) {
 // all describe the same gesture — collapse them into a single placement
 let placeGestureAt = 0;
 
-function requestPlace(clientX, clientY, hint = {}) {
-    if (!canPlaceCarry()) return;
+function requestPlace(clientX, clientY, hint = {}, { force = false } = {}) {
+    if (force ? !carried.value : !canPlaceCarry()) return;
     const now = performance.now();
     if (now - placeGestureAt < 300) return;
     placeGestureAt = now;
@@ -7511,9 +7565,37 @@ function requestPlace(clientX, clientY, hint = {}) {
 }
 
 function onCarryPointerUp(e) {
-    if (e.button !== 0 || !canPlaceCarry()) return;
+    if (e.button !== 0) return;
+    if (pressPick) {
+        const press = pressPick;
+        pressPick = null;
+        if (!press.moved) {
+            // a plain click on the bar: it stays on the pointer (click to place)
+            skipNextBarClick = true;
+            return;
+        }
+        // released after a drag: drop exactly where the ghost shows — the
+        // element UNDER the pointer decides (tooltips / carry layer are transparent)
+        const under = hitElementIgnoringCarry(e.clientX, e.clientY);
+        if (!isSchedPlaceTarget(under)) return;
+        ignorePickUntil = performance.now() + 400;   // the click that follows must not re-pick
+        requestPlace(e.clientX, e.clientY, {}, { force : true });
+        return;
+    }
+    if (!canPlaceCarry()) return;
     if (!isSchedPlaceTarget(e.target)) return;
     requestPlace(e.clientX, e.clientY);
+}
+
+// Mouse down on a bar: pick it up right away (press-and-hold drag)
+function handleBarMouseDown(ev) {
+    if (performance.now() < ignorePickUntil) return;
+    const dom = domFromBryntum(ev);
+    if (!dom || dom.button !== 0) return;
+    if (dom.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
+    if (carried.value) return;                     // the click that follows places the carried bar
+    pickUp(ev.eventRecord, dom, { grab : true });
+    if (carried.value) pressPick = { x : dom.clientX, y : dom.clientY, moved : false };
 }
 
 function onSchedClick(e) {
@@ -7525,6 +7607,7 @@ function domFromBryntum(ev) {
 }
 
 function handleBarClick(ev) {
+    if (skipNextBarClick) { skipNextBarClick = false; return; }   // the click of the press that already picked up
     if (performance.now() < ignorePickUntil) return;
     const dom = domFromBryntum(ev);
     if (dom?.button === 2 || dom?.which === 3) return;
@@ -7985,6 +8068,7 @@ onMounted(() => {
 
     // FastReact pick & place: click bar to pick up, click timeline to place.
     uiHooks.onBarClick = handleBarClick;
+    uiHooks.onBarMouseDown = handleBarMouseDown;
     uiHooks.onScheduleClick = handleScheduleClick;
 
     // After a split, the new (split-off) bar sticks to the cursor so the
@@ -8013,6 +8097,16 @@ onMounted(() => {
             paint() { installFrVScroll(s); },
             resize() { updateFrVScroll(s); fitBoardView(s); }
         });
+        // Press-and-hold drag: a native mouse-down on a bar picks it up at
+        // once (capture phase — before the grid's own handlers)
+        s.element?.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            const wrap = e.target?.closest?.('.b-sch-event-wrap, .b-sch-event');
+            if (!wrap) return;
+            const rec = s.resolveEventRecord?.(wrap);
+            if (!rec) return;
+            handleBarMouseDown({ eventRecord : rec, domEvent : e });
+        }, true);
         requestAnimationFrame(() => fitBoardView(s));
     }
 

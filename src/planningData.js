@@ -282,18 +282,29 @@ export const fmtDate = d => {
     if (!d) return '';
     const x = d instanceof Date ? d : new Date(d);
     if (Number.isNaN(x.getTime())) return '';
-    return `${String(x.getDate()).padStart(2, '0')}-${x.toLocaleString('en-US', { month : 'short' })}`;
+    // Board date format (2026-10-07): DD/MM/YY — display only, stored values untouched
+    return fmtDdMmYySlash(x);
 };
+export function fmtDdMmYySlash(d) {
+    if (!d) return '';
+    const x = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(x.getTime())) return '';
+    return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${String(x.getFullYear()).slice(-2)}`;
+}
 
 const MON_RR = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
 export function fmtDateDdMonRr(d) {
+    // DD/MM/YY (board-wide date format); the old DD-MON-RR name is kept for its callers
+    return fmtDdMmYySlash(d);
+}
+export const fmtDateDdMonRrLegacy = d => {
     if (!d) return '';
     const x = d instanceof Date ? d : new Date(d);
     if (Number.isNaN(x.getTime())) return '';
     return `${String(x.getDate()).padStart(2, '0')}-${MON_RR[x.getMonth()]}-${String(x.getFullYear()).slice(-2)}`;
-}
+};
 
 // ---------------------------------------------------------------------------
 // Sewing lines (document 3.1 left panel: unit, floor, capacity, manpower,
