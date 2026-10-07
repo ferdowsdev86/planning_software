@@ -1722,10 +1722,17 @@ function chApply() {
         return;
     }
     const needsTime = chAction.value === 'setNew' || chAction.value === 'addTime';
-    // Accept 11:30, 11.30 and 11,30 alike — all mean 11 hours 30 minutes
-    const timeH = hmToHours(String(chTime.value).trim().replace(/[.,]/g, ':'));
-    if (needsTime && !(timeH > 0)) {
-        toast('Specify time (hh:mm) ঘরে সময় দিন — যেমন 11:00', 'warn');
+    // Accept 11:30, 11.30 and 11,30 alike — all mean 11 hours 30 minutes.
+    // "Change to new working hours" 00:00 = those dates become off days
+    // (same as "Set to zero working hours"); only "Add time" needs > 0
+    const timeTxt = String(chTime.value).trim().replace(/[.,]/g, ':');
+    const timeH = hmToHours(timeTxt);
+    if (needsTime && (!timeTxt || !Number.isFinite(timeH) || timeH < 0 || timeH > 24)) {
+        toast('Specify time (hh:mm) ঘরে সময় দিন — যেমন 11:00 (00:00 = ছুটি)', 'warn');
+        return;
+    }
+    if (chAction.value === 'addTime' && !(timeH > 0)) {
+        toast('Add time-এর জন্য 00:00-এর বেশি সময় দিন — যেমন 02:00', 'warn');
         return;
     }
     if (chDayMode.value === 'selected' && !Object.values(chDays.value).some(Boolean)) {
@@ -10204,7 +10211,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn cal-btn-primary st-btn ch-apply" @click="chApply">✔ Apply</button>
                         <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetName }}</b></span>
                     </div>
-                    <div class="st-hint">Zero hours = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
+                    <div class="st-hint">Zero hours / নতুন hours 00:00 = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
                 </div>
             </div>
         </div>
