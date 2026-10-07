@@ -740,28 +740,12 @@ export const UNPLANNED_INIT = [
 // Day-wise manpower band: one figure per working day under each line's bars
 // (bottom 25% of the row, FastReact style)
 // ---------------------------------------------------------------------------
-export function buildManpowerRanges(lines, from = VIEW_START, to = VIEW_END) {
-    const ranges = [];
-    let i = 0;
-    for (const l of lines) {
-        const d = new Date(from);
-        while (d < to) {
-            if (!isFriday(d)) {
-                const end = new Date(d);
-                end.setDate(end.getDate() + 1);
-                ranges.push({
-                    id         : `mp-${++i}`,
-                    resourceId : l.id,
-                    startDate  : new Date(d),
-                    endDate    : end,
-                    name       : String(l.manpower),
-                    cls        : 'mb-mp'
-                });
-            }
-            d.setDate(d.getDate() + 1);
-        }
-    }
-    return ranges;
+// Per-day manpower figure in every day cell of every line: removed from the
+// board (planner request, 2026-10-07) — the line's manpower is read in the
+// line panel (red figure) and in the tooltips. Nothing else lives in these
+// ranges, so an empty resourceTimeRange set is the whole change.
+export function buildManpowerRanges(/* lines, from, to */) {
+    return [];
 }
 
 // Highlighted 8 AM day-start separator lines (one per working day)
