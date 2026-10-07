@@ -542,6 +542,7 @@ const openWindows = computed(() => [
     { id : 'orders',   icon : '🔴', title : 'Orders',              open : ordersOpen.value,   min : ordersMin.value },
     { id : 'dayplan',  icon : '📄', title : 'Day Plan Report',     open : dpOpen.value,       min : dpMin.value },
     { id : 'produpd',  icon : '🏭', title : 'Production update',   open : puOpen.value,       min : puMin.value },
+    { id : 'stripprod', icon : '🏭', title : `Production update — ${spHead.value?.po || 'strip'}`, open : spOpen.value, min : spMin.value },
     { id : 'settings', icon : '⚙️', title : 'Settings',            open : settingsOpen.value, min : settingsMin.value },
     { id : 'roles',    icon : '👤', title : 'Planning roles',      open : rolesOpen.value,    min : rolesMin.value },
     { id : 'eff',      icon : '📊', title : 'Efficiency profiles', open : effOpen.value,      min : effMin.value },
@@ -557,6 +558,7 @@ function restoreWin(id) {
     if (id === 'orders')   ordersMin.value = false;
     if (id === 'dayplan')  dpMin.value = false;
     if (id === 'produpd')  puMin.value = false;
+    if (id === 'stripprod') spMin.value = false;
     if (id === 'settings') settingsMin.value = false;
     if (id === 'roles')    rolesMin.value = false;
     if (id === 'eff')      effMin.value = false;
@@ -572,6 +574,7 @@ function closeWin(id) {
     if (id === 'orders')   ordersOpen.value = false;
     if (id === 'dayplan')  dpOpen.value = false;
     if (id === 'produpd')  puOpen.value = false;
+    if (id === 'stripprod') spOpen.value = false;
     if (id === 'settings') settingsOpen.value = false;
     if (id === 'roles')    rolesOpen.value = false;
     if (id === 'eff')      effOpen.value = false;
@@ -6877,6 +6880,147 @@ watch(puDate, () => {
     if (puOpen.value) buildPuRows();
 });
 
+// ---------------------------------------------------------------------------
+// Production update of ONE strip (right-click → Production update): every
+// day of the bar with its plan qty, the actual saved for that day, the
+// update status and the running (cumulative) plan / actual / variance.
+// Saved exactly like the date-wise dialog (day_production_update_plan), so
+// both views and the board (remaining qty) stay in step.
+// ---------------------------------------------------------------------------
+const spOpen = ref(false);
+const spMin  = ref(false);
+const spRec  = shallowRef(null);
+const spRows = ref([]);
+const spHead = ref(null);
+const spBusy = ref(false);
+
+async function openStripProd(rec) {
+    const raw = eventRawOf(rec);
+    if (!raw || raw.stage) { toast('Production update শুধু sewing strip-এর জন্য', 'warn'); return; }
+    spRec.value = rec;
+    spOpen.value = true;
+    spMin.value = false;
+    await spBuild();
+}
+uiHooks.onOpenStripProd = openStripProd;
+
+async function spBuild() {
+    const s = getInstance();
+    const rec = spRec.value;
+    const raw = eventRawOf(rec);
+    if (!s || !rec || !raw) { spRows.value = []; spHead.value = null; return; }
+    spBusy.value = true;
+    try {
+        const evId = String(rec.id);
+        let dbRows = [];
+        try { dbRows = (await loadProdUpdatesDb()).filter(r => String(r.event_ref).split(':po')[0] === evId); }
+        catch { /* offline — this browser's store only */ }
+        const store = loadProdStore();
+        // actual per date: DB rows (manual row + ERP rows per PO / other line), else the local store
+        const actual = {};
+        for (const r of dbRows) {
+            const d = String(r.save_date).slice(0, 10);
+            const a = actual[d] ||= { qty : 0, erp : false, manual : false, lines : new Set() };
+            a.qty += Number(r.prod_qty) || 0;
+            if (/:po\d+/.test(String(r.event_ref))) a.erp = true;
+            else a.manual = true;
+            if (r.line) a.lines.add(r.line);
+        }
+        if (!dbRows.length) {
+            for (const [d, q] of Object.entries(store[evId] || {})) actual[d] = { qty : Number(q) || 0, erp : false, manual : true, lines : new Set() };
+        }
+        // plan per date: the production model from the bar's ORIGINAL start
+        // with the full qty — past days keep their plan figure
+        const lid = lineIdOf(s, rec);
+        const start = raw.origStart ? new Date(raw.origStart) : new Date(rec.startDate);
+        let planDays = [];
+        try {
+            if (lid && !isHoldId(lid)) planDays = simulateStrip(s, { ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0 }, lid, start).days;
+        }
+        catch { planDays = []; }
+        const plan = {};
+        for (const d of planDays) plan[ymdOf(d.date)] = { q : d.q, off : d.off };
+        const dates = [...new Set([...Object.keys(plan), ...Object.keys(actual)])].sort();
+        const today = ymdOf(new Date());
+        const res  = s.resourceStore.getById(lid);
+        const line = LINE_BY_ID[lid];
+        spHead.value = {
+            evId, dbId : rec.data?.dbId ?? null,
+            unit  : res?.data?.unit || line?.unit || currentBoard.value?.unitName || 'AQL',
+            floor : res?.data?.floor || line?.floor || '—',
+            line  : res?.name || lid || '—',
+            style : raw.style || '—', order : mbmOrderNo(raw.po, raw.mbmOrder), po : raw.po || '—',
+            color : orderColor(raw.po), orderQty : Number(raw.qty) || 0
+        };
+        let cumPlan = 0;
+        spRows.value = dates.map(d => {
+            const p = plan[d], a = actual[d];
+            const planQ = p?.q || 0;
+            cumPlan += planQ;
+            const has = !!a;
+            const status = has
+                ? (a.erp && a.manual ? 'ERP + manual' : a.erp ? 'ERP' : 'Updated')
+                : (d > today ? 'Future' : d === today ? 'Today — pending' : 'Pending');
+            return {
+                d, wd : DAY_NAMES[new Date(d + 'T00:00:00').getDay()].slice(0, 3),
+                off : !!p?.off && !has, planQ, cumPlan,
+                prodQty : has ? a.qty : '', saved : has ? a.qty : null,
+                status, has,
+                // only days up to today can be reported; ERP-fed days stay the ERP's
+                editable : d <= today && !a?.erp,
+                lines : a ? [...a.lines].join(', ') : ''
+            };
+        });
+    }
+    finally { spBusy.value = false; }
+}
+
+// cumulative actual / variance follow what is typed (before Save)
+const spView = computed(() => {
+    let cum = 0;
+    return spRows.value.map(r => {
+        cum += Number(r.prodQty) || 0;
+        return { ...r, cumAct : cum, diff : cum - r.cumPlan };
+    });
+});
+const spTotals = computed(() => {
+    const t = { plan : 0, act : 0 };
+    for (const r of spRows.value) { t.plan += r.planQ; t.act += Number(r.prodQty) || 0; }
+    return t;
+});
+
+async function spSave() {
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot save this board'
+            : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
+    const s = getInstance();
+    const head = spHead.value;
+    if (!s || !head) return;
+    // days whose figure was typed / changed — a blank stays unreported, 0 is a real zero
+    const changed = spRows.value.filter(r => r.editable && r.prodQty !== '' && r.prodQty != null && Number(r.prodQty) !== Number(r.saved));
+    if (!changed.length) { toast('কোনো দিনের Prod qty বদলায়নি', 'warn'); return; }
+    const store = loadProdStore();
+    store[head.evId] ||= {};
+    for (const r of changed) store[head.evId][r.d] = Math.max(0, Number(r.prodQty) || 0);
+    localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+    applyProdUpdates(s);
+    const payload = changed.map(r => ({
+        eventId : head.dbId, eventRef : head.evId, unit : head.unit, floor : head.floor, line : head.line,
+        operationType : 'Sewing', style : head.style, orderNo : head.order, po : head.po, color : head.color,
+        orderQty : head.orderQty, dayPlanQty : r.planQ, prodQty : Math.max(0, Number(r.prodQty) || 0), saveDate : r.d
+    }));
+    try {
+        const res = await saveProdUpdatesDb(payload);
+        toast(`Production saved — ${res.saved} day(s) of ${head.po} (day_production_update_plan), strip updated`, 'ok');
+    }
+    catch (e) { toast(`DB save failed (${e.message}) — saved locally only`, 'warn'); }
+    await spBuild();
+    if (puOpen.value) buildPuRows();
+}
+
 function showOrderOnBoard(row) {
     if (row.replaced || row.status === 'replaced') {
         const code = row.mbmOrder || '';
@@ -9846,6 +9990,76 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             </div>
         </div>
 
+        <!-- Production update of ONE strip (right-click → Production update) -->
+        <div v-if="spOpen && !spMin" class="cal-overlay" @click.self="spOpen = false">
+            <div class="cal-dialog sp-dialog">
+                <div class="cal-title">
+                    Production update — {{ spHead?.po || '' }}
+                    <span class="cal-title-btns">
+                        <span class="cal-x cal-minbtn" @click="spMin = true">—</span>
+                        <span class="cal-x" @click="spOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <div v-if="spHead" class="sp-head">
+                        <span><b>Order</b> {{ spHead.order }}</span>
+                        <span><b>PO</b> {{ spHead.po }}</span>
+                        <span><b>Style</b> {{ spHead.style }}</span>
+                        <span><b>Colour</b> {{ spHead.color }}</span>
+                        <span><b>Line</b> {{ spHead.line }} · {{ spHead.unit }}</span>
+                        <span><b>Order qty</b> {{ fmtQty(spHead.orderQty) }}</span>
+                        <span><b>Made</b> {{ fmtQty(spTotals.act) }}</span>
+                        <span><b>Remaining</b> {{ fmtQty(Math.max(0, spHead.orderQty - spTotals.act)) }}</span>
+                    </div>
+                    <div v-if="spBusy" class="st-hint">Loading…</div>
+                    <div class="sp-wrap">
+                        <table class="st-table ef-table sp-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th><th>Day</th>
+                                    <th class="od-num">Plan qty</th><th class="od-num">Cum. plan</th>
+                                    <th class="od-num">Prod qty</th><th class="od-num">Cum. actual</th>
+                                    <th class="od-num">Variance</th><th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(r, i) in spView" :key="r.d" :class="{ 'sp-off' : r.off, 'sp-done' : r.has, 'sp-future' : !r.editable && !r.has }">
+                                    <td>{{ fmtDate(new Date(r.d + 'T00:00:00')) }}</td>
+                                    <td>{{ r.wd }}</td>
+                                    <td class="od-num">{{ r.off ? 'off' : fmtQty(r.planQ) }}</td>
+                                    <td class="od-num">{{ fmtQty(r.cumPlan) }}</td>
+                                    <td class="od-num">
+                                        <input v-if="r.editable" v-model="spRows[i].prodQty" class="cal-in ef-in sp-in" type="number" min="0" placeholder="—">
+                                        <span v-else>{{ r.has ? fmtQty(r.prodQty) : '—' }}</span>
+                                    </td>
+                                    <td class="od-num">{{ fmtQty(r.cumAct) }}</td>
+                                    <td class="od-num" :class="{ 'sp-neg' : r.diff < 0, 'sp-pos' : r.diff > 0 }">{{ r.diff > 0 ? '+' : '' }}{{ fmtQty(r.diff) }}</td>
+                                    <td>
+                                        <span class="sp-st" :class="'sp-st-' + (r.has ? 'ok' : r.editable ? 'pend' : 'fut')">{{ r.status }}</span>
+                                        <span v-if="r.lines" class="ls-dim"> · {{ r.lines }}</span>
+                                    </td>
+                                </tr>
+                                <tr v-if="!spRows.length && !spBusy"><td colspan="8" class="st-hint">এই strip-এর কোনো দিন নেই</td></tr>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <th colspan="2">Total</th>
+                                    <th class="od-num">{{ fmtQty(spTotals.plan) }}</th><th></th>
+                                    <th class="od-num">{{ fmtQty(spTotals.act) }}</th><th></th>
+                                    <th class="od-num" :class="{ 'sp-neg' : spTotals.act < spTotals.plan }">{{ spTotals.act - spTotals.plan > 0 ? '+' : '' }}{{ fmtQty(spTotals.act - spTotals.plan) }}</th><th></th>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <div class="st-actions">
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="spBusy" @click="spSave">💾 Save</button>
+                        <button class="cal-btn st-btn" @click="spOpen = false">✕ Close</button>
+                    </div>
+                    <div class="st-hint">Prod qty = ওই দিনের actual output · আজ পর্যন্ত দিনগুলো update করা যায় · ERP থেকে আসা দিন read-only · Save করলে strip-এর remaining qty board-এ কমে · Cum. = শুরু থেকে জমা · Variance = cum. actual − cum. plan</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Daily production update: line-wise actual output for a date -->
         <div v-if="puOpen && !puMin" class="cal-overlay" @click.self="puOpen = false">
             <div class="cal-dialog od-dialog pu-dialog">
@@ -11921,6 +12135,22 @@ body {
 }
 .dp-empty { text-align : center; color : #666; padding : 18px !important; }
 .dp-hint { padding : 18px 8px; }
+
+/* Production update of one strip (right-click) */
+.sp-dialog { width : 840px; max-width : 96vw; }
+.sp-head { display : flex; flex-wrap : wrap; gap : 6px 18px; font-size : 12px; margin-bottom : 8px; }
+.sp-wrap { max-height : 420px; overflow : auto; }
+.sp-table th, .sp-table td { white-space : nowrap; }
+.sp-in { width : 84px; text-align : right; }
+.sp-off td { color : #999; background : #f6f6f6; }
+.sp-future td { color : #888; }
+.sp-done td { background : #f3faf3; }
+.sp-neg { color : #c62828; }
+.sp-pos { color : #2e7d32; }
+.sp-st { font-size : 11px; padding : 1px 6px; border-radius : 8px; background : #eee; }
+.sp-st-ok { background : #dcedc8; }
+.sp-st-pend { background : #ffe0b2; }
+.sp-st-fut { background : #eee; }
 
 /* Daily production update */
 .pu-in {

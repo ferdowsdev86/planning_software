@@ -289,6 +289,7 @@ export const searchState = { query : '' };
 export const uiHooks = {
     instance         : null,
     unitId           : null,   // production unit of the open board (1 MBM / 2 CEIL / 3 AQL)
+    onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -1709,6 +1710,15 @@ export const schedulerProConfig = {
                     uiHooks.onOpenWorkHours?.(rec);
                 }
             },
+            prodUpdate : {
+                text   : 'Production update',
+                icon   : 'b-fa b-fa-industry',
+                weight : 235,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenStripProd?.(rec);
+                }
+            },
             multiStrip : {
                 text   : 'Multiple strip handling',
                 icon   : 'b-fa b-fa-layer-group',
@@ -1751,6 +1761,7 @@ export const schedulerProConfig = {
                 items.stripProps    = false;
                 items.planSchedule  = false;
                 items.buildUpCurve  = false;
+                items.prodUpdate    = false;
                 items.multiStrip    = false;
                 return;
             }
