@@ -6814,8 +6814,10 @@ function carryOrderToBoard(row) {
 // shallowRef: a deep ref would wrap the Bryntum record in a reactive Proxy
 // and break identity comparisons against store records
 const carried  = shallowRef(null);
-const carryPreview = ref({ valid : false, barBox : null });
-const carryOrigin  = ref({ valid : false, left : 0, top : 0, width : 0, height : 0 });
+// Plain holders (shallowRef): nothing in the template watches them, so a
+// pointer move must not run Vue's reactivity on every frame
+const carryPreview = shallowRef({ valid : false, barBox : null });
+const carryOrigin  = shallowRef({ valid : false, left : 0, top : 0, width : 0, height : 0 });
 /** Imperative carry overlay — avoids Teleport/ref timing races on pick-up */
 let carryDom = null;
 let carriedPrevCls = '';
@@ -6827,9 +6829,14 @@ const PLACE_GUARD_MS = 150;
 let pressPick = null;
 let skipNextBarClick = false;
 const DRAG_PX = 6;
-// Where on the bar it was grabbed (ms into the bar) so the bar stays under
-// the hand while carried instead of jumping its start to the pointer
-let carryGrabMs = 0;
+// Pointer-to-bar offset in PIXELS, fixed for the whole drag: the pointer
+// stays inside the bar, at most 14 px from its left edge (a bar grabbed in
+// its middle slides so the pointer sits near its start), and at the height
+// it was grabbed. Pixels, not time: at coarse zoom one pixel is hours and
+// the hidden night window would otherwise make the start drift under the hand.
+let carryGrabPx = 14;
+let carryGrabPy = 12;
+const GRAB_MAX_PX = 14;
 const lastMouse    = { x : 400, y : 300 };
 let clockRaf       = 0;
 
@@ -6857,9 +6864,11 @@ const fmtClock = d => {
 const idleFormula = '0.0 x 0:00 x 0 = 0.000';
 const CLOCK_DEFAULT = () => `${fmtClock(new Date())}<br>${idleFormula}`;
 
+let lastClockHtml = '';
 function setClock(html) {
+    if (html === lastClockHtml) return;
     const el = document.getElementById('mb-hover-clock');
-    if (el) el.innerHTML = html;
+    if (el) { el.innerHTML = html; lastClockHtml = html; }
 }
 
 function onSchedMouseMove(e) {
@@ -7038,13 +7047,12 @@ function flushCarryPreview() {
     if (!s || !rec) return;
 
     const els = ensureCarryDom();
-    carryOrigin.value = computeCarryOrigin(s, rec);
     const snap = computeCarryPreview(s, rec, p.clientX, p.clientY);
     carryPreview.value = snap;
 
-    // No trace at the old spot while carrying — the bar exists only under
-    // the mouse pointer until it is placed
-    paintCarryBox(els.vacancy, null);
+    // the dashed slot marks the landing spot on the target line; the solid
+    // bar follows the pointer
+    paintCarryBox(els.vacancy, snap.targetBox);
     paintCarryBox(els.bar, snap.barBox);
 
     const raw = rec.data.raw;
@@ -7163,15 +7171,11 @@ const lastCarrySize = { width : 120, height : 40 };
 // The ghost trails the pointer but cannot be dropped here
 function floatingCarrySnap(clientX, clientY) {
     const { width, height } = lastCarrySize;
+    // off the lines the bar keeps riding with the pointer at the same offset
     return {
-        valid  : false,
-        barBox : {
-            valid  : true,
-            left   : clientX - width / 2,
-            top    : clientY - height / 2,
-            width,
-            height
-        }
+        valid     : false,
+        barBox    : { valid : true, left : clientX - carryGrabPx, top : clientY - carryGrabPy, width, height },
+        targetBox : null
     };
 }
 
@@ -7184,9 +7188,9 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     const res = resourceFromY(s, clientY, clientX);
     if (!isPlannableResource(res)) return floatingCarrySnap(clientX, clientY);
 
-    const pointerAtRaw = pointerDateOnTimeline(s, clientX);
-    if (!pointerAtRaw) return floatingCarrySnap(clientX, clientY);
-    const pointerAt = carryGrabMs ? new Date(pointerAtRaw.getTime() - carryGrabMs) : pointerAtRaw;
+    // the bar's LEFT edge is the pointer minus the fixed grab offset
+    const pointerAt = pointerDateOnTimeline(s, clientX - carryGrabPx);
+    if (!pointerAt) return floatingCarrySnap(clientX, clientY);
 
     const lineId = res.id;
     const dur = raw.dur || 1;
@@ -7207,7 +7211,10 @@ function computeCarryPreview(s, rec, clientX, clientY) {
 
     return {
         valid       : true,
-        barBox      : { valid : true, left : leftX, top : rowRect.top + 1, width, height },
+        // the carried bar itself rides with the pointer (no snapping, no jumps) …
+        barBox      : { valid : true, left : clientX - carryGrabPx, top : clientY - carryGrabPy, width, height },
+        // … the dashed slot shows exactly where it will land (snapped date, that row)
+        targetBox   : { valid : true, left : leftX, top : rowRect.top + 1, width, height },
         line        : res.name || lineId,
         start,
         end,
@@ -7268,7 +7275,7 @@ function syncCarryPreviewNow(clientX, clientY) {
 function attachCarryScroll(s) {
     detachCarryScroll();
     if (!s?.scrollable?.on) return;
-    const fn = () => updateCarryPreview(lastMouse.x, lastMouse.y);
+    const fn = () => { if (carried.value) carryOrigin.value = computeCarryOrigin(s, carried.value); updateCarryPreview(lastMouse.x, lastMouse.y); };
     s.scrollable.on('scroll', fn);
     carryScrollDetach = () => s.scrollable?.un?.('scroll', fn);
 }
@@ -7347,8 +7354,10 @@ function stopEdgeScroll() {
 
 function attachCarryListeners() {
     detachCarryListeners();
-    document.addEventListener('mousemove', trackGhost, true);
-    document.addEventListener('pointermove', trackGhost, true);
+    // one pointer stream (pointermove covers the mouse) — two listeners did
+    // the whole preview twice per move
+    if (window.PointerEvent) document.addEventListener('pointermove', trackGhost, true);
+    else document.addEventListener('mousemove', trackGhost, true);
     document.addEventListener('pointerup', onCarryPointerUp, true);
     document.addEventListener('keydown', escCancel, true);
 }
@@ -7398,12 +7407,15 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
     if (!s) return;
-    // grabbed on the board: keep the pointer at the same spot of the bar
-    carryGrabMs = 0;
-    if (grab && domEvent && rec.startDate && rec.endDate) {
-        const at = pointerDateOnTimeline(s, domEvent.clientX);
-        if (at) carryGrabMs = Math.max(0, Math.min(at - rec.startDate, rec.endDate - rec.startDate));
+    // grabbed on the board: pointer offset inside the bar, left-anchored
+    const barEl = grab && domEvent ? s.getElementFromEventRecord?.(rec) : null;
+    const barRect = barEl?.getBoundingClientRect?.();
+    const barH = Math.max(16, Math.round((s.rowHeight || 48) / 2));
+    if (barRect && barRect.width > 0) {
+        carryGrabPx = Math.min(GRAB_MAX_PX, Math.max(4, domEvent.clientX - barRect.left));
+        carryGrabPy = Math.min(barRect.height - 2, Math.max(2, domEvent.clientY - barRect.top));
     }
+    else { carryGrabPx = GRAB_MAX_PX; carryGrabPy = Math.round(barH / 2); }
     // qty 0 / no SMV → the bar cannot be moved onto a line
     if (!(Number(raw.qty) > 0)) { toast(`${raw.mbmOrder || raw.po} — quantity is 0, cannot be planned`, 'warn'); return; }
     if (!(Number(raw.smv) > 0) || (raw.smvMissing && !(Number(raw.smvManual) > 0))) { toast(`${raw.mbmOrder || raw.po} — SMV is 0 / missing, cannot be planned (right-click → Recalculate duration to enter it)`, 'warn'); return; }
@@ -7427,7 +7439,7 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     carriedPrevCls = String(rec.data.cls || '');
     rec.set('cls', `${carriedPrevCls} mb-carried-away`.trim());
     carryPreview.value = emptyCarrySnap();
-    carryOrigin.value  = computeCarryOrigin(s, rec);
+    carryOrigin.value  = computeCarryOrigin(s, rec);   // once — refreshed on scroll, not per frame
     const cx = domEvent?.clientX ?? lastMouse.x;
     const cy = domEvent?.clientY ?? lastMouse.y;
     lastMouse.x = cx;
@@ -7447,7 +7459,6 @@ function restoreCarriedCls() {
 
 function cancelCarry() {
     pressPick = null;
-    carryGrabMs = 0;
     setBarTooltipEnabled(getInstance(), true);
     restoreCarriedCls();
     carried.value = null;
@@ -7504,11 +7515,8 @@ function rowResourceAt(s, clientX, clientY) {
 
 function resourceFromY(s, clientY, clientX) {
     if (!s) return null;
-    const x = clientX ?? lastMouse.x;
-    const hit = rowResourceAt(s, x, clientY);
-    if (hit) return hit;
-
-    // Pointer over a range/canvas element: match the row by its screen bounds
+    // Row bounds first (no DOM hit-test per frame): the row whose box holds
+    // the pointer's Y — this is what makes up/down and diagonal moves land
     const rows = s.rowManager?.rows || [];
     for (const row of rows) {
         const el = row.element;
@@ -7519,6 +7527,9 @@ function resourceFromY(s, clientY, clientX) {
             if (rec) return rec;
         }
     }
+    const x = clientX ?? lastMouse.x;
+    const hit = rowResourceAt(s, x, clientY);
+    if (hit) return hit;
     const body = s.element?.querySelector('.b-grid-sub-grid-normal');
     if (!body) return null;
     const rect = body.getBoundingClientRect();
@@ -8106,6 +8117,7 @@ onMounted(() => {
             const rec = s.resolveEventRecord?.(wrap);
             if (!rec) return;
             handleBarMouseDown({ eventRecord : rec, domEvent : e });
+            if (carried.value) e.preventDefault();   // no text selection / native drag image under the carry
         }, true);
         requestAnimationFrame(() => fitBoardView(s));
     }
@@ -14077,8 +14089,9 @@ body.mb-carry-active * { cursor : grabbing !important; }
 }
 
 .mb-carry-vacancy {
-    border     : 1px dashed rgba(80, 80, 80, 0.75);
-    background : rgba(255, 255, 255, 0.65);
+    border     : 2px dashed #1f3fde;
+    background : rgba(31, 63, 222, 0.14);
+    border-radius : 3px;
     z-index    : 1;
 }
 
