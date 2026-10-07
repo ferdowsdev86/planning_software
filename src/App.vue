@@ -1665,6 +1665,34 @@ const chTargetIsOpenBoard = computed(() => !chTargetCal.value || Number(chTarget
 const chTargetName = computed(() => chTargetIsOpenBoard.value ? calendarState.name : chTargetCal.value.name);
 // weekly hours of the target calendar (open board: the live calendarState)
 const chNormalHours = wd => (chTargetIsOpenBoard.value ? calendarState.days : (chTargetCal.value?.days || {}))[wd]?.hours || '0:00';
+// Date overrides of the target calendar (open board: the live ones; another
+// unit's: read from the DB when it is picked) — what the board actually runs on
+const chTargetOv = ref({});
+watch([chCalId, chCalendars], async () => {
+    if (chTargetIsOpenBoard.value) { chTargetOv.value = calendarState.overrides; return; }
+    const id = chTargetCal.value?.id;
+    if (!id) return;
+    try { chTargetOv.value = await loadCalendarOverridesDb(id); }
+    catch { chTargetOv.value = {}; }
+});
+// Hours the target calendar currently has on that weekday inside the chosen
+// period (overrides included) — "10:00 / 11:00" when they differ by date
+const chPeriodHours = wd => {
+    const from = new Date(chFrom.value + 'T00:00:00'), to = new Date(chTo.value + 'T00:00:00');
+    if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) return '—';
+    const ov = chTargetOv.value || {};
+    const seen = [];
+    const d = new Date(from);
+    for (let g = 0; d <= to && g < 400; g++, d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== wd) continue;
+        const v = ov[ymdOf(d)];
+        const h = v != null && v !== '' ? (Number(v) || 0) : hmToHours(chNormalHours(wd));
+        const t = hoursToHm(h);
+        if (!seen.includes(t)) seen.push(t);
+    }
+    if (!seen.length) return '—';
+    return seen.length <= 2 ? seen.join(' / ') : `${seen[0]} …`;
+};
 
 function openWorkHours(rec) {
     openMenu.value = null;
@@ -10098,10 +10126,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div class="ch-head">Which days do you want to change</div>
                             <fieldset class="pr-box">
                                 <legend>Select days</legend>
-                                <div class="ch-dayrow ch-dayrow-h"><span></span><span>Normal hours</span></div>
+                                <div class="ch-dayrow ch-dayrow-h"><span></span><span>Normal hours</span><span title="Hours the calendar runs on inside the selected period (changed hours included)">Current (period)</span></div>
                                 <div v-for="wd in CH_DAY_ORDER" :key="wd" class="ch-dayrow">
                                     <label><input v-model="chDays[wd]" type="checkbox"> {{ DAY_NAMES[wd] }}</label>
                                     <input class="cal-in ch-nh" :value="chNormalHours(wd)" readonly>
+                                    <input class="cal-in ch-nh ch-cur" :value="chPeriodHours(wd)" readonly>
                                 </div>
                                 <div class="ch-modes">
                                     <label><input v-model="chDayMode" type="radio" value="selected"> Selected days only</label>
@@ -12868,6 +12897,11 @@ body {
     align-items     : center;
     justify-content : space-between;
     gap             : 10px;
+}
+.ch-dayrow label { flex : 1; }
+.ch-dayrow-h span:not(:first-child) { width : 84px; text-align : center; }
+.ch-cur { width : 84px; background : #eef3ff; font-weight : bold; }
+.ch-dayrow-x {
     margin          : 2px 0;
 }
 .ch-dayrow label { display : flex; align-items : center; gap : 6px; }

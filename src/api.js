@@ -843,7 +843,11 @@ export function calendarDaysFromRows(rows) {
 export async function loadCalendarsDb() {
     const j = await get('/calendars', 8000);
     if (!j.success) throw new Error(j.error || 'load failed');
-    return (j.calendars || []).map(c => ({ id : c.id, unitId : c.unitId, unitName : c.unitName, name : c.name, days : calendarDaysFromRows(c.rows).calendarDays }));
+    // the weekly 'working' row carries no weekday (it covers every working
+    // day): fill the week with the factory default, Friday off, then overlay
+    const DEF = { start : '08:00', hours : '10:00', ot : '02:00' };
+    const week = { 0 : DEF, 1 : DEF, 2 : DEF, 3 : DEF, 4 : DEF, 5 : { start : '08:00', hours : '00:00', ot : '02:00' }, 6 : DEF };
+    return (j.calendars || []).map(c => ({ id : c.id, unitId : c.unitId, unitName : c.unitName, name : c.name, days : { ...week, ...calendarDaysFromRows(c.rows).calendarDays } }));
 }
 
 export async function loadFromApi(unitId = null) {
