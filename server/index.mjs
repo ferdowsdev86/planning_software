@@ -735,35 +735,50 @@ app.get(`${BASE}/calendars`, async (req, res) => {
 
 app.get(`${BASE}/calendars/:id/overrides`, async (req, res) => {
     try {
+        // resource_id NULL = the whole unit calendar; set = that one sewing
+        // line only (Change working hours → Selected lines)
         const [rows] = await pool.query(
-            `SELECT DATE_FORMAT(start_date, '%Y-%m-%d') AS d, interval_name AS n
+            `SELECT resource_id AS r, DATE_FORMAT(start_date, '%Y-%m-%d') AS d, interval_name AS n
              FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?`,
             [Number(req.params.id), CAL_OVERRIDE]);
-        const overrides = {};
+        const overrides = {}, lineOverrides = {};
         for (const r of rows) {
             const h = Number(String(r.n || '').replace(/^HOURS=/, ''));
-            if (r.d && Number.isFinite(h)) overrides[r.d] = h;
+            if (!r.d || !Number.isFinite(h)) continue;
+            if (r.r) (lineOverrides[r.r] ||= {})[r.d] = h;
+            else overrides[r.d] = h;
         }
-        res.json({ success : true, overrides });
+        res.json({ success : true, overrides, lineOverrides });
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 app.put(`${BASE}/calendars/:id/overrides`, async (req, res) => {
     const calId = Number(req.params.id);
-    const ov = req.body?.overrides || {};
+    const ov  = req.body?.overrides || {};
+    // { resourceId : { date : hours } } — omitted = the line rows stay as they are
+    const lov = req.body?.lineOverrides && typeof req.body.lineOverrides === 'object' ? req.body.lineOverrides : null;
     const conn = await pool.getConnection();
     try {
         await conn.beginTransaction();
-        await conn.query('DELETE FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?', [calId, CAL_OVERRIDE]);
+        await conn.query(
+            `DELETE FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?${lov ? '' : ' AND resource_id IS NULL'}`,
+            [calId, CAL_OVERRIDE]);
         let n = 0;
-        for (const [d, h] of Object.entries(ov)) {
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Number(h)) || Number(h) < 0 || Number(h) > 24) continue;
+        const insert = async (rid, d, h) => {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Number(h)) || Number(h) < 0 || Number(h) > 24) return;
             await conn.query(
                 `INSERT INTO planning_calendar_intervals
-                    (calendar_id, interval_type, interval_name, recurrent_rule, start_date, end_date, created_at, updated_at)
-                 VALUES (?, 'overtime', ?, ?, ?, ?, NOW(), NOW())`,
-                [calId, `HOURS=${Number(h)}`, CAL_OVERRIDE, `${d} 00:00:00`, `${d} 23:59:59`]);
+                    (calendar_id, resource_id, interval_type, interval_name, recurrent_rule, start_date, end_date, created_at, updated_at)
+                 VALUES (?, ?, 'overtime', ?, ?, ?, ?, NOW(), NOW())`,
+                [calId, rid, `HOURS=${Number(h)}`, CAL_OVERRIDE, `${d} 00:00:00`, `${d} 23:59:59`]);
             n++;
+        };
+        for (const [d, h] of Object.entries(ov)) await insert(null, d, h);
+        if (lov) {
+            for (const [rid, map] of Object.entries(lov)) {
+                if (!(Number(rid) > 0) || !map || typeof map !== 'object') continue;
+                for (const [d, h] of Object.entries(map)) await insert(Number(rid), d, h);
+            }
         }
         await conn.commit();
         res.json({ success : true, saved : n });

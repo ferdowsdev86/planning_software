@@ -69,8 +69,21 @@ export const calendarState = {
     // Date-specific working-hour overrides (Change working hours dialog):
     // 'YYYY-MM-DD' -> hours as a number (0 = that date becomes an off day,
     // 11.5 = 11:30). Overrides beat the weekly pattern for that date only.
-    overrides : {}
+    overrides : {},
+    // Per-LINE overrides (Change working hours → Selected lines): resource
+    // DB id -> { 'YYYY-MM-DD' : hours }. A line's own figure beats the unit
+    // override, which beats the weekly pattern. 0 = that line is off that day.
+    lineOverrides : {}
 };
+
+// The hours a specific line was given for that date, undefined when none
+export function lineOverrideOf(date, lineId) {
+    if (!lineId) return undefined;
+    const dbId = LINE_BY_ID[lineId]?.dbId;
+    if (!dbId) return undefined;
+    const v = calendarState.lineOverrides[dbId]?.[ymdOf(date)];
+    return v != null && v !== '' ? (Number(v) || 0) : undefined;
+}
 
 export const hmToHours = s => {
     const [h, m] = String(s || '0').split(':').map(Number);
@@ -108,8 +121,9 @@ export const isOffDay = d => dayHoursOf(d) <= 0;
 // Change-working-hours dialog overrides a date, that override takes PRIORITY
 // over the line's normal hours — the day's available minutes and piece
 // capacity scale by this factor (1 on untouched dates).
-export function dayCapacityFactor(date, lineBaseHours) {
-    const ov = calendarState.overrides[ymdOf(date)];
+export function dayCapacityFactor(date, lineBaseHours, lineId = null) {
+    const lo = lineOverrideOf(date, lineId);
+    const ov = lo !== undefined ? lo : calendarState.overrides[ymdOf(date)];
     if (ov == null || ov === '') return 1;
     const base = Number(lineBaseHours) > 0
         ? Number(lineBaseHours)

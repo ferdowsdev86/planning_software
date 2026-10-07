@@ -24,7 +24,7 @@ import {
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
-    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
+    resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb
 } from './api.js';
 import {
@@ -1669,12 +1669,39 @@ const chNormalHours = wd => (chTargetIsOpenBoard.value ? calendarState.days : (c
 // Date overrides of the target calendar (open board: the live ones; another
 // unit's: read from the DB when it is picked) — what the board actually runs on
 const chTargetOv = ref({});
+// Per-line overrides of the target calendar: resource DB id -> { ymd : hours }
+const chTargetLineOv = ref({});
+// FastReact "Apply changes to": the whole unit calendar, or only the ticked
+// sewing lines (their own hours beat the unit calendar on those dates)
+const chTargetMode = ref('calendar');   // 'calendar' | 'lines'
+const chLineSel    = ref({});           // board line id -> ticked
+const chLineOptions = computed(() => {
+    if (chTargetIsOpenBoard.value) {
+        const s = getInstance();
+        return (s?.resourceStore?.records || [])
+            .filter(r => r.data?.lineRow)
+            .map(r => ({ id : r.id, dbId : r.data.dbId, name : r.data.name || r.name }));
+    }
+    const uid = Number(chTargetCal.value?.unitId);
+    return allUnitLines.value.filter(l => Number(l.unitId) === uid).map(l => ({ id : l.id, dbId : l.dbId, name : l.name }));
+});
+const chSelectedLines = computed(() => chLineOptions.value.filter(l => chLineSel.value[l.id] && l.dbId));
+const chTargetLabel = computed(() => (chTargetMode.value === 'lines' && chSelectedLines.value.length
+    ? `${chSelectedLines.value.map(l => l.name).join(', ')} (${chTargetName.value})`
+    : chTargetName.value));
+function chLinesAll(on) {
+    for (const l of chLineOptions.value) chLineSel.value[l.id] = on;
+}
 watch([chCalId, chCalendars], async () => {
-    if (chTargetIsOpenBoard.value) { chTargetOv.value = calendarState.overrides; return; }
+    if (chTargetIsOpenBoard.value) { chTargetOv.value = calendarState.overrides; chTargetLineOv.value = calendarState.lineOverrides; return; }
     const id = chTargetCal.value?.id;
     if (!id) return;
-    try { chTargetOv.value = await loadCalendarOverridesDb(id); }
-    catch { chTargetOv.value = {}; }
+    try {
+        const full = await loadCalendarOverridesFullDb(id);
+        chTargetOv.value = full.overrides;
+        chTargetLineOv.value = full.lineOverrides;
+    }
+    catch { chTargetOv.value = {}; chTargetLineOv.value = {}; }
 });
 // Hours the planner has SET for that weekday inside the chosen period
 // (Change working hours overrides only) — "11:00 / 12:00" when they differ
@@ -1683,14 +1710,20 @@ const chPeriodHours = wd => {
     const from = new Date(chFrom.value + 'T00:00:00'), to = new Date(chTo.value + 'T00:00:00');
     if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) return '';
     const ov = chTargetOv.value || {};
+    const lov = chTargetLineOv.value || {};
+    // Selected lines: what those lines run on (their own figure, else the unit's)
+    const lineKeys = chTargetMode.value === 'lines' ? chSelectedLines.value.map(l => String(l.dbId)) : [null];
     const seen = [];
     const d = new Date(from);
     for (let g = 0; d <= to && g < 400; g++, d.setDate(d.getDate() + 1)) {
         if (d.getDay() !== wd) continue;
-        const v = ov[ymdOf(d)];
-        if (v == null || v === '') continue;
-        const t = hoursToHm(Number(v) || 0);
-        if (!seen.includes(t)) seen.push(t);
+        const k = ymdOf(d);
+        for (const lk of lineKeys) {
+            const v = lk ? (lov[lk]?.[k] ?? ov[k]) : ov[k];
+            if (v == null || v === '') continue;
+            const t = hoursToHm(Number(v) || 0);
+            if (!seen.includes(t)) seen.push(t);
+        }
     }
     if (!seen.length) return '';
     return seen.length <= 2 ? seen.join(' / ') : `${seen[0]} …`;
@@ -1707,6 +1740,16 @@ function openWorkHours(rec) {
         chTo.value   = isoInputDate(addCalDays(new Date(), 6));
     }
     chCalId.value = calendarState.id || 1;
+    // Lines selected on the board (row selection) come in pre-ticked, like
+    // FastReact's "Line 10 + 10" target; otherwise the whole calendar
+    chLineSel.value = {};
+    chTargetMode.value = 'calendar';
+    const s = getInstance();
+    const selLines = (s?.selectedRecords || []).filter(r => r?.data?.lineRow);
+    if (selLines.length) {
+        for (const r of selLines) chLineSel.value[r.id] = true;
+        chTargetMode.value = 'lines';
+    }
     const allowed = new Set(dpUnits.value.map(u => u.unitId));
     loadCalendarsDb()
         .then(list => { chCalendars.value = list.filter(c => allowed.has(Number(c.unitId))); })
@@ -1738,6 +1781,12 @@ function chApply() {
     }
     if (chDayMode.value === 'selected' && !Object.values(chDays.value).some(Boolean)) {
         toast('কোন কোন দিন বদলাবে — অন্তত একটা দিন select করুন', 'warn');
+        return;
+    }
+    // Selected lines only: those lines get their own hours on the dates
+    if (chTargetMode.value === 'lines') {
+        if (!chSelectedLines.value.length) { toast('কোন line-এ লাগবে — অন্তত একটা line tick করুন', 'warn'); return; }
+        chApplyToLines(from, to, timeH);
         return;
     }
     // Another unit's calendar: its own weekly hours + DB overrides, saved to
@@ -1825,6 +1874,81 @@ async function chApplyToOtherUnit(from, to, timeH) {
         chOpen.value = false;
     }
     catch (e) { toast(`DB save failed: ${e.message}`, 'error'); }
+}
+
+// FastReact "Line 10 + 10": the change lands on the ticked lines only. Each
+// line keeps its own date -> hours map (planning_calendar_intervals rows
+// with resource_id); on those dates the line's figure beats the unit
+// calendar, 0 = that line is off. "Reset to normal" drops the line's own
+// figure, so the line follows the unit calendar again. Bars on those lines
+// re-size (open board) exactly as with a unit-wide change.
+async function chApplyToLines(from, to, timeH) {
+    if (boardReadOnly.value) { toast('🔒 Read only — working hours cannot be changed', 'warn'); return; }
+    const other = chTargetIsOpenBoard.value ? null : chTargetCal.value;
+    const calId = other ? other.id : (calendarState.id || 1);
+    const calName = other ? other.name : calendarState.name;
+    let unitOv, lineOv;
+    if (!other) { unitOv = calendarState.overrides; lineOv = calendarState.lineOverrides; }
+    else {
+        try { const full = await loadCalendarOverridesFullDb(calId); unitOv = full.overrides; lineOv = full.lineOverrides; }
+        catch (e) { toast(`Could not read the ${calName}: ${e.message}`, 'error'); return; }
+    }
+    const weekly = wd => hmToHours((other ? other.days?.[wd]?.hours : calendarState.days[wd]?.hours) || '0');
+    const lines = chSelectedLines.value;
+    let changed = 0;
+    for (const l of lines) {
+        const key  = String(l.dbId);
+        const mine = { ...(lineOv[key] || {}) };
+        const hoursOf = d => {
+            const k = ymdOf(d);
+            const v = mine[k] ?? unitOv[k];
+            return v != null && v !== '' ? (Number(v) || 0) : weekly(d.getDay());
+        };
+        const d = new Date(from);
+        for (let guard = 0; d <= to && guard < 400; guard++) {
+            const wd = d.getDay();
+            const include =
+                chDayMode.value === 'selected'    ? !!chDays.value[wd]
+                : chDayMode.value === 'normalOnly' ? weekly(wd) > 0
+                : chDayMode.value === 'all'        ? true
+                : /* workingOnly */                  hoursOf(d) > 0;
+            if (include) {
+                const k = ymdOf(d);
+                if (chAction.value === 'resetNormal')  delete mine[k];
+                else if (chAction.value === 'zero')    mine[k] = 0;
+                else if (chAction.value === 'setNew')  mine[k] = timeH;
+                else /* addTime */                     mine[k] = hoursOf(d) + timeH;
+                changed++;
+            }
+            d.setDate(d.getDate() + 1);
+        }
+        if (Object.keys(mine).length) lineOv[key] = mine;
+        else delete lineOv[key];
+    }
+    try { await saveCalendarOverridesDb({ ...unitOv }, calId, JSON.parse(JSON.stringify(lineOv))); }
+    catch (e) { toast(`DB save failed: ${e.message}`, 'error'); return; }
+    const names = lines.map(l => l.name).join(', ');
+    if (!other) {
+        const s = getInstance();
+        let rs = null;
+        if (s) {
+            const ids = new Set(lines.map(l => l.id));
+            const toEnd = new Date(to);
+            toEnd.setDate(toEnd.getDate() + 1);
+            rs = resizeBars(s, ev => ids.has(lineIdOf(s, ev)) && ev.startDate < toEnd && ev.endDate > from);
+            recalcCapacity(s);
+            refreshGrandTotals(s);
+            s.refreshRows?.();
+        }
+        if (rs && (rs.shrunk || rs.grown)) {
+            toast(`${rs.shrunk + rs.grown} bar(s) re-sized to the new hours (${rs.shrunk} shorter, ${rs.grown} longer${rs.pushed ? `, ${rs.pushed} follower(s) shifted` : ''}) — Save to keep`, 'ok');
+        }
+        toast(`${changed} line-day(s) updated — ${names} only, calendar "${calName}" — shared with every planner`, 'ok');
+    }
+    else {
+        toast(`${changed} line-day(s) updated — ${names} only, calendar "${calName}" (${other.unitName}) — that board takes the new hours when it opens`, 'ok');
+    }
+    chOpen.value = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -4248,13 +4372,16 @@ async function syncCalendarOverrides(calId = calendarState.id || 1) {
     }
     catch { /* corrupt store — start clean */ }
     for (const k of Object.keys(calendarState.overrides)) delete calendarState.overrides[k];
+    for (const k of Object.keys(calendarState.lineOverrides)) delete calendarState.lineOverrides[k];
     try {
         // The DB is the truth, an empty answer included: overrides cleared
         // there (back to Normal hours) must not come back from a browser's
         // stale cache. The cache only serves this browser while offline.
-        const db = await loadCalendarOverridesDb(calId);
-        Object.assign(calendarState.overrides, db);
-        localStorage.setItem(calOverridesKey(calId), JSON.stringify(db));
+        // Per-line overrides (Selected lines) live in the DB only.
+        const full = await loadCalendarOverridesFullDb(calId);
+        Object.assign(calendarState.overrides, full.overrides);
+        Object.assign(calendarState.lineOverrides, full.lineOverrides);
+        localStorage.setItem(calOverridesKey(calId), JSON.stringify(full.overrides));
     }
     catch { Object.assign(calendarState.overrides, local); }   // offline — this browser's copy
 }
@@ -10263,13 +10390,27 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <input type="radio" name="ch-cal" :value="c.id" v-model="chCalId"> {{ c.name }}<span class="ls-dim"> · {{ c.unitName }}</span>
                             </label>
                             <label v-if="!chCalendars.length" class="ch-opt"><input type="radio" checked> {{ calendarState.name }}</label>
+                            <div class="ch-scope">
+                                <label class="ch-opt"><input v-model="chTargetMode" type="radio" value="calendar"> Whole calendar — every line</label>
+                                <label class="ch-opt"><input v-model="chTargetMode" type="radio" value="lines"> Selected lines only</label>
+                                <div v-if="chTargetMode === 'lines'" class="ch-lines">
+                                    <div class="ch-lines-tools">
+                                        <a href="#" @click.prevent="chLinesAll(true)">all</a> · <a href="#" @click.prevent="chLinesAll(false)">none</a>
+                                        · {{ chSelectedLines.length }} line(s) selected
+                                    </div>
+                                    <div class="ch-lines-list">
+                                        <label v-for="l in chLineOptions" :key="l.id" class="ch-line"><input v-model="chLineSel[l.id]" type="checkbox"> {{ l.name }}</label>
+                                        <div v-if="!chLineOptions.length" class="bc-empty">এই unit-এর line list পাওয়া যায়নি</div>
+                                    </div>
+                                </div>
+                            </div>
                         </fieldset>
                     </div>
                     <div class="ch-actions">
                         <button class="cal-btn cal-btn-primary st-btn ch-apply" @click="chApply">✔ Apply</button>
-                        <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetName }}</b></span>
+                        <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetLabel }}</b></span>
                     </div>
-                    <div class="st-hint">Zero hours / নতুন hours 00:00 = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
+                    <div class="st-hint">Zero hours / নতুন hours 00:00 = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে (Selected lines: ওই line আবার unit calendar অনুযায়ী) · Selected lines = শুধু ওই line-গুলোর hours বদলায়, বাকি board আগের মতো · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
                 </div>
             </div>
         </div>
@@ -13025,6 +13166,14 @@ body {
 .ch-date  { width : 150px; }
 .ch-period { flex : 2 1 0; }
 .ch-target { flex : 1 1 0; }
+.ch-scope { margin-top : 6px; padding-top : 6px; border-top : 1px dashed #c9c5b8; }
+.ch-lines-tools { font-size : 11px; color : #555; margin : 4px 0; }
+.ch-lines-tools a { color : #1b52ad; text-decoration : none; }
+.ch-lines-list {
+    max-height : 84px; overflow-y : auto; background : #fff; border : 1px solid #c9c5b8;
+    padding : 4px 6px; display : grid; grid-template-columns : 1fr 1fr 1fr; gap : 2px 8px; font-size : 12px;
+}
+.ch-line { display : flex; align-items : center; gap : 4px; white-space : nowrap; }
 .ch-actions {
     display     : flex;
     align-items : center;

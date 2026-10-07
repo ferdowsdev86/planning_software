@@ -626,11 +626,18 @@ export async function loadCalendarOverridesDb(calId = 1) {
     if (!data.success) throw new Error(data.error || 'load failed');
     return data.overrides || {};
 }
-export async function saveCalendarOverridesDb(overrides, calId = 1) {
+// Unit overrides + per-line overrides ({ resourceDbId : { date : hours } })
+export async function loadCalendarOverridesFullDb(calId = 1) {
+    const data = await get(`/calendars/${calId}/overrides`, 6000);
+    if (!data.success) throw new Error(data.error || 'load failed');
+    return { overrides : data.overrides || {}, lineOverrides : data.lineOverrides || {} };
+}
+// lineOverrides omitted = the DB keeps its line rows untouched
+export async function saveCalendarOverridesDb(overrides, calId = 1, lineOverrides = undefined) {
     const res = await fetch(`${API_BASE}/calendars/${calId}/overrides`, {
         method  : 'PUT',
         headers : { 'Content-Type' : 'application/json' },
-        body    : JSON.stringify({ overrides })
+        body    : JSON.stringify(lineOverrides ? { overrides, lineOverrides } : { overrides })
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'save failed');
@@ -1164,7 +1171,7 @@ export function registerBoardLines(resources) {
     LINES.length = 0;
     for (const l of lines) {
         const entry = {
-            id : l.id, name : l.name, unit : l.unit, unitId : l.unitId, floor : l.floor,
+            id : l.id, dbId : l.dbId || null, name : l.name, unit : l.unit, unitId : l.unitId, floor : l.floor,
             manpower : l.manpower, machines : l.machines, eff : l.eff, hours : l.hours,
             availMin : l.availMin
         };

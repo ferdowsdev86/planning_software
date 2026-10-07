@@ -126,11 +126,12 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     let workIdx = 0, finish = null;
     for (let guard = 0; guard < 400; guard++) {
         if (lim ? d >= lim : remaining <= 0) break;
-        const off = isOffDay(d);
+        // a line given 0 hours for the date (Selected lines) is off that day
+        const hrsF    = dayCapacityFactor(d, lineHours, lineId);
+        const off = isOffDay(d) || hrsF <= 0;
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = !!lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        const hrsF    = dayCapacityFactor(d, lineHours);
         const fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
         const ws0  = startOfWorkDay(d), we0 = workEndOfDay(d);
         const span = Math.max(60000, we0 - ws0);
@@ -473,7 +474,8 @@ function grandTotalMaps() {
                 if (!isOffDay(d) && remaining > 0) {
                     // Changed-hours dates take PRIORITY: the day capacity
                     // scales to the overridden hours
-                    let dayCap = Math.max(1, Math.floor(target * dayCapacityFactor(d, line.hours)));
+                    const hrsF = dayCapacityFactor(d, line.hours, line.id);
+                    let dayCap = hrsF > 0 ? Math.max(1, Math.floor(target * hrsF)) : 0;
                     // A production cut can leave the bar starting mid-shift:
                     // that first day only holds the fraction of the shift left
                     const sw = startOfWorkDay(d), ew = endOfWorkDay(d);
