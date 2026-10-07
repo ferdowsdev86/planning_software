@@ -6959,9 +6959,13 @@ function setClock(html) {
 }
 
 function onSchedMouseMove(e) {
+    // While a bar is carried the carry's own pointermove stream owns the
+    // pointer position: Bryntum re-fires this hook on every scroll with the
+    // coordinates of its LAST real event, which would drag the position back
+    // and stop the edge auto-scroll
+    if (carried.value) return;
     lastMouse.x = e.clientX;
     lastMouse.y = e.clientY;
-    if (carried.value) updateCarryPreview(e.clientX, e.clientY);
     if (clockRaf) return;
     clockRaf = requestAnimationFrame(() => {
         clockRaf = 0;
@@ -7364,7 +7368,9 @@ function attachCarryScroll(s) {
     if (!s?.scrollable?.on) return;
     const fn = () => { if (carried.value) carryOrigin.value = computeCarryOrigin(s, carried.value); updateCarryPreview(lastMouse.x, lastMouse.y); };
     s.scrollable.on('scroll', fn);
-    carryScrollDetach = () => s.scrollable?.un?.('scroll', fn);
+    const ax = s.timeAxisSubGrid?.scrollable;
+    ax?.on?.('scroll', fn);
+    carryScrollDetach = () => { s.scrollable?.un?.('scroll', fn); ax?.un?.('scroll', fn); };
 }
 
 function detachCarryScroll() {
@@ -7373,6 +7379,10 @@ function detachCarryScroll() {
 }
 
 function trackGhost(e) {
+    // Only the real pointer: the grid re-dispatches synthetic pointer moves
+    // (e.g. on every scroll, with its last known coordinates) which would
+    // pull the carried bar back to where it was picked up
+    if (e.isTrusted === false) return;
     if (pressPick && !pressPick.moved
         && (Math.abs(e.clientX - pressPick.x) > DRAG_PX || Math.abs(e.clientY - pressPick.y) > DRAG_PX)) {
         pressPick.moved = true;
@@ -7409,19 +7419,26 @@ function edgeScrollTick() {
     }
     const r = sub.element.getBoundingClientRect();
     const { x, y } = lastMouse;
-    // Only while the pointer is vertically over the schedule area
-    if (y < r.top || y > r.bottom) return;
     const zone = carryEdgeZonePx();
     const MIN = 4, MAX = 26; // px per tick — smooth, controllable ramp
+    const ramp = t => MIN + Math.min(1, t) * (MAX - MIN);
+    // Vertical: holding the bar near the top / bottom edge (or past it)
+    // scrolls the lines, so a bar can travel to a line that is off screen.
+    // The body scroller (s.scrollable) holds the rows.
+    const body = s.scrollable;
+    const bodyEl = body?.element || s.element?.querySelector('.b-grid-body-container');
+    if (body && bodyEl && x >= r.left - zone && x <= r.right + zone) {
+        const b = bodyEl.getBoundingClientRect();
+        let vy = 0;
+        if (y <= b.top + zone)         vy = -ramp((b.top + zone - y) / zone);
+        else if (y >= b.bottom - zone) vy =  ramp((y - (b.bottom - zone)) / zone);
+        if (vy) body.y = Math.max(0, body.y + vy);
+    }
+    // Horizontal: only while the pointer is vertically over the schedule area
+    if (y < r.top - zone || y > r.bottom + zone) return;
     let vel = 0;
-    if (x <= r.left + zone) {
-        const t = Math.min(1, (r.left + zone - x) / zone);
-        vel = -(MIN + t * (MAX - MIN));
-    }
-    else if (x >= r.right - zone) {
-        const t = Math.min(1, (x - (r.right - zone)) / zone);
-        vel = MIN + t * (MAX - MIN);
-    }
+    if (x <= r.left + zone)       vel = -ramp((r.left + zone - x) / zone);
+    else if (x >= r.right - zone) vel =  ramp((x - (r.right - zone)) / zone);
     if (!vel) return;
     const sc = sub.scrollable;
     if (!sc) return;
@@ -7442,18 +7459,20 @@ function stopEdgeScroll() {
 function attachCarryListeners() {
     detachCarryListeners();
     // one pointer stream (pointermove covers the mouse) — two listeners did
-    // the whole preview twice per move
-    if (window.PointerEvent) document.addEventListener('pointermove', trackGhost, true);
-    else document.addEventListener('mousemove', trackGhost, true);
-    document.addEventListener('pointerup', onCarryPointerUp, true);
-    document.addEventListener('keydown', escCancel, true);
+    // the whole preview twice per move. On WINDOW capture: it fires before
+    // any document-level handler the grid installs, so the carry sees every
+    // pointer move wherever the pointer is (status bar, header, outside the grid)
+    if (window.PointerEvent) window.addEventListener('pointermove', trackGhost, true);
+    else window.addEventListener('mousemove', trackGhost, true);
+    window.addEventListener('pointerup', onCarryPointerUp, true);
+    window.addEventListener('keydown', escCancel, true);
 }
 
 function detachCarryListeners() {
-    document.removeEventListener('mousemove', trackGhost, true);
-    document.removeEventListener('pointermove', trackGhost, true);
-    document.removeEventListener('pointerup', onCarryPointerUp, true);
-    document.removeEventListener('keydown', escCancel, true);
+    window.removeEventListener('mousemove', trackGhost, true);
+    window.removeEventListener('pointermove', trackGhost, true);
+    window.removeEventListener('pointerup', onCarryPointerUp, true);
+    window.removeEventListener('keydown', escCancel, true);
 }
 
 function escCancel(e) {
