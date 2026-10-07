@@ -16,6 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
+import { balanceSplits } from './equalOrderService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
@@ -7873,6 +7874,200 @@ function boardArrowKeys(e) {
 document.addEventListener('keydown', boardArrowKeys, true);
 
 // ---------------------------------------------------------------------------
+// Equal Order (toolbar ⚖ / right-click): an order split over several lines
+// gets its REMAINING qty re-balanced by each line's real capacity so every
+// split finishes on the same date. Capacity comes from the one production
+// model that sizes every bar (simulateStrip: SMV, manpower, hours,
+// efficiency, learning curve, calendar, changed hours, line hours), so the
+// result matches what the board would draw. Produced qty is never touched;
+// a locked / completed bar after a split caps that line — nothing moves it.
+// ---------------------------------------------------------------------------
+const eqOpen = ref(false);
+const eqPlan = shallowRef(null);
+const eqBusy = ref(false);
+const isFixedBar = ev => ev?.draggable === false || ev?.data?.raw?.status === 'completed';
+const eqWhen = d => (d ? `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—');
+
+function equalOrderPlan(s, rec) {
+    const raw0 = rec?.data?.raw;
+    if (!s || !raw0 || raw0.stage) return { error : 'Select a sewing strip of the order first' };
+    const key   = orderFamilyKey(raw0);
+    const label = raw0.mbmOrder || raw0.po || rec.name;
+    // every live bar of the order on a sewing line, one adjustable split per
+    // line (the last one there — earlier splits on that line keep their qty)
+    const byLine = new Map();
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage || r.status === 'completed' || orderFamilyKey(r) !== key) continue;
+        const lid = lineIdOf(s, ev);
+        if (!lid || isHoldId(lid) || !LINE_BY_ID[lid]) continue;
+        if (!byLine.has(lid)) byLine.set(lid, []);
+        byLine.get(lid).push(ev);
+    }
+    const splits = [];
+    for (const [lid, evs] of byLine) {
+        evs.sort((a, b) => a.startDate - b.startDate);
+        const ev = evs[evs.length - 1];
+        if (ev.draggable === false) continue;   // a locked split stays as it is
+        splits.push({ ev, lid, line : s.resourceStore.getById(lid)?.name || lid });
+    }
+    if (splits.length < 2) {
+        return { error : `${label} is planned on ${splits.length === 1 ? 'one line only' : 'no sewing line'} — Equal Order needs the order split over 2 or more lines` };
+    }
+    let R = 0;
+    for (const sp of splits) {
+        const r = sp.ev.data.raw;
+        sp.qty   = Number(r.qty) || 0;
+        sp.made  = Math.min(sp.qty, Math.max(0, Number(r.made) || 0));
+        sp.rem   = sp.qty - sp.made;
+        sp.start = new Date(sp.ev.startDate);
+        sp.end   = new Date(sp.ev.endDate);
+        R += sp.rem;
+    }
+    if (R <= 0) return { error : `${label}: nothing left to balance — every split is already produced` };
+    // capacity profile of each split: pieces per day from its own start on
+    // its own line (qty unbounded), cut at the next fixed bar on that line
+    for (const sp of splits) {
+        const r = sp.ev.data.raw;
+        let sim = null;
+        try { sim = simulateStrip(s, { ...r, qty : 1e9, orderQty : 1e9, made : 0 }, sp.lid, sp.start); }
+        catch { sim = null; }
+        if (!sim?.days?.length) return { error : `${sp.line}: cannot model production for ${label} (SMV / capacity missing)` };
+        const lock = s.eventStore.records
+            .filter(ev => ev !== sp.ev && isFixedBar(ev) && lineIdOf(s, ev) === sp.lid && ev.startDate >= sp.start)
+            .sort((a, b) => a.startDate - b.startDate)[0] || null;
+        const lockDay = lock ? ymdOf(new Date(lock.startDate)) : null;
+        sp.lockName = lock ? (lock.data.raw?.mbmOrder || lock.data.raw?.po || lock.name) : null;
+        sp.cap = {};
+        for (const d of sim.days) {
+            const k = ymdOf(d.date);
+            if (lockDay && k >= lockDay) break;
+            if (d.q > 0) sp.cap[k] = d.q;
+        }
+    }
+    // the common finish day and the whole-piece allocations (pure service,
+    // node-tested): SUM(alloc) = R, every split ends on D
+    const bal = balanceSplits(splits.map(sp => sp.cap), R);
+    if (bal.error) {
+        if (bal.error === 'no capacity') return { error : `${label}: no capacity day found on the lines` };
+        if (bal.error === 'too few') return { error : `${label}: only ${fmtQty(R)} pcs left for ${splits.length} splits — remove a split first` };
+        const capped = splits.filter(sp => sp.lockName).map(sp => `${sp.line} (${sp.lockName} is fixed after it)`);
+        return { error : `${label}: the lines cannot hold the remaining ${fmtQty(R)} pcs before their fixed orders${capped.length ? ' — ' + capped.join(', ') : ''} — move a fixed order first` };
+    }
+    const { D, alloc : allocs } = bal;
+    // proposed bars: new qty = produced + allocation; the end comes from the
+    // same production model with that qty
+    let pushes = 0, totalBefore = 0, totalAfter = 0;
+    const rows = splits.map((sp, i) => {
+        const alloc  = allocs[i];
+        const newQty = sp.made + alloc;
+        const r = sp.ev.data.raw;
+        let newEnd = null;
+        try {
+            const sim2 = simulateStrip(s, { ...r, qty : newQty, orderQty : newQty, made : sp.made }, sp.lid, sp.start);
+            newEnd = sim2?.finish || null;
+        }
+        catch { newEnd = null; }
+        const next = s.eventStore.records
+            .filter(ev => ev !== sp.ev && !isFixedBar(ev) && lineIdOf(s, ev) === sp.lid && ev.startDate >= sp.start)
+            .sort((a, b) => a.startDate - b.startDate)[0] || null;
+        const pushed = !!(next && newEnd && next.startDate < newEnd);
+        if (pushed) pushes++;
+        totalBefore += sp.qty;
+        totalAfter  += newQty;
+        const notes = [];
+        if (sp.made) notes.push(`${fmtQty(sp.made)} made — kept`);
+        if (sp.lockName) notes.push(`capped before fixed ${sp.lockName}`);
+        if (pushed) notes.push(`${next.data.raw?.mbmOrder || next.data.raw?.po || next.name} shifts later`);
+        return { evId : String(sp.ev.id), line : sp.line, qty : sp.qty, made : sp.made, newQty, end : sp.end, newEnd, note : notes.join(' · ') };
+    });
+    const check = rows.reduce((a, r) => a + (r.newQty - r.made), 0);
+    if (check !== R || rows.some(r => r.newQty < 1)) {
+        return { error : `${label}: balancing could not keep the total (${fmtQty(check)} ≠ ${fmtQty(R)}) — nothing changed` };
+    }
+    return { label, R, D, rows, pushes, totalBefore, totalAfter };
+}
+
+function openEqualOrder(rec = null) {
+    openMenu.value = null;
+    const s = getInstance();
+    if (!s) return;
+    let target = rec || carried.value || null;
+    if (!target && order.value) target = s.eventStore.records.find(ev => ev.data?.raw === order.value) || null;
+    if (!target) { toast('আগে order-এর একটা bar select করুন (click) — তারপর Equal Order', 'warn'); return; }
+    if (carried.value) cancelCarry();
+    const plan = equalOrderPlan(s, target);
+    if (plan.error) { toast(plan.error, 'warn'); return; }
+    eqPlan.value = plan;
+    eqOpen.value = true;
+}
+uiHooks.onEqualOrder = openEqualOrder;
+
+async function applyEqualOrder() {
+    const s = getInstance();
+    const plan = eqPlan.value;
+    if (!s || !plan) return;
+    if (boardReadOnly.value) {
+        const h = boardLockHolder.value;
+        toast(boardViewOnly.value ? '🔒 Read only access — you cannot change this board'
+            : `🔒 Locked — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
+        return;
+    }
+    eqBusy.value = true;
+    const posOf = ev => `${+ev.startDate}|${+ev.endDate}|${lineIdOf(s, ev)}`;
+    const before = new Map(s.eventStore.records.map(ev => [String(ev.id), posOf(ev)]));
+    const ids = [];
+    const lines = new Set();
+    beginBoardInteraction(s, 'light');
+    try {
+        for (const row of plan.rows) {
+            const rec = s.eventStore.getById(row.evId);
+            if (!rec) continue;
+            const raw = rec.data.raw;
+            const lid = lineIdOf(s, rec);
+            const q0  = Number(raw.qty) || 0;
+            if (Number(raw.baseQty) > 0 && q0 > 0) raw.baseQty = Math.round(Number(raw.baseQty) * row.newQty / q0);
+            raw.qty = row.newQty;
+            if (raw.orderQty != null) raw.orderQty = row.newQty;
+            raw.reqMin = Math.round(row.newQty * (Number(raw.smv) || 0));
+            raw.start  = new Date(rec.startDate);           // start stays where it is
+            applyLineFormulaDuration(s, raw, lid);          // end = when the new qty is made
+            const end = endOfWork(raw.start, raw.dur || 1);
+            raw.end = end;
+            raw.latePlan = !!raw.ship && end > new Date(raw.ship);
+            rec.set({ endDate : end, duration : elapsedDays(raw.start, end) });
+            pushFollowers(s, lid, rec);                     // existing rule: later bars shift, fixed ones never
+            ids.push(String(rec.id));
+            lines.add(lid);
+        }
+        applyLearningCurves(s, { lineIds : [...lines] });
+    }
+    finally {
+        endBoardInteraction(s);
+    }
+    // everything that moved with it (pushed followers) is saved in the same batch
+    for (const ev of s.eventStore.records) {
+        const k = String(ev.id);
+        if (!ids.includes(k) && before.get(k) !== posOf(ev)) ids.push(k);
+    }
+    recalcCapacity(s);
+    refreshGrandTotals(s);
+    s.refresh?.();
+    markBoardDirty();
+    touchBoardCache(s);
+    try {
+        await syncToApi(s, { eventIds : ids, unitId : currentUnitId.value });
+        toast(`Equal Order applied — ${plan.rows.length} split(s) of ${plan.label} finish on ${fmtDate(new Date(plan.D + 'T00:00:00'))}; ${ids.length} bar(s) saved in one transaction`, 'ok');
+    }
+    catch (e) {
+        toast(`Equal Order applied on the board, but the DB save failed (${e.message}) — press Save to keep it`, 'warn');
+    }
+    eqBusy.value = false;
+    eqOpen.value = false;
+    eqPlan.value = null;
+}
+
+// ---------------------------------------------------------------------------
 // Consolidate orders (toolbar toggle): the group of a bar = the side-by-side
 // bars of the SAME order on its line (a projection replaced by its confirm
 // POs, one order split into several bars) with no other order between them.
@@ -9316,6 +9511,7 @@ function syncRowHeightVar(s) {
 
 const act = name => {
     if (name === 'consolidate') { toggleConsolidate(); return; }
+    if (name === 'equalOrder')  { openEqualOrder(); return; }
     if (name === 'colorMenu') {
         colorMenuOpen.value = !colorMenuOpen.value;
         return;
@@ -9400,7 +9596,8 @@ const toolbar = [
     // projection replaced by its confirm POs, splits of one order) move as
     // one group; OFF = every bar moves alone
     { fa : 'fa-object-group', cls : 'fr-tb-consol', toggle : 'consolidate',
-        title : 'Consolidate orders — একই order-এর পাশাপাশি bar গুলো এক group হয়ে একসাথে move করবে (আবার click = ungroup)', action : 'consolidate' }
+        title : 'Consolidate orders — একই order-এর পাশাপাশি bar গুলো এক group হয়ে একসাথে move করবে (আবার click = ungroup)', action : 'consolidate' },
+    { fa : 'fa-scale-balanced', title : 'Equal Order — selected order-এর সব split line-এ একই দিনে শেষ হবে (line capacity অনুযায়ী remaining qty ভাগ)', action : 'equalOrder' }
 ];
 
 const consolidate = ref(localStorage.getItem('mbm-consolidate') === '1');
@@ -10141,6 +10338,59 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </table>
                     </template>
                     <div v-else class="st-hint dp-hint">Select a date range and click Generate — data comes from the planning board</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Equal Order preview: balanced split quantities, common output date -->
+        <div v-if="eqOpen && eqPlan" class="cal-overlay" @click.self="eqOpen = false">
+            <div class="cal-dialog eq-dialog">
+                <div class="cal-title">
+                    Equal Order — {{ eqPlan.label }}
+                    <span class="cal-title-btns">
+                        <span class="cal-x" @click="eqOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <div class="sp-head">
+                        <span><b>Remaining qty</b> {{ fmtQty(eqPlan.R) }}</span>
+                        <span><b>Common output date</b> {{ fmtDate(new Date(eqPlan.D + 'T00:00:00')) }}</span>
+                        <span><b>Splits</b> {{ eqPlan.rows.length }} line(s)</span>
+                        <span v-if="eqPlan.pushes" class="sp-neg"><b>Following order(s) shifting later</b> {{ eqPlan.pushes }}</span>
+                    </div>
+                    <table class="st-table ef-table sp-table">
+                        <thead>
+                            <tr>
+                                <th>Line</th><th class="od-num">Made</th>
+                                <th class="od-num">Current qty</th><th class="od-num">Proposed qty</th>
+                                <th>Current output</th><th>Proposed output</th><th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="r in eqPlan.rows" :key="r.evId">
+                                <td>{{ r.line }}</td>
+                                <td class="od-num">{{ fmtQty(r.made) }}</td>
+                                <td class="od-num">{{ fmtQty(r.qty) }}</td>
+                                <td class="od-num"><b>{{ fmtQty(r.newQty) }}</b> <span class="ls-dim">({{ r.newQty - r.qty > 0 ? '+' : '' }}{{ fmtQty(r.newQty - r.qty) }})</span></td>
+                                <td>{{ eqWhen(r.end) }}</td>
+                                <td><b>{{ eqWhen(r.newEnd) }}</b></td>
+                                <td class="ls-dim">{{ r.note }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th>Total</th><th></th>
+                                <th class="od-num">{{ fmtQty(eqPlan.totalBefore) }}</th>
+                                <th class="od-num">{{ fmtQty(eqPlan.totalAfter) }}</th>
+                                <th colspan="3"></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div class="st-actions">
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="eqBusy" @click="applyEqualOrder">✔ Apply</button>
+                        <button class="cal-btn st-btn" @click="eqOpen = false">✕ Cancel</button>
+                    </div>
+                    <div class="st-hint">Remaining qty (order qty − made) line capacity অনুযায়ী ভাগ হয় (SMV, manpower, hours, efficiency, build-up curve, calendar) যাতে সব split একই দিনে শেষ হয় · total qty বদলায় না · made qty বদলায় না · fixed/locked order কখনো সরে না, তার আগে capacity cap হয় · Apply = board update + DB save (এক transaction)</div>
                 </div>
             </div>
         </div>
@@ -12295,6 +12545,9 @@ body {
 }
 .dp-empty { text-align : center; color : #666; padding : 18px !important; }
 .dp-hint { padding : 18px 8px; }
+
+/* Equal Order preview */
+.eq-dialog { width : 900px; max-width : 96vw; }
 
 /* Consolidate orders toggle (toolbar) — pressed look while ON */
 .fr-tb-btn.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }

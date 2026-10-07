@@ -290,6 +290,7 @@ export const uiHooks = {
     instance         : null,
     unitId           : null,   // production unit of the open board (1 MBM / 2 CEIL / 3 AQL)
     onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
+    onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -1712,6 +1713,15 @@ export const schedulerProConfig = {
                     uiHooks.onOpenWorkHours?.(rec);
                 }
             },
+            equalOrder : {
+                text   : 'Equal order (balance splits)',
+                icon   : 'b-fa b-fa-scale-balanced',
+                weight : 234,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onEqualOrder?.(rec);
+                }
+            },
             prodUpdate : {
                 text   : 'Production update',
                 icon   : 'b-fa b-fa-industry',
@@ -1764,6 +1774,7 @@ export const schedulerProConfig = {
                 items.planSchedule  = false;
                 items.buildUpCurve  = false;
                 items.prodUpdate    = false;
+                items.equalOrder    = false;
                 items.multiStrip    = false;
                 return;
             }
