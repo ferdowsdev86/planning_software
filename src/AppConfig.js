@@ -11,7 +11,7 @@ import {
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
 , workDayUnits, planQtyOf, workingMinutesBetween,
-    buyerDefaultEff
+    buyerDefaultEff, deliveryMonthColor
 } from './planningData.js';
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -2231,6 +2231,11 @@ export const schedulerProConfig = {
         }
         else if (colorState.mode === 'status') {
             renderData.style = `background-color:${STATUS_COLORS[r.status] || '#5e7c8a'};border-color:#222;color:#fff`;
+        }
+        else if (colorState.mode === 'delivery') {
+            // Product delivery: the bar wears its delivery month's colour
+            const c = deliveryMonthColor(r.ship);
+            if (c) renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
         }
 
         if (r.stage) {

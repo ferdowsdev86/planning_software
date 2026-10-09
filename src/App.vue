@@ -16,6 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
+import { deliveryMonthColor } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
@@ -83,7 +84,8 @@ const colorMenuOpen = ref(false);
 // Display mode (risk | buyer | status | style) — last choice survives refresh
 const colorMode = ref((() => {
     const saved = localStorage.getItem('mbm-color-mode');
-    return ['risk', 'buyer', 'status', 'style'].includes(saved) ? saved : 'risk';
+    // 'risk' was the old name of the first mode — it is "Product delivery" now
+    return ['delivery', 'buyer', 'status', 'style'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
 const dataSource = ref('demo');
@@ -9916,11 +9918,27 @@ const act = name => {
 };
 
 const colorModes = [
-    { icon : '⚠', label : 'Risk status', mode : 'risk' },
+    // Product delivery: every bar due in the same month wears one colour,
+    // the next month another — the delivery picture is readable at a glance
+    { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
     { icon : '👕', label : 'Buyer',       mode : 'buyer' },
     { icon : '🏷', label : 'Plan status', mode : 'status' },
     { icon : '🧵', label : 'Style',       mode : 'style' }
 ];
+
+// Legend for Product delivery: this month and the next five, each in the
+// colour its bars wear on the board
+const deliveryLegend = computed(() => {
+    const out = [];
+    const d = new Date();
+    d.setDate(1);
+    for (let i = 0; i < 6; i++) {
+        const c = deliveryMonthColor(d);
+        if (c) out.push(c);
+        d.setMonth(d.getMonth() + 1);
+    }
+    return out;
+});
 
 const pickColorMode = m => {
     colorMode.value = m;
@@ -10163,6 +10181,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             @click="pickColorMode(c.mode)"
                         >
                             <span class="fr-colormenu-ico">{{ c.icon }}</span>{{ c.label }}
+                        </div>
+                        <div v-if="colorMode === 'delivery'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">Delivery month</div>
+                            <span v-for="m in deliveryLegend" :key="m.label" class="fr-colormenu-chip" :style="{ background : m.bg, color : m.fg }">{{ m.label }}</span>
+                            <span class="fr-colormenu-chip" style="background:#ee2e24;color:#fff">overdue</span>
                         </div>
                     </div>
                 </span>
@@ -12975,6 +12998,11 @@ body {
     margin-top : 3px;
     padding-top : 9px !important;
 }
+
+/* Product delivery legend inside the colour menu */
+.fr-colormenu-legend { border-top : 1px solid #e3e0d6; margin-top : 4px; padding : 8px 10px 6px; display : flex; flex-wrap : wrap; gap : 4px; max-width : 230px; }
+.fr-colormenu-legend-t { width : 100%; font-size : 11px; color : #666; margin-bottom : 2px; }
+.fr-colormenu-chip { font-size : 11px; padding : 2px 7px; border-radius : 9px; white-space : nowrap; }
 
 /* Equal Order preview */
 .eq-dialog { width : 900px; max-width : 96vw; }

@@ -85,6 +85,22 @@ export function lineOverrideOf(date, lineId) {
     return v != null && v !== '' ? (Number(v) || 0) : undefined;
 }
 
+// "Product delivery" colour mode: one colour per calendar month of the
+// delivery (ship) date — every bar due in the same month shares it, the next
+// month is clearly another colour. 12 hues, so a year of months never repeats.
+const DELIVERY_PALETTE = [
+    { bg : '#1e88e5', fg : '#fff' }, { bg : '#43a047', fg : '#fff' }, { bg : '#8e24aa', fg : '#fff' },
+    { bg : '#f4511e', fg : '#fff' }, { bg : '#00897b', fg : '#fff' }, { bg : '#c0ca33', fg : '#222' },
+    { bg : '#d81b60', fg : '#fff' }, { bg : '#5e35b1', fg : '#fff' }, { bg : '#fb8c00', fg : '#222' },
+    { bg : '#039be5', fg : '#fff' }, { bg : '#6d4c41', fg : '#fff' }, { bg : '#546e7a', fg : '#fff' }
+];
+export function deliveryMonthColor(date) {
+    const d = date instanceof Date ? date : (date ? new Date(date) : null);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    const c = DELIVERY_PALETTE[d.getMonth()];
+    return { ...c, month : d.getMonth(), year : d.getFullYear(), label : d.toLocaleDateString('en-GB', { month : 'short', year : '2-digit' }) };
+}
+
 export const hmToHours = s => {
     const [h, m] = String(s || '0').split(':').map(Number);
     return (h || 0) + (m || 0) / 60;
