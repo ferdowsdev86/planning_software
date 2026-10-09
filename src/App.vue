@@ -1472,7 +1472,6 @@ async function hydrateBoardFromApi() {
     if (boardHydratePromise) return boardHydratePromise;
 
     boardHydratePromise = (async () => {
-        const s = getInstance();
         const unitId = currentBoard.value?.unitId || 3;
         setBoardLoad(true, 'Connecting to planning database…', 0);
         try {
@@ -1481,7 +1480,6 @@ async function hydrateBoardFromApi() {
             const picked = await resolveApiBase();
             apiBaseLabel.value = picked.base;
             const data = await loadFromApi(unitId);
-            if (!s) return;
             setBoardLoad(true, 'Loading board layout…', 20);
             storeUnitCache(unitId, {
                 resources          : data.resources,
@@ -1506,17 +1504,32 @@ async function hydrateBoardFromApi() {
             await syncCalendarOverrides(data.calendarId || 1);
             // Production figures first — bars are laid out ONCE, on real data
             await refreshProdStoreFromDb();
-            applyApiBoardData(s, boardUnitCache[unitId].apiData);
+            // The board may still be mounting (opened a moment ago) or not be
+            // on screen at all (home view): with an instance the data is laid
+            // out now, otherwise it waits in the unit cache and the board
+            // takes it the moment it opens (reloadBoardForUnit)
+            const s = await waitForInstance();
+            if (s) {
+                applyApiBoardData(s, boardUnitCache[unitId].apiData);
+                finishBoardLoad(unitId, data, s);
+            }
+            else {
+                dataSource.value = 'db';
+                if (countSewingEvents(data) > 0) boardUnitCache[unitId].ready = true;
+            }
             apiReady.value = true;
             setBoardLoad(false);
-            finishBoardLoad(unitId, data, s);
             syncMasterData();
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
         }
         catch (err) {
             dataSource.value = 'demo';
             apiReady.value = true;
-            toast(`Planning API/DB offline (${err.message}) — showing local demo data`, 'warn');
+            // A failed first load must not stick: the next board open tries
+            // the API again (for THAT board's unit) instead of serving the
+            // demo lines forever
+            boardHydratePromise = null;
+            toast(`Planning API/DB offline (${err.message}) — showing local demo data; open the board again to retry`, 'warn');
         }
         finally {
             if (!planInFlight) setBoardLoad(false);
@@ -3672,7 +3685,9 @@ function openBoard(b) {
     if (dataSource.value === 'db') {
         reloadBoardForUnit(b); // uses cache when ready — no API wipe
     }
-    else if (!apiReady.value) {
+    else if (!apiReady.value || !boardHydratePromise) {
+        // first load, or the first load failed (demo data): fetch THIS
+        // board's unit from the API now
         setBoardLoad(true, 'Loading planning board…', 0);
         hydrateBoardFromApi();
     }
@@ -8779,8 +8794,23 @@ let toastId = 0;
 
 const getInstance = () => {
     const i = schedRef.value?.instance;
-    return i?.value ?? i ?? null;
+    // the wrapper hands out a ref-like holder ({ value : scheduler }) whose
+    // value is still empty while the scheduler mounts — an empty holder is
+    // "no instance", never an instance (s.project would be undefined)
+    let s = i;
+    if (s && !s.eventStore && s.value !== undefined) s = s.value;
+    return s && s.eventStore ? s : null;
 };
+// The scheduler right after the board view opens: wait (bounded) for it to mount
+async function waitForInstance(maxMs = 6000) {
+    const t0 = performance.now();
+    for (;;) {
+        const s = getInstance();
+        if (s?.project) return s;
+        if (performance.now() - t0 > maxMs) return null;
+        await new Promise(r => setTimeout(r, 100));
+    }
+}
 
 // Bulk board writes (auto-plan, API load) suspend Bryntum refresh so the
 // UI thread is not repainted once per strip — that was freezing the board.

@@ -800,7 +800,7 @@ export async function loadUnplannedDbPaged(firstLimit, onBatch, unitId = null) {
     const unitQ   = unitId ? `&unit_id=${unitId}` : '';
 
     // First page — fast
-    const first = await get(`/unplanned-orders?limit=${firstLimit}&offset=0${unitQ}`);
+    const first = await get(`/unplanned-orders?limit=${firstLimit}&offset=0${unitQ}`, 30000);
     if (!first.success) throw new Error(first.error || 'load failed');
     const total = first.total || 0;
     const firstRows = (first.rows || []).map(mapUnplannedRow).filter(u => String(u.buyer || '').trim());
@@ -809,7 +809,7 @@ export async function loadUnplannedDbPaged(firstLimit, onBatch, unitId = null) {
     // Rest in background chunks
     let offset = firstLimit;
     while (offset < total) {
-        const page = await get(`/unplanned-orders?limit=${PAGE}&offset=${offset}${unitQ}`);
+        const page = await get(`/unplanned-orders?limit=${PAGE}&offset=${offset}${unitQ}`, 30000);
         if (!page.success) break;
         const chunk = (page.rows || []).map(mapUnplannedRow).filter(u => String(u.buyer || '').trim());
         if (!chunk.length) break;
@@ -866,13 +866,16 @@ export async function loadCalendarsDb() {
 export async function loadFromApi(unitId = null) {
     skippedDbEvents.length = 0;
     const unitQ = unitId ? `?unit_id=${unitId}` : '';
-    const data = await get(`/projects/1/scheduler-data${unitQ}`);
+    // The whole board in one answer (hundreds of bars, every order's notes):
+    // over the internet this takes longer than the 4 s probe timeout, and
+    // an aborted load used to leave the app on "demo data" for good
+    const data = await get(`/projects/1/scheduler-data${unitQ}`, 90000);
     if (!data.success) throw new Error(data.error || 'load failed');
 
     const effUnitId = unitId || data.project?.unitId || null;
     const effUnitName = data.project?.unitName || unitLabel(effUnitId);
     const unpQ  = effUnitId ? `?unit_id=${effUnitId}` : '';
-    const unp    = await get(`/unplanned-orders${unpQ}`);
+    const unp    = await get(`/unplanned-orders${unpQ}`, 60000);
 
     const dbIdToBoardId = {};
     const mapped = data.resources.rows.map(r => {
