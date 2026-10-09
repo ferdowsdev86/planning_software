@@ -9917,13 +9917,14 @@ const act = name => {
     }
 };
 
+// Order as the planner asked: Style first, then Product delivery (every bar
+// due in the same month wears one colour, the next month another), Buyer,
+// Plan status
 const colorModes = [
-    // Product delivery: every bar due in the same month wears one colour,
-    // the next month another — the delivery picture is readable at a glance
+    { icon : '🧵', label : 'Style',            mode : 'style' },
     { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
-    { icon : '👕', label : 'Buyer',       mode : 'buyer' },
-    { icon : '🏷', label : 'Plan status', mode : 'status' },
-    { icon : '🧵', label : 'Style',       mode : 'style' }
+    { icon : '👕', label : 'Buyer',            mode : 'buyer' },
+    { icon : '🏷', label : 'Plan status',      mode : 'status' }
 ];
 
 // Legend for Product delivery: this month and the next five, each in the
@@ -9945,8 +9946,14 @@ const pickColorMode = m => {
     colorState.mode = m;
     localStorage.setItem('mbm-color-mode', m); // survives refresh
     colorMenuOpen.value = false;
+    // every bar repaints in the new mode at once (text and colour)
     const s = getInstance();
-    s?.refreshWithTransition?.() ?? s?.refreshRows?.();
+    if (s) {
+        try { s.refreshRows?.(true); } catch { /* fall through */ }
+        s.refresh?.();
+    }
+    const picked = colorModes.find(c => c.mode === m);
+    if (picked) toast(`Colour by: ${picked.label}`, 'ok');
 };
 
 const boardSearch = ref('');
