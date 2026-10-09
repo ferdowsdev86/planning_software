@@ -1019,9 +1019,56 @@ function disableStmIfLarge(s) {
 // The board is shown only when it is complete: rows, bars, scroll position
 // (today at the left) all final — never a half-built picture. The loader
 // stays up (opaque) until then.
+// Bryntum sizes its row viewport from its OWN element's ResizeObserver —
+// not from window resize events. When the scheduler measured itself before
+// the page layout was final (the "sized by minHeight" moment) it rendered
+// rows for that small height and nothing told it to re-measure, so the
+// board stayed half empty. Nudging the element's height by one pixel and
+// back makes the observer fire and the grid recompute its row viewport.
+const nextFrame = () => new Promise(r => requestAnimationFrame(r));
+async function remeasureBoard(s) {
+    const el = s?.element;
+    if (!el) return;
+    const h = el.getBoundingClientRect().height;
+    if (!(h > 0)) return;
+    el.style.height = `${Math.max(1, h - 1)}px`;
+    await nextFrame();
+    await nextFrame();
+    el.style.height = '';
+    await nextFrame();
+    await nextFrame();
+    try {
+        s.rowManager?.renderRows?.();
+        s.refreshRows?.();
+    }
+    catch { /* board gone */ }
+}
+
+// The rendered rows must reach the bottom of the board's body: when they
+// do not (the row manager counted rows for a smaller height), make it count
+// again and render — this is the deterministic check behind "all lines
+// visible once loading ends"
+function ensureRowsCoverBoard(s) {
+    const rm = s?.rowManager;
+    if (!rm || !rm.rows) return false;
+    const need  = s.bodyContainer?.getBoundingClientRect().height || s.bodyHeight || 0;
+    const total = s.resourceStore?.count || 0;
+    const last  = rm.rows.length ? rm.rows[rm.rows.length - 1].bottom : 0;
+    const top   = s.scrollable?.y || 0;
+    if (rm.rows.length < total && last - top < need) {
+        try {
+            rm.calculateRowCount?.();
+            s.renderRows?.();
+        }
+        catch { /* board gone */ }
+        return true;
+    }
+    return false;
+}
+
 async function revealBoard(s) {
     setBoardLoad(true, 'Laying out the board…', 90);
-    await new Promise(r => requestAnimationFrame(r));
+    await nextFrame();
     try {
         window.dispatchEvent(new Event('resize'));
         s?.refresh?.();
@@ -1031,20 +1078,21 @@ async function revealBoard(s) {
         scrollBoardToToday(s);
     }
     catch { /* nothing to lay out yet */ }
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // every line row rendered BEFORE the loader goes
+    await remeasureBoard(s);
+    ensureRowsCoverBoard(s);
+    try { updateFrVScroll(s); } catch { /* no scrollbar yet */ }
+    await nextFrame();
     setBoardLoad(false);
-    // Second pass once the layout has settled: a row manager that measured
-    // its height before the window was laid out rendered too few rows and
-    // left the rest of the board blank — re-measure and render the rest
-    setTimeout(() => {
-        try {
-            window.dispatchEvent(new Event('resize'));
-            s?.rowManager?.renderRows?.();
-            s?.refreshRows?.();
-            updateFrVScroll(s);
-        }
-        catch { /* board gone */ }
-    }, 500);
+    // and again after the layout has fully settled (twice — a slow machine
+    // or a very tall window can still be laying out after the first pass)
+    for (const ms of [600, 2000, 4000]) {
+        setTimeout(async () => {
+            await remeasureBoard(s);
+            ensureRowsCoverBoard(s);
+            try { updateFrVScroll(s); } catch { /* board gone */ }
+        }, ms);
+    }
 }
 
 function setBoardLoad(on, msg = '', pct = 0) {
