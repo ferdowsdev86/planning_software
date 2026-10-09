@@ -7982,7 +7982,7 @@ function boardSnapshotFull(s) {
         id : ev.id, name : ev.name,
         startDate : new Date(ev.startDate), endDate : new Date(ev.endDate), duration : ev.duration,
         resourceId : lineIdOf(s, ev),
-        cls : String(ev.data.cls || '').replace(/\bmb-carried-away\b/g, '').trim(),
+        cls : String(ev.data.cls || '').replace(/\bmb-carried-away\b|\bmb-multi-sel\b/g, '').trim(),
         dbId : ev.data.dbId ?? null,
         raw : cloneData(ev.data.raw || {})
     }));
@@ -8075,6 +8075,12 @@ function resetUndoHistory() {
 
 // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z on the board (never inside an input or dialog)
 function boardUndoKeys(e) {
+    // Esc with nothing carried = drop the Ctrl+click selection
+    if (e.key === 'Escape' && !carried.value && multiSel.size && view.value === 'board') {
+        clearMultiSelect();
+        toast('Selection cleared', 'ok');
+        return;
+    }
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const k = String(e.key || '').toLowerCase();
     if (k !== 'z' && k !== 'y') return;
@@ -8380,6 +8386,48 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
     return placed;
 }
 
+// ---------------------------------------------------------------------------
+// Ctrl+click multi-select: Ctrl (⌘ on Mac) + click toggles a bar in the
+// selection (blue outline). Picking one of the selected bars up carries all
+// of them; on the drop the others follow onto the target row in start order
+// (the same group placement Consolidate orders uses). Esc or a plain click
+// on an unselected bar clears the selection.
+// ---------------------------------------------------------------------------
+const multiSel = new Set();          // event ids
+const MULTI_CLS = 'mb-multi-sel';
+let lastMultiToggle = { id : '', t : 0 };
+function setMultiCls(rec, on) {
+    const cls = String(rec.data.cls || '').split(/\s+/).filter(c => c && c !== MULTI_CLS);
+    if (on) cls.push(MULTI_CLS);
+    rec.set('cls', cls.join(' '));
+}
+function toggleMultiSelect(rec) {
+    const raw = rec?.data?.raw;
+    if (!raw || raw.stage) return;
+    const id = String(rec.id);
+    if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); }
+    else { multiSel.add(id); setMultiCls(rec, true); }
+    toast(multiSel.size
+        ? `${multiSel.size} bar(s) selected — Ctrl+click more, then click one of them and move the group · Esc = clear`
+        : 'Selection cleared', 'ok');
+}
+function clearMultiSelect() {
+    if (!multiSel.size) return;
+    const s = getInstance();
+    for (const id of multiSel) {
+        const r = s?.eventStore?.getById(id);
+        if (r) setMultiCls(r, false);
+    }
+    multiSel.clear();
+}
+function multiSelectMembers(s, rec) {
+    if (!multiSel.has(String(rec.id))) return [];
+    return [...multiSel]
+        .map(id => s.eventStore.getById(id))
+        .filter(r => r && r !== rec && r.data?.raw && !r.data.raw.stage && r.data.raw.status !== 'completed' && r.draggable !== false)
+        .sort((a, b) => a.startDate - b.startDate);
+}
+
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
     const raw = rec?.data?.raw;
@@ -8401,8 +8449,11 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
 
     const els = ensureCarryDom();
     els.layer.style.display = 'block';
-    // Consolidate orders ON: the bar's group leaves the line with it
-    carryGroup = consolidate.value ? groupMembersOf(s, rec) : [];
+    // A Ctrl+click selection travels with the bar; else (Consolidate orders
+    // ON) the bar's order group. Picking an unselected bar drops the selection.
+    if (multiSel.size && !multiSel.has(String(rec.id))) clearMultiSelect();
+    carryGroup = multiSelectMembers(s, rec);
+    if (!carryGroup.length && consolidate.value) carryGroup = groupMembersOf(s, rec);
     for (const m of carryGroup) {
         const r = m.data.raw;
         r._carryGroup = true;
@@ -8593,6 +8644,19 @@ function handleBarMouseDown(ev) {
     if (!dom || dom.button !== 0) return;
     if (dom.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
     if (carried.value) return;                     // the click that follows places the carried bar
+    // Ctrl / ⌘ + click = add to / remove from the multi-selection, no pick-up
+    // (the same press reaches us twice — Bryntum's hook and the native
+    // capture listener — so one toggle per press)
+    if (dom.ctrlKey || dom.metaKey) {
+        const id = String(ev.eventRecord?.id ?? '');
+        const now = performance.now();
+        if (lastMultiToggle.id !== id || now - lastMultiToggle.t > 300) {
+            lastMultiToggle = { id, t : now };
+            toggleMultiSelect(ev.eventRecord);
+        }
+        skipNextBarClick = true;
+        return;
+    }
     pickUp(ev.eventRecord, dom, { grab : true });
     if (carried.value) pressPick = { x : dom.clientX, y : dom.clientY, moved : false };
 }
@@ -8768,6 +8832,7 @@ async function placeCarried(date, resourceRecord) {
     }
 
     if (parkHold) placeGroupMembers(s, rec, targetId, true);   // the group parks together
+    clearMultiSelect();                                         // the selection has been moved
     const util = computeLineUtil(s.eventStore.records);
     raw.risk = calcRisk({
         start, end,
@@ -15305,6 +15370,13 @@ body.mb-carry-active * { cursor : grabbing !important; }
 
 /* Picked-up bar leaves its old position while being carried */
 .b-sch-event.mb-carried-away { display : none !important; }
+/* Ctrl+click multi-selection */
+.b-sch-event.mb-multi-sel {
+    outline : 3px solid #1b52ad;
+    outline-offset : -3px;
+    box-shadow : 0 0 0 2px #fff inset, 0 0 6px 2px rgba(27, 82, 173, 0.55);
+    z-index : 3;
+}
 .b-sch-event-wrap:has(.mb-carried-away) { display : none !important; }
 
 .mb-carry-layer {
