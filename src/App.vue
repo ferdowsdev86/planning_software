@@ -1436,7 +1436,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
 
     setBoardLoad(true, `Loading ${b.unitName || 'unit'} orders…`, 15);
     try {
-        const data = await loadFromApi(uid);
+        const data = await loadBoardWithRetry(uid);
         storeUnitCache(uid, {
             resources          : data.resources,
             events             : data.events,
@@ -1461,25 +1461,71 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
         finishBoardLoad(uid, data, s);
     }
     catch (err) {
-        toast(`Unit load failed (${err.message})`, 'error');
+        // Three tries failed: this board shows NOTHING (not the previous
+        // board's bars, not demo data); the next open tries again
+        clearBoardData(s);
+        boardLoadedUnitId = null;
+        if (boardUnitCache[uid]) boardUnitCache[uid].ready = false;
+        toast(`Can't connect — internet error. ${b.unitName || 'Unit'} board data could not be loaded after ${BOARD_LOAD_TRIES} tries (${err.message}). Check the internet / VPN and open the board again.`, 'error');
     }
     finally {
         setBoardLoad(false);
     }
 }
 
+// A board load is tried up to three times (the endpoint is re-resolved in
+// between); the planner sees each failed try, and the final failure
+const BOARD_LOAD_TRIES = 3;
+async function loadBoardWithRetry(unitId) {
+    let lastErr = null;
+    for (let attempt = 1; attempt <= BOARD_LOAD_TRIES; attempt++) {
+        try {
+            setBoardLoad(true, attempt === 1 ? 'Connecting to planning database…' : `Can't connect — trying again (${attempt} of ${BOARD_LOAD_TRIES})…`, 5);
+            // pick the live endpoint (Auto probes local + AWS; pinned modes
+            // keep their endpoint) before the data request
+            const picked = await resolveApiBase();
+            apiBaseLabel.value = picked.base;
+            return await loadFromApi(unitId);
+        }
+        catch (e) {
+            lastErr = e;
+            if (attempt < BOARD_LOAD_TRIES) {
+                toast(`Can't connect to the planning server (try ${attempt} of ${BOARD_LOAD_TRIES}) — retrying…`, 'warn');
+                await new Promise(r => setTimeout(r, 1500 * attempt));
+            }
+        }
+    }
+    throw lastErr || new Error('connect failed');
+}
+
+// No board data is ever a stand-in: a board that could not be loaded is EMPTY
+// (no demo lines, no demo bars)
+function clearBoardData(s) {
+    if (!s?.project) return;
+    try {
+        s.project.loadInlineData({ resources : [], events : [], assignments : [], dependencies : [], resourceTimeRanges : [] });
+    }
+    catch { /* nothing to clear */ }
+    unplanned.value = [];
+}
+
 async function hydrateBoardFromApi() {
     if (boardHydratePromise) return boardHydratePromise;
 
     boardHydratePromise = (async () => {
-        const unitId = currentBoard.value?.unitId || 3;
+        // Only a board the user may see is loaded: the open board's unit,
+        // else the first permitted board's. No permission → nothing to load.
+        const unitId = currentBoard.value?.unitId || permittedBoards.value[0]?.unitId || null;
+        if (!unitId) {
+            apiReady.value = true;
+            dataSource.value = 'offline';
+            boardHydratePromise = null;
+            return;
+        }
+        const unitName = currentBoard.value?.unitName || permittedBoards.value[0]?.unitName || unitLabel(unitId);
         setBoardLoad(true, 'Connecting to planning database…', 0);
         try {
-            // pick the live endpoint (Auto probes local + AWS; pinned modes
-            // keep their endpoint) before the first data request
-            const picked = await resolveApiBase();
-            apiBaseLabel.value = picked.base;
-            const data = await loadFromApi(unitId);
+            const data = await loadBoardWithRetry(unitId);
             setBoardLoad(true, 'Loading board layout…', 20);
             storeUnitCache(unitId, {
                 resources          : data.resources,
@@ -1523,13 +1569,13 @@ async function hydrateBoardFromApi() {
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
         }
         catch (err) {
-            dataSource.value = 'demo';
+            // Three tries failed: the board stays EMPTY (never demo data) and
+            // the next board open tries again for that board's unit
+            dataSource.value = 'offline';
             apiReady.value = true;
-            // A failed first load must not stick: the next board open tries
-            // the API again (for THAT board's unit) instead of serving the
-            // demo lines forever
             boardHydratePromise = null;
-            toast(`Planning API/DB offline (${err.message}) — showing local demo data; open the board again to retry`, 'warn');
+            clearBoardData(getInstance());
+            toast(`Can't connect — network issue. ${unitName} board data could not be loaded after ${BOARD_LOAD_TRIES} tries (${err.message}). Check the internet / VPN and open the board again.`, 'error');
         }
         finally {
             if (!planInFlight) setBoardLoad(false);
@@ -3361,6 +3407,9 @@ async function doLogin() {
         // Board already open behind the gate: take/check the edit lock as
         // the newly signed-in user
         if (view.value === 'board' && currentUnitId.value) startLockHeartbeat();
+        // Load only what this user may see: the open board's unit, else the
+        // first board they have permission for (nothing without permission)
+        if (!boardHydratePromise && dataSource.value !== 'db') hydrateBoardFromApi();
     }
     catch (e) {
         loginErr.value = /fetch|network/i.test(e.message)
@@ -3388,6 +3437,15 @@ function doLogout() {
     loginP.value = '';
     loginErr.value = '';
     openMenu.value = null;
+    // This user's board data leaves with them: the next login loads only
+    // the boards THAT user may see, from the server
+    clearBoardData(getInstance());
+    for (const k of Object.keys(boardUnitCache)) delete boardUnitCache[k];
+    boardLoadedUnitId = null;
+    boardHydratePromise = null;
+    apiReady.value = false;
+    dataSource.value = 'offline';
+    unplanned.value = [];
     // freshest user list for the login chips
     refreshUsersFromDb();
 }
@@ -3685,8 +3743,15 @@ function openBoard(b) {
     if (dataSource.value === 'db') {
         reloadBoardForUnit(b); // uses cache when ready — no API wipe
     }
-    else if (!apiReady.value || !boardHydratePromise) {
-        // first load, or the first load failed (demo data): fetch THIS
+    else if (boardHydratePromise) {
+        // the first load (maybe another unit's) is still running: this
+        // board takes its own unit's data right after it
+        boardHydratePromise.then(() => {
+            if (currentBoard.value?.id === b.id && view.value === 'board' && dataSource.value === 'db' && boardLoadedUnitId !== (b.unitId ?? 3)) reloadBoardForUnit(b);
+        });
+    }
+    else {
+        // first load, or the last load failed (empty board): fetch THIS
         // board's unit from the API now
         setBoardLoad(true, 'Loading planning board…', 0);
         hydrateBoardFromApi();
@@ -8946,8 +9011,12 @@ onMounted(() => {
     }
     catch { /* corrupt saved state - stay on home */ }
 
-    // Try the MySQL-backed API (172.16.101.70 / fastreact); fall back to demo
-    if (!boardHydratePromise) hydrateBoardFromApi();
+    // The scheduler starts with its built-in sample data: wipe it — a board
+    // shows its own unit's data or nothing at all
+    waitForInstance().then(s => { if (s && dataSource.value !== 'db') clearBoardData(s); });
+    // A signed-in session loads its board's unit now (a fresh visitor loads
+    // nothing until they log in — see doLogin)
+    if (authUser.value && !boardHydratePromise) hydrateBoardFromApi();
 });
 
 let saveInFlight = false;
@@ -9771,7 +9840,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <span class="fr-status-cell fr-status-logout" title="Sign out" @click="doLogout">⎋ Logout</span>
                 <span class="fr-status-cell">{{ permittedBoards.length }} board(s) permitted</span>
                 <span class="fr-status-cell fr-status-wide"></span>
-                <span class="fr-status-cell" :title="apiBaseLabel">{{ dataSource === 'db' ? ('API: ' + apiBaseLabel) : 'demo data' }}</span>
+                <span class="fr-status-cell" :class="{ 'fr-status-off' : dataSource === 'offline' }" :title="apiBaseLabel">{{ dataSource === 'db' ? ('API: ' + apiBaseLabel) : dataSource === 'offline' ? "⚠ can't connect — no board data" : 'not connected yet' }}</span>
                 <span class="fr-status-cell">
                     Server:
                     <select v-model="apiModeSel" @change="onApiModeChange"
@@ -12031,6 +12100,7 @@ body {
     font-size   : 11px;
 }
 
+.fr-status-off { color : #c62828; font-weight : bold; }
 .fr-status-cell {
     padding    : 3px 10px;
     background : #f4f2ec;
