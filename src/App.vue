@@ -1291,6 +1291,7 @@ function applyApiBoardData(s, data) {
     // The board is rebuilt from the DB: a removal noted on the previous
     // picture but never saved is void — its bar is back on the screen
     removedDbEventIds.clear();
+    resetUndoHistory();   // the history belongs to the picture that was on screen
     clearDayPlanChips();
     // Every board open (fresh or cached) refreshes the shared efficiency
     // profiles from the DB; bars re-render once they arrive
@@ -1855,6 +1856,7 @@ function chApply() {
     // Another unit's calendar: its own weekly hours + DB overrides, saved to
     // that calendar; the open board is not touched
     if (!chTargetIsOpenBoard.value) { chApplyToOtherUnit(from, to, timeH); return; }
+    pushUndo(getInstance(), 'change working hours');
     let changed = 0;
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
@@ -1994,6 +1996,7 @@ async function chApplyToLines(from, to, timeH) {
     if (!other) {
         const s = getInstance();
         let rs = null;
+        pushUndo(s, `change working hours — ${names}`);
         if (s) {
             const ids = new Set(lines.map(l => l.id));
             const toEnd = new Date(to);
@@ -2049,6 +2052,7 @@ function recalcBarDuration(rec) {
     const lid = rec ? lineIdOf(s, rec) : null;
     if (!s || !raw || !lid || isHoldId(lid)) { toast('Place the bar on a line first', 'warn'); return; }
     if (raw.status === 'completed') { toast('Completed bar — nothing to recalculate', 'warn'); return; }
+    pushUndo(s, `recalculate ${raw.po || rec.name}`);
     if (raw.smvMissing && !(Number(raw.smvManual) > 0)) {
         const v = window.prompt(`${mbmOrderNo(raw.po, raw.mbmOrder)}: ERP has no SMV for this style. Enter the SMV (minutes) to plan with:`, '');
         if (v === null) return;
@@ -2147,6 +2151,7 @@ function applyCurveDialog() {
     const c    = sel ? bcList.value.find(x => x.id === sel) : null;
     if (sel && !c) return;
     const snap = c ? { name : c.name, period : c.period, pct : c.pct.map(Number) } : null;
+    pushUndo(s, `build up curve ${raw.po || rec.name}`);
     const pushed = applyCurveSnapshotToRec(s, rec, snap);
     if (pushed > 0) toast(`${pushed} following order(s) shifted later`, 'warn');
     // Reference changed → live-linked bars follow with the same curve
@@ -2562,6 +2567,7 @@ function applyPullForward() {
     // One undoable step + all-or-nothing: any failure rolls every move back
     const stm = s.project?.stm;
     let stmTx = false;
+    pushUndo(s, 'plan pull forward');
     try { if (stm) { stm.enable?.(); stm.startTransaction?.('Plan pull forward'); stmTx = true; } } catch { /* no stm */ }
     const applied = [];
     try {
@@ -2815,6 +2821,7 @@ function applySopPlan() {
     if (!window.confirm(`Place ${p.changes.length} order(s) on the board by the SOP backward timeline? Overlapped bars shift later (never earlier). Continue?`)) return;
     const stm = s.project?.stm;
     let stmTx = false;
+    pushUndo(s, 'plan by SOP timeline');
     try { if (stm) { stm.enable?.(); stm.startTransaction?.('Plan by SOP timeline'); stmTx = true; } } catch { /* no stm */ }
     const placed = [];
     let pushedTotal = 0;
@@ -6939,6 +6946,7 @@ function saveProdUpdate() {
         store[r.evId][puDate.value] = Math.max(0, Number(r.prodQty) || 0);
     }
     localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+    pushUndo(s, `production update ${puDate.value}`);
     applyProdUpdates(s);
     buildPuRows();
 
@@ -7099,6 +7107,7 @@ async function spSave() {
         store[head.evId] ||= {};
         for (const r of changed) store[head.evId][r.d] = Math.max(0, Number(r.prodQty) || 0);
         localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+        pushUndo(s, `production update ${head.po}`);
         applyProdUpdates(s);
         const payload = changed.map(r => ({
             eventId : head.dbId, eventRef : head.evId, unit : head.unit, floor : head.floor, line : head.line,
@@ -7954,6 +7963,133 @@ function boardArrowKeys(e) {
 document.addEventListener('keydown', boardArrowKeys, true);
 
 // ---------------------------------------------------------------------------
+// Undo / redo (toolbar ↶ ↷, Ctrl+Z / Ctrl+Y): snapshots of the whole board
+// taken right before every planner action (move, split, change hours, curve,
+// recalc, equal order, production figures, pull forward). Bryntum's own STM
+// cannot see the board's edits (store events are suspended while bars are
+// laid out, and it was switched off on big boards), so the board keeps its
+// own history: undo puts every bar back exactly as it was — position, line,
+// quantity, curve, status — and bars a split created disappear again.
+// ---------------------------------------------------------------------------
+const UNDO_MAX = 40;
+const undoStack = [];
+const redoStack = [];
+const undoDepth = ref(0);
+const redoDepth = ref(0);
+
+function boardSnapshotFull(s) {
+    return s.eventStore.records.map(ev => ({
+        id : ev.id, name : ev.name,
+        startDate : new Date(ev.startDate), endDate : new Date(ev.endDate), duration : ev.duration,
+        resourceId : lineIdOf(s, ev),
+        cls : String(ev.data.cls || '').replace(/\bmb-carried-away\b/g, '').trim(),
+        dbId : ev.data.dbId ?? null,
+        raw : cloneData(ev.data.raw || {})
+    }));
+}
+
+function pushUndo(s, label) {
+    if (!s?.eventStore) return;
+    undoStack.push({ label, snap : boardSnapshotFull(s) });
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    redoStack.length = 0;
+    undoDepth.value = undoStack.length;
+    redoDepth.value = 0;
+}
+uiHooks.onBeforeEdit = label => pushUndo(getInstance(), label);
+
+function restoreUndoSnapshot(s, snap) {
+    if (carried.value) cancelCarry();
+    const byId = new Map(snap.map(x => [String(x.id), x]));
+    beginBoardInteraction(s, 'light');
+    try {
+        // bars that did not exist in the snapshot (a split's new bar) go
+        const drop = s.eventStore.records.filter(ev => !byId.has(String(ev.id)));
+        for (const ev of drop) {
+            const asgn = findEventAssignments(s, ev);
+            if (asgn.length) s.assignmentStore.remove(asgn);
+        }
+        if (drop.length) s.eventStore.remove(drop);
+        for (const x of snap) {
+            let ev = s.eventStore.getById(x.id);
+            if (!ev) {
+                // a bar that was removed since (merged / completed on the board)
+                ev = s.eventStore.add({
+                    id : x.id, name : x.name, startDate : x.startDate, endDate : x.endDate,
+                    duration : x.duration, cls : x.cls, dbId : x.dbId, raw : cloneData(x.raw)
+                })?.[0];
+                if (ev) assignEventToLine(s, ev, x.resourceId);
+                continue;
+            }
+            // the raw object keeps its identity (dialogs / the order panel hold it)
+            const raw = ev.data.raw || (ev.data.raw = {});
+            for (const k of Object.keys(raw)) delete raw[k];
+            Object.assign(raw, cloneData(x.raw));
+            if (lineIdOf(s, ev) !== x.resourceId) assignEventToLine(s, ev, x.resourceId);
+            ev.set({ startDate : x.startDate, endDate : x.endDate, duration : x.duration, cls : x.cls });
+            ev.data.resourceId = x.resourceId;
+        }
+    }
+    finally {
+        endBoardInteraction(s);
+    }
+    applyLearningCurves(s, {});
+    recalcCapacity(s);
+    refreshGrandTotals(s);
+    s.refresh?.();
+    markBoardDirty();
+    touchBoardCache(s);
+}
+
+function undoBoard() {
+    const s = getInstance();
+    if (!s) return;
+    if (!undoStack.length) { toast('Nothing to undo', 'warn'); return; }
+    const entry = undoStack.pop();
+    redoStack.push({ label : entry.label, snap : boardSnapshotFull(s) });
+    restoreUndoSnapshot(s, entry.snap);
+    undoDepth.value = undoStack.length;
+    redoDepth.value = redoStack.length;
+    toast(`Undo: ${entry.label}${undoStack.length ? ` (${undoStack.length} more)` : ''} — Save to keep`, 'ok');
+}
+
+function redoBoard() {
+    const s = getInstance();
+    if (!s) return;
+    if (!redoStack.length) { toast('Nothing to redo', 'warn'); return; }
+    const entry = redoStack.pop();
+    undoStack.push({ label : entry.label, snap : boardSnapshotFull(s) });
+    restoreUndoSnapshot(s, entry.snap);
+    undoDepth.value = undoStack.length;
+    redoDepth.value = redoStack.length;
+    toast(`Redo: ${entry.label} — Save to keep`, 'ok');
+}
+
+// a board load starts a fresh history
+function resetUndoHistory() {
+    undoStack.length = 0;
+    redoStack.length = 0;
+    undoDepth.value = 0;
+    redoDepth.value = 0;
+}
+
+// Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z on the board (never inside an input or dialog)
+function boardUndoKeys(e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = String(e.key || '').toLowerCase();
+    if (k !== 'z' && k !== 'y') return;
+    if (view.value !== 'board') return;
+    const ae = document.activeElement;
+    if (ae && (ae.matches?.(EDITABLE_SEL) || ae.closest?.('.b-popup, .b-menu, .cal-dialog, .od-dialog, .b-editor'))) return;
+    if (document.querySelector('.cal-overlay')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (k === 'y' || (k === 'z' && e.shiftKey)) redoBoard();
+    else undoBoard();
+}
+document.addEventListener('keydown', boardUndoKeys, true);
+
+// ---------------------------------------------------------------------------
 // Equal Order (toolbar ⚖ / right-click): an order split over several lines
 // gets its REMAINING qty re-balanced by each line's real capacity so every
 // split finishes on the same date. Capacity comes from the one production
@@ -8094,6 +8230,7 @@ async function applyEqualOrder() {
         return;
     }
     eqBusy.value = true;
+    pushUndo(s, `equal order ${plan.label}`);
     const posOf = ev => `${+ev.startDate}|${+ev.endDate}|${lineIdOf(s, ev)}`;
     const before = new Map(s.eventStore.records.map(ev => [String(ev.id), posOf(ev)]));
     const ids = [];
@@ -8585,6 +8722,7 @@ async function placeCarried(date, resourceRecord) {
     raw.latePlan = !parkHold && !!raw.ship && end > new Date(raw.ship);
 
     restoreCarriedCls();
+    pushUndo(s, `move ${raw.po || rec.name}${carryGroup.length ? ` (+${carryGroup.length})` : ''}`);
     assignEventToLine(s, rec, targetId);
     rec.set({
         startDate  : start,
@@ -9640,8 +9778,8 @@ const act = name => {
         case 'vZoomOut' : vZoom(-8); break;
         case 'pullForward' : openPullForward(); break;
         case 'print'    : window.print(); break;
-        case 'undo'     : s.project.stm?.canUndo && s.project.stm.undo(); break;
-        case 'redo'     : s.project.stm?.canRedo && s.project.stm.redo(); break;
+        case 'undo'     : undoBoard(); break;
+        case 'redo'     : redoBoard(); break;
         default         : break;
     }
 };

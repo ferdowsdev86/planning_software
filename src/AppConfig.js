@@ -291,6 +291,7 @@ export const uiHooks = {
     unitId           : null,   // production unit of the open board (1 MBM / 2 CEIL / 3 AQL)
     onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
+    onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -1659,6 +1660,7 @@ export const schedulerProConfig = {
                     if (!rec || !raw) return;
                     const date = menuSplitCtx?.rec === rec ? menuSplitCtx.date : rec.startDate;
                     const d1  = Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date)));
+                    uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
                     const res = splitBar(uiHooks.instance, rec, { dur1 : d1 });
                     uiHooks.onToast?.(
                         res.ok
@@ -1752,6 +1754,7 @@ export const schedulerProConfig = {
                         `${raw.po}: quantity for the NEW bar (1 – ${fmtQty(raw.qty - 1)} pcs)`,
                         String(Math.round(raw.qty / 2)));
                     if (v === null) return;
+                    uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
                     const res = splitBar(uiHooks.instance, rec, { qty2 : Number(String(v).replace(/[^0-9]/g, '')) });
                     uiHooks.onToast?.(
                         res.ok
@@ -2464,9 +2467,11 @@ export const schedulerProConfig = {
                 return { id : 'today-col', startDate : t0, endDate : t1, cls : 'mb-today' };
             })()
         ],
+        // Bryntum's STM is off: the board keeps its own undo history (App.vue
+        // pushUndo / undoBoard) — it sees every custom edit, STM could not
         stm : {
-            autoRecord : true,
-            disabled   : false
+            autoRecord : false,
+            disabled   : true
         }
     }
 };
