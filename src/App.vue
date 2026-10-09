@@ -12849,6 +12849,67 @@ body {
 .dp-empty { text-align : center; color : #666; padding : 18px !important; }
 .dp-hint { padding : 18px 8px; }
 
+/* Bar right-click menu (Bryntum Menu): compact, the app's own font, icons,
+   grouped, never taller than the window (scrolls instead of being cut off).
+   The floating layer sits ABOVE the fixed footer bars, which used to cover
+   the lower items of a menu opened near the bottom of the board. */
+.b-float-root { z-index : 45000 !important; }
+.b-float-root .b-menu {
+    font-family : 'Segoe UI', Tahoma, Arial, sans-serif !important;
+    font-size   : 13px !important;
+    min-width   : 250px;
+    max-height  : calc(100vh - 24px) !important;
+    overflow-y  : auto !important;
+    padding     : 4px 0 !important;
+    border      : 1px solid #c9c5b8 !important;
+    border-radius : 6px !important;
+    background  : #fff !important;
+    box-shadow  : 0 6px 22px rgba(0, 0, 0, 0.22) !important;
+}
+.b-float-root .b-menu .b-menu-item {
+    padding     : 7px 16px 7px 12px !important;
+    min-height  : 0 !important;
+    line-height : 1.3 !important;
+    color       : #222 !important;
+    font-family : inherit !important;
+    font-size   : 13px !important;
+    gap         : 10px;
+}
+.b-float-root .b-menu .b-menu-item .b-icon,
+.b-float-root .b-menu .b-menu-item > i {
+    width       : 18px;
+    text-align  : center;
+    color       : #1b52ad;
+    font-family : 'Font Awesome 6 Free', 'Font Awesome 5 Free', 'Font Awesome 6 Pro' !important;
+    font-weight : 900 !important;
+    font-size   : 13px !important;
+}
+/* Bryntum's b-fa-* icon classes have no glyph mapping without its full
+   structural CSS — map the ones the bar menu uses to Font Awesome 6 Solid */
+.b-float-root .b-menu .b-fa-scissors::before       { content : '\f0c4'; }
+.b-float-root .b-menu .b-fa-compass::before        { content : '\f14e'; }
+.b-float-root .b-menu .b-fa-rotate::before         { content : '\f2f1'; }
+.b-float-root .b-menu .b-fa-table-list::before     { content : '\f00b'; }
+.b-float-root .b-menu .b-fa-chart-line::before     { content : '\f201'; }
+.b-float-root .b-menu .b-fa-clock::before          { content : '\f017'; }
+.b-float-root .b-menu .b-fa-scale-balanced::before { content : '\f24e'; }
+.b-float-root .b-menu .b-fa-industry::before       { content : '\f275'; }
+.b-float-root .b-menu .b-fa-layer-group::before    { content : '\f5fd'; }
+.b-float-root .b-menu .b-menu-item:hover,
+.b-float-root .b-menu .b-menu-item.b-focused {
+    background : #e3edff !important;
+    color      : #0d2a66 !important;
+}
+.b-float-root .b-menu .b-menu-item.b-disabled { color : #999 !important; }
+/* group lines: info · scheduling · hours & production · bulk */
+.b-float-root .b-menu .b-menu-item[data-ref="stripProps"],
+.b-float-root .b-menu .b-menu-item[data-ref="buildUpCurve"],
+.b-float-root .b-menu .b-menu-item[data-ref="multiStrip"] {
+    border-top : 1px solid #e3e0d6 !important;
+    margin-top : 3px;
+    padding-top : 9px !important;
+}
+
 /* Equal Order preview */
 .eq-dialog { width : 900px; max-width : 96vw; }
 
