@@ -1014,6 +1014,25 @@ function disableStmIfLarge(s) {
     catch { /* STM optional */ }
 }
 
+// The board is shown only when it is complete: rows, bars, scroll position
+// (today at the left) all final — never a half-built picture. The loader
+// stays up (opaque) until then.
+async function revealBoard(s) {
+    setBoardLoad(true, 'Laying out the board…', 90);
+    await new Promise(r => requestAnimationFrame(r));
+    try {
+        window.dispatchEvent(new Event('resize'));
+        s?.refresh?.();
+        installFrVScroll(s);
+        fitBoardView(s);
+        if (s?.scrollable) s.scrollable.y = 0;
+        scrollBoardToToday(s);
+    }
+    catch { /* nothing to lay out yet */ }
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    setBoardLoad(false);
+}
+
 function setBoardLoad(on, msg = '', pct = 0) {
     boardLoading.value = on;
     boardLoadMsg.value = msg;
@@ -1424,11 +1443,13 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
     }
 
     if (!force && boardUnitCache[uid]?.ready && !boardUnitCache[uid]?.dirty && cacheHasLines(boardUnitCache[uid])) {
+        setBoardLoad(true, `Opening ${b.unitName || 'unit'} board…`, 60);
         await syncCalendarOverrides(boardUnitCache[uid].apiData.calendarId || 1);
         applyApiBoardData(s, boardUnitCache[uid].apiData);
         unplanned.value = cloneData(boardUnitCache[uid].unplanned);
         setBoardBaseline(s);
         applyBoardFilter();
+        await revealBoard(s);
         return;
     }
     if (boardUnitCache[uid] && !cacheHasLines(boardUnitCache[uid])) {
@@ -1460,6 +1481,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
         apiReady.value = true;
         applyBoardFilter();
         finishBoardLoad(uid, data, s);
+        await revealBoard(s);
     }
     catch (err) {
         // Three tries failed: this board shows NOTHING (not the previous
@@ -1518,8 +1540,9 @@ async function hydrateBoardFromApi() {
         // else the first permitted board's. No permission → nothing to load.
         const unitId = currentBoard.value?.unitId || permittedBoards.value[0]?.unitId || null;
         if (!unitId) {
+            // nothing to load (no board permission) — not a connection problem
             apiReady.value = true;
-            dataSource.value = 'offline';
+            dataSource.value = 'idle';
             boardHydratePromise = null;
             return;
         }
@@ -1565,7 +1588,8 @@ async function hydrateBoardFromApi() {
                 if (countSewingEvents(data) > 0) boardUnitCache[unitId].ready = true;
             }
             apiReady.value = true;
-            setBoardLoad(false);
+            if (s && view.value === 'board') await revealBoard(s);
+            else setBoardLoad(false);
             syncMasterData();
             toast(`Connected: ${data.unitName || 'AQL'} board`, 'ok');
         }
@@ -3774,7 +3798,8 @@ function openBoard(b) {
         applyBoardFilter();
         removeOrdersWithoutBuyer(s);
         installFrVScroll(s);
-        requestAnimationFrame(() => fitBoardView(s));
+        // a board always opens on the current date
+        requestAnimationFrame(() => { fitBoardView(s); scrollBoardToToday(s); });
     });
 }
 
@@ -7344,7 +7369,18 @@ function carryOrderToBoard(row) {
                 s.scrollToDate?.(m.production_start.date, { block : 'start' });
                 toast(`${src.mbmOrder || src.po} — SOP: PP ${fmtDateDdMonRr(m.pp_start.date)} · Prod start ${fmtDateDdMonRr(m.production_start.date)} · Complete ${fmtDateDdMonRr(m.production_complete.date)} (${sp.production.days}d)${sp.breached ? ` · ⚠ PP passed ${sp.breachDays}d` : ''} — click a line to place it`, sp.breached ? 'warn' : 'ok');
             }
-            else toast(`${src.mbmOrder || src.po} — bar is on your pointer; click a line to place it`, 'ok');
+            else {
+                // No SOP timeline: the board goes to the order's PCD — the
+                // date the plan points at — so the planner lands where it belongs
+                const pcd = asViewDate(src.pcd || u?.pcd || row.pcd);
+                if (pcd) {
+                    const from = new Date(pcd);
+                    from.setDate(from.getDate() - 2);   // two days of context before the PCD
+                    s.scrollToDate?.(from, { block : 'start' });
+                    toast(`${src.mbmOrder || src.po} — PCD ${fmtDateDdMonRr(pcd)}, the board is there; click a line to place it`, 'ok');
+                }
+                else toast(`${src.mbmOrder || src.po} — bar is on your pointer; click a line to place it`, 'ok');
+            }
         }
     }, wasBoard ? 150 : 600);
 }
@@ -12373,8 +12409,8 @@ body {
     display         : flex;
     align-items     : center;
     justify-content : center;
-    background      : rgba(255, 255, 255, 0.82);
-    backdrop-filter : blur(2px);
+    /* opaque: a half-built board never shows through while it is loading */
+    background      : #f4f3ef;
 }
 
 .fr-board-loader-box {
