@@ -9248,6 +9248,15 @@ onMounted(() => {
             handleBarMouseDown({ eventRecord : rec, domEvent : e });
             if (carried.value) e.preventDefault();   // no text selection / native drag image under the carry
         }, true);
+        // Ctrl+click is multi-select — on a Mac the OS turns it into a
+        // right-click, and with the bar menu suppressed the BROWSER's own
+        // menu (Back / Reload / Inspect…) popped up instead. Swallow it.
+        s.element?.addEventListener('contextmenu', e => {
+            if (e.ctrlKey || e.metaKey || uiHooks.modifierHeld) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
         requestAnimationFrame(() => fitBoardView(s));
     }
 
