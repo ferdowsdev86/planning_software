@@ -3444,7 +3444,7 @@ function doLogout() {
     boardLoadedUnitId = null;
     boardHydratePromise = null;
     apiReady.value = false;
-    dataSource.value = 'offline';
+    dataSource.value = 'idle';   // "not connected yet" — nothing failed, nobody is signed in
     unplanned.value = [];
     // freshest user list for the login chips
     refreshUsersFromDb();
