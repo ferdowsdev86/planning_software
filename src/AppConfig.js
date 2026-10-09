@@ -292,6 +292,7 @@ export const uiHooks = {
     onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
+    modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -1766,6 +1767,10 @@ export const schedulerProConfig = {
             }
         },
         processItems(context) {
+            // Ctrl / ⌘ + click is multi-select (on a Mac that click also
+            // raises contextmenu): no menu while the modifier is held
+            const de = context.domEvent || context.event;
+            if (uiHooks.modifierHeld || de?.ctrlKey || de?.metaKey) return false;
             const items = context.items || context;
             const rec = context.eventRecord;
             const raw = rec?.data?.raw || rec?.raw;
@@ -1813,8 +1818,13 @@ export const schedulerProConfig = {
         cls                  : 'mb-fr-tip',
         // The tooltip stays up while hovered (allowOver) — tab clicks inside
         // it switch panels without re-rendering the template
-        onBeforeShow() { installTip4Tabs(); },
-        hoverDelay           : 400,
+        // No tooltip while Ctrl / ⌘ is held (multi-selecting bars)
+        onBeforeShow() {
+            if (uiHooks.modifierHeld) return false;
+            installTip4Tabs();
+        },
+        // the pointer has to rest on a bar for 2 s before the tooltip opens
+        hoverDelay           : 2000,
         hideOnDelegateChange : true,
         hideOnScroll         : true,
         allowOver            : true,

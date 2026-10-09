@@ -8396,6 +8396,27 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
 const multiSel = new Set();          // event ids
 const MULTI_CLS = 'mb-multi-sel';
 let lastMultiToggle = { id : '', t : 0 };
+
+// While Ctrl / ⌘ is held the planner is picking bars: the bar tooltip and
+// the bar menu stay away (they came up between the clicks and got in the
+// way). Released key, window blur or a plain mouse-up restore them.
+function setModifierHeld(on) {
+    if (uiHooks.modifierHeld === on) return;
+    uiHooks.modifierHeld = on;
+    const s = getInstance();
+    if (!s) return;
+    if (on) {
+        s.features?.eventTooltip?.hide?.();
+        if (!carried.value) setBarTooltipEnabled(s, false);
+    }
+    else if (!carried.value) {
+        setBarTooltipEnabled(s, true);
+    }
+}
+window.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(true); }, true);
+window.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(false); }, true);
+window.addEventListener('blur',    () => setModifierHeld(false));
+window.addEventListener('mouseup', e => { if (!e.ctrlKey && !e.metaKey) setModifierHeld(false); }, true);
 function setMultiCls(rec, on) {
     const cls = String(rec.data.cls || '').split(/\s+/).filter(c => c && c !== MULTI_CLS);
     if (on) cls.push(MULTI_CLS);
