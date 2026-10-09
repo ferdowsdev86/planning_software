@@ -1033,6 +1033,18 @@ async function revealBoard(s) {
     catch { /* nothing to lay out yet */ }
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     setBoardLoad(false);
+    // Second pass once the layout has settled: a row manager that measured
+    // its height before the window was laid out rendered too few rows and
+    // left the rest of the board blank — re-measure and render the rest
+    setTimeout(() => {
+        try {
+            window.dispatchEvent(new Event('resize'));
+            s?.rowManager?.renderRows?.();
+            s?.refreshRows?.();
+            updateFrVScroll(s);
+        }
+        catch { /* board gone */ }
+    }, 500);
 }
 
 function setBoardLoad(on, msg = '', pct = 0) {
