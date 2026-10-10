@@ -134,7 +134,9 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                        that quantity must not be cut off again on load (used
                        when the bar's notes carry no explicit madeBase) */
                     (SELECT COALESCE(SUM(d.prod_qty), 0) FROM day_production_update_plan d
-                      WHERE d.event_id = e.id AND d.created_at <= e.updated_at) AS made_at_save
+                      WHERE d.event_id = e.id AND d.created_at <= e.updated_at
+                        /* MBM / CEIL: ERP-synced rows (":po") never count — hand-entered only */
+                        AND NOT (d.event_ref LIKE '%:po%' AND d.unit IN ('MBM', 'CEIL'))) AS made_at_save
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
              /* saved projection bars (ev-proj:<code>[-n]) carry no order link —
@@ -3061,7 +3063,11 @@ const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL (orde
 // code letter + the ERP line number (AQL 'A01' → L01, MBM '3' → M03,
 // CEIL '17' → C17). One board per production unit; every unit's output is
 // synced to its own lines.
-const PROD_UNITS   = { AQL : 'L', MBM : 'M', CEIL : 'C' };   // hr_unit_short_name → code prefix
+// ERP production is pulled for AQL only. MBM and CEIL report production BY
+// HAND on the board (planner decision 2026-10-10): no automatic deduction
+// there — their rows in day_production_update_plan come from the dialogs.
+const PROD_UNITS   = { AQL : 'L' };   // hr_unit_short_name → code prefix
+const PROD_AUTO_UNIT_NAMES = Object.keys(PROD_UNITS);
 let   lineByCode   = new Map();                               // resource_code → { name, floor_id, unit_id }
 async function loadLineCodes() {
     const [rows] = await pool.query(`SELECT resource_code, resource_name, floor_id, unit_id FROM planning_resources WHERE resource_type = 'sewing_line'`);
@@ -3201,23 +3207,30 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
             // order dropped from the board) must not survive
             {
                 const all  = [...writtenRefs.values()].flatMap(set => [...set]);
+                // (auto-synced units only — MBM / CEIL rows are the planners' own)
                 const [gone] = await conn.query(
                     `DELETE FROM day_production_update_plan
-                     WHERE save_date BETWEEN ? AND ? AND event_ref LIKE '%:po%'${all.length ? ` AND event_ref NOT IN (${all.map(() => '?').join(',')})` : ''}`,
-                    [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...all]);
+                     WHERE save_date BETWEEN ? AND ? AND event_ref LIKE '%:po%'
+                       AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})${all.length ? ` AND event_ref NOT IN (${all.map(() => '?').join(',')})` : ''}`,
+                    [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...PROD_AUTO_UNIT_NAMES, ...all]);
                 if (gone.affectedRows) console.log(`[prod-sync] removed ${gone.affectedRows} row(s) no longer reported by the ERP`);
             }
             // The summary row (save_date = PROD_SUMMARY_TO) already contains
             // everything up to that date — older daily rows would count twice
             if (summary) {
-                const [old] = await conn.query('DELETE FROM day_production_update_plan WHERE save_date < ?', [PROD_SUMMARY_TO]);
+                const [old] = await conn.query(
+                    `DELETE FROM day_production_update_plan WHERE save_date < ? AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})`,
+                    [PROD_SUMMARY_TO, ...PROD_AUTO_UNIT_NAMES]);
                 if (old.affectedRows) console.log(`[prod-sync] removed ${old.affectedRows} daily row(s) dated before the ${PROD_SUMMARY_TO} summary`);
             }
             // Keep the table to the tracked board plan only
             const liveRefs = bars.map(b => `db-${b.id}`);
             if (liveRefs.length) {
                 const [del] = await conn.query(
-                    `DELETE FROM day_production_update_plan WHERE SUBSTRING_INDEX(event_ref, ':po', 1) NOT IN (${liveRefs.map(() => '?').join(',')})`, liveRefs);
+                    `DELETE FROM day_production_update_plan
+                     WHERE unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})
+                       AND SUBSTRING_INDEX(event_ref, ':po', 1) NOT IN (${liveRefs.map(() => '?').join(',')})`,
+                    [...PROD_AUTO_UNIT_NAMES, ...liveRefs]);
                 if (del.affectedRows) console.log(`[prod-sync] removed ${del.affectedRows} row(s) of orders not planned on the board from ${PROD_BOARD_FROM}`);
             }
         }

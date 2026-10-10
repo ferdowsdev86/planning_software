@@ -1472,9 +1472,21 @@ function scheduleBackgroundPlan(s) {
 // the real figures arrived a few seconds later the strip shrank back but the
 // pushed bars stayed where they had been pushed — a reload showed the plan
 // days later than it was saved (and the period totals dropped).
+// MBM and CEIL report production BY HAND (planner decision 2026-10-10):
+// rows the ERP sync wrote for them (":po" keys) never deduct from a bar —
+// only the figures typed in the production dialogs count. AQL keeps the
+// ERP feed. (The server no longer syncs MBM / CEIL; this guard also parks
+// the rows already in the table.)
+const MANUAL_PROD_UNITS = new Set(['MBM', 'CEIL']);
+const isAutoProdRow = r => /:po\d+/.test(String(r?.event_ref || ''));
+const prodRowApplies = r => !(isAutoProdRow(r) && MANUAL_PROD_UNITS.has(String(r?.unit || '').toUpperCase()));
+async function loadProdRowsApplied() {
+    return (await loadProdUpdatesDb()).filter(prodRowApplies);
+}
+
 async function refreshProdStoreFromDb() {
     try {
-        const rows = await loadProdUpdatesDb();
+        const rows = await loadProdRowsApplied();
         // ERP rows of a projection bar come per PO as "db-<id>:po<po_id>" —
         // summed onto the bar ("db-<id>")
         const store = {};
@@ -6740,7 +6752,7 @@ async function buildPuReport() {
     if (!from || !to || from > to) { toast('From date must not be after To date', 'warn'); return; }
     puBusy.value = true;
     try {
-        const all = await loadProdUpdatesDb();
+        const all = await loadProdRowsApplied();
         const dkey = d => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('en-CA'));
         const dates = [...new Set(all.map(r => dkey(r.save_date)).filter(d => d >= from && d <= to))].sort();
         const lines = new Map();
@@ -6906,7 +6918,7 @@ async function buildPuRows() {
     const s = getInstance();
     const date = puDate.value;
     let dbRows = [];
-    try { dbRows = await loadProdUpdatesDb(); } catch { /* offline — local store only */ }
+    try { dbRows = await loadProdRowsApplied(); } catch { /* offline — local store only */ }
     // Fresh store from the DB (per-PO rows of a projection bar summed onto the bar)
     let store = loadProdStore();
     if (dbRows.length) {
@@ -7098,7 +7110,7 @@ async function spBuild() {
     try {
         const evId = String(rec.id);
         let dbRows = [];
-        try { dbRows = (await loadProdUpdatesDb()).filter(r => String(r.event_ref).split(':po')[0] === evId); }
+        try { dbRows = (await loadProdRowsApplied()).filter(r => String(r.event_ref).split(':po')[0] === evId); }
         catch { /* offline — this browser's store only */ }
         const store = loadProdStore();
         // actual per date: DB rows (manual row + ERP rows per PO / other line), else the local store
