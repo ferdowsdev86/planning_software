@@ -16,7 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
-import { deliveryMonthColor } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -3224,8 +3224,8 @@ const plDailyRows = computed(() => {
     const rows = [];
     for (const x of sim.days) {
         const d = x.date;
-        const cfg = dayCfgOf(d); // date-specific hour overrides included
-        let hours = x.off || !x.q ? '0:00' : (cfg.hours || '10:00');
+        // the line's hours for the date (line override → unit override → line / weekday)
+        let hours = x.off || !x.q ? '0:00' : lineHoursLabel({ id : plLine.value?.id, hours : plLine.value?.line?.hours }, d);
         if (!x.off && x.q > 0 && x.q < x.fullTarget) {
             const clock = Math.max(1, Math.round((x.q / x.fullTarget) * (x.span / 60000)));
             hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
@@ -7707,6 +7707,9 @@ function showDayPlanChips(s, rec) {
 // Change-working-hours override → the line's own hours
 // (planning_resources.working_hours_per_day) → the weekday calendar
 function lineHoursLabel(r, day) {
+    // the line's own figure for the date (Change working hours → Selected lines) wins
+    const lov = lineOverrideOf(day, r?.id);
+    if (lov !== undefined) return hoursToHm(lov);
     const ov = calendarState.overrides[ymdOf(day)];
     if (ov != null && ov !== '') return hoursToHm(ov);
     const h = Number(r.hours);
