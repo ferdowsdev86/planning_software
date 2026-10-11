@@ -2,7 +2,7 @@ import { DateHelper, StringHelper } from '@bryntum/schedulerpro';
 import {
     LINES, LINE_BY_ID, STAGE_RESOURCES, ORDERS, STAGE_EVENTS, DEPENDENCIES,
     PLAN_START, PLAN_END, VIEW_START, VIEW_END, TOTAL_AVAIL_MIN,
-    computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, fmtQty, fmtDate,
+    computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, isLineOffDay, nextLineWorkingDay, fmtQty, fmtDate,
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
@@ -586,8 +586,9 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
     const NEAR_MS = WORK_SNAP_MIN * 60 * 1000;
     let start = new Date(desired);
     let snapped = false, blockedBy = null;
-    if (isOffDay(start)) {
-        start   = startOfWorkDay(nextWorkingDay(start));
+    // an off day of the unit OR of this line (Selected lines → 0 hours)
+    if (isLineOffDay(start, lineId)) {
+        start   = startOfWorkDay(nextLineWorkingDay(start, lineId));
         snapped = true;
     }
     else if (start >= endOfWorkDay(start)) {
@@ -608,6 +609,7 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
         if (!obst) return { start, end, snapped, blockedBy };
         blockedBy = obst.name;
         start = nextStartAfter(obst.endDate);
+        if (isLineOffDay(start, lineId)) start = startOfWorkDay(nextLineWorkingDay(start, lineId));
     }
     return { start, end : endOfWork(start, dur), snapped, blockedBy };
 }

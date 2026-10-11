@@ -16,7 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
-import { deliveryMonthColor, lineOverrideOf } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -2042,6 +2042,41 @@ async function chApplyToOtherUnit(from, to, timeH) {
     catch (e) { toast(`DB save failed: ${e.message}`, 'error'); }
 }
 
+// Per-line hours on the board (Change working hours → Selected lines): a
+// line's own 0-hour dates show as a grey "off" crosshatch on THAT row only,
+// and a line figure on other dates prints its hours on the row (maroon) —
+// the unit-wide columns stay as they are
+function applyLineOffRanges(s = getInstance()) {
+    const st = s?.resourceTimeRangeStore;
+    if (!st) return;
+    const olds = st.records.filter(r => String(r.id).startsWith('lo-'));
+    if (olds.length) st.remove(olds);
+    const lov = calendarState.lineOverrides || {};
+    const ranges = [];
+    for (const res of s.resourceStore.records) {
+        if (!res.data?.lineRow) continue;
+        const dbId = res.data.dbId ?? LINE_BY_ID[res.id]?.dbId;
+        const mine = dbId != null ? lov[String(dbId)] : null;
+        if (!mine) continue;
+        for (const [ymd, v] of Object.entries(mine)) {
+            const d0 = new Date(`${ymd}T00:00:00`);
+            if (Number.isNaN(d0.getTime())) continue;
+            const d1 = new Date(d0);
+            d1.setDate(d1.getDate() + 1);
+            const h = Number(v) || 0;
+            ranges.push({
+                id         : `lo-${dbId}-${ymd}`,
+                resourceId : res.id,
+                startDate  : d0,
+                endDate    : d1,
+                name       : h > 0 ? hoursToHmPd(h) : 'off',
+                cls        : h > 0 ? 'mb-line-hours' : 'mb-line-off'
+            });
+        }
+    }
+    if (ranges.length) st.add(ranges);
+}
+
 // FastReact "Line 10 + 10": the change lands on the ticked lines only. Each
 // line keeps its own date -> hours map (planning_calendar_intervals rows
 // with resource_id); on those dates the line's figure beats the unit
@@ -2102,6 +2137,33 @@ async function chApplyToLines(from, to, timeH) {
             const ids = new Set(lines.map(l => l.id));
             const toEnd = new Date(to);
             toEnd.setDate(toEnd.getDate() + 1);
+            applyLineOffRanges(s);
+            // A bar that now STARTS on a day its line has off moves to the
+            // line's next working day (its followers are pushed by resizeBars)
+            let shifted = 0;
+            beginBoardInteraction(s, 'batch');
+            try {
+                const bars = s.eventStore.records
+                    .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && ids.has(lineIdOf(s, ev)) && ev.startDate < toEnd && ev.endDate > from; })
+                    .sort((a, b) => a.startDate - b.startDate);
+                for (const ev of bars) {
+                    const lid = lineIdOf(s, ev);
+                    if (!isLineOffDay(ev.startDate, lid)) continue;
+                    const ns = clampIntoLineWorkWindow(new Date(ev.startDate), lid);
+                    if (!(ns > ev.startDate)) continue;
+                    const raw = ev.data.raw;
+                    raw.start = ns;
+                    applyLineFormulaDuration(s, raw, lid);
+                    const ne = endOfWork(ns, raw.dur || 1);
+                    ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+                    raw.end = ne;
+                    raw.userPinned = true;
+                    pushFollowers(s, lid, ev);
+                    shifted++;
+                }
+            }
+            finally { endBoardInteraction(s); }
+            if (shifted) toast(`${shifted} bar(s) moved off the line's 0-hour day(s) to the next working day`, 'ok');
             rs = resizeBars(s, ev => ids.has(lineIdOf(s, ev)) && ev.startDate < toEnd && ev.endDate > from);
             recalcCapacity(s);
             refreshGrandTotals(s);
@@ -9223,7 +9285,7 @@ async function placeCarried(date, resourceRecord) {
         deriveLcForPlacement(s, raw, targetId, date);
         // The bar's length always follows the capacity of the row it lands
         // on, from the point it lands at (bar end = production schedule)
-        raw.start = clampIntoWorkWindow(new Date(date));
+        raw.start = clampIntoLineWorkWindow(new Date(date), targetId);
         applyLineFormulaDuration(s, raw, targetId);
     }
 
@@ -9494,6 +9556,7 @@ function applyCalendarToBoard({ pack = true } = {}) {
         .filter(r => r.id === 'currentTime')
         .map(r => ({ ...r.data }));
     s.project.timeRangeStore.data = [...keep, ...buildOffDayRanges()];
+    applyLineOffRanges(s);
 
     // Reflow every bar to the new calendar (FastReact rule): starts snap off
     // 0-hour days, ends stretch so off days are never counted as work
@@ -16176,6 +16239,28 @@ body {
         repeating-linear-gradient(-45deg, #d8d8d8 0 1px, transparent 1px 6px),
         #f4f4f4 !important;
 }
+
+/* Selected-lines hours on ONE row: 0 hours = grey off crosshatch on that
+   line only; another figure = maroon crosshatch with the hours printed */
+.b-sch-resource-time-range.mb-line-off,
+.b-sch-resource-time-range.mb-line-hours {
+    display : flex; align-items : flex-end; justify-content : center;
+    font-size : 9px; line-height : 12px; z-index : 2; pointer-events : none;
+}
+.b-sch-resource-time-range.mb-line-off {
+    background :
+        repeating-linear-gradient(45deg, #c9c9c9 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, #c9c9c9 0 1px, transparent 1px 6px),
+        rgba(236, 236, 236, .85) !important;
+}
+.b-sch-resource-time-range.mb-line-off, .b-sch-resource-time-range.mb-line-off * { color : #777 !important; }
+.b-sch-resource-time-range.mb-line-hours {
+    background :
+        repeating-linear-gradient(45deg, rgba(140,26,26,.45) 0 1px, transparent 1px 5px),
+        repeating-linear-gradient(-45deg, rgba(140,26,26,.45) 0 1px, transparent 1px 5px),
+        rgba(255,244,244,.5) !important;
+}
+.b-sch-resource-time-range.mb-line-hours, .b-sch-resource-time-range.mb-line-hours * { color : #8c1a1a !important; font-weight : bold !important; }
 
 /* Hours changed from the weekly default — FastReact's maroon crosshatch */
 .b-time-ranges-canvas .b-sch-range.mb-hours-changed {

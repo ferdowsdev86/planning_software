@@ -184,6 +184,28 @@ export function nextWorkingDay(date) {
     return d;
 }
 
+// Per-LINE off day (Change working hours → Selected lines): the line's own
+// figure for the date decides — 0 = that line is off even on a unit working
+// day, > 0 = it works even on a unit off day; no figure = the unit calendar
+export function isLineOffDay(date, lineId) {
+    const lo = lineOverrideOf(date, lineId);
+    if (lo !== undefined) return lo <= 0;
+    return isOffDay(date);
+}
+export function nextLineWorkingDay(date, lineId) {
+    const d = new Date(date);
+    let guard = 0;
+    while (isLineOffDay(d, lineId) && ++guard < 60) d.setDate(d.getDate() + 1);
+    return d;
+}
+// Where a bar may START on a line: inside the work window, never on a day
+// the unit or that line has off
+export function clampIntoLineWorkWindow(date, lineId) {
+    const t = clampIntoWorkWindow(date);
+    if (!lineId || !isLineOffDay(t, lineId)) return t;
+    return startOfWorkDay(nextLineWorkingDay(t, lineId));
+}
+
 // End of a day's working window: start + working hours + overtime
 // (08:00 + 10:00 + 02:00 -> 20:00; with 03:00 OT -> 21:00)
 export function endOfWorkDay(date) {
