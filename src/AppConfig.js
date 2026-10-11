@@ -1421,6 +1421,16 @@ function noteRemovedDbEvent(ev) {
 // Context captured when the strip right-click menu opens
 let menuSplitCtx = null;
 
+// Holding Row bar: the cursor's position along the bar → quantity of the
+// first part (at least 1 pc on each side)
+function holdCursorQty(rec, raw, date) {
+    const s0 = new Date(rec.startDate).getTime(), e0 = new Date(rec.endDate).getTime();
+    const t  = date instanceof Date ? date.getTime() : new Date(date).getTime();
+    const frac = e0 > s0 ? Math.min(0.95, Math.max(0.05, (t - s0) / (e0 - s0))) : 0.5;
+    const qty = Number(raw.qty) || 0;
+    return Math.max(1, Math.min(qty - 1, Math.round(qty * frac)));
+}
+
 // ---------------------------------------------------------------------------
 // Drop of an unplanned order onto the board (documents 3.2 + 11)
 // Returns { ok, errors, warnings }
@@ -1748,9 +1758,11 @@ export const schedulerProConfig = {
                     const raw = rec?.data?.raw || rec?.raw || menuSplitCtx?.raw;
                     if (!rec || !raw) return;
                     const date = menuSplitCtx?.rec === rec ? menuSplitCtx.date : rec.startDate;
-                    const d1  = Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date)));
                     uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
-                    const res = splitBar(uiHooks.instance, rec, { dur1 : d1 });
+                    // Holding Row: split by the cursor's share of the bar's qty
+                    const res = isHoldId(lineIdOf(uiHooks.instance, rec))
+                        ? splitBar(uiHooks.instance, rec, { qty2 : raw.qty - holdCursorQty(rec, raw, date) })
+                        : splitBar(uiHooks.instance, rec, { dur1 : Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date))) });
                     uiHooks.onToast?.(
                         res.ok
                             ? `${raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
@@ -1916,7 +1928,14 @@ export const schedulerProConfig = {
                 items.splitQtyItem  = false;
                 return;
             }
-            if (raw.dur < 2) {
+            const onHold = isHoldId(lineIdOf(s, rec));
+            if (onHold && items.splitAtCursor) {
+                // Holding Row: no capacity, any span — the cursor's position
+                // along the bar is the quantity split
+                const q1 = holdCursorQty(rec, raw, date);
+                items.splitAtCursor.text = `Split strip at ${fmtQty(q1)} + ${fmtQty(raw.qty - q1)}`;
+            }
+            else if (raw.dur < 2) {
                 items.splitAtCursor = false;
             }
             else if (items.splitAtCursor) {

@@ -9433,7 +9433,15 @@ onMounted(() => {
 
     // After a split, the new (split-off) bar sticks to the cursor so the
     // user can point-and-place it anywhere (FastReact behaviour)
-    uiHooks.onCarryNew = rec => pickUp(rec, null);
+    // A piece just cut off a bar rides on the pointer at once (line or
+    // Holding Row alike). Whatever was carried before (a bar clicked earlier,
+    // a stale carry) is put back first — otherwise the new piece stays put
+    uiHooks.onCarryNew = rec => {
+        if (carried.value) cancelCarry();
+        ignorePickUntil = 0;
+        pickUp(rec, null);
+        if (!carried.value) toast(`${rec?.data?.raw?.po || rec?.name || 'Piece'} is on the board — press and drag it to move`, 'ok');
+    };
 
     // Dev-console access for diagnostics
     window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
