@@ -8508,6 +8508,7 @@ async function applyEqualOrder() {
 // bars stay separate bars.
 // ---------------------------------------------------------------------------
 let carryGroup = [];   // the other bars of the carried bar's group (in order)
+let carryRecStart0 = null;   // the carried bar's start when it was picked up (its place in the sequence)
 
 function groupMembersOf(s, rec) {
     const raw = rec?.data?.raw;
@@ -8541,25 +8542,42 @@ function releaseCarryGroup() {
     carryGroup = [];
 }
 
-// The carried bar is placed: its group follows, one after another, on the
-// same target row (each member resolves collisions like a dropped bar)
+// The carried bar is placed: the whole group (the carried bar included)
+// lands on the target row in its ORIGINAL start order from the drop point —
+// the earliest bar of the selection takes the clicked point, the others
+// follow flush, whichever bar the planner grabbed. The planned sequence
+// never changes (planner rule, 2026-10-11).
 function placeGroupMembers(s, rec, targetId, parkHold) {
     const members = carryGroup;
     carryGroup = [];
     if (!members.length) return 0;
-    let prevEnd = new Date(rec.endDate);
+    const t0 = ev => (ev === rec ? +(carryRecStart0 || rec.startDate) : +ev.startDate);
+    const ordered = [rec, ...members].sort((x, y) => t0(x) - t0(y));
+    const anchor  = new Date(rec.startDate);   // the drop point placeCarried chose
+    const recRaw  = rec.data.raw;
+    // the carried bar is not the first of the sequence: it leaves the drop
+    // point for its own turn (hidden from collision checks until then)
+    if (ordered[0] !== rec) recRaw._carryGroup = true;
+    let prevEnd = null;
     let placed = 0;
     beginBoardInteraction(s, 'light');
     try {
-        for (const m of members) {
+        for (const m of ordered) {
             const mraw = m.data?.raw;
             if (!mraw) continue;
             mraw._carryGroup = false;
-            m.set('cls', mraw._prevCls || '');
-            delete mraw._prevCls;
+            if (m !== rec) {
+                m.set('cls', mraw._prevCls || '');
+                delete mraw._prevCls;
+            }
+            if (m === rec && ordered[0] === rec) {      // already sits at the drop point
+                prevEnd = new Date(rec.endDate);
+                continue;
+            }
+            const desired = prevEnd === null ? anchor : prevEnd;
             let start, end;
             if (parkHold) {
-                start = startOfWorkDay(prevEnd);
+                start = startOfWorkDay(desired);
                 mraw.start = start;
                 applyLineFormulaDuration(s, mraw, targetId);
                 end = endOfWork(start, mraw.dur || 1);
@@ -8567,7 +8585,7 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
                 mraw.parked = true;
             }
             else {
-                const ins = computeInsertStart(s, targetId, prevEnd, mraw.dur, m.id);
+                const ins = computeInsertStart(s, targetId, desired, mraw.dur, m.id);
                 start = ins.start;
                 mraw.start = start;
                 applyLineFormulaDuration(s, mraw, targetId);
@@ -8585,120 +8603,14 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
             mraw.end   = end;
             if (!parkHold) pushFollowers(s, targetId, m);
             prevEnd = new Date(end);
-            placed++;
+            if (m !== rec) placed++;
         }
     }
     finally {
         endBoardInteraction(s);
     }
-    if (placed) toast(`Consolidated: ${placed} more bar(s) of ${rec.data.raw?.mbmOrder || rec.data.raw?.po} moved along`, 'ok');
+    if (placed) toast(`${placed + 1} bars moved together in their planned sequence`, 'ok');
     return placed;
-}
-
-// ---------------------------------------------------------------------------
-// Ctrl+click multi-select: Ctrl (⌘ on Mac) + click toggles a bar in the
-// selection (blue outline). Picking one of the selected bars up carries all
-// of them; on the drop the others follow onto the target row in start order
-// (the same group placement Consolidate orders uses). Esc or a plain click
-// on an unselected bar clears the selection.
-// ---------------------------------------------------------------------------
-const multiSel = new Set();          // event ids
-const MULTI_CLS = 'mb-multi-sel';
-let lastMultiToggle = { id : '', t : 0 };
-
-// While Ctrl / ⌘ is held the planner is picking bars: the bar tooltip and
-// the bar menu stay away (they came up between the clicks and got in the
-// way). Released key, window blur or a plain mouse-up restore them.
-function setModifierHeld(on) {
-    if (uiHooks.modifierHeld === on) return;
-    uiHooks.modifierHeld = on;
-    const s = getInstance();
-    if (!s) return;
-    if (on) {
-        s.features?.eventTooltip?.hide?.();
-        if (!carried.value) setBarTooltipEnabled(s, false);
-    }
-    else if (!carried.value) {
-        setBarTooltipEnabled(s, true);
-    }
-}
-window.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(true); }, true);
-window.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(false); }, true);
-window.addEventListener('blur',    () => {
-    setModifierHeld(false);
-    // Leaving the window mid-carry: the bar goes back to its place instead
-    // of hanging on a pointer that never comes back. A modal prompt (split
-    // quantity…) also blurs the window for a moment and the carry that the
-    // split hands over must survive it — so only a window that STAYS
-    // unfocused drops the carry.
-    setTimeout(() => { if (carried.value && !document.hasFocus()) cancelCarry(); }, 500);
-});
-window.addEventListener('mouseup', e => { if (!e.ctrlKey && !e.metaKey) setModifierHeld(false); }, true);
-function setMultiCls(rec, on) {
-    const cls = String(rec.data.cls || '').split(/\s+/).filter(c => c && c !== MULTI_CLS);
-    if (on) cls.push(MULTI_CLS);
-    rec.set('cls', cls.join(' '));
-}
-function toggleMultiSelect(rec) {
-    const raw = rec?.data?.raw;
-    if (!raw || raw.stage) return;
-    const id = String(rec.id);
-    if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); }
-    else { multiSel.add(id); setMultiCls(rec, true); }
-    uiHooks.multiSelCount = multiSel.size;
-    toast(multiSel.size
-        ? `${multiSel.size} bar(s) selected — Ctrl+click more, then click one of them and move the group · Esc = clear`
-        : 'Selection cleared', 'ok');
-}
-function clearMultiSelect() {
-    if (!multiSel.size) return;
-    const s = getInstance();
-    for (const id of multiSel) {
-        const r = s?.eventStore?.getById(id);
-        if (r) setMultiCls(r, false);
-    }
-    multiSel.clear();
-    uiHooks.multiSelCount = 0;
-}
-
-// Right-click → Split into equal pieces (3, 4, 5, 6…): works on a line and
-// on the Holding Row; the pieces lie flush after the bar
-uiHooks.onSplitPieces = (rec, n) => {
-    const s = getInstance();
-    const raw = rec?.data?.raw;
-    if (!s || !raw) return;
-    pushUndo(s, `split ${raw.po || rec.name} into ${n}`);
-    const r = splitBarIntoPieces(s, rec, n);
-    if (!r.ok) { toast(r.msg, 'error'); return; }
-    markBoardDirty();
-    touchBoardCache(s);
-    s.refreshRows?.();
-    toast(`${raw.po || raw.mbmOrder} split into ${r.n} pieces — ${fmtQty(r.per)} pcs each${r.last !== r.per ? `, last ${fmtQty(r.last)}` : ''}${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
-};
-
-// Right-click → Merge selected bars into one: the Ctrl+click selection (plus
-// the bar under the pointer) of one order on one row becomes a single bar
-uiHooks.onMergeSelected = rec => {
-    const s = getInstance();
-    if (!s) return;
-    const recs = [...multiSel].map(id => s.eventStore.getById(id)).filter(Boolean);
-    if (rec && !recs.includes(rec)) recs.push(rec);
-    if (recs.length < 2) { toast('Ctrl+click দিয়ে একই order-এর ২+ bar select করুন, তারপর Merge', 'warn'); return; }
-    pushUndo(s, `merge ${recs.length} bars`);
-    const r = mergeBars(s, recs);
-    if (!r.ok) { toast(r.msg, 'error'); undoStack.pop(); undoDepth.value = undoStack.length; return; }
-    clearMultiSelect();
-    markBoardDirty();
-    touchBoardCache(s);
-    s.refreshRows?.();
-    toast(`${r.merged + 1} bars merged into one — ${fmtQty(r.qty)} pcs${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
-};
-function multiSelectMembers(s, rec) {
-    if (!multiSel.has(String(rec.id))) return [];
-    return [...multiSel]
-        .map(id => s.eventStore.getById(id))
-        .filter(r => r && r !== rec && r.data?.raw && !r.data.raw.stage && r.data.raw.status !== 'completed' && r.draggable !== false)
-        .sort((a, b) => a.startDate - b.startDate);
 }
 
 function pickUp(rec, domEvent, { grab = false } = {}) {
@@ -8734,6 +8646,7 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
         m.set('cls', `${r._prevCls} mb-carried-away`.trim());
     }
     els.label.textContent = `${rec.name || ''}${carryGroup.length ? ` (+${carryGroup.length})` : ''}`;
+    carryRecStart0 = new Date(rec.startDate);
 
     carried.value = rec;
     pickStamp     = performance.now();
