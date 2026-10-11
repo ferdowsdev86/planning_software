@@ -2580,18 +2580,23 @@ function pfIsFixed(ev, raw) {
     return raw.status === 'completed';
 }
 
-function computePullForward() {
+// opts (Move to mouse position): { line, from, anchorStart } — only that
+// line, bars starting before `from` are anchors, the first bar at/after it
+// is pulled up to `anchorStart` (the clicked point), the rest follow flush
+function computePullForward(opts = {}) {
     const s = getInstance();
     if (!s) return null;
-    const rangeFrom = pfScope.value === 'range' ? new Date(`${pfFrom.value}T00:00:00`) : null;
-    const rangeTo   = pfScope.value === 'range' ? new Date(`${pfTo.value}T23:59:59`)   : null;
-    const inRange   = d => !rangeFrom || (d >= rangeFrom && d <= rangeTo);
+    const lineSel   = opts.line ?? pfLine.value;
+    const rangeFrom = opts.from ? new Date(opts.from) : (pfScope.value === 'range' ? new Date(`${pfFrom.value}T00:00:00`) : null);
+    const rangeTo   = opts.from ? null : (pfScope.value === 'range' ? new Date(`${pfTo.value}T23:59:59`) : null);
+    const anchorStart = opts.anchorStart ? new Date(opts.anchorStart) : null;
+    const inRange   = d => !rangeFrom || (d >= rangeFrom && (!rangeTo || d <= rangeTo));
     const changes = [];
     let unchanged = 0, skipped = 0;
     for (const res of s.resourceStore.records) {
         if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
         // Line scope: one chosen line, or every line
-        if (pfLine.value !== 'all' && res.id !== pfLine.value) continue;
+        if (lineSel !== 'all' && res.id !== lineSel) continue;
         const bars = s.eventStore.records
             .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
             .sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
@@ -2602,12 +2607,14 @@ function computePullForward() {
             const oldEnd   = new Date(ev.endDate);
             const fixed    = pfIsFixed(ev, raw);
             if (fixed) skipped++;
-            if (fixed || !inRange(oldStart) || anchorEnd === null) {
+            if (fixed || !inRange(oldStart) || (anchorEnd === null && !anchorStart)) {
                 // anchor (locked / out of range / first bar on the line)
                 if (anchorEnd === null || oldEnd > anchorEnd) anchorEnd = oldEnd;
                 continue;
             }
-            let ns = nextDayStartAfter(anchorEnd);
+            // first bar after the clicked point goes TO the point; a bar
+            // running across the point is an anchor (pull only, never later)
+            let ns = anchorEnd === null ? clampIntoWorkWindow(new Date(anchorStart)) : nextDayStartAfter(anchorEnd);
             // Range rule: a pulled bar never crosses BEFORE the From date
             if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
             if (oldStart.getTime() - ns.getTime() < 5 * 60000) {
@@ -2654,15 +2661,21 @@ function pfPreview() {
     if (!pfPrev.value?.changes.length) toast('No removable gaps found in the selected scope', 'ok');
 }
 
-function applyPullForward() {
+function applyPullForward(plan = null, { mouse = null } = {}) {
     const s = getInstance();
     if (!s || !pfRangeValid.value) return;
-    const p = pfPrev.value || computePullForward();
+    // "Move to mouse position": the dialog closes and the next click on a
+    // line tells WHERE the plan after that point is pulled to
+    if (!plan && pfMouse.value) { pfStartPick(); return; }
+    const p = plan || pfPrev.value || computePullForward();
     if (!p || !p.changes.length) {
-        toast('No gaps to remove — nothing moved', 'ok');
+        toast(mouse ? `Nothing to pull on ${mouse.lineName} after ${fmtDate(mouse.date)}` : 'No gaps to remove — nothing moved', 'ok');
         return;
     }
-    if (!window.confirm(`This action will pull ${p.changes.length} planning bars forward and remove available gaps. Continue?`)) return;
+    const ask = mouse
+        ? `Pull ${p.changes.length} bar(s) on ${mouse.lineName} up to ${fmtClock(mouse.date)}? Bars after that point close up from there.`
+        : `This action will pull ${p.changes.length} planning bars forward and remove available gaps. Continue?`;
+    if (!window.confirm(ask)) return;
     // One undoable step + all-or-nothing: any failure rolls every move back
     const stm = s.project?.stm;
     let stmTx = false;
@@ -2696,10 +2709,10 @@ function applyPullForward() {
         line : c.lineName, order : c.order,
         oldStart : c.oldStart.toISOString(), newStart : c.newStart.toISOString(),
         oldEnd : c.oldEnd.toISOString(), newEnd : c.newEnd.toISOString(),
-        scope : pfScope.value,
-        lineScope : pfLine.value === 'all' ? 'all lines' : (pfLineList.value.find(l => l.id === pfLine.value)?.name || pfLine.value),
-        from : pfScope.value === 'range' ? pfFrom.value : null,
-        to   : pfScope.value === 'range' ? pfTo.value : null,
+        scope : mouse ? 'mouse' : pfScope.value,
+        lineScope : mouse ? mouse.lineName : (pfLine.value === 'all' ? 'all lines' : (pfLineList.value.find(l => l.id === pfLine.value)?.name || pfLine.value)),
+        from : mouse ? mouse.date.toISOString() : (pfScope.value === 'range' ? pfFrom.value : null),
+        to   : mouse ? null : (pfScope.value === 'range' ? pfTo.value : null),
         user : authUser.value?.username, at : new Date().toISOString()
     })));
     recalcCapacity(s);
@@ -2722,6 +2735,48 @@ function applyPullForward() {
     }, 400);
 }
 let pfSaveNoConfirm = false;
+
+// Move to mouse position (FastReact): tick the box, Save and Apply closes
+// the dialog, the cursor turns into a crosshair, and the next click on a
+// line pulls every bar planned after that point on THAT line up to it —
+// the first bar lands on the clicked time, the rest follow flush. Esc
+// leaves pick mode.
+const pfMouse      = ref(false);
+const pfPickActive = ref(false);
+
+function pfStartPick() {
+    pfOpen.value = false;
+    if (carried.value) cancelCarry();
+    pfPickActive.value = true;
+    document.body.classList.add('mb-pf-pick');
+    toast('Pull forward: click the point on a line — every bar after it on that line moves up to there · Esc = cancel', 'ok');
+}
+function pfStopPick() {
+    pfPickActive.value = false;
+    document.body.classList.remove('mb-pf-pick');
+}
+// a click on the board while picking: { resource, date } from Bryntum's
+// event or resolved from the DOM event
+function pfPickAt({ resource = null, date = null, domEvent = null } = {}) {
+    const s = getInstance();
+    if (!s) { pfStopPick(); return; }
+    let res = resource, d = date;
+    if ((!res || !d) && domEvent) {
+        try {
+            res = res || s.resolveResourceRecord(domEvent);
+            d   = d   || s.getDateFromDomEvent(domEvent, 'floor');
+        }
+        catch { /* outside the axis */ }
+    }
+    if (!res || !(res.data?.lineRow || LINE_BY_ID[res.id]) || !d) {
+        toast('Click inside a sewing line row (not the Holding Row / header)', 'warn');
+        return;
+    }
+    pfStopPick();
+    const lineName = res.data?.name || res.name || res.id;
+    const plan = computePullForward({ line : res.id, from : d, anchorStart : d });
+    applyPullForward(plan, { mouse : { lineId : res.id, lineName, date : new Date(d) } });
+}
 
 // ---------------------------------------------------------------------------
 // Plan by SOP timeline (SOP-PLN-01): every unplanned projection / confirm
@@ -8220,6 +8275,12 @@ function resetUndoHistory() {
 
 // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z on the board (never inside an input or dialog)
 function boardUndoKeys(e) {
+    // Esc while picking a pull-forward point = leave pick mode
+    if (e.key === 'Escape' && pfPickActive.value) {
+        pfStopPick();
+        toast('Pull forward cancelled', 'ok');
+        return;
+    }
     // Esc with nothing carried = drop the Ctrl+click selection
     if (e.key === 'Escape' && !carried.value && multiSel.size && view.value === 'board') {
         clearMultiSelect();
@@ -8810,6 +8871,7 @@ function handleBarMouseDown(ev) {
     if (!dom || dom.button !== 0) return;
     if (dom.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
     if (carried.value) return;                     // the click that follows places the carried bar
+    if (pfPickActive.value) return;                // pull-forward pick: the click chooses a point, no pick-up
     // Ctrl / ⌘ + click = add to / remove from the multi-selection, no pick-up
     // (the same press reaches us twice — Bryntum's hook and the native
     // capture listener — so one toggle per press)
@@ -8828,6 +8890,7 @@ function handleBarMouseDown(ev) {
 }
 
 function onSchedClick(e) {
+    if (pfPickActive.value) { pfPickAt({ domEvent : e }); return; }
     requestPlace(e.clientX, e.clientY);
 }
 
@@ -8839,6 +8902,7 @@ function handleBarClick(ev) {
     if (skipNextBarClick) { skipNextBarClick = false; return; }   // the click of the press that already picked up
     if (performance.now() < ignorePickUntil) return;
     const dom = domFromBryntum(ev);
+    if (pfPickActive.value) { pfPickAt({ resource : ev.resourceRecord, date : ev.date, domEvent : dom }); return; }
     if (dom?.button === 2 || dom?.which === 3) return;
     if (dom?.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
     if (carried.value) {
@@ -11656,6 +11720,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label class="pf-radio pf-disabled"><input type="radio" disabled> Current month <span class="msh-soon">phase 2</span></label>
                             <label class="pf-radio"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
                             <label class="pf-radio"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
+                            <label class="pf-radio pf-mouse"><input type="checkbox" v-model="pfMouse"> Move to mouse position</label>
+                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → তারপর board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে (Esc = cancel)</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Selected dates</legend>
@@ -11676,8 +11742,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
 
                     <div class="st-actions">
-                        <button class="cal-btn st-btn" :disabled="!pfRangeValid" @click="pfPreview">🔍 Preview</button>
-                        <button class="cal-btn cal-btn-primary st-btn" :disabled="!pfRangeValid" @click="applyPullForward">💾 Save and Apply</button>
+                        <button class="cal-btn st-btn" :disabled="!pfRangeValid || pfMouse" @click="pfPreview">🔍 Preview</button>
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="!pfRangeValid" @click="applyPullForward()">{{ pfMouse ? '🖱 Save and Apply — pick the point on the board' : '💾 Save and Apply' }}</button>
                         <button class="cal-btn st-btn" @click="pfOpen = false">Close</button>
                     </div>
 
@@ -13117,6 +13183,10 @@ body {
 .fr-colormenu-legend { border-top : 1px solid #e3e0d6; margin-top : 4px; padding : 8px 10px 6px; display : flex; flex-wrap : wrap; gap : 4px; max-width : 230px; }
 .fr-colormenu-legend-t { width : 100%; font-size : 11px; color : #666; margin-bottom : 2px; }
 .fr-colormenu-chip { font-size : 11px; padding : 2px 7px; border-radius : 9px; white-space : nowrap; }
+
+/* Pull forward: picking the point on the board */
+.mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched * { cursor : crosshair !important; }
+.pf-mouse { margin-top : 8px; padding-top : 8px; border-top : 1px dashed #c9c5b8; display : block; }
 
 /* Equal Order preview */
 .eq-dialog { width : 900px; max-width : 96vw; }
