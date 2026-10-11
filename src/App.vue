@@ -8623,9 +8623,12 @@ window.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === '
 window.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(false); }, true);
 window.addEventListener('blur',    () => {
     setModifierHeld(false);
-    // leaving the window mid-carry: the bar goes back to its place instead
-    // of hanging on a pointer that never comes back
-    if (carried.value) cancelCarry();
+    // Leaving the window mid-carry: the bar goes back to its place instead
+    // of hanging on a pointer that never comes back. A modal prompt (split
+    // quantity…) also blurs the window for a moment and the carry that the
+    // split hands over must survive it — so only a window that STAYS
+    // unfocused drops the carry.
+    setTimeout(() => { if (carried.value && !document.hasFocus()) cancelCarry(); }, 500);
 });
 window.addEventListener('mouseup', e => { if (!e.ctrlKey && !e.metaKey) setModifierHeld(false); }, true);
 function setMultiCls(rec, on) {
@@ -9439,8 +9442,13 @@ onMounted(() => {
     uiHooks.onCarryNew = rec => {
         if (carried.value) cancelCarry();
         ignorePickUntil = 0;
-        pickUp(rec, null);
-        if (!carried.value) toast(`${rec?.data?.raw?.po || rec?.name || 'Piece'} is on the board — press and drag it to move`, 'ok');
+        // next tick: the menu has closed and a quantity prompt's blur/focus
+        // pair has been dispatched — nothing left to knock the carry off
+        setTimeout(() => {
+            if (carried.value) cancelCarry();
+            pickUp(rec, null);
+            if (!carried.value) toast(`${rec?.data?.raw?.po || rec?.name || 'Piece'} is on the board — press and drag it to move`, 'ok');
+        }, 50);
     };
 
     // Dev-console access for diagnostics
