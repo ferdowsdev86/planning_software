@@ -1966,10 +1966,442 @@ export const schedulerProConfig = {
         // Open BELOW the hovered bar so the Holding-Row day-qty chips at the
         // top stay visible while the tooltip is up
         align                : 't-b',
-        async template({ eventRecord : e }) {
+        // Content is built synchronously whenever the ERP detail is already
+        // cached — prefetched while the pointer rests on the bar for the hover
+        // delay — so the tooltip opens with its data, no "Loading…" flash. A
+        // cold cache (first hover of a PO this session) fetches, then renders.
+        template({ eventRecord : e }) {
             const r = e.data.raw;
             if (!r) return StringHelper.encodeHtml(e.name);
+            const warm = tipDataFromCache(r);
+            if (warm) return renderTip4(e, r, warm);
+            return fetchTipData(r).then(d => renderTip4(e, r, d));
+        },
+    },
 
+    // Pick-and-place uses click, not native drag — drag caused blank flashes
+    eventDragFeature : {
+        disabled                : true,
+        constrainDragToResource : false,
+        showTooltip             : false,
+        validatorFn(context) {
+            const recs  = context.eventRecords || context.draggedRecords || [];
+            const rec   = recs[0];
+            const raw   = rec?.data?.raw;
+            const newRes = context.newResource;
+            const start  = context.startDate;
+            if (!raw) return true;
+            if (raw.stage) {
+                if (newRes && !STAGE_RESOURCES.some(s => s.id === newRes.id)) {
+                    return { valid : false, message : 'Stage tasks stay on stage resources' };
+                }
+                return true;
+            }
+            if (newRes?.data?.subtotalRow || newRes?.id === 'subtot') {
+                return { valid : false, message : 'Cannot place orders on the Subtotal row' };
+            }
+            // FastReact: park on Holding Row, or plan on any sewing line
+            if (newRes && !isHoldingRes(newRes) && !isSewingRes(newRes)) {
+                return { valid : false, message : 'Place the bar on a sewing line or the Holding Row' };
+            }
+            if (!isHoldingRes(newRes) && raw.matReady && start && DateHelper.clearTime(start) < raw.matReady) {
+                return { valid : false, message : `Material not ready before ${fmtDate(raw.matReady)}` };
+            }
+            return true;
+        }
+    },
+
+    // Grand totals footer: per day, all lines - Day Plan qty, actual
+    // Production (day_production_update_plan) and the +/- difference
+    // Grand totals footer removed (the strip legend below the board is the
+    // live order bar now) — grandTotalMaps() still serves the reports
+    summaryFeature : false,
+    summaryFeatureUnused : {
+        renderer({ startDate }) {
+            const { plan, made } = grandTotalMaps();
+            const key = ymdKeyOf(startDate);
+            const p = plan[key] || 0;
+            const a = made[key] || 0;
+            if (!p && !a) {
+                return '<div class="fr-gt"><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
+            }
+            const diff = a - p;
+            const dCls = diff < 0 ? 'fr-gt-neg' : 'fr-gt-pos';
+            return `<div class="fr-gt">
+                <span class="fr-gt-plan">${fmtQty(p)}</span>
+                <span class="fr-gt-act">${fmtQty(a)}</span>
+                <span class="${dCls}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</span>
+            </div>`;
+        }
+    },
+
+    // Order bar rendering (document 10) - colour plus text and icon
+    eventRenderer({ eventRecord : e, renderData }) {
+        const r = e.data.raw;
+        if (!r) return StringHelper.encodeHtml(e.name || '');
+
+        const pastDelivery = r.status !== 'completed'
+            && isLateVsDelivery(e.endDate || r.end, r.ship);
+        const colorKey =
+            r.status === 'completed' ? 'grey'
+          : pastDelivery ? 'late'
+          : r.latePlan ? 'yellow'
+          : r.risk.level === 'draft' || r.status === 'draft' ? 'blue'
+          : { low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[r.risk.level] || 'green';
+
+        renderData.cls.add(`mb-risk-${colorKey}`);
+        if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
+        if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
+
+        const q = (searchState.query || '').trim().toLowerCase();
+        if (searchState.ids) {
+            renderData.cls.add(searchState.ids.has(String(e.id)) ? 'mb-search-hit' : 'mb-search-dim');
+        }
+        else if (q) {
+            const hay = [
+                r.buyer, r.po, r.style, r.status, r.productType,
+                orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name
+            ].join(' ').toLowerCase();
+            renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
+        }
+
+        if (pastDelivery) {
+            renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
+        }
+        else if (colorState.mode === 'buyer') {
+            renderData.style = `background-color:${hashColor(r.buyer)};border-color:#222;color:#fff`;
+        }
+        else if (colorState.mode === 'status') {
+            renderData.style = `background-color:${STATUS_COLORS[r.status] || '#5e7c8a'};border-color:#222;color:#fff`;
+        }
+        else if (colorState.mode === 'delivery') {
+            // Product delivery: the bar wears its delivery month's colour
+            const c = deliveryMonthColor(r.ship);
+            if (c) renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
+        }
+
+        if (r.stage) {
+            return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
+        }
+        // Bar height is handled purely in CSS (wrap height = 50% of the row
+        // via --mb-row-h) so it stays identical in normal / selected /
+        // hovered / dragging states — a renderData.height override here was
+        // lost on selection repaints and made clicked bars jump to full row.
+        // Single line, vertically centred — no confirm/projection label
+        // (the bar colour/border already distinguishes confirm orders).
+        // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
+        // position, duration and colour coding stay exactly as-is.
+        const line = colorState.mode === 'style' ? barStyleLine : barDisplayLine;
+        const full = line(r);
+        const w = renderData.width || 0;
+        const compact = w > 0 && w < full.length * 6.8 + 12;
+        const text = compact ? line(r, true) : full;
+        // Learning-curve ramp: hatched overlay on the bar's head — a shade on
+        // top of (never replacing) the status/risk colour
+        const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
+        const lcHtml = lcFrac > 0.005
+            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-badge" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}">LC</span>`
+            : '';
+        // Multiple strip handling: live-linked bars carry a small link badge
+        const lk = r.lcLink;
+        const linkHtml = lk
+            ? `<span class="mb-linked-badge" title="${StringHelper.encodeHtml(
+                `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
+            : '';
+        return `
+            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center">
+                <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
+            </div>`;
+    },
+
+    // Press-and-hold: the bar attaches to the pointer on mouse DOWN (the
+    // board's own pick & place carry); release after a drag drops it there,
+    // a plain click keeps it on the pointer until the next click
+    onEventMouseDown(ev) {
+        uiHooks.onBarMouseDown?.(ev);
+    },
+
+    onEventClick(ev) {
+        const dom = ev?.domEvent || ev?.event;
+        if (dom?.button === 2) return;
+        if (dom?.target?.closest?.('.b-menu, .b-popup')) return;
+        setBarTooltipEnabled(uiHooks.instance, false);
+        uiHooks.onOrderSelect?.(ev.eventRecord);
+        uiHooks.onBarClick?.(ev);
+        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
+    },
+
+    // Hovering a bar shows its day-wise plan quantities on the Holding Row
+    // (same trigger feel as the tooltip)
+    onEventMouseEnter({ eventRecord }) {
+        // warm the tooltip's ERP data during the hover delay — it then opens
+        // with its content instead of a "Loading…" placeholder
+        const raw = eventRecord?.data?.raw;
+        if (raw && !raw.stage && !tipDataFromCache(raw)) fetchTipData(raw).catch(() => {});
+        uiHooks.onBarHover?.(eventRecord);
+    },
+
+    onEventMouseLeave() {
+        uiHooks.onBarHoverOut?.();
+    },
+
+    onEventMenuItem({ item, eventRecord }) {
+        const rec = eventRecord || menuSplitCtx?.rec;
+        if (!rec) return;
+        const key = item?.ref || item?.id || item;
+        if (key === 'stripProps') uiHooks.onOpenProps?.(rec);
+        else if (key === 'planSchedule') uiHooks.onOpenSchedule?.(rec);
+    },
+
+    onScheduleClick(ev) {
+        setBarTooltipEnabled(uiHooks.instance, false);
+        uiHooks.onScheduleClick?.(ev);
+        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
+    },
+
+    // Board pan never starts from a bar: with eventDrag disabled (pick &
+    // place moves bars by click), Bryntum's Pan would otherwise also grab
+    // drags that begin ON an event. Bar presses keep their own behavior
+    // (click = pick up / select, right-click = menu, resize = handles).
+    // NOTE: as a `listeners` entry — the Vue wrapper does not map an
+    // onBeforePan prop, so a top-level handler would silently never attach.
+    listeners : {
+        beforePan({ event }) {
+            if (event?.target?.closest?.('.b-sch-event, .b-sch-event-wrap')) return false;
+        }
+    },
+
+    // After a drag-drop: snap the start off 0-hour days, keep the sequential
+    // rule, and recompute the end so off days are never counted (FastReact)
+    onEventDragStart() {
+        const s = uiHooks.instance;
+        setBarTooltipEnabled(s, false);
+        uiHooks.boardUserActive = true;
+        s?.suspendRefresh?.();
+    },
+
+    onEventDrag() {
+        uiHooks.instance?.features?.eventTooltip?.hide?.();
+    },
+
+    onEventDragReset() {
+        const s = uiHooks.instance;
+        setBarTooltipEnabled(s, true);
+        uiHooks.boardUserActive = false;
+        s?.resumeRefresh?.(false);
+    },
+
+    onEventDrop({ eventRecords }) {
+        const s = uiHooks.instance;
+        setBarTooltipEnabled(s, false);
+        if (!s) return;
+        beginBoardInteraction(s);
+        try {
+            for (const rec of eventRecords) {
+                const raw = rec.data.raw;
+                if (!raw || raw.stage) continue;
+                const origStart = startOfWorkDay(DateHelper.clearTime(rec.startDate));
+                const rid = lineIdOf(s, rec);
+                if (isHoldId(rid) || !LINE_BY_ID[rid]) {
+                    const targetId = rid;
+                    const start = startOfWorkDay(DateHelper.clearTime(rec.startDate));
+                    const end   = endOfWork(start, raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1);
+                    const a = s.assignmentStore.records.find(x =>
+                        (x.eventId ?? x.data?.eventId ?? x.data?.event) === rec.id);
+                    if (a) a.set('resourceId', targetId);
+                    else s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
+                    rec.data.resourceId = targetId;
+                    rec.set({
+                        resourceId : targetId,
+                        startDate  : start,
+                        endDate    : end,
+                        duration   : elapsedDays(start, end)
+                    });
+                    raw.start = start;
+                    raw.end   = end;
+                    if (isHoldId(rid) && (raw.status === 'planned' || raw.status === 'draft')) {
+                        raw.status = 'unplanned';
+                    }
+                    continue;
+                }
+                if (raw.status === 'unplanned') raw.status = 'draft';
+                // FastReact insertion rule (same as pick & place): the
+                // dropped bar keeps the EXACT drop point (work-calendar
+                // clamped; only a locked/completed bar blocks); overlapped
+                // bars and their followers shift LATER only via pushFollowers
+                const { start : sd, end, snapped, blockedBy } =
+                    computeInsertStart(s, rid, origStart, raw.dur, rec.id);
+                const moved = snapped || !!blockedBy || sd.getTime() !== origStart.getTime();
+                rec.set({ startDate : sd, endDate : end, duration : elapsedDays(sd, end) });
+                noteManualGap(s, rid, rec, sd);
+                const pushedCnt = pushFollowers(s, rid, rec);
+                if (pushedCnt) {
+                    uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+                }
+                const mergedInfo = tryMergeAdjacent(s, rec, rid);
+                if (mergedInfo) {
+                    uiHooks.onToast?.(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
+                }
+                raw.start = sd;
+                raw.end   = end;
+                raw.risk = calcRisk({
+                    start    : sd,
+                    end,
+                    ship     : raw.ship,
+                    matReady : raw.matReady,
+                    lineUtil : 0,
+                    status   : raw.status
+                });
+                if (moved) {
+                    uiHooks.onToast?.(`${rec.name}: adjusted to the next working day (starts ${fmtDate(sd)})`, 'warn');
+                }
+            }
+        }
+        finally {
+            endBoardInteraction(s);
+            const util = computeLineUtil(s.eventStore.records);
+            for (const rec of eventRecords) {
+                const raw = rec.data?.raw;
+                if (!raw || raw.stage) continue;
+                const rid = lineIdOf(s, rec);
+                raw.risk = calcRisk({
+                    start    : raw.start,
+                    end      : raw.end,
+                    ship     : raw.ship,
+                    matReady : raw.matReady,
+                    lineUtil : util[rid] ?? 0,
+                    status   : raw.status
+                });
+            }
+            setBarTooltipEnabled(s, true);
+            uiHooks.boardUserActive = false;
+            uiHooks.onBoardEdited?.();
+        }
+    },
+    // following bars so the resized bar never overlaps the next one
+    onEventResizeEnd({ eventRecord : rec }) {
+        const raw = rec.data.raw;
+        if (!raw || raw.stage) return;
+        raw.dur   = Math.max(1, workDaysBetween(rec.startDate, rec.endDate));
+        raw.start = rec.startDate;
+        raw.end   = rec.endDate;
+        const s = uiHooks.instance;
+        if (!s) return;
+        beginBoardInteraction(s);
+        try {
+            const pushedCnt = pushFollowers(s, rec.resourceId ?? rec.data.resourceId, rec);
+            if (pushedCnt) {
+                uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
+            }
+        }
+        finally {
+            endBoardInteraction(s);
+        }
+    },
+
+    onEventSelectionChange({ selection }) {
+        if (!selection.length) uiHooks.onSelectionClear?.();
+    },
+
+    project : {
+        calendar  : 'factory',
+        calendars : [{
+            id        : 'factory',
+            name      : 'Factory calendar',
+            intervals : [{
+                recurrentStartDate : 'on Fri at 0:00',
+                recurrentEndDate   : 'on Sat at 0:00',
+                isWorking          : false
+            }]
+        }],
+        resources,
+        events,
+        dependencies       : DEPENDENCIES,
+        resourceTimeRanges : buildManpowerRanges(LINES),
+        timeRanges         : [
+            ...buildOffDayRanges(),
+            (() => {
+                const t0 = new Date();
+                t0.setHours(0, 0, 0, 0);
+                const t1 = new Date(t0);
+                t1.setDate(t1.getDate() + 1);
+                return { id : 'today-col', startDate : t0, endDate : t1, cls : 'mb-today' };
+            })()
+        ],
+        // Bryntum's STM is off: the board keeps its own undo history (App.vue
+        // pushUndo / undoBoard) — it sees every custom edit, STM could not
+        stm : {
+            autoRecord : false,
+            disabled   : true
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tooltip ERP data: session-cached per PO so the tooltip can render at once.
+// onEventMouseEnter prefetches during the hover delay; the template only
+// awaits when the cache is still cold.
+// ---------------------------------------------------------------------------
+const tipApiBase = () => import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
+const tipAllPos  = r => (Array.isArray(r.poList) && r.poList.length > 0 ? r.poList : (r.po ? [String(r.po)] : []));
+function tipPoQuery(r) {
+    if (orderTypeOf(r.po, r.orderType) !== 'confirm') return null;
+    const allPos = tipAllPos(r);
+    if (!allPos.length) return null;
+    // planning_orders row ids when the bar knows them — a PO number can span
+    // several colours; ids give the exact colour rows this bar covers
+    const ids = Array.isArray(r.idList) ? r.idList.filter(n => Number(n) > 0) : [];
+    return ids.length ? `ids=${encodeURIComponent(ids.join(','))}` : `pos=${encodeURIComponent(allPos.join(','))}`;
+}
+const ssGet = k => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : undefined; } catch { return undefined; } };
+const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* quota */ } };
+
+// { detail, poSummary } when everything the tooltip needs is cached, else null
+export function tipDataFromCache(r) {
+    const detail = r.po ? ssGet(`tip-${r.po}`) : null;
+    if (r.po && detail === undefined) return null;
+    const qs = tipPoQuery(r);
+    const poSummary = qs ? ssGet(`pos-sum-${qs}`) : [];
+    if (qs && poSummary === undefined) return null;
+    return { detail : detail || null, poSummary : Array.isArray(poSummary) ? poSummary : [] };
+}
+
+const tipInflight = new Map();
+export function fetchTipData(r) {
+    const key = `${r.po || ''}|${tipPoQuery(r) || ''}`;
+    if (tipInflight.has(key)) return tipInflight.get(key);
+    const p = (async () => {
+        const API_BASE = tipApiBase();
+        let detail = r.po ? ssGet(`tip-${r.po}`) : null;
+        if (r.po && detail === undefined) {
+            detail = null;
+            try {
+                const res  = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
+                const json = await res.json();
+                if (json.success) { detail = json.data; ssSet(`tip-${r.po}`, detail); }
+            }
+            catch { /* API offline */ }
+        }
+        const qs = tipPoQuery(r);
+        let poSummary = qs ? ssGet(`pos-sum-${qs}`) : [];
+        if (qs && poSummary === undefined) {
+            poSummary = [];
+            try {
+                const resPo = await fetch(`${API_BASE}/pos-summary?${qs}`);
+                const jsPo  = await resPo.json();
+                if (jsPo.success) { poSummary = jsPo.rows; ssSet(`pos-sum-${qs}`, poSummary); }
+            }
+            catch { /* offline */ }
+        }
+        return { detail : detail || null, poSummary : Array.isArray(poSummary) ? poSummary : [] };
+    })().finally(() => tipInflight.delete(key));
+    tipInflight.set(key, p);
+    return p;
+}
+
+// The bar tooltip (4 tabs). `detail` = ERP order-details, `poSummary` =
+// per-PO rows — both from fetchTipData / tipDataFromCache.
+function renderTip4(e, r, { detail, poSummary }) {
             const enc  = StringHelper.encodeHtml;
             const ymd  = d => {
                 if (!d) return '';
@@ -2002,26 +2434,7 @@ export const schedulerProConfig = {
             const pcd   = r.pcd ? new Date(r.pcd) : (r.ship ? addCalDays(new Date(r.ship), -30) : null);
             const stage = r.stage || 'Sew';
 
-            // Fetch ERP detail (cached per PO)
-            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
-            const cacheKey = `tip-${r.po}`;
-            let detail = null;
-            if (r.po) {
-                try {
-                    const cached = sessionStorage.getItem(cacheKey);
-                    if (cached) {
-                        detail = JSON.parse(cached);
-                    } else {
-                        const res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
-                        const json = await res.json();
-                        if (json.success) {
-                            detail = json.data;
-                            sessionStorage.setItem(cacheKey, JSON.stringify(detail));
-                        }
-                    }
-                } catch { /* API offline */ }
-            }
-
+            // ERP detail / PO summary: fetched (and session-cached) by fetchTipData
             const s  = detail?.style  || {};
             const bk = detail?.bookings?.[0] || {};
 
@@ -2044,33 +2457,8 @@ export const schedulerProConfig = {
                 ? (bk.is_store_sent ? '<span class="tip-badge tip-ok">✓ Store received</span>' : '<span class="tip-badge tip-pend">Not received</span>')
                 : '<span class="tip-dim">No booking</span>';
 
-            // Fetch per-PO breakdown for confirm orders
             const isConfirm  = orderTypeOf(r.po, r.orderType) === 'confirm';
-            const allPos     = Array.isArray(r.poList) && r.poList.length > 0 ? r.poList : (r.po ? [String(r.po)] : []);
-            let   poSummary  = [];
-            if (isConfirm && allPos.length > 0) {
-                try {
-                    // Query by planning_orders row IDs when the bar knows them —
-                    // a PO number can span several colours; ids give the exact
-                    // colour rows this bar covers
-                    const ids = Array.isArray(r.idList) ? r.idList.filter(n => Number(n) > 0) : [];
-                    const qs  = ids.length
-                        ? `ids=${encodeURIComponent(ids.join(','))}`
-                        : `pos=${encodeURIComponent(allPos.join(','))}`;
-                    const cacheKeyPos = `pos-sum-${qs}`;
-                    const cachedPos   = sessionStorage.getItem(cacheKeyPos);
-                    if (cachedPos) {
-                        poSummary = JSON.parse(cachedPos);
-                    } else {
-                        const resPo = await fetch(`${API_BASE}/pos-summary?${qs}`);
-                        const jsPo  = await resPo.json();
-                        if (jsPo.success) {
-                            poSummary = jsPo.rows;
-                            sessionStorage.setItem(cacheKeyPos, JSON.stringify(poSummary));
-                        }
-                    }
-                } catch { /* offline */ }
-            }
+            const allPos     = tipAllPos(r);
 
             const colorHtml  = r.color
                 ? `<span class="tip4-swatch" style="background:${hashColor(r.color)}"></span>${enc(r.color)}`
@@ -2287,359 +2675,4 @@ export const schedulerProConfig = {
   </div>
 
 </div>`;
-        }
-    },
-
-    // Pick-and-place uses click, not native drag — drag caused blank flashes
-    eventDragFeature : {
-        disabled                : true,
-        constrainDragToResource : false,
-        showTooltip             : false,
-        validatorFn(context) {
-            const recs  = context.eventRecords || context.draggedRecords || [];
-            const rec   = recs[0];
-            const raw   = rec?.data?.raw;
-            const newRes = context.newResource;
-            const start  = context.startDate;
-            if (!raw) return true;
-            if (raw.stage) {
-                if (newRes && !STAGE_RESOURCES.some(s => s.id === newRes.id)) {
-                    return { valid : false, message : 'Stage tasks stay on stage resources' };
-                }
-                return true;
-            }
-            if (newRes?.data?.subtotalRow || newRes?.id === 'subtot') {
-                return { valid : false, message : 'Cannot place orders on the Subtotal row' };
-            }
-            // FastReact: park on Holding Row, or plan on any sewing line
-            if (newRes && !isHoldingRes(newRes) && !isSewingRes(newRes)) {
-                return { valid : false, message : 'Place the bar on a sewing line or the Holding Row' };
-            }
-            if (!isHoldingRes(newRes) && raw.matReady && start && DateHelper.clearTime(start) < raw.matReady) {
-                return { valid : false, message : `Material not ready before ${fmtDate(raw.matReady)}` };
-            }
-            return true;
-        }
-    },
-
-    // Grand totals footer: per day, all lines - Day Plan qty, actual
-    // Production (day_production_update_plan) and the +/- difference
-    // Grand totals footer removed (the strip legend below the board is the
-    // live order bar now) — grandTotalMaps() still serves the reports
-    summaryFeature : false,
-    summaryFeatureUnused : {
-        renderer({ startDate }) {
-            const { plan, made } = grandTotalMaps();
-            const key = ymdKeyOf(startDate);
-            const p = plan[key] || 0;
-            const a = made[key] || 0;
-            if (!p && !a) {
-                return '<div class="fr-gt"><span class="fr-gt-plan">-</span><span class="fr-gt-act">-</span><span>-</span></div>';
-            }
-            const diff = a - p;
-            const dCls = diff < 0 ? 'fr-gt-neg' : 'fr-gt-pos';
-            return `<div class="fr-gt">
-                <span class="fr-gt-plan">${fmtQty(p)}</span>
-                <span class="fr-gt-act">${fmtQty(a)}</span>
-                <span class="${dCls}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</span>
-            </div>`;
-        }
-    },
-
-    // Order bar rendering (document 10) - colour plus text and icon
-    eventRenderer({ eventRecord : e, renderData }) {
-        const r = e.data.raw;
-        if (!r) return StringHelper.encodeHtml(e.name || '');
-
-        const pastDelivery = r.status !== 'completed'
-            && isLateVsDelivery(e.endDate || r.end, r.ship);
-        const colorKey =
-            r.status === 'completed' ? 'grey'
-          : pastDelivery ? 'late'
-          : r.latePlan ? 'yellow'
-          : r.risk.level === 'draft' || r.status === 'draft' ? 'blue'
-          : { low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[r.risk.level] || 'green';
-
-        renderData.cls.add(`mb-risk-${colorKey}`);
-        if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
-        if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
-
-        const q = (searchState.query || '').trim().toLowerCase();
-        if (searchState.ids) {
-            renderData.cls.add(searchState.ids.has(String(e.id)) ? 'mb-search-hit' : 'mb-search-dim');
-        }
-        else if (q) {
-            const hay = [
-                r.buyer, r.po, r.style, r.status, r.productType,
-                orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name
-            ].join(' ').toLowerCase();
-            renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
-        }
-
-        if (pastDelivery) {
-            renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
-        }
-        else if (colorState.mode === 'buyer') {
-            renderData.style = `background-color:${hashColor(r.buyer)};border-color:#222;color:#fff`;
-        }
-        else if (colorState.mode === 'status') {
-            renderData.style = `background-color:${STATUS_COLORS[r.status] || '#5e7c8a'};border-color:#222;color:#fff`;
-        }
-        else if (colorState.mode === 'delivery') {
-            // Product delivery: the bar wears its delivery month's colour
-            const c = deliveryMonthColor(r.ship);
-            if (c) renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
-        }
-
-        if (r.stage) {
-            return `<div class="mb-bar"><div class="mb-bar-l1">${StringHelper.encodeHtml(e.name)}</div><div class="mb-bar-l2">${StringHelper.encodeHtml(r.stage)}</div></div>`;
-        }
-        // Bar height is handled purely in CSS (wrap height = 50% of the row
-        // via --mb-row-h) so it stays identical in normal / selected /
-        // hovered / dragging states — a renderData.height override here was
-        // lost on selection repaints and made clicked bars jump to full row.
-        // Single line, vertically centred — no confirm/projection label
-        // (the bar colour/border already distinguishes confirm orders).
-        // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
-        // position, duration and colour coding stay exactly as-is.
-        const line = colorState.mode === 'style' ? barStyleLine : barDisplayLine;
-        const full = line(r);
-        const w = renderData.width || 0;
-        const compact = w > 0 && w < full.length * 6.8 + 12;
-        const text = compact ? line(r, true) : full;
-        // Learning-curve ramp: hatched overlay on the bar's head — a shade on
-        // top of (never replacing) the status/risk colour
-        const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
-        const lcHtml = lcFrac > 0.005
-            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-badge" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}">LC</span>`
-            : '';
-        // Multiple strip handling: live-linked bars carry a small link badge
-        const lk = r.lcLink;
-        const linkHtml = lk
-            ? `<span class="mb-linked-badge" title="${StringHelper.encodeHtml(
-                `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
-            : '';
-        return `
-            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center">
-                <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
-            </div>`;
-    },
-
-    // Press-and-hold: the bar attaches to the pointer on mouse DOWN (the
-    // board's own pick & place carry); release after a drag drops it there,
-    // a plain click keeps it on the pointer until the next click
-    onEventMouseDown(ev) {
-        uiHooks.onBarMouseDown?.(ev);
-    },
-
-    onEventClick(ev) {
-        const dom = ev?.domEvent || ev?.event;
-        if (dom?.button === 2) return;
-        if (dom?.target?.closest?.('.b-menu, .b-popup')) return;
-        setBarTooltipEnabled(uiHooks.instance, false);
-        uiHooks.onOrderSelect?.(ev.eventRecord);
-        uiHooks.onBarClick?.(ev);
-        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
-    },
-
-    // Hovering a bar shows its day-wise plan quantities on the Holding Row
-    // (same trigger feel as the tooltip)
-    onEventMouseEnter({ eventRecord }) {
-        uiHooks.onBarHover?.(eventRecord);
-    },
-
-    onEventMouseLeave() {
-        uiHooks.onBarHoverOut?.();
-    },
-
-    onEventMenuItem({ item, eventRecord }) {
-        const rec = eventRecord || menuSplitCtx?.rec;
-        if (!rec) return;
-        const key = item?.ref || item?.id || item;
-        if (key === 'stripProps') uiHooks.onOpenProps?.(rec);
-        else if (key === 'planSchedule') uiHooks.onOpenSchedule?.(rec);
-    },
-
-    onScheduleClick(ev) {
-        setBarTooltipEnabled(uiHooks.instance, false);
-        uiHooks.onScheduleClick?.(ev);
-        setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
-    },
-
-    // Board pan never starts from a bar: with eventDrag disabled (pick &
-    // place moves bars by click), Bryntum's Pan would otherwise also grab
-    // drags that begin ON an event. Bar presses keep their own behavior
-    // (click = pick up / select, right-click = menu, resize = handles).
-    // NOTE: as a `listeners` entry — the Vue wrapper does not map an
-    // onBeforePan prop, so a top-level handler would silently never attach.
-    listeners : {
-        beforePan({ event }) {
-            if (event?.target?.closest?.('.b-sch-event, .b-sch-event-wrap')) return false;
-        }
-    },
-
-    // After a drag-drop: snap the start off 0-hour days, keep the sequential
-    // rule, and recompute the end so off days are never counted (FastReact)
-    onEventDragStart() {
-        const s = uiHooks.instance;
-        setBarTooltipEnabled(s, false);
-        uiHooks.boardUserActive = true;
-        s?.suspendRefresh?.();
-    },
-
-    onEventDrag() {
-        uiHooks.instance?.features?.eventTooltip?.hide?.();
-    },
-
-    onEventDragReset() {
-        const s = uiHooks.instance;
-        setBarTooltipEnabled(s, true);
-        uiHooks.boardUserActive = false;
-        s?.resumeRefresh?.(false);
-    },
-
-    onEventDrop({ eventRecords }) {
-        const s = uiHooks.instance;
-        setBarTooltipEnabled(s, false);
-        if (!s) return;
-        beginBoardInteraction(s);
-        try {
-            for (const rec of eventRecords) {
-                const raw = rec.data.raw;
-                if (!raw || raw.stage) continue;
-                const origStart = startOfWorkDay(DateHelper.clearTime(rec.startDate));
-                const rid = lineIdOf(s, rec);
-                if (isHoldId(rid) || !LINE_BY_ID[rid]) {
-                    const targetId = rid;
-                    const start = startOfWorkDay(DateHelper.clearTime(rec.startDate));
-                    const end   = endOfWork(start, raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1);
-                    const a = s.assignmentStore.records.find(x =>
-                        (x.eventId ?? x.data?.eventId ?? x.data?.event) === rec.id);
-                    if (a) a.set('resourceId', targetId);
-                    else s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
-                    rec.data.resourceId = targetId;
-                    rec.set({
-                        resourceId : targetId,
-                        startDate  : start,
-                        endDate    : end,
-                        duration   : elapsedDays(start, end)
-                    });
-                    raw.start = start;
-                    raw.end   = end;
-                    if (isHoldId(rid) && (raw.status === 'planned' || raw.status === 'draft')) {
-                        raw.status = 'unplanned';
-                    }
-                    continue;
-                }
-                if (raw.status === 'unplanned') raw.status = 'draft';
-                // FastReact insertion rule (same as pick & place): the
-                // dropped bar keeps the EXACT drop point (work-calendar
-                // clamped; only a locked/completed bar blocks); overlapped
-                // bars and their followers shift LATER only via pushFollowers
-                const { start : sd, end, snapped, blockedBy } =
-                    computeInsertStart(s, rid, origStart, raw.dur, rec.id);
-                const moved = snapped || !!blockedBy || sd.getTime() !== origStart.getTime();
-                rec.set({ startDate : sd, endDate : end, duration : elapsedDays(sd, end) });
-                noteManualGap(s, rid, rec, sd);
-                const pushedCnt = pushFollowers(s, rid, rec);
-                if (pushedCnt) {
-                    uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
-                }
-                const mergedInfo = tryMergeAdjacent(s, rec, rid);
-                if (mergedInfo) {
-                    uiHooks.onToast?.(`${mergedInfo.po}: adjacent strips joined into one (${fmtQty(mergedInfo.qty)} pcs)`, 'ok');
-                }
-                raw.start = sd;
-                raw.end   = end;
-                raw.risk = calcRisk({
-                    start    : sd,
-                    end,
-                    ship     : raw.ship,
-                    matReady : raw.matReady,
-                    lineUtil : 0,
-                    status   : raw.status
-                });
-                if (moved) {
-                    uiHooks.onToast?.(`${rec.name}: adjusted to the next working day (starts ${fmtDate(sd)})`, 'warn');
-                }
-            }
-        }
-        finally {
-            endBoardInteraction(s);
-            const util = computeLineUtil(s.eventStore.records);
-            for (const rec of eventRecords) {
-                const raw = rec.data?.raw;
-                if (!raw || raw.stage) continue;
-                const rid = lineIdOf(s, rec);
-                raw.risk = calcRisk({
-                    start    : raw.start,
-                    end      : raw.end,
-                    ship     : raw.ship,
-                    matReady : raw.matReady,
-                    lineUtil : util[rid] ?? 0,
-                    status   : raw.status
-                });
-            }
-            setBarTooltipEnabled(s, true);
-            uiHooks.boardUserActive = false;
-            uiHooks.onBoardEdited?.();
-        }
-    },
-    // following bars so the resized bar never overlaps the next one
-    onEventResizeEnd({ eventRecord : rec }) {
-        const raw = rec.data.raw;
-        if (!raw || raw.stage) return;
-        raw.dur   = Math.max(1, workDaysBetween(rec.startDate, rec.endDate));
-        raw.start = rec.startDate;
-        raw.end   = rec.endDate;
-        const s = uiHooks.instance;
-        if (!s) return;
-        beginBoardInteraction(s);
-        try {
-            const pushedCnt = pushFollowers(s, rec.resourceId ?? rec.data.resourceId, rec);
-            if (pushedCnt) {
-                uiHooks.onToast?.(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
-            }
-        }
-        finally {
-            endBoardInteraction(s);
-        }
-    },
-
-    onEventSelectionChange({ selection }) {
-        if (!selection.length) uiHooks.onSelectionClear?.();
-    },
-
-    project : {
-        calendar  : 'factory',
-        calendars : [{
-            id        : 'factory',
-            name      : 'Factory calendar',
-            intervals : [{
-                recurrentStartDate : 'on Fri at 0:00',
-                recurrentEndDate   : 'on Sat at 0:00',
-                isWorking          : false
-            }]
-        }],
-        resources,
-        events,
-        dependencies       : DEPENDENCIES,
-        resourceTimeRanges : buildManpowerRanges(LINES),
-        timeRanges         : [
-            ...buildOffDayRanges(),
-            (() => {
-                const t0 = new Date();
-                t0.setHours(0, 0, 0, 0);
-                const t1 = new Date(t0);
-                t1.setDate(t1.getDate() + 1);
-                return { id : 'today-col', startDate : t0, endDate : t1, cls : 'mb-today' };
-            })()
-        ],
-        // Bryntum's STM is off: the board keeps its own undo history (App.vue
-        // pushUndo / undoBoard) — it sees every custom edit, STM could not
-        stm : {
-            autoRecord : false,
-            disabled   : true
-        }
-    }
-};
+}
