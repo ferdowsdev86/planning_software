@@ -2159,13 +2159,28 @@ export const schedulerProConfig = {
           ${R('Color', colorHtml)}
           ${R('PO', `<b>${poCell}</b>`)}
           ${R('Order Qty', `<b>${enc(fmtQty(r.fullOrderQty || r.baseQty || r.orderQty || r.qty))}</b>${Number(r.fullOrderQty) > 0 && Number(r.baseQty ?? r.orderQty) > 0 && Number(r.fullOrderQty) !== Number(r.baseQty ?? r.orderQty) ? ` <span class="t4dim" title="this colour's quantity">(colour ${enc(fmtQty(r.baseQty ?? r.orderQty))})</span>` : ''}`)}
-          ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>${Number(r.made) > 0 ? ` <span class="t4dim">(${fmtQty(r.made)} done)</span>` : ''}`)}
+          ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>`)}
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
           ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
           ${R('Stage', enc(stage))}
         </div>
+        ${(() => {
+            // Production update applied: what is DONE and, highlighted, what
+            // is STILL TO MAKE (the qty the bar now stands for)
+            const made = Number(r.made) || 0;
+            if (!(made > 0)) return '';
+            const plan = Number(r.qty) || 0;
+            const left = Math.max(0, plan - made);
+            const pct  = plan > 0 ? Math.min(100, Math.round(made / plan * 100)) : 0;
+            return R('Production',
+                `<span class="t4-prod">` +
+                    `<span class="t4-done" title="quantity produced (production update / ERP)">✔ Done <b>${enc(fmtQty(made))}</b></span>` +
+                    `<span class="t4-left${left <= 0 ? ' t4-left-zero' : ''}" title="quantity still to be sewn — the bar now stands for this">⏳ Remaining <b>${enc(fmtQty(left))}</b></span>` +
+                    `<span class="t4-bar" title="${pct}% of plan qty made"><i style="width:${pct}%"></i></span><span class="t4-pct">${pct}%</span>` +
+                `</span>`, 't4-full t4-prodrow');
+        })()}
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}
       </div>
     </div>

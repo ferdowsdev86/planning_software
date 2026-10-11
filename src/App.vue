@@ -15701,6 +15701,18 @@ body {
 .t4v b  { font-weight : 700; color : #0d2b72; }
 .t4dim  { color : #aab; font-style : italic; }
 .t4-order-no { font-size : 12.5px; font-weight : 700; color : #0d2b72; }
+/* Production row: done (green) and the highlighted REMAINING qty (amber) */
+.t4-prodrow .t4v { white-space : normal; overflow : visible; }
+.t4-prod { display : inline-flex; align-items : center; gap : 6px; flex-wrap : wrap; row-gap : 3px; }
+.t4-done { background : #e6f4ea; color : #1e6b3a; border : 1px solid #b7dfc4; border-radius : 10px; padding : 0 7px; font-size : 10.5px; white-space : nowrap; }
+.t4-done b { color : #1e6b3a; }
+.t4-left { background : #fff3cd; color : #7a4b00; border : 1px solid #f1c232; border-radius : 10px; padding : 0 8px; font-size : 11px; font-weight : 700; white-space : nowrap; box-shadow : 0 0 0 2px #ffe08a inset; }
+.t4-left b { color : #7a4b00; font-size : 12px; }
+.t4-left-zero { background : #e6f4ea; color : #1e6b3a; border-color : #b7dfc4; box-shadow : none; }
+.t4-left-zero b { color : #1e6b3a; }
+.t4-bar { display : inline-block; width : 70px; height : 6px; border-radius : 3px; background : #e3e8f0; overflow : hidden; }
+.t4-bar i { display : block; height : 100%; background : #2e9e5b; }
+.t4-pct { font-size : 10px; color : #7a8faa; }
 
 /* Badges */
 .tip4-badge {
