@@ -13248,9 +13248,10 @@ body {
 .fr-colormenu-chip { font-size : 11px; padding : 2px 7px; border-radius : 9px; white-space : nowrap; }
 
 /* Pull forward: picking the point on the board — the pointer becomes the
-   toolbar's own ⟵| icon (arrow to a bar), hotspot at the bar's edge */
-.mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched * {
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='5' fill='%23ffffff' stroke='%231b52ad' stroke-width='1.5'/><path d='M22 16H8m0 0l5-5M8 16l5 5' fill='none' stroke='%231b52ad' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/><rect x='24' y='8' width='3' height='16' rx='1.5' fill='%231b52ad'/></svg>") 8 16, crosshair !important;
+   FastReact "|<=" shape: a bar on the left with a hollow block arrow
+   pointing at it; hotspot on the bar = the point the plan is pulled to */
+.mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched *, .mb-pf-pick .mb-sched-wrap {
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect x='2.5' y='5' width='3' height='22' fill='%23000'/><rect x='2' y='4.5' width='4' height='23' fill='none' stroke='%23fff' stroke-width='1'/><path d='M9 16L18 7V12H29V20H18V25Z' fill='%23fff' stroke='%23000' stroke-width='2' stroke-linejoin='round'/></svg>") 4 16, crosshair !important;
 }
 .pf-mouse { margin-top : 8px; padding-top : 8px; border-top : 1px dashed #c9c5b8; display : block; }
 
