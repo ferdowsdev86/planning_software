@@ -18,6 +18,7 @@ import {
 } from './planningData.js';
 import { deliveryMonthColor } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
+import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
@@ -5487,25 +5488,32 @@ function replaceProjectionsWithConfirms(s) {
         risk : { score : 0, level : 'low', label : 'On track', reasons : [] }
     });
 
-    // Several colour groups of one order: the first group keeps the swapped
-    // bar, the rest follow it FLUSH on the same line — each piece sized by
-    // its own colour quantity (line capacity), no gap between pieces. Every
-    // piece carries the full order quantity (fullOrderQty) beside its own.
-    const splitSpanAmong = (ev, groups, fullOrderQty) => {
+    // Pieces of one order laid flush after the first: each item = one
+    // confirm group (or the portion of a group this piece takes) with its
+    // own quantity; on a line each is sized by capacity, on the Holding Row
+    // (no capacity) the pieces share the saved span. Every piece carries
+    // the full order quantity (fullOrderQty) beside its own.
+    const codeCounter = new Map();   // confirm group id -> portions placed so far
+    const codeFor = g => {
+        const n = (codeCounter.get(String(g.id)) || 0) + 1;
+        codeCounter.set(String(g.id), n);
+        const base = `EV-C${g.dbId}-SEW`;
+        return { eventCode : n === 1 ? base : `${base}-${n}`, evId : n === 1 ? `ev-${g.id}` : `ev-${g.id}-p${n}` };
+    };
+    const layItemsAfter = (ev, items, fullOrderQty) => {
         const raw = ev.data.raw;
         const lid = lineIdOf(s, ev);
         const start0 = new Date(ev.startDate), end0 = new Date(ev.endDate);
         const totalUnits = Number(raw.dur) > 0 ? Number(raw.dur) : elapsedDays(start0, end0);
-        const totalQty = groups.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0) || 1;
-        // on the Holding Row (no capacity) the pieces share the saved span
+        const totalQty = items.reduce((t, it) => t + it.qty, 0) || 1;
         const sizePiece = (r, share) => {
             if (isHoldId(lid)) { r.dur = Math.max(1 / 60, totalUnits * share); return; }
             applyLineFormulaDuration(s, r, lid);
             if (!(Number(r.dur) > 0)) r.dur = Math.max(1 / 60, totalUnits * share);
         };
         let cursor = start0;
-        groups.forEach((g, i) => {
-            const share = (Number(g.qty ?? g.orderQty) || 0) / totalQty;
+        items.forEach((it, i) => {
+            const share = it.qty / totalQty;
             if (i === 0) {
                 raw.start = cursor;
                 sizePiece(raw, share);
@@ -5515,30 +5523,32 @@ function replaceProjectionsWithConfirms(s) {
                 cursor = end;
                 return;
             }
-            const evId = `ev-${g.id}`;
-            {
-                if (!s.eventStore.getById(evId)) {
-                    const raw2 = confirmRawFor(g, raw);
-                    raw2.fullOrderQty = fullOrderQty || undefined;
-                    raw2.start = cursor;
-                    sizePiece(raw2, share);
-                    const end = endOfWork(cursor, raw2.dur);
-                    raw2.end = end;
-                    raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
-                    s.eventStore.add({
-                        id : evId, resourceId : lid,
-                        startDate : cursor, endDate : end,
-                        duration : elapsedDays(cursor, end), durationUnit : 'day',
-                        manuallyScheduled : true,
-                        name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
-                        percentDone : 0,
-                        raw : raw2
-                    });
-                    pendingSwapIds.add(evId);
-                    cursor = end;
-                }
-                else cursor = new Date(s.eventStore.getById(evId).endDate);
+            const { eventCode, evId } = codeFor(it.g);
+            if (!s.eventStore.getById(evId)) {
+                const raw2 = confirmRawFor(it.g, raw);
+                raw2.eventCode = eventCode;
+                raw2.qty = it.qty;
+                raw2.orderQty = it.qty;
+                raw2.baseQty = it.qty;
+                raw2.fullOrderQty = fullOrderQty || undefined;
+                raw2.start = cursor;
+                sizePiece(raw2, share);
+                const end = endOfWork(cursor, raw2.dur);
+                raw2.end = end;
+                raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
+                s.eventStore.add({
+                    id : evId, resourceId : lid,
+                    startDate : cursor, endDate : end,
+                    duration : elapsedDays(cursor, end), durationUnit : 'day',
+                    manuallyScheduled : true,
+                    name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
+                    percentDone : 0,
+                    raw : raw2
+                });
+                pendingSwapIds.add(evId);
+                cursor = end;
             }
+            else cursor = new Date(s.eventStore.getById(evId).endDate);
         });
     };
 
@@ -5549,72 +5559,97 @@ function replaceProjectionsWithConfirms(s) {
     // Equal = same quantity (1 pc / 0.5% rounding tolerance)
     const qtyEqual = (a, b) => b > 0 && Math.abs(a - b) <= Math.max(1, b * 0.005);
 
+    // RULE (planner, 2026-10-11): the confirm order replaces the projection
+    // PIECE BY PIECE. A projection planned in several pieces (a line and the
+    // Holding Row, two lines, two spots on one line) keeps every piece where
+    // it is: each piece takes its share of the confirmed quantity (by its
+    // own quantity), sized for that share — nothing migrates to one place.
+    const piecesByKey = new Map();
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage || raw.orderType !== 'projection') continue;
         const key = reconKey(raw);
+        if (!piecesByKey.has(key)) piecesByKey.set(key, []);
+        piecesByKey.get(key).push(ev);
+    }
+    const pieceQty = ev => Number(ev.data.raw.qty) || 0;
+
+    for (const [key, pieces] of piecesByKey) {
+        pieces.sort((x, y) => x.startDate - y.startDate);
         const hit = confirms.get(key);
-        if (!hit) { delete raw.confirmMismatch; continue; }
+        if (!hit) { for (const ev of pieces) delete ev.data.raw.confirmMismatch; continue; }
         const grpList = (confirmGroups.get(key) || []).filter(g => !dropUnplanned.has(String(g.id)));
         const evQty   = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.qty) || 0), 0);
         const grpQty  = grpList.reduce((t, g) => t + (Number(g.qty ?? g.orderQty) || 0), 0);
+        const raw0 = pieces[0].data.raw;
         // Compare like with like: confirm bars / unplanned confirm groups carry
-        // the PLAN qty (+3%), so the projection's full order is taken as plan qty too
-        const fullQty = Number(raw.orderQty) > 0 ? planQtyOf(raw.orderQty) : (Number(raw.qty) || 0);
-        // RULE: the confirm order replaces the projection ONLY when its
-        // quantity equals the projection quantity. Unequal → nothing is
-        // planned; the projection bar stays and is highlighted until the
-        // confirmed quantity matches.
-        if (evQty > 0 && qtyEqual(evQty, fullQty) && !grpList.length && hit.kind === 'event' && hit.ev !== ev) {
-            // the confirm bar is already on the board with the full quantity
-            delete raw.confirmMismatch;
-            rememberReplaced(raw, hit.raw);
-            dropEvents.push(ev);
-            n++;
+        // the PLAN qty (+3%); the projection's whole order is taken as plan
+        // qty too — one piece: its order qty; several pieces: their plan
+        // quantities together (the order was split on the board)
+        const fullQty = Number(raw0.fullOrderQty) > 0 ? planQtyOf(raw0.fullOrderQty)
+            : pieces.length === 1
+                ? (Number(raw0.orderQty) > 0 ? planQtyOf(raw0.orderQty) : pieceQty(pieces[0]))
+                : pieces.reduce((t, ev) => t + pieceQty(ev), 0);
+        if (evQty > 0 && qtyEqual(evQty, fullQty) && !grpList.length && hit.kind === 'event' && !pieces.includes(hit.ev)) {
+            // the confirm bars are already on the board with the full quantity
+            for (const ev of pieces) { delete ev.data.raw.confirmMismatch; dropEvents.push(ev); }
+            rememberReplaced(raw0, hit.raw);
+            n += pieces.length;
             continue;
         }
         if (!(evQty === 0 && grpList.length && qtyEqual(grpQty, fullQty))) {
-            raw.confirmMismatch = { confirmed : evQty + grpQty, full : fullQty };
+            for (const ev of pieces) ev.data.raw.confirmMismatch = { confirmed : evQty + grpQty, full : fullQty };
             continue;
         }
-        delete raw.confirmMismatch;
-        const c = grpList[0];
-        rememberReplaced(raw, c);
-        // the projection's quantity = the whole order; every colour piece keeps it
-        const fullOrderQty = Number(raw.orderQty) || grpList.reduce((t, g) => t + (Number(g.orderQty ?? g.qty) || 0), 0);
-        raw.fullOrderQty = fullOrderQty || undefined;
-        raw.baseQty      = Number(c.orderQty ?? c.qty) || undefined;   // this colour's ERP qty
-        raw.orderType = 'confirm';
-        raw.replaced  = false;
-        raw.po        = c.po || raw.po;
-        raw.mbmOrder  = c.mbmOrder || raw.mbmOrder;
-        raw.qty       = Number(c.qty ?? c.orderQty ?? raw.qty);
-        raw.orderQty  = Number(c.orderQty ?? c.qty ?? raw.orderQty);
-        raw.ship      = c.ship || raw.ship;
-        raw.pcd       = c.pcd || raw.pcd;
-        raw.smv       = Number(c.smv) > 0 ? Number(c.smv) : raw.smv;
-        raw.dbId      = c.dbId ?? raw.dbId;
-        raw.id        = c.id || raw.id;
-        raw.color     = c.color || orderColor(raw.po);
-        // Consolidated confirm bar: carry the whole PO group so the sync
-        // marks every planning_orders row of the group as planned
-        raw.poList    = Array.isArray(c.poList) && c.poList.length ? c.poList : (raw.po ? [raw.po] : []);
-        raw.idList    = Array.isArray(c.idList) && c.idList.length ? c.idList : (raw.dbId ? [raw.dbId] : []);
-        raw.poCount   = c.poCount || raw.poList.length || 1;
-        raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
-        raw.reqMin    = Math.round(raw.qty * (Number(raw.smv) || 0));
-        // The swapped bar keeps the projection's SAVED span (and its SOP run
-        // for a later Recalculate)
-        delete raw.sopMode;
-        raw.userPinned = true;
-        // The event keeps its stable 'ev-proj:' code (PO-based codes can
-        // collide when one PO number spans several orders/colours) — the
-        // confirm link is carried by planning_order_id via raw.dbId.
-        ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
-        pendingSwapIds.add(String(ev.id));
+        rememberReplaced(raw0, grpList[0]);
+        const fullOrderQty = Number(raw0.fullOrderQty) || Number(raw0.orderQty) || grpList.reduce((t, g) => t + (Number(g.orderQty ?? g.qty) || 0), 0);
+        // each piece's share of the confirmed quantity (by its own quantity,
+        // whole pieces, SUM = grpQty); the confirm groups flow through the
+        // pieces in order — a group straddling two pieces is split (same PO,
+        // two bars). Pure maths in confirmReplaceService (node-tested).
+        const allot = allotByPieces(pieces.map(pieceQty), grpQty);
+        const perPiece = queueGroupsIntoPieces(grpList.map(g => ({ g, qty : Number(g.qty ?? g.orderQty) || 0 })), allot);
+        pieces.forEach((ev, i) => {
+            const raw = ev.data.raw;
+            const items = perPiece[i] || [];
+            if (!items.length) { dropEvents.push(ev); return; }   // nothing left for this piece
+            delete raw.confirmMismatch;
+            const c = items[0].g;
+            const { eventCode } = codeFor(c);
+            raw.fullOrderQty = fullOrderQty || undefined;
+            raw.baseQty      = items[0].qty;              // this piece's confirmed quantity
+            raw.orderType = 'confirm';
+            raw.replaced  = false;
+            raw.po        = c.po || raw.po;
+            raw.mbmOrder  = c.mbmOrder || raw.mbmOrder;
+            raw.qty       = items[0].qty;
+            raw.orderQty  = items[0].qty;
+            raw.ship      = c.ship || raw.ship;
+            raw.pcd       = c.pcd || raw.pcd;
+            raw.smv       = Number(c.smv) > 0 ? Number(c.smv) : raw.smv;
+            raw.dbId      = c.dbId ?? raw.dbId;
+            raw.id        = c.id || raw.id;
+            raw.color     = c.color || orderColor(raw.po);
+            // Consolidated confirm bar: carry the whole PO group so the sync
+            // marks every planning_orders row of the group as planned
+            raw.poList    = Array.isArray(c.poList) && c.poList.length ? c.poList : (raw.po ? [raw.po] : []);
+            raw.idList    = Array.isArray(c.idList) && c.idList.length ? c.idList : (raw.dbId ? [raw.dbId] : []);
+            raw.poCount   = c.poCount || raw.poList.length || 1;
+            raw.poDetails = Array.isArray(c.poDetails) ? c.poDetails : (raw.poDetails || []);
+            raw.reqMin    = Math.round(raw.qty * (Number(raw.smv) || 0));
+            // a second portion of the same PO needs its own event code; the
+            // first keeps the piece's stable 'ev-proj:' identity
+            if (eventCode !== `EV-C${c.dbId}-SEW`) raw.eventCode = eventCode;
+            // The swapped bar keeps the projection's SAVED span (and its SOP
+            // run for a later Recalculate)
+            delete raw.sopMode;
+            raw.userPinned = true;
+            ev.set('name', `${raw.buyer} | ${raw.mbmOrder || raw.po}`);
+            pendingSwapIds.add(String(ev.id));
+            layItemsAfter(ev, items, fullOrderQty);
+            n++;
+        });
         for (const g of grpList) dropUnplanned.add(String(g.id));
-        if (grpList.length > 1) splitSpanAmong(ev, grpList, fullOrderQty);
-        n++;
     }
 
     // Unplanned projections that merely have a linked Confirm Order are NOT
