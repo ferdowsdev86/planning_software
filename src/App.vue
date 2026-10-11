@@ -15700,6 +15700,7 @@ body {
 }
 .t4v b  { font-weight : 700; color : #0d2b72; }
 .t4dim  { color : #aab; font-style : italic; }
+.tip4-wait { color : #9aa6b8; font-style : italic; font-size : 11px; }
 .t4-order-no { font-size : 12.5px; font-weight : 700; color : #0d2b72; }
 /* Production row: done (green) and the highlighted REMAINING qty (amber) */
 .t4-prodrow .t4v { white-space : normal; overflow : visible; }

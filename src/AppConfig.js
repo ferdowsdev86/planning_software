@@ -1975,7 +1975,11 @@ export const schedulerProConfig = {
             if (!r) return StringHelper.encodeHtml(e.name);
             const warm = tipDataFromCache(r);
             if (warm) return renderTip4(e, r, warm);
-            return fetchTipData(r).then(d => renderTip4(e, r, d));
+            // Cold cache: the tooltip opens NOW with the bar's own data (never
+            // a Promise → Bryntum never shows "Loading…"); the ERP parts are
+            // filled in place the moment they arrive
+            fetchTipData(r).then(d => refreshTip4(e, r, d)).catch(() => {});
+            return renderTip4(e, r, { detail : null, poSummary : [], pending : true });
         },
     },
 
@@ -2401,7 +2405,23 @@ export function fetchTipData(r) {
 
 // The bar tooltip (4 tabs). `detail` = ERP order-details, `poSummary` =
 // per-PO rows — both from fetchTipData / tipDataFromCache.
-function renderTip4(e, r, { detail, poSummary }) {
+// ERP data arrived for a tooltip that opened cold: swap its content in place
+// (same bar still shown), keeping the tab the planner is on
+function refreshTip4(e, r, data) {
+    const tip = uiHooks.instance?.features?.eventTooltip?.tooltip;
+    if (!tip?.isVisible) return;
+    const root = tip.element?.querySelector?.('.mb-tip4');
+    if (!root || root.dataset.tipEv !== String(e.id)) return;
+    const tab = root.querySelector('.tip4-tab.tip4-tab-on')?.dataset.tab;
+    tip.html = renderTip4(e, r, data);
+    if (tab) {
+        const root2 = tip.element?.querySelector?.('.mb-tip4');
+        root2?.querySelectorAll('.tip4-tab').forEach(b => b.classList.toggle('tip4-tab-on', b.dataset.tab === tab));
+        root2?.querySelectorAll('.tip4-panel').forEach(pn => pn.classList.toggle('tip4-panel-on', pn.dataset.panel === tab));
+    }
+}
+
+function renderTip4(e, r, { detail, poSummary, pending = false }) {
             const enc  = StringHelper.encodeHtml;
             const ymd  = d => {
                 if (!d) return '';
@@ -2439,7 +2459,8 @@ function renderTip4(e, r, { detail, poSummary }) {
             const bk = detail?.bookings?.[0] || {};
 
             // Wash status label
-            const washLbl = s.wash_recipe_status ? '<span class="tip-badge tip-ok">✓ Done</span>' : '<span class="tip-badge tip-pend">Pending</span>';
+            const erpWait = '<span class="tip-dim tip4-wait">⏳ ERP…</span>';
+            const washLbl = pending ? erpWait : (s.wash_recipe_status ? '<span class="tip-badge tip-ok">✓ Done</span>' : '<span class="tip-badge tip-pend">Pending</span>');
 
             // Image
             const ERP_HOST = 'https://erp.mbm.group';
@@ -2448,12 +2469,12 @@ function renderTip4(e, r, { detail, poSummary }) {
                 : '';
 
             // Techpack
-            const tpHtml = s.techpack
+            const tpHtml = pending ? erpWait : s.techpack
                 ? `<a class="tip-link" href="${ERP_HOST}${enc(s.techpack)}" target="_blank">📎 View techpack</a>`
                 : '<span class="tip-dim">—</span>';
 
             // Booking status
-            const bkStatus = bk.booking_no
+            const bkStatus = pending ? erpWait : bk.booking_no
                 ? (bk.is_store_sent ? '<span class="tip-badge tip-ok">✓ Store received</span>' : '<span class="tip-badge tip-pend">Not received</span>')
                 : '<span class="tip-dim">No booking</span>';
 
@@ -2500,7 +2521,7 @@ function renderTip4(e, r, { detail, poSummary }) {
                 `<div class="t4r${cls ? ' '+cls : ''}"><span class="t4l">${lbl}</span><span class="t4v">${val}</span></div>`;
 
             return `
-<div class="mb-tip4">
+<div class="mb-tip4" data-tip-ev="${enc(String(e.id))}">
 
   <!-- HEADER -->
   <div class="tip4-hdr">
