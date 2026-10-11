@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
@@ -28,7 +28,8 @@ import {
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
-    skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb
+    skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1069,6 +1070,7 @@ function ensureRowsCoverBoard(s) {
 
 async function revealBoard(s) {
     setBoardLoad(true, 'Laying out the board…', 90);
+    refreshStripNotes();          // note markers on the bars (no wait — the board shows at once)
     await nextFrame();
     try {
         window.dispatchEvent(new Event('resize'));
@@ -7269,6 +7271,106 @@ const spHead = ref(null);
 const spBusy = ref(false);
 const spComplete = ref(false);   // "Mark order complete" tick — Save then completes the order
 
+// ---------------------------------------------------------------------------
+// Strip notes (FastReact Notes window): right-click a bar → "Strip notes".
+// Free text per PO with the planner's name and the date; every piece of the
+// PO (splits, re-plans) shows the same notes — on the bar (📝 marker), in the
+// tooltip (Notes card) and in this window. Notes live in planning_strip_notes.
+// ---------------------------------------------------------------------------
+const snOpen = ref(false);
+const snRec  = shallowRef(null);
+const snRows = ref([]);
+const snText = ref('');
+const snBusy = ref(false);
+const snRaw  = computed(() => eventRawOf(snRec.value));
+const snTitle = computed(() => {
+    const raw = snRaw.value;
+    if (!raw) return 'Strip notes';
+    return `${mbmOrderNo(raw.po, raw.mbmOrder)}::${raw.po || '—'} (${String(raw.stage || 'SEW').toUpperCase()})`;
+});
+const snUser = () => authUser.value?.username || currentUser.value?.username || authUser.value?.name || '—';
+const snCanDelete = n => {
+    const role = authUser.value?.role || currentUser.value?.role || '';
+    return n.by === snUser() || /manager|admin/i.test(role);
+};
+function snWhen(d) {
+    const x = new Date(d);
+    if (Number.isNaN(x.getTime())) return '—';
+    return `${fmtDate(x)} ${x.toLocaleTimeString('en-US', { hour : 'numeric', minute : '2-digit' })}`;
+}
+
+// All live notes → shared store (bar markers + tooltip); board repaint
+async function refreshStripNotes() {
+    try {
+        setStripNotes(await loadStripNotesDb());
+        const s = getInstance();
+        s?.refreshRows?.();
+    }
+    catch { /* offline — markers appear when the API is back */ }
+}
+
+async function openStripNotes(rec) {
+    const raw = eventRawOf(rec);
+    if (!raw || raw.stage) { toast('Strip notes শুধু sewing strip-এর জন্য', 'warn'); return; }
+    if (!raw.po) { toast('This bar has no PO number — notes are kept per PO', 'warn'); return; }
+    snRec.value  = rec;
+    snText.value = '';
+    snRows.value = stripNotesFor(raw.po);
+    snOpen.value = true;
+    snBusy.value = true;
+    try {
+        snRows.value = await loadStripNotesDb(raw.po);
+    }
+    catch (e) { toast(`Notes could not be loaded: ${e.message}`, 'error'); }
+    finally { snBusy.value = false; }
+    setTimeout(() => document.querySelector('.sn-dialog textarea')?.focus(), 30);
+}
+uiHooks.onOpenStripNotes = openStripNotes;
+const snFocusNew = () => document.querySelector('.sn-dialog textarea')?.focus();
+
+async function snAdd() {
+    const raw = snRaw.value;
+    const note = snText.value.trim();
+    if (!raw?.po) return;
+    if (!note) { toast('Type the note first', 'warn'); return; }
+    snBusy.value = true;
+    try {
+        const evId = String(snRec.value?.id || '').replace(/^db-/, '');
+        await addStripNoteDb({ po : raw.po, orderCode : raw.mbmOrder || null, eventId : /^\d+$/.test(evId) ? Number(evId) : null, note, user : snUser() });
+        snText.value = '';
+        snRows.value = await loadStripNotesDb(raw.po);
+        await refreshStripNotes();
+        toast('Note saved', 'ok');
+    }
+    catch (e) { toast(`Note not saved: ${e.message}`, 'error'); }
+    finally { snBusy.value = false; }
+}
+
+async function snDelete(n) {
+    if (!window.confirm(`Delete this note?\n\n${n.note}`)) return;
+    snBusy.value = true;
+    try {
+        await deleteStripNoteDb(n.id, snUser());
+        snRows.value = await loadStripNotesDb(snRaw.value?.po);
+        await refreshStripNotes();
+    }
+    catch (e) { toast(`Note not deleted: ${e.message}`, 'error'); }
+    finally { snBusy.value = false; }
+}
+
+function snPrint() {
+    const raw = snRaw.value;
+    const w = window.open('', '_blank', 'width=760,height=600');
+    if (!w) { toast('Pop-up blocked — allow pop-ups to print', 'warn'); return; }
+    const enc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&' : '&amp;', '<' : '&lt;', '>' : '&gt;', '"' : '&quot;' }[c]));
+    w.document.write(`<!doctype html><title>${enc(snTitle.value)}</title><style>body{font:13px -apple-system,Segoe UI,sans-serif;padding:20px}h2{font-size:16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left;vertical-align:top}th{background:#eee}</style>` +
+        `<h2>Strip notes — ${enc(snTitle.value)}</h2><div>${enc(raw?.buyer || '')} · ${enc(raw?.style || '')} ${raw?.color ? ' : ' + enc(raw.color) : ''}</div><br>` +
+        `<table><tr><th>Date</th><th>User</th><th>Note</th></tr>${snRows.value.map(n => `<tr><td>${enc(snWhen(n.at))}</td><td>${enc(n.by || '')}</td><td>${enc(n.note)}</td></tr>`).join('') || '<tr><td colspan=3>No notes</td></tr>'}</table>`);
+    w.document.close();
+    w.focus();
+    w.print();
+}
+
 async function openStripProd(rec) {
     const raw = eventRawOf(rec);
     if (!raw || raw.stage) { toast('Production update শুধু sewing strip-এর জন্য', 'warn'); return; }
@@ -11339,6 +11441,52 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Production update of ONE strip (right-click → Production update) -->
+        <!-- Strip notes (FastReact Notes window) -->
+        <div v-if="snOpen" class="cal-overlay" @click.self="snOpen = false">
+            <div class="cal-dialog sn-dialog" @keydown.esc="snOpen = false">
+                <div class="cal-title">
+                    📝 {{ snTitle }}
+                    <span class="cal-title-btns"><span class="cal-x" @click="snOpen = false">✕</span></span>
+                </div>
+                <div class="sn-toolbar">
+                    <button class="cal-btn st-btn sn-tb" @click="snFocusNew"><span class="sn-new">NEW</span> Notes</button>
+                    <button class="cal-btn st-btn sn-tb" :disabled="!snRows.length" @click="snPrint">🖨 Print</button>
+                    <button class="cal-btn st-btn sn-tb" @click="snOpen = false">✖ Close</button>
+                    <span class="sn-order"><b>Orders</b> <input class="cal-in" readonly :value="snTitle"></span>
+                </div>
+                <div class="st-body sn-body">
+                    <div v-if="snRaw" class="sp-head">
+                        <span><b>Buyer</b> {{ snRaw.buyer || '—' }}</span>
+                        <span><b>Style</b> {{ snRaw.style || '—' }}<template v-if="snRaw.color"> : {{ snRaw.color }}</template></span>
+                        <span><b>Qty</b> {{ fmtQty(snRaw.qty) }}</span>
+                        <span><b>Ship</b> {{ snRaw.ship ? fmtDate(snRaw.ship) : '—' }}</span>
+                    </div>
+                    <div class="sn-new-row">
+                        <textarea v-model="snText" class="cal-in sn-text" rows="3" placeholder="Write a note for this strip… (Ctrl+Enter = save)" :disabled="snBusy" @keydown.ctrl.enter.prevent="snAdd" @keydown.meta.enter.prevent="snAdd"></textarea>
+                        <div class="sn-new-side">
+                            <div class="t4dim">{{ snUser() }} · {{ fmtDate(new Date()) }}</div>
+                            <button class="cal-btn cal-btn-primary st-btn" :disabled="snBusy || !snText.trim()" @click="snAdd">＋ Add note</button>
+                        </div>
+                    </div>
+                    <div class="sn-list">
+                        <div v-if="!snRows.length" class="sn-none">&lt;&lt; There are no notes for this item &gt;&gt;</div>
+                        <table v-else class="st-table sn-table">
+                            <thead><tr><th>Date</th><th>User</th><th>Note</th><th></th></tr></thead>
+                            <tbody>
+                                <tr v-for="n in snRows" :key="n.id">
+                                    <td class="sn-when">{{ snWhen(n.at) }}</td>
+                                    <td class="sn-by">{{ n.by || '—' }}</td>
+                                    <td class="sn-note">{{ n.note }}</td>
+                                    <td class="sn-del"><span v-if="snCanDelete(n)" class="cal-x" title="Delete note" @click="snDelete(n)">🗑</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">Notes are kept per PO — every piece of this PO (splits, re-plans) shows them: 📝 on the bar, a Notes card in the tooltip, and here. Only the author or a manager can delete a note.</div>
+                </div>
+            </div>
+        </div>
+
         <div v-if="spOpen && !spMin" class="cal-overlay" @click.self="spOpen = false">
             <div class="cal-dialog sp-dialog">
                 <div class="cal-title">
@@ -13637,6 +13785,44 @@ body {
 
 /* Production update of one strip (right-click) */
 .sp-dialog { width : 840px; max-width : 96vw; }
+/* Strip notes window (FastReact Notes) */
+.sn-dialog { width : 780px; max-width : 96vw; max-height : 90vh; display : flex; flex-direction : column; }
+.sn-toolbar { display : flex; align-items : center; gap : 6px; padding : 6px 10px; background : #e9e7df; border-bottom : 1px solid #c9c5b8; }
+.sn-tb { padding : 3px 10px; font-size : 12px; }
+.sn-new { display : inline-block; background : #f6d34a; color : #5a4300; font-size : 8px; font-weight : 800; padding : 1px 4px; border-radius : 3px; margin-right : 4px; vertical-align : middle; }
+.sn-order { margin-left : 14px; display : flex; align-items : center; gap : 8px; font-size : 12px; flex : 1; }
+.sn-order .cal-in { flex : 1; max-width : 420px; background : #f6f8fa; }
+.sn-body { overflow : auto; }
+.sn-new-row { display : flex; gap : 10px; margin-bottom : 8px; }
+.sn-text { flex : 1; font : inherit; font-size : 13px; padding : 6px 8px; resize : vertical; }
+.sn-new-side { display : flex; flex-direction : column; justify-content : space-between; align-items : flex-end; gap : 6px; font-size : 11px; }
+.sn-list { border : 1px solid #b9c4d0; border-radius : 4px; background : #fff; min-height : 180px; max-height : 46vh; overflow : auto; }
+.sn-none { background : #c8c8c8; color : #fff; text-align : center; padding : 4px; font-size : 13px; }
+.sn-table { width : 100%; border-collapse : collapse; font-size : 12.5px; }
+.sn-table th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 5px 8px; font-weight : 600; }
+.sn-table td { padding : 5px 8px; border-bottom : 1px solid #eef1f5; vertical-align : top; }
+.sn-when { white-space : nowrap; color : #5b6673; width : 150px; }
+.sn-by { white-space : nowrap; font-weight : 600; color : #0d2b72; width : 120px; }
+.sn-note { white-space : pre-wrap; word-break : break-word; }
+.sn-del { width : 28px; text-align : center; }
+/* 📝 marker on a bar that carries notes */
+.b-sch-event.mb-has-note::after {
+    content : '📝';
+    position : absolute;
+    right : 2px;
+    top : 0;
+    font-size : 10px;
+    line-height : 12px;
+    pointer-events : none;
+    z-index : 3;
+}
+/* Tooltip notes card */
+.tip4-notes .tip4-card-hd { background : #fff8dc; color : #6b5200; }
+.t4-note { padding : 3px 0; border-bottom : 1px dashed #eadfb8; font-size : 11.5px; }
+.t4-note:last-child { border-bottom : none; }
+.t4-note-meta { font-size : 10px; color : #7a8faa; }
+.t4-note-meta b { color : #0d2b72; }
+.t4-note-txt { white-space : pre-wrap; word-break : break-word; color : #18284a; }
 .sp-head { display : flex; flex-wrap : wrap; gap : 6px 18px; font-size : 12px; margin-bottom : 8px; }
 .sp-wrap { max-height : 420px; overflow : auto; }
 .sp-table th, .sp-table td { white-space : nowrap; }

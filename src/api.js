@@ -1338,3 +1338,31 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
     if (out?.success) removedDbEventIds.clear();
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Strip notes (FastReact Notes window): free text per PO with user + date
+// ---------------------------------------------------------------------------
+export async function loadStripNotesDb(po = null) {
+    const res = await fetch(`${API_BASE}/strip-notes${po ? `?po=${encodeURIComponent(po)}` : ''}`);
+    const out = await res.json();
+    if (!out?.success) throw new Error(out?.error || 'strip notes failed');
+    return out.notes || [];
+}
+
+export async function addStripNoteDb({ po, orderCode, eventId, note, user }) {
+    const res = await fetch(`${API_BASE}/strip-notes`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ po, orderCode, eventId, note, user })
+    });
+    const out = await res.json();
+    if (!out?.success) throw new Error(out?.error || 'add note failed');
+    return out.note;
+}
+
+export async function deleteStripNoteDb(id, user) {
+    const res = await fetch(`${API_BASE}/strip-notes/${encodeURIComponent(id)}?user=${encodeURIComponent(user || '')}`, { method : 'DELETE' });
+    const out = await res.json();
+    if (!out?.success) throw new Error(out?.error || 'delete note failed');
+    return true;
+}

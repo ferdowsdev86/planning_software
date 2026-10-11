@@ -287,11 +287,27 @@ export const colorState = { mode : 'risk' };
 // (multi-criteria) — when set it decides hit / dim, the text query is ignored
 export const searchState = { query : '', ids : null };
 
+// Strip notes (FastReact Notes): per PO, newest first — filled by App.vue
+// from the API when a board opens and kept in step on add / delete. The bar
+// renderer marks bars that carry notes; the tooltip lists them.
+export const stripNotes = { byPo : new Map() };
+export const stripNotesFor = po => (po ? stripNotes.byPo.get(String(po)) || [] : []);
+export function setStripNotes(rows) {
+    stripNotes.byPo = new Map();
+    for (const n of rows || []) {
+        const k = String(n.po || '');
+        if (!k) continue;
+        if (!stripNotes.byPo.has(k)) stripNotes.byPo.set(k, []);
+        stripNotes.byPo.get(k).push(n);
+    }
+}
+
 // Bridge between the scheduler config and App.vue
 export const uiHooks = {
     instance         : null,
     unitId           : null,   // production unit of the open board (1 MBM / 2 CEIL / 3 AQL)
     onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
+    onOpenStripNotes : null,   // right-click → Strip notes (FastReact Notes window)
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
@@ -1857,6 +1873,15 @@ export const schedulerProConfig = {
                     if (rec) uiHooks.onOpenStripProd?.(rec);
                 }
             },
+            stripNotes : {
+                text   : 'Strip notes',
+                icon   : 'b-fa b-fa-note-sticky',
+                weight : 236,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onOpenStripNotes?.(rec);
+                }
+            },
             multiStrip : {
                 text   : 'Multiple strip handling',
                 icon   : 'b-fa b-fa-layer-group',
@@ -1909,6 +1934,7 @@ export const schedulerProConfig = {
                 items.splitPieces   = false;
                 items.mergeSel      = false;
                 items.multiStrip    = false;
+                items.stripNotes    = false;
                 return;
             }
             if (raw.status === 'completed' && items.buildUpCurve) {
@@ -2056,6 +2082,7 @@ export const schedulerProConfig = {
         renderData.cls.add(`mb-risk-${colorKey}`);
         if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
         if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
+        if (stripNotesFor(r.po).length) renderData.cls.add('mb-has-note');
 
         const q = (searchState.query || '').trim().toLowerCase();
         if (searchState.ids) {
@@ -2556,6 +2583,19 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       </div>
     </div>
   </div>
+
+  ${(() => {
+      const notes = stripNotesFor(r.po);
+      if (!notes.length) return '';
+      const when = d => { const x = new Date(d); return Number.isNaN(x.getTime()) ? '' : `${ddMon(x)} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+      return `<div class="tip4-card tip4-notes">
+    <div class="tip4-card-hd">📝 Notes <span class="tip4-tab-n">${notes.length}</span></div>
+    <div class="tip4-card-body">
+      ${notes.slice(0, 4).map(n => `<div class="t4-note"><div class="t4-note-meta"><b>${enc(n.by || '—')}</b> · ${enc(when(n.at))}</div><div class="t4-note-txt">${enc(n.note)}</div></div>`).join('')}
+      ${notes.length > 4 ? `<div class="t4dim">… ${notes.length - 4} more — right-click → Strip notes</div>` : ''}
+    </div>
+  </div>`;
+  })()}
 
   <!-- ORDER CARD -->
   <div class="tip4-card">

@@ -2768,6 +2768,75 @@ async function runAutoSync() {
 const SNAP_TZ   = 'Asia/Dhaka';
 const SNAP_TIME = '23:30';
 
+// --------------------------------------------------------------------------
+// Strip notes (FastReact Notes window): free-text notes a planner leaves on a
+// strip, keyed by PO so every piece / re-plan of that PO shows them. Soft
+// delete keeps the trail.
+// --------------------------------------------------------------------------
+async function ensureStripNotesTable() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS planning_strip_notes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        po VARCHAR(60) NOT NULL,
+        order_code VARCHAR(60) NULL,
+        event_id INT NULL,
+        note TEXT NOT NULL,
+        created_by VARCHAR(60) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        deleted_by VARCHAR(60) NULL,
+        deleted_at DATETIME NULL,
+        KEY idx_note_po (po, deleted_at)
+    )`);
+}
+
+const noteDto = r => ({
+    id : r.id, po : r.po, orderCode : r.order_code, eventId : r.event_id, note : r.note,
+    by : r.created_by, at : r.created_at
+});
+
+// All live notes (no po) or one PO's notes, newest first
+app.get(`${BASE}/strip-notes`, async (req, res) => {
+    try {
+        const po = req.query.po ? String(req.query.po).slice(0, 60) : null;
+        const [rows] = await pool.query(
+            `SELECT id, po, order_code, event_id, note, created_by, created_at
+               FROM planning_strip_notes
+              WHERE deleted_at IS NULL ${po ? 'AND po = ?' : ''}
+              ORDER BY created_at DESC, id DESC
+              LIMIT 5000`, po ? [po] : []);
+        res.json({ success : true, notes : rows.map(noteDto) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+app.post(`${BASE}/strip-notes`, async (req, res) => {
+    try {
+        const po   = String(req.body?.po || '').trim().slice(0, 60);
+        const note = String(req.body?.note || '').trim().slice(0, 4000);
+        if (!po || !note) return res.status(400).json({ success : false, error : 'po and note are required' });
+        const orderCode = req.body?.orderCode ? String(req.body.orderCode).slice(0, 60) : null;
+        const eventId   = /^\d+$/.test(String(req.body?.eventId ?? '')) ? Number(req.body.eventId) : null;
+        const by        = req.body?.user ? String(req.body.user).slice(0, 60) : null;
+        const [r] = await pool.query(
+            `INSERT INTO planning_strip_notes (po, order_code, event_id, note, created_by) VALUES (?, ?, ?, ?, ?)`,
+            [po, orderCode, eventId, note, by]);
+        const [[row]] = await pool.query(
+            `SELECT id, po, order_code, event_id, note, created_by, created_at FROM planning_strip_notes WHERE id = ?`, [r.insertId]);
+        res.json({ success : true, note : noteDto(row) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+app.delete(`${BASE}/strip-notes/:id`, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!(id > 0)) return res.status(400).json({ success : false, error : 'bad id' });
+        const by = req.query.user ? String(req.query.user).slice(0, 60) : null;
+        await pool.query(`UPDATE planning_strip_notes SET deleted_at = NOW(), deleted_by = ? WHERE id = ? AND deleted_at IS NULL`, [by, id]);
+        res.json({ success : true });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 async function ensureSnapshotTable() {
     await pool.query(`CREATE TABLE IF NOT EXISTS planning_board_snapshots (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -3280,6 +3349,7 @@ app.listen(PORT, () => {
     setInterval(prodSyncTick, 60000);
     console.log(`[prod-sync] ERP production sync at ${PROD_SYNC_TIMES.join(' & ')} ${SNAP_TZ} (daily rows from ${PROD_SYNC_FROM})`);
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
+    ensureStripNotesTable().catch(e => console.error('[strip-notes] table init failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
         .catch(e => console.error('[snapshot] table init failed:', e.message));
