@@ -8613,6 +8613,112 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
     return placed;
 }
 
+// ---------------------------------------------------------------------------
+// Ctrl+click multi-select: Ctrl (⌘ on Mac) + click toggles a bar in the
+// selection (blue outline). Picking one of the selected bars up carries all
+// of them; on the drop the others follow onto the target row in start order
+// (the same group placement Consolidate orders uses). Esc or a plain click
+// on an unselected bar clears the selection.
+// ---------------------------------------------------------------------------
+const multiSel = new Set();          // event ids
+const MULTI_CLS = 'mb-multi-sel';
+let lastMultiToggle = { id : '', t : 0 };
+
+// While Ctrl / ⌘ is held the planner is picking bars: the bar tooltip and
+// the bar menu stay away (they came up between the clicks and got in the
+// way). Released key, window blur or a plain mouse-up restore them.
+function setModifierHeld(on) {
+    if (uiHooks.modifierHeld === on) return;
+    uiHooks.modifierHeld = on;
+    const s = getInstance();
+    if (!s) return;
+    if (on) {
+        s.features?.eventTooltip?.hide?.();
+        if (!carried.value) setBarTooltipEnabled(s, false);
+    }
+    else if (!carried.value) {
+        setBarTooltipEnabled(s, true);
+    }
+}
+window.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(true); }, true);
+window.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(false); }, true);
+window.addEventListener('blur',    () => {
+    setModifierHeld(false);
+    // Leaving the window mid-carry: the bar goes back to its place instead
+    // of hanging on a pointer that never comes back. A modal prompt (split
+    // quantity…) also blurs the window for a moment and the carry that the
+    // split hands over must survive it — so only a window that STAYS
+    // unfocused drops the carry.
+    setTimeout(() => { if (carried.value && !document.hasFocus()) cancelCarry(); }, 500);
+});
+window.addEventListener('mouseup', e => { if (!e.ctrlKey && !e.metaKey) setModifierHeld(false); }, true);
+function setMultiCls(rec, on) {
+    const cls = String(rec.data.cls || '').split(/\s+/).filter(c => c && c !== MULTI_CLS);
+    if (on) cls.push(MULTI_CLS);
+    rec.set('cls', cls.join(' '));
+}
+function toggleMultiSelect(rec) {
+    const raw = rec?.data?.raw;
+    if (!raw || raw.stage) return;
+    const id = String(rec.id);
+    if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); }
+    else { multiSel.add(id); setMultiCls(rec, true); }
+    uiHooks.multiSelCount = multiSel.size;
+    toast(multiSel.size
+        ? `${multiSel.size} bar(s) selected — Ctrl+click more, then click one of them and move the group · Esc = clear`
+        : 'Selection cleared', 'ok');
+}
+function clearMultiSelect() {
+    if (!multiSel.size) return;
+    const s = getInstance();
+    for (const id of multiSel) {
+        const r = s?.eventStore?.getById(id);
+        if (r) setMultiCls(r, false);
+    }
+    multiSel.clear();
+    uiHooks.multiSelCount = 0;
+}
+
+// Right-click → Split into equal pieces (3, 4, 5, 6…): works on a line and
+// on the Holding Row; the pieces lie flush after the bar
+uiHooks.onSplitPieces = (rec, n) => {
+    const s = getInstance();
+    const raw = rec?.data?.raw;
+    if (!s || !raw) return;
+    pushUndo(s, `split ${raw.po || rec.name} into ${n}`);
+    const r = splitBarIntoPieces(s, rec, n);
+    if (!r.ok) { toast(r.msg, 'error'); return; }
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(`${raw.po || raw.mbmOrder} split into ${r.n} pieces — ${fmtQty(r.per)} pcs each${r.last !== r.per ? `, last ${fmtQty(r.last)}` : ''}${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
+};
+
+// Right-click → Merge selected bars into one: the Ctrl+click selection (plus
+// the bar under the pointer) of one order on one row becomes a single bar
+uiHooks.onMergeSelected = rec => {
+    const s = getInstance();
+    if (!s) return;
+    const recs = [...multiSel].map(id => s.eventStore.getById(id)).filter(Boolean);
+    if (rec && !recs.includes(rec)) recs.push(rec);
+    if (recs.length < 2) { toast('Ctrl+click দিয়ে একই order-এর ২+ bar select করুন, তারপর Merge', 'warn'); return; }
+    pushUndo(s, `merge ${recs.length} bars`);
+    const r = mergeBars(s, recs);
+    if (!r.ok) { toast(r.msg, 'error'); undoStack.pop(); undoDepth.value = undoStack.length; return; }
+    clearMultiSelect();
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(`${r.merged + 1} bars merged into one — ${fmtQty(r.qty)} pcs${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
+};
+function multiSelectMembers(s, rec) {
+    if (!multiSel.has(String(rec.id))) return [];
+    return [...multiSel]
+        .map(id => s.eventStore.getById(id))
+        .filter(r => r && r !== rec && r.data?.raw && !r.data.raw.stage && r.data.raw.status !== 'completed' && r.draggable !== false)
+        .sort((a, b) => a.startDate - b.startDate);
+}
+
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
     const raw = rec?.data?.raw;
