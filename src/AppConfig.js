@@ -293,6 +293,9 @@ export const uiHooks = {
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
+    multiSelCount    : 0,      // bars in the Ctrl+click selection (menu shows "Merge" from 2)
+    onSplitPieces    : null,   // (rec, n) → split one bar into n equal pieces
+    onMergeSelected  : null,   // (rec) → merge the Ctrl+click selection (+ rec) into one bar
     onOrderSelect    : null,
     onSelectionClear : null,
     onToast          : null,
@@ -1144,10 +1147,13 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const raw  = rec.data.raw;
     const rid  = rec.resourceId ?? rec.data.resourceId;
     const res  = scheduler.resourceStore.getById(rid);
-    const line = LINE_BY_ID[rid] || (res?.data?.lineRow ? { id : rid, ...res.data } : null);
+    // A bar on the Holding Row splits too (no capacity there: the parts
+    // share the bar's own span by quantity)
+    const onHold = isHoldId(rid);
+    const line = LINE_BY_ID[rid] || (res?.data?.lineRow ? { id : rid, ...res.data } : (onHold && res ? { id : rid, ...res.data } : null));
     if (!raw || raw.stage) return { ok : false, msg : 'Only production bars can be split' };
     if (raw.status === 'completed') return { ok : false, msg : 'Completed orders cannot be split' };
-    if (!line) return { ok : false, msg : 'Only sewing-line bars can be split' };
+    if (!line) return { ok : false, msg : 'Only sewing-line / Holding Row bars can be split' };
 
     const orig = { ...raw };
     const manpower = Number(res?.data?.manpower ?? line.manpower) || 50;
@@ -1165,8 +1171,15 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
             return { ok : false, msg : `Quantity must be between 1 and ${fmtQty(orig.qty - 1)}` };
         }
         q1 = orig.qty - q2;
-        d1 = formulaWorkingDays(q1, orig.smv, manpower, usedEff);
-        d2 = formulaWorkingDays(q2, orig.smv, manpower, usedEff);
+        if (onHold) {
+            const span = Number(orig.dur) > 0 ? Number(orig.dur) : Math.max(1, elapsedDays(new Date(rec.startDate), new Date(rec.endDate)));
+            d1 = Math.max(1 / 60, span * q1 / orig.qty);
+            d2 = Math.max(1 / 60, span * q2 / orig.qty);
+        }
+        else {
+            d1 = formulaWorkingDays(q1, orig.smv, manpower, usedEff);
+            d2 = formulaWorkingDays(q2, orig.smv, manpower, usedEff);
+        }
     }
     else {
         if (orig.dur < 2) return { ok : false, msg : 'Bar is only one working day — nothing to split' };
@@ -1180,7 +1193,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     // quantity (the parent's run must not be inherited — later edits would
     // keep sizing both parts by the full order)
     let sop1 = null, sop2 = null;
-    if (Number(orig.sopDur) > 0) {
+    if (Number(orig.sopDur) > 0 && !onHold) {
         const t1 = { ...orig, qty : q1, orderQty : q1, sopMode : true, sop : { ...(orig.sop || {}) } };
         const t2 = { ...orig, qty : q2, orderQty : q2, sopMode : true, sop : { ...(orig.sop || {}), lcDays : 0 }, lc : orig.lc ? { ...orig.lc, applied : false } : undefined };
         applyLineFormulaDuration(scheduler, t1, line.id);
@@ -1238,7 +1251,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     });
     const rec2 = scheduler.eventStore.getById(id);
 
-    const pushed = rec2 ? pushFollowers(scheduler, line.id, rec2) : 0;
+    const pushed = rec2 && !onHold ? pushFollowers(scheduler, line.id, rec2) : 0;
     const util   = recalcCapacity(scheduler) || {};
     const riskOf = (st, en, status) => calcRisk({
         start : st, end : en, ship : orig.ship, matReady : orig.matReady,
@@ -1249,6 +1262,81 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
 
     uiHooks.onBoardEdited?.();
     return { ok : true, q1, q2, d1, d2, pushed, rec2 };
+}
+
+// One bar → n pieces of (nearly) equal quantity, laid flush one after the
+// other on the same row (line or Holding Row); the last piece takes the
+// rounding remainder. Each step is the ordinary split, so every piece keeps
+// the order's identity and its own strip code.
+export function splitBarIntoPieces(scheduler, rec, n) {
+    const raw = rec?.data?.raw;
+    n = Math.max(2, Math.min(12, Math.round(Number(n) || 2)));
+    if (!raw || raw.stage) return { ok : false, msg : 'Only production bars can be split' };
+    const total = Number(raw.qty) || 0;
+    if (total < n) return { ok : false, msg : `${fmtQty(total)} pcs cannot be split into ${n} pieces` };
+    const per = Math.floor(total / n);
+    const pieces = [rec];
+    let current = rec;
+    let pushed = 0;
+    for (let k = 1; k < n; k++) {
+        // the current (last) piece keeps `per`, the new bar takes the rest
+        const rest = total - k * per;
+        const r = splitBar(scheduler, current, { qty2 : rest });
+        if (!r.ok) return { ok : false, msg : r.msg, pieces };
+        pushed += r.pushed || 0;
+        current = r.rec2;
+        pieces.push(current);
+    }
+    return { ok : true, n, per, last : total - (n - 1) * per, pushed, pieces };
+}
+
+// Several bars of ONE order (same PO / order / colour) on ONE row → one bar:
+// the earliest keeps its place, quantities add up, the length follows the
+// row's capacity, the other bars leave (cancelled in the DB on Save).
+export function mergeBars(scheduler, recs) {
+    const list = (recs || []).filter(r => r?.data?.raw && !r.data.raw.stage);
+    if (list.length < 2) return { ok : false, msg : 'Select at least two bars of the same order (Ctrl+click)' };
+    const first = [...list].sort((a, b) => a.startDate - b.startDate)[0];
+    const r0 = first.data.raw;
+    const lid = lineIdOf(scheduler, first);
+    const same = o =>
+        String(o.po || '') === String(r0.po || '')
+        && String(o.mbmOrder || '') === String(r0.mbmOrder || '')
+        && String(o.color || '').trim().toLowerCase() === String(r0.color || '').trim().toLowerCase();
+    for (const r of list) {
+        if (r.data.raw.status === 'completed') return { ok : false, msg : 'A completed bar cannot be merged' };
+        if (!same(r.data.raw)) return { ok : false, msg : `${r.data.raw.mbmOrder || r.data.raw.po} is another order / colour — only one order's bars merge` };
+        if (lineIdOf(scheduler, r) !== lid) return { ok : false, msg : 'The bars must sit on the same line / row' };
+    }
+    const others = list.filter(r => r !== first);
+    let qty = Number(r0.qty) || 0, made = Number(r0.made) || 0, base = Number(r0.baseQty) || 0, progW = (Number(r0.progress) || 0) * qty;
+    let dur = Number(r0.dur) || elapsedDays(new Date(first.startDate), new Date(first.endDate));
+    for (const r of others) {
+        const x = r.data.raw;
+        qty  += Number(x.qty) || 0;
+        made += Number(x.made) || 0;
+        base += Number(x.baseQty) || 0;
+        progW += (Number(x.progress) || 0) * (Number(x.qty) || 0);
+        dur  += Number(x.dur) || elapsedDays(new Date(r.startDate), new Date(r.endDate));
+    }
+    r0.qty = qty;
+    if (base > 0) r0.baseQty = base;
+    if (made > 0) r0.made = made;
+    r0.progress = qty ? Math.round(progW / qty) : 0;
+    r0.reqMin = Math.round(qty * (Number(r0.smv) || 0));
+    const start = new Date(first.startDate);
+    r0.start = start;
+    if (isHoldId(lid)) r0.dur = dur;
+    else { r0.dur = dur; try { applyLineFormulaDuration(scheduler, r0, lid); } catch { /* keep the summed span */ } }
+    const end = endOfWork(start, r0.dur || dur || 1);
+    r0.end = end;
+    first.set({ endDate : end, duration : elapsedDays(start, end), percentDone : r0.progress });
+    for (const r of others) noteRemovedDbEvent(r);
+    scheduler.eventStore.remove(others);
+    const pushed = isHoldId(lid) ? 0 : pushFollowers(scheduler, lid, first);
+    recalcCapacity(scheduler);
+    uiHooks.onBoardEdited?.();
+    return { ok : true, qty, merged : others.length, pushed, rec : first };
 }
 
 // ---------------------------------------------------------------------------
@@ -1716,6 +1804,27 @@ export const schedulerProConfig = {
                     uiHooks.onOpenWorkHours?.(rec);
                 }
             },
+            splitPieces : {
+                text   : 'Split into equal pieces',
+                icon   : 'b-fa b-fa-scissors',
+                weight : 115,
+                menu   : [2, 3, 4, 5, 6].map(n => ({
+                    text : `${n} pieces`,
+                    onItem() {
+                        const rec = menuSplitCtx?.rec;
+                        if (rec) uiHooks.onSplitPieces?.(rec, n);
+                    }
+                }))
+            },
+            mergeSel : {
+                text   : 'Merge selected bars into one',
+                icon   : 'b-fa b-fa-object-group',
+                weight : 118,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onMergeSelected?.(rec);
+                }
+            },
             equalOrder : {
                 text   : 'Equal order (balance splits)',
                 icon   : 'b-fa b-fa-scale-balanced',
@@ -1783,12 +1892,17 @@ export const schedulerProConfig = {
                 items.buildUpCurve  = false;
                 items.prodUpdate    = false;
                 items.equalOrder    = false;
+                items.splitPieces   = false;
+                items.mergeSel      = false;
                 items.multiStrip    = false;
                 return;
             }
             if (raw.status === 'completed' && items.buildUpCurve) {
                 items.buildUpCurve = false;
             }
+            if (raw.status === 'completed') { items.splitPieces = false; items.mergeSel = false; }
+            // the merge item only when two or more bars are Ctrl+click selected
+            if ((uiHooks.multiSelCount || 0) < 2) items.mergeSel = false;
             let date = null;
             try {
                 date = s?.getDateFromDomEvent(context.domEvent || context.event);

@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
 } from './AppConfig.js';
@@ -8621,7 +8621,12 @@ function setModifierHeld(on) {
 }
 window.addEventListener('keydown', e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(true); }, true);
 window.addEventListener('keyup',   e => { if (e.key === 'Control' || e.key === 'Meta') setModifierHeld(false); }, true);
-window.addEventListener('blur',    () => setModifierHeld(false));
+window.addEventListener('blur',    () => {
+    setModifierHeld(false);
+    // leaving the window mid-carry: the bar goes back to its place instead
+    // of hanging on a pointer that never comes back
+    if (carried.value) cancelCarry();
+});
 window.addEventListener('mouseup', e => { if (!e.ctrlKey && !e.metaKey) setModifierHeld(false); }, true);
 function setMultiCls(rec, on) {
     const cls = String(rec.data.cls || '').split(/\s+/).filter(c => c && c !== MULTI_CLS);
@@ -8634,6 +8639,7 @@ function toggleMultiSelect(rec) {
     const id = String(rec.id);
     if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); }
     else { multiSel.add(id); setMultiCls(rec, true); }
+    uiHooks.multiSelCount = multiSel.size;
     toast(multiSel.size
         ? `${multiSel.size} bar(s) selected — Ctrl+click more, then click one of them and move the group · Esc = clear`
         : 'Selection cleared', 'ok');
@@ -8646,7 +8652,41 @@ function clearMultiSelect() {
         if (r) setMultiCls(r, false);
     }
     multiSel.clear();
+    uiHooks.multiSelCount = 0;
 }
+
+// Right-click → Split into equal pieces (3, 4, 5, 6…): works on a line and
+// on the Holding Row; the pieces lie flush after the bar
+uiHooks.onSplitPieces = (rec, n) => {
+    const s = getInstance();
+    const raw = rec?.data?.raw;
+    if (!s || !raw) return;
+    pushUndo(s, `split ${raw.po || rec.name} into ${n}`);
+    const r = splitBarIntoPieces(s, rec, n);
+    if (!r.ok) { toast(r.msg, 'error'); return; }
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(`${raw.po || raw.mbmOrder} split into ${r.n} pieces — ${fmtQty(r.per)} pcs each${r.last !== r.per ? `, last ${fmtQty(r.last)}` : ''}${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
+};
+
+// Right-click → Merge selected bars into one: the Ctrl+click selection (plus
+// the bar under the pointer) of one order on one row becomes a single bar
+uiHooks.onMergeSelected = rec => {
+    const s = getInstance();
+    if (!s) return;
+    const recs = [...multiSel].map(id => s.eventStore.getById(id)).filter(Boolean);
+    if (rec && !recs.includes(rec)) recs.push(rec);
+    if (recs.length < 2) { toast('Ctrl+click দিয়ে একই order-এর ২+ bar select করুন, তারপর Merge', 'warn'); return; }
+    pushUndo(s, `merge ${recs.length} bars`);
+    const r = mergeBars(s, recs);
+    if (!r.ok) { toast(r.msg, 'error'); undoStack.pop(); undoDepth.value = undoStack.length; return; }
+    clearMultiSelect();
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    toast(`${r.merged + 1} bars merged into one — ${fmtQty(r.qty)} pcs${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
+};
 function multiSelectMembers(s, rec) {
     if (!multiSel.has(String(rec.id))) return [];
     return [...multiSel]
@@ -8870,7 +8910,14 @@ function handleBarMouseDown(ev) {
     const dom = domFromBryntum(ev);
     if (!dom || dom.button !== 0) return;
     if (dom.target?.closest?.('.b-menu, .b-popup, .b-float-root')) return;
-    if (carried.value) return;                     // the click that follows places the carried bar
+    if (carried.value) {
+        // A carry whose bar is gone or whose ghost layer is no longer shown
+        // is stale (lost pointer-up, reload of the board under it): drop it
+        // so the next press can pick a bar up — "the bar is stuck" otherwise
+        const stale = !getInstance()?.eventStore?.getById(carried.value.id) || carryDom?.layer?.style.display === 'none';
+        if (!stale) return;                        // the click that follows places the carried bar
+        cancelCarry();
+    }
     if (pfPickActive.value) return;                // pull-forward pick: the click chooses a point, no pick-up
     // Ctrl / ⌘ + click = add to / remove from the multi-selection, no pick-up
     // (the same press reaches us twice — Bryntum's hook and the native
