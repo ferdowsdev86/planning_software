@@ -283,7 +283,9 @@ const STATUS_COLORS = {
 };
 
 export const colorState = { mode : 'risk' };
-export const searchState = { query : '' };
+// query = the toolbar quick search (text); ids = the Find panel's result set
+// (multi-criteria) — when set it decides hit / dim, the text query is ignored
+export const searchState = { query : '', ids : null };
 
 // Bridge between the scheduler config and App.vue
 export const uiHooks = {
@@ -2348,7 +2350,10 @@ export const schedulerProConfig = {
         if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
 
         const q = (searchState.query || '').trim().toLowerCase();
-        if (q) {
+        if (searchState.ids) {
+            renderData.cls.add(searchState.ids.has(String(e.id)) ? 'mb-search-hit' : 'mb-search-dim');
+        }
+        else if (q) {
             const hay = [
                 r.buyer, r.po, r.style, r.status, r.productType,
                 orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name

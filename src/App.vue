@@ -7591,6 +7591,7 @@ function carryOrderToBoard(row) {
         return;
     }
     boardSearch.value = '';   // carrying must not sit behind a search filter
+    if (findIds.value) clearFind(true);
     ordersOpen.value = false;
     const wasBoard = view.value === 'board';
     if (!wasBoard) {
@@ -8960,7 +8961,7 @@ function resourceFromY(s, clientY, clientX) {
 
 function isSchedPlaceTarget(el) {
     if (!el?.closest) return false;
-    if (el.closest('.fr-toolbar, .fr-banner, .fr-orderbar, .fr-colormenu, .fr-board-loader, .fr-toasts, .b-popup, .b-menu, .b-float-root')) {
+    if (el.closest('.fr-toolbar, .fr-banner, .fr-orderbar, .fr-colormenu, .fr-board-loader, .fr-toasts, .fnd-panel, .b-popup, .b-menu, .b-float-root')) {
         return false;
     }
     return !!el.closest('.mb-sched-wrap');
@@ -10226,6 +10227,7 @@ function syncRowHeightVar(s) {
 
 const act = name => {
     if (name === 'consolidate') { toggleConsolidate(); return; }
+    if (name === 'find')        { toggleFindPanel(); return; }
     if (name === 'equalOrder')  { openEqualOrder(); return; }
     if (name === 'colorMenu') {
         colorMenuOpen.value = !colorMenuOpen.value;
@@ -10308,9 +10310,152 @@ watch(boardSearch, q => {
     s?.refreshWithTransition?.() ?? s?.refreshRows?.();
 });
 
+// ---------------------------------------------------------------------------
+// Find strips (FastReact Find, toolbar 🔍): a floating panel over the board
+// with several criteria — Style, Order (MBM order / PO), Product (style ::
+// colour / product type), Buyer, Shipment date range, Floor, Unit — ANDed
+// together. Text fields take wild cards (* = any run, ? = one character;
+// plain text = contains). Matches are highlighted, the rest dimmed, the
+// result list jumps to a bar, Next / Prev walk the matches in board order.
+// ---------------------------------------------------------------------------
+const FIND_BLANK = () => ({ style : '', order : '', product : '', buyer : '', shipFrom : '', shipTo : '', floor : '', unit : '' });
+const findOpen    = ref(false);
+const findForm    = ref(FIND_BLANK());
+const findResults = ref([]);           // [{ id, order, po, style, color, buyer, qty, line, floor, start, ship }]
+const findIds     = ref(null);         // Set of matched event ids while a find is applied
+const findIdx     = ref(-1);           // the result currently shown
+const findOptions = ref({ floors : [], units : [] });
+
+function findMatcher(pattern) {
+    const p = String(pattern || '').trim().toLowerCase();
+    if (!p) return null;
+    if (!/[*?]/.test(p)) return v => String(v ?? '').toLowerCase().includes(p);
+    const re = new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
+    return v => re.test(String(v ?? ''));
+}
+const findAny = (m, vals) => !m || vals.some(v => m(v));
+
+function findRowInfo(s, ev) {
+    const raw = ev.data.raw;
+    const lid = lineIdOf(s, ev);
+    const res = s.resourceStore.getById(lid);
+    const unit = res?.data?.unit || currentBoard.value?.unitName || '';
+    return {
+        id : String(ev.id), rec : ev,
+        order : mbmOrderNo(raw.po, raw.mbmOrder), po : raw.po || '',
+        style : raw.style || '—', color : raw.color || '', buyer : raw.buyer || '—',
+        qty : Number(raw.qty) || 0,
+        line : res?.name || lid || '—',
+        floor : res?.data?.lineRow ? floorLabelOf(unit, res.data.floor) : (isHoldId(lid) ? 'Holding' : '—'),
+        unit,
+        start : ev.startDate, ship : raw.ship ? new Date(raw.ship) : null,
+        completed : raw.status === 'completed'
+    };
+}
+
+function findRefreshOptions(s) {
+    const floors = new Set(), units = new Set();
+    for (const r of s.resourceStore.records) {
+        if (!r.data?.lineRow) continue;
+        const u = r.data.unit || currentBoard.value?.unitName || '';
+        if (u) units.add(u);
+        floors.add(floorLabelOf(u, r.data.floor));
+    }
+    findOptions.value = { floors : [...floors].sort(), units : [...units].sort() };
+}
+
+function toggleFindPanel() {
+    if (findOpen.value) { closeFindPanel(); return; }
+    if (view.value !== 'board' || !currentBoard.value) { toast('Open a planning board first', 'warn'); return; }
+    const s = getInstance();
+    if (s) findRefreshOptions(s);
+    findOpen.value = true;
+    setTimeout(() => document.querySelector('.fnd-panel input')?.focus(), 30);
+}
+
+function runFind() {
+    const s = getInstance();
+    if (!s) return;
+    const f = findForm.value;
+    const mStyle = findMatcher(f.style), mOrder = findMatcher(f.order), mProd = findMatcher(f.product), mBuyer = findMatcher(f.buyer);
+    const from = f.shipFrom ? new Date(`${f.shipFrom}T00:00:00`) : null;
+    const to   = f.shipTo   ? new Date(`${f.shipTo}T23:59:59`)   : null;
+    if (from && to && from > to) { toast('Shipment "from" date is after "to"', 'warn'); return; }
+    if (!mStyle && !mOrder && !mProd && !mBuyer && !from && !to && !f.floor && !f.unit) {
+        toast('Type at least one criterion', 'warn');
+        return;
+    }
+    const rows = [];
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const info = findRowInfo(s, ev);
+        if (!findAny(mStyle, [raw.style])) continue;
+        if (!findAny(mOrder, [raw.mbmOrder, raw.po, ...(Array.isArray(raw.poList) ? raw.poList : [])])) continue;
+        if (!findAny(mProd,  [`${raw.style || ''} :: ${raw.color || ''}`, raw.color, raw.productType, raw.product])) continue;
+        if (!findAny(mBuyer, [raw.buyer])) continue;
+        if (from || to) {
+            if (!info.ship || Number.isNaN(+info.ship)) continue;
+            if (from && info.ship < from) continue;
+            if (to && info.ship > to) continue;
+        }
+        if (f.floor && info.floor !== f.floor) continue;
+        if (f.unit && String(info.unit).toUpperCase() !== String(f.unit).toUpperCase()) continue;
+        rows.push(info);
+    }
+    rows.sort((a, b) => (a.start - b.start) || String(a.line).localeCompare(String(b.line)));
+    findResults.value = rows;
+    findIds.value = new Set(rows.map(r => r.id));
+    searchState.ids = findIds.value;
+    s.refreshWithTransition?.() ?? s.refreshRows?.();
+    findIdx.value = -1;
+    if (rows.length) findGoTo(0);
+    else toast('No strip matches — the board is dimmed until Clear', 'warn');
+}
+
+function findGoTo(i) {
+    const s = getInstance();
+    const rows = findResults.value;
+    if (!s || !rows.length) return;
+    const n = ((i % rows.length) + rows.length) % rows.length;
+    findIdx.value = n;
+    const rec = s.eventStore.getById(rows[n].id);
+    if (!rec) return;
+    s.selectEvent?.(rec);
+    s.scrollEventIntoView?.(rec, { animate : true, block : 'center' });
+}
+
+function clearFind(keepOpen = true) {
+    findResults.value = [];
+    findIds.value = null;
+    findIdx.value = -1;
+    if (searchState.ids) {
+        searchState.ids = null;
+        const s = getInstance();
+        s?.refreshWithTransition?.() ?? s?.refreshRows?.();
+    }
+    if (!keepOpen) findOpen.value = false;
+}
+
+function resetFind() {
+    findForm.value = FIND_BLANK();
+    clearFind(true);
+}
+
+function closeFindPanel() {
+    clearFind(false);
+}
+
+const findSummary = computed(() => {
+    const n = findResults.value.length;
+    if (!findIds.value) return '';
+    return n ? `${findIdx.value + 1} / ${n} found` : 'no match';
+});
+
 const toolbar = [
     { fa : 'fa-xmark', cls : 'fr-tb-red', title : 'Close view', action : 'close' },
     { fa : 'fa-house', title : 'Go to current date', action : 'home' },
+    { fa : 'fa-magnifying-glass', cls : 'fr-tb-find', toggle : 'find', title : 'Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)', action : 'find' },
     { sep : true },
     { fa : 'fa-magnifying-glass-minus', title : 'Horizontal zoom out — narrower days', action : 'hZoomOut' },
     { fa : 'fa-magnifying-glass-plus',  title : 'Horizontal zoom in — wider days', action : 'hZoomIn' },
@@ -10541,7 +10686,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : b.toggle === 'consolidate' && consolidate }]" :title="b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : undefined" @click="b.action && act(b.action)">
+                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)) }]" :title="b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
                     <i class="fa-solid fr-tb-fa" :class="b.fa" aria-hidden="true"></i>
                 </button>
             </template>
@@ -10557,6 +10702,61 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
         <!-- Board -->
         <div class="mb-main">
+            <!-- Find strips panel (floats over the board, the board stays live) -->
+            <div v-if="findOpen" class="fnd-panel" @keydown.esc.stop="closeFindPanel" @keydown.enter.stop="runFind">
+                <div class="fnd-title">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find strips
+                    <span class="fnd-sum">{{ findSummary }}</span>
+                    <span class="cal-x" title="Close (Esc)" @click="closeFindPanel">✕</span>
+                </div>
+                <div class="fnd-hint">Fields in <b>bold</b> accept a wild card find (<code>*</code> = any, <code>?</code> = one character); plain text = contains. All filled fields apply together.</div>
+                <div class="fnd-grid">
+                    <label class="fnd-b">Style</label>     <input v-model.trim="findForm.style"   class="cal-in" placeholder="00AFB or 00A*">
+                    <label class="fnd-b">Order</label>     <input v-model.trim="findForm.order"   class="cal-in" placeholder="26H1LEV474 or PO number">
+                    <label class="fnd-b">Product</label>   <input v-model.trim="findForm.product" class="cal-in" placeholder="style :: colour / product type">
+                    <label class="fnd-b">Buyer</label>     <input v-model.trim="findForm.buyer"   class="cal-in" placeholder="LEVI*">
+                    <label>Shipment</label>
+                    <span class="fnd-range">
+                        <input v-model="findForm.shipFrom" class="cal-in" type="date"> <span>→</span>
+                        <input v-model="findForm.shipTo"   class="cal-in" type="date">
+                    </span>
+                    <label>Floor</label>
+                    <select v-model="findForm.floor" class="cal-in">
+                        <option value="">— any —</option>
+                        <option v-for="f in findOptions.floors" :key="f" :value="f">{{ f }}</option>
+                    </select>
+                    <label>Unit</label>
+                    <select v-model="findForm.unit" class="cal-in">
+                        <option value="">— any —</option>
+                        <option v-for="u in findOptions.units" :key="u" :value="u">{{ u }}</option>
+                    </select>
+                </div>
+                <div class="fnd-btns">
+                    <button class="cal-btn cal-btn-primary st-btn" @click="runFind">🔍 Find</button>
+                    <button class="cal-btn st-btn" :disabled="!findResults.length" @click="findGoTo(findIdx - 1)">◀ Prev</button>
+                    <button class="cal-btn st-btn" :disabled="!findResults.length" @click="findGoTo(findIdx + 1)">Next ▶</button>
+                    <button class="cal-btn st-btn" @click="resetFind">Clear</button>
+                </div>
+                <div v-if="findIds" class="fnd-list">
+                    <table v-if="findResults.length">
+                        <thead><tr><th>#</th><th>Order</th><th>Style : Colour</th><th>Buyer</th><th>Qty</th><th>Line</th><th>Floor</th><th>Start</th><th>Ship</th></tr></thead>
+                        <tbody>
+                            <tr v-for="(r, i) in findResults" :key="r.id" :class="{ 'fnd-cur' : i === findIdx, 'fnd-done' : r.completed }" @click="findGoTo(i)">
+                                <td>{{ i + 1 }}</td>
+                                <td><b>{{ r.order }}</b><span v-if="r.po && r.po !== r.order" class="fnd-po">{{ r.po }}</span></td>
+                                <td>{{ r.style }}<template v-if="r.color"> : {{ r.color }}</template></td>
+                                <td>{{ r.buyer }}</td>
+                                <td class="fnd-num">{{ fmtQty(r.qty) }}</td>
+                                <td>{{ r.line }}</td>
+                                <td>{{ r.floor }}</td>
+                                <td>{{ fmtDate(r.start) }}</td>
+                                <td>{{ r.ship ? fmtDate(r.ship) : '—' }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div v-else class="fnd-none">No strip on this board matches. Change the criteria or press Clear.</div>
+                </div>
+            </div>
             <div
                 class="mb-sched-wrap"
                 :class="{ 'mb-carrying' : carried, 'mb-sched-loading' : boardLoading }"
@@ -12654,6 +12854,7 @@ body {
     display    : flex;
     flex       : 1 1 auto;
     min-height : 0;
+    position   : relative;   /* the Find panel floats inside the board area */
 }
 
 .mb-sched-wrap {
@@ -13391,6 +13592,45 @@ body {
 
 /* Equal Order preview */
 .eq-dialog { width : 900px; max-width : 96vw; }
+
+/* Find strips panel (toolbar 🔍): floats over the board's top-right */
+.fnd-panel {
+    position   : absolute;
+    top        : 0;
+    right      : 10px;
+    z-index    : 150;
+    width      : 560px;
+    max-width  : calc(100vw - 20px);
+    max-height : calc(100% - 10px);
+    overflow   : auto;
+    background : #f0efe8;
+    border     : 1px solid #7a7a7a;
+    box-shadow : 3px 4px 12px rgba(0, 0, 0, 0.4);
+    font-size  : 12px;
+    padding    : 0 0 8px;
+}
+.fnd-title { display : flex; align-items : center; gap : 6px; padding : 6px 10px; font-weight : bold; font-size : 13px; background : #fff; border-bottom : 1px solid #c9c5b8; }
+.fnd-title .fa-solid { color : #0a6ed1; }
+.fnd-sum { margin-left : auto; font-weight : 600; color : #1b52ad; font-size : 12px; }
+.fnd-hint { padding : 6px 10px 2px; color : #5b6673; font-size : 11px; }
+.fnd-hint code { background : #e6e9ee; padding : 0 4px; border-radius : 3px; }
+.fnd-grid { display : grid; grid-template-columns : 80px 1fr; gap : 5px 8px; align-items : center; padding : 6px 10px; }
+.fnd-grid label { font-size : 12px; }
+.fnd-grid .fnd-b { font-weight : 700; }
+.fnd-grid .cal-in { width : 100%; box-sizing : border-box; font-size : 12px; }
+.fnd-range { display : flex; gap : 6px; align-items : center; }
+.fnd-btns { display : flex; gap : 6px; padding : 4px 10px 6px; }
+.fnd-list { margin : 0 10px; border : 1px solid #b9c4d0; border-radius : 4px; max-height : 240px; overflow : auto; background : #fff; }
+.fnd-list table { border-collapse : collapse; width : 100%; font-size : 11.5px; }
+.fnd-list th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 4px 6px; font-weight : 600; }
+.fnd-list td { padding : 3px 6px; border-bottom : 1px solid #eef1f5; white-space : nowrap; cursor : pointer; }
+.fnd-list tr:hover td { background : #eaf1fb; }
+.fnd-list tr.fnd-cur td { background : #cfe0ff; }
+.fnd-list tr.fnd-done td { color : #8a94a0; }
+.fnd-num { text-align : right; }
+.fnd-po { display : block; font-size : 10px; color : #5b6673; }
+.fnd-none { padding : 10px; color : #a35b00; }
+.fr-tb-find.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
 
 /* Consolidate orders toggle (toolbar) — pressed look while ON */
 .fr-tb-btn.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
