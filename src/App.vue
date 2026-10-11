@@ -2278,6 +2278,8 @@ const mshLive     = ref(false);            // Linked checkbox (live sync)
 const mshSearch   = ref('');
 const mshSel      = ref([]);               // selected event ids
 const mshCurveSel = ref('ref');            // 'ref' = reference bar's curve | curve id
+const mshStripEff = ref(100);              // Change strip efficiency: the % to set (1–500, 100 = line/profile figure)
+const mshEffRef   = ref(true);             // … apply it to the reference bar as well
 let   mshLastIdx  = -1;                    // for shift-click ranges
 
 const MSH_ACTIONS = [
@@ -2288,7 +2290,7 @@ const MSH_ACTIONS = [
     { id : 'clearlc',  label : 'Clear previous update for build up curve', soon : true },
     { id : 'capfac',   label : 'Change capacity factor', soon : true },
     { id : 'clearcap', label : 'Clear capacity factor', soon : true },
-    { id : 'stripeff', label : 'Change strip efficiency', soon : true },
+    { id : 'stripeff', label : 'Change strip efficiency' },
     { id : 'route',    label : 'Change strip route', soon : true }
 ];
 
@@ -2339,6 +2341,7 @@ function mshBarInfo(ev) {
         qty      : Number(raw.qty) || 0,
         delivery : raw.ship ? fmtDate(raw.ship) : '—',
         curve    : raw.lcManual?.name || (raw.lc?.applied ? (raw.lc.profileName || 'auto') : '—'),
+        eff      : Number(raw.stripEff) > 0 ? Number(raw.stripEff) : 100,
         linked   : raw.lcLink ? `🔗 ${raw.lcLink.mode === 'live' ? 'live' : 'copy'} → ${raw.lcLink.refOrder || raw.lcLink.refId}` : '',
         completed : raw.status === 'completed'
     };
@@ -2386,10 +2389,87 @@ function openMultiStrip(rec) {
     mshSearch.value = '';
     mshSel.value   = [];
     mshCurveSel.value = 'ref';
+    mshStripEff.value = Number(raw.stripEff) > 0 ? Number(raw.stripEff) : 100;
+    mshEffRef.value   = true;
     mshLastIdx     = -1;
     mshOpen.value  = true;
 }
 uiHooks.onOpenMultiStrip = openMultiStrip;
+
+// Change strip efficiency: the reference bar's base figure (plan / buyer /
+// profile / line efficiency) × the strip % typed = the % the capacity formula
+// actually runs on — shown live under the input
+const mshEffPreview = computed(() => {
+    const s = getInstance();
+    const rec = mshRec.value;
+    const raw = mshRaw.value;
+    if (!s || !rec || !raw) return null;
+    const lid = lineIdOf(s, rec);
+    if (!lid) return null;
+    const probe = { ...raw, stripEff : 100 };
+    const base  = lineCalcParams(s, probe, lid).effPct;
+    const strip = Math.max(1, Math.min(500, Number(mshStripEff.value) || 0));
+    return { base : Math.round(base * 10) / 10, strip, eff : Math.round(base * strip / 10) / 10 };
+});
+
+// ---- Change strip efficiency: every selected strip (and the reference bar
+// when ticked) takes the typed strip %; each bar is re-sized from its OWN
+// start (start / line / qty / SMV unchanged), overlaps push later as usual
+function mshImplementStripEff(s, ref, refRaw, targets) {
+    const v = Math.round(Number(mshStripEff.value));
+    if (!(v >= 1 && v <= 500)) { toast('Strip efficiency must be between 1 and 500 %', 'error'); return; }
+    const list = mshEffRef.value ? [ref, ...targets.filter(t => t !== ref)] : targets.filter(t => t !== ref);
+    if (!list.length) { toast('Select at least one strip from the list below (or tick "reference bar too")', 'warn'); return; }
+    const skipped = [], valid = [];
+    for (const ev of list) {
+        const raw = ev.data.raw;
+        const name = mbmOrderNo(raw.po, raw.mbmOrder);
+        if (raw.status === 'completed')   { skipped.push(`${name}: completed bar cannot be modified`); continue; }
+        if (isHoldId(lineIdOf(s, ev)))    { skipped.push(`${name}: on the Holding Row — plan it first`); continue; }
+        valid.push(ev);
+    }
+    if (!valid.length) { window.alert(`No strips could be changed:\n\n${skipped.join('\n')}`); return; }
+    const summary =
+        `Reference Bar: ${mbmOrderNo(refRaw.po, refRaw.mbmOrder)}\n` +
+        `Action: Change strip efficiency → ${v}%\n` +
+        `Strips: ${valid.length}${skipped.length ? ` (${skipped.length} skipped)` : ''}${mshEffRef.value ? ' (reference bar included)' : ''}\n` +
+        `Each bar is re-sized from its own start date; start / line / qty / SMV stay.`;
+    if (!window.confirm(summary)) return;
+
+    pushUndo(s, `strip efficiency ${v}% (${valid.length})`);
+    const now = new Date().toISOString();
+    const audit = [];
+    const lines = new Set();
+    let pushedTotal = 0;
+    beginBoardInteraction(s, 'light');
+    try {
+        // board order: a bar re-sized before its followers pushes them once
+        valid.sort((a, b) => a.startDate - b.startDate);
+        for (const ev of valid) {
+            const raw  = ev.data.raw;
+            const lid  = lineIdOf(s, ev);
+            const prev = Number(raw.stripEff) > 0 ? Number(raw.stripEff) : 100;
+            raw.stripEff = v;
+            const p = resizeBarForEfficiency(s, ev, lid);
+            if (p < 0) { raw.stripEff = prev; skipped.push(`${mbmOrderNo(raw.po, raw.mbmOrder)}: could not re-size`); continue; }
+            pushedTotal += p;
+            lines.add(lid);
+            audit.push({ eventId : String(ev.id).replace(/^db-/, ''), action : 'strip-eff',
+                refId : String(ref.id), from : prev, to : v, user : authUser.value?.username, at : now });
+        }
+    }
+    finally { endBoardInteraction(s); }
+    if (audit.length) linkAudit(audit);
+    if (lines.size) applyLearningCurves(s, { lineIds : [...lines] });
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    let msg = `${audit.length} strip(s) set to ${v}% strip efficiency — bars re-sized from their own start. Save to keep it.`;
+    if (pushedTotal) msg += ` ${pushedTotal} follower(s) shifted later.`;
+    toast(msg, 'ok');
+    if (skipped.length) window.alert(`Skipped:\n\n${skipped.join('\n')}`);
+}
 
 function mshToggleRow(row, idx, evd) {
     if (row.isRef || row.completed) return;
@@ -2423,13 +2503,14 @@ function mshImplement() {
     const ref = mshRec.value;
     const refRaw = mshRaw.value;
     if (!s || !ref || !refRaw) return;
-    if (!['link', 'unlink'].includes(mshAction.value)) {
-        toast('This action ships in the next phase — Link / Unlink are available now', 'warn');
+    if (!['link', 'unlink', 'stripeff'].includes(mshAction.value)) {
+        toast('This action ships in the next phase — Link / Unlink / Change strip efficiency are available now', 'warn');
         return;
     }
     const targets = mshSel.value
         .map(id => s.eventStore.getById(id))
         .filter(Boolean);
+    if (mshAction.value === 'stripeff') { mshImplementStripEff(s, ref, refRaw, targets); return; }
     if (!targets.length) {
         toast('Select at least one strip from the list below', 'warn');
         return;
@@ -3315,20 +3396,7 @@ function propsUpdate() {
     }
 
     if (lid && !isHoldId(lid) && raw.status !== 'completed') {
-        // An efficiency edit re-sizes THIS bar by the SOP run with the new
-        // figures (curve-aware, whole days) — a saved bar's fixed SOP run
-        // must not swallow the change, or the schedule and the bar disagree
-        const start = new Date(rec.startDate);
-        raw.start   = start;
-        raw.sopMode = !!raw.ship;
-        deriveLcForPlacement(s, raw, lid, start);
-        applyLineFormulaDuration(s, raw, lid);
-        raw.sopMode = false;
-        const end   = endOfWork(start, raw.dur);
-        rec.set({ endDate : end, duration : elapsedDays(start, end) });
-        raw.end   = end;
-        raw.userPinned = true;
-        const pushed = pushFollowers(s, lid, rec);
+        const pushed = resizeBarForEfficiency(s, rec, lid);
         if (pushed) toast(`${pushed} following order(s) shifted later`, 'warn');
         applyLearningCurves(s, { lineIds : [lid] });
         recalcCapacity(s);
@@ -3336,6 +3404,27 @@ function propsUpdate() {
         s.refreshWithTransition?.();
     }
     toast(`${mbmOrderNo(raw.po, raw.mbmOrder)}: profile efficiency ${pe}% · strip ${se}% — bar re-sized${raw.sopDur ? ` to ${raw.sopDur} day(s)` : ''}; Save to keep it`, 'ok');
+}
+
+// An efficiency edit re-sizes the bar from its own start by the SOP run with
+// the new figures (curve-aware, whole days) — a saved bar's fixed SOP run
+// must not swallow the change, or the schedule and the bar disagree. Start,
+// line, qty and SMV stay; only the end moves. Returns the follower count
+// pushed later (−1 when the bar cannot be re-sized where it is).
+function resizeBarForEfficiency(s, rec, lid) {
+    const raw = rec?.data?.raw;
+    if (!raw || !lid || isHoldId(lid) || raw.status === 'completed') return -1;
+    const start = new Date(rec.startDate);
+    raw.start   = start;
+    raw.sopMode = !!raw.ship;
+    deriveLcForPlacement(s, raw, lid, start);
+    applyLineFormulaDuration(s, raw, lid);
+    raw.sopMode = false;
+    const end   = endOfWork(start, raw.dur);
+    rec.set({ endDate : end, duration : elapsedDays(start, end) });
+    raw.end   = end;
+    raw.userPinned = true;
+    return pushFollowers(s, lid, rec);
 }
 
 // Users & permissions is Planning Manager-only — everyone else neither sees
@@ -12031,7 +12120,28 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 >{{ a.label }}<span v-if="a.soon" class="msh-soon">phase 2</span></div>
                             </div>
                         </div>
-                        <div class="msh-side">
+                        <div v-if="mshAction === 'stripeff'" class="msh-side">
+                            <div class="cal-label">Strip efficiency</div>
+                            <div class="msh-eff-box">
+                                <div class="ef-row">
+                                    <label>Strip efficiency</label>
+                                    <input v-model.number="mshStripEff" class="cal-in ef-in" type="number" min="1" max="500" step="1" @keydown.enter="mshImplement">
+                                    <span class="pr-dim">% (1 – 500)</span>
+                                </div>
+                                <div class="msh-eff-quick">
+                                    <button v-for="q in [50, 75, 90, 100, 110, 125]" :key="q" class="cal-btn st-btn msh-eff-q" :class="{ 'msh-eff-q-on' : mshStripEff === q }" @click="mshStripEff = q">{{ q }}%</button>
+                                </div>
+                                <table v-if="mshEffPreview" class="msh-eff-tbl">
+                                    <tr><th>Reference now</th><td>{{ mshRaw.stripEff > 0 ? mshRaw.stripEff : 100 }}%</td></tr>
+                                    <tr><th>Base efficiency</th><td>{{ mshEffPreview.base }}%</td></tr>
+                                    <tr><th>× strip {{ mshEffPreview.strip }}%</th><td><b>{{ mshEffPreview.eff }}%</b> runs the formula</td></tr>
+                                </table>
+                                <div class="msh-eff-note">100% = line / profile efficiency as it is · below 100 = slower (longer bar) · above 100 = faster</div>
+                            </div>
+                            <label class="msh-live"><input type="checkbox" v-model="mshEffRef"> Apply to the reference bar too</label>
+                            <button class="cal-btn cal-btn-primary st-btn msh-impl" @click="mshImplement">✔ Implement</button>
+                        </div>
+                        <div v-else class="msh-side">
                             <div class="cal-label">Select build</div>
                             <select v-model="mshCurveSel" class="msh-build-sel">
                                 <option value="ref">Reference bar's current curve</option>
@@ -12061,7 +12171,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <table>
                             <thead><tr>
                                 <th></th><th>Start</th><th>Order</th>
-                                <th>Style : Color</th><th>Qty</th><th>Delivery</th><th>Curve</th><th>Link</th>
+                                <th>Style : Color</th><th>Qty</th><th>Delivery</th><th>Curve</th><th>Eff %</th><th>Link</th>
                             </tr></thead>
                             <tbody>
                                 <tr
@@ -12082,6 +12192,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td class="msh-num">{{ fmtQty(r.qty) }}</td>
                                     <td>{{ r.delivery }}</td>
                                     <td>{{ r.curve }}</td>
+                                    <td class="msh-num" :class="{ 'msh-eff-off' : r.eff !== 100 }">{{ r.eff }}%</td>
                                     <td class="msh-link">{{ r.linked }}</td>
                                 </tr>
                             </tbody>
@@ -12090,7 +12201,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">
                         Link = reference bar-এর curve টা প্রতিটি selected bar-এর <b>নিজের start date থেকে relative day</b> হিসেবে চলে (calendar dates copy হয় না) ·
                         নিজের start/line/qty/SMV বদলায় না, শুধু end date recalculate হয় · overlap হলে আগের push-back rule ·
-                        Unlink = সম্পর্ক মুছে যায়, শেষ curve মানগুলো থেকে যায় · সব action-এর audit trail DB-তে
+                        Unlink = সম্পর্ক মুছে যায়, শেষ curve মানগুলো থেকে যায় ·
+                        Change strip efficiency = selected strip-গুলোর strip % set হয় (100 = line/profile efficiency), প্রতিটি bar নিজের start থেকে re-size হয় · সব action-এর audit trail DB-তে
                     </div>
                 </div>
             </div>
@@ -14661,6 +14773,18 @@ body {
 .msh-curve-name { font-size : 11px; color : #5b6673; margin-top : 4px; text-align : right; }
 .msh-curve-none { color : #a35b00; font-size : 12px; }
 .msh-live { font-size : 12px; display : flex; gap : 6px; align-items : center; }
+.msh-eff-box { border : 1px solid #d5dbe2; border-radius : 4px; padding : 8px; background : #fbfcfe; display : flex; flex-direction : column; gap : 6px; }
+.msh-eff-box .ef-row { display : flex; gap : 6px; align-items : center; font-size : 12px; }
+.msh-eff-box .ef-row label { font-weight : 600; }
+.msh-eff-box .ef-in { width : 70px; text-align : right; }
+.msh-eff-quick { display : flex; gap : 4px; flex-wrap : wrap; }
+.msh-eff-q { padding : 2px 7px; font-size : 11px; }
+.msh-eff-q-on { background : #2f6fb4; color : #fff; border-color : #2f6fb4; }
+.msh-eff-tbl { border-collapse : collapse; width : 100%; font-size : 11px; }
+.msh-eff-tbl th { text-align : left; font-weight : 600; color : #5b6673; padding : 2px 4px; border-bottom : 1px solid #e9edf2; }
+.msh-eff-tbl td { padding : 2px 4px; border-bottom : 1px solid #e9edf2; }
+.msh-eff-note { font-size : 11px; color : #5b6673; }
+.msh-eff-off { color : #a35b00; font-weight : 700; }
 .msh-impl { align-self : flex-start; }
 .msh-list-hd { display : flex; gap : 10px; align-items : center; margin-bottom : 6px; font-weight : 600; font-size : 13px; }
 .msh-search { flex : 1 1 auto; font : inherit; font-size : 12px; padding : 4px 8px; border : 1px solid #b9c4d0; border-radius : 4px; }
