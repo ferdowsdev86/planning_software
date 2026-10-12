@@ -13813,6 +13813,25 @@ body {
 
 .od-filterrow th { padding : 2px 3px; background : #eef2f8; }
 
+/* Report headers stay put while the rows scroll (FastReact): the whole
+   <thead> — column titles AND the filter row — sticks to the top of the
+   scrolling body; collapsed borders vanish on a sticky head, so a shadow
+   draws the bottom line */
+.od-body .od-table thead,
+.dp-body .dp-table thead,
+.sp-wrap .sp-table thead {
+    position : sticky;
+    top      : 0;
+    z-index  : 6;
+}
+.od-body .od-table thead th,
+.dp-body .dp-table thead th,
+.sp-wrap .sp-table thead th {
+    background-clip : padding-box;
+    box-shadow      : inset 0 -1px 0 #c9c5b8, inset -1px 0 0 #e3e0d6;
+}
+.od-body .od-table thead tr:last-child th { box-shadow : 0 2px 3px rgba(0, 0, 0, 0.18), inset -1px 0 0 #e3e0d6; }
+
 .od-filter {
     width      : 100%;
     box-sizing : border-box;
