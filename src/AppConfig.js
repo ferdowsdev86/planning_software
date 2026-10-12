@@ -2141,7 +2141,12 @@ export const schedulerProConfig = {
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
         }
 
-        if (pastDelivery) {
+        // The fill follows the chosen colour mode. Product delivery / Style
+        // paint a late bar red ("overdue" in the legend) — in Buyer / Plan
+        // status mode the colour must mean ONE thing (every Nautica bar the
+        // same blue); lateness stays visible as the red marker (mb-late)
+        if (pastDelivery) renderData.cls.add('mb-late');
+        if (pastDelivery && !['buyer', 'status'].includes(colorState.mode)) {
             renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
         }
         else if (colorState.mode === 'buyer') {

@@ -90,6 +90,14 @@ const colorMode = ref((() => {
     return ['delivery', 'buyer', 'status', 'style'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
+// the board root carries the colour mode: in Buyer / Plan status mode the
+// CSS keeps the fill untouched (no mismatch hatch over it — outline only)
+function applyColorModeClass(m) {
+    const b = document.body.classList;
+    for (const c of [...b]) if (c.startsWith('mb-color-')) b.remove(c);
+    b.add(`mb-color-${m}`);
+}
+applyColorModeClass(colorMode.value);
 const dataSource = ref('demo');
 const apiModeSel = ref(apiMode());        // auto | local | aws — status-bar switch
 const apiBaseLabel = ref('');             // the endpoint actually in use
@@ -10676,6 +10684,7 @@ const deliveryLegend = computed(() => {
 const pickColorMode = m => {
     colorMode.value = m;
     colorState.mode = m;
+    applyColorModeClass(m);
     if (m === 'buyer') bcolTick.value++;
     localStorage.setItem('mbm-color-mode', m); // survives refresh
     colorMenuOpen.value = false;
@@ -15505,6 +15514,15 @@ body {
     background : repeating-linear-gradient(135deg, #ffe082 0 8px, #ff8f00 8px 16px) !important;
 }
 .b-sch-event.mb-qty-mismatch { outline : 2px solid #e65100; outline-offset : -2px; color : #3e2723 !important; }
+/* Buyer / Plan status mode: the fill is the buyer's / status colour and
+   nothing else — the mismatch keeps its orange outline, no hatch over it;
+   a late bar shows a red marker along its bottom edge instead of a red fill */
+body.mb-color-buyer .b-sch-event.mb-qty-mismatch::before,
+body.mb-color-status .b-sch-event.mb-qty-mismatch::before { background : none !important; }
+body.mb-color-buyer .b-sch-event.mb-qty-mismatch,
+body.mb-color-status .b-sch-event.mb-qty-mismatch { color : inherit !important; }
+body.mb-color-buyer .b-sch-event.mb-late,
+body.mb-color-status .b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }
 .st-access { width : 100px; text-align : left; font-size : 11px; padding : 2px 4px; }
