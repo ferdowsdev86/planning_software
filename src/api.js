@@ -33,14 +33,24 @@ const LEGACY_BASE = _strip(import.meta.env.VITE_API_URL);
 export const apiMode = () => localStorage.getItem('planningApiMode') || 'auto';
 export const setApiMode = m => localStorage.setItem('planningApiMode', m);
 
+// A page served from the real host (mbmplan.mbm.group) never talks to a
+// planner's OWN machine: an API answering on localhost there is some
+// developer's instance — wrong DB, no VPN — and would silently hijack the
+// board (bars that will not move, tooltips and saves failing). Only a page
+// opened on localhost may use a localhost API; a pinned "local" mode or a
+// cached localhost base is ignored elsewhere.
+const isLocalBase = u => /\/\/(localhost|127\.0\.0\.1|\[?::1\]?)(:|\/|$)/i.test(String(u || ''));
+const allowLocal  = ON_LOCALHOST;
+const usable      = b => !!b && (allowLocal || !isLocalBase(b));
+
 export let API_BASE = (() => {
     const mode = apiMode();
-    if (mode === 'local') return LOCAL_BASE;
+    if (mode === 'local' && allowLocal) return LOCAL_BASE;
     if (mode === 'aws' && AWS_BASE) return AWS_BASE;
     const cached = _strip(localStorage.getItem('planningApiBase'));
-    if (cached) return cached;
-    if (LEGACY_BASE && (ON_LOCALHOST || !/\/\/(localhost|127\.0\.0\.1)/.test(LEGACY_BASE))) return LEGACY_BASE;
-    return ON_LOCALHOST ? LOCAL_BASE : (AWS_BASE || '/api/v1/planning');
+    if (usable(cached)) return cached;
+    if (usable(LEGACY_BASE)) return LEGACY_BASE;
+    return allowLocal ? LOCAL_BASE : (AWS_BASE || '/api/v1/planning');
 })();
 
 async function _healthy(base, timeoutMs = 2500) {
@@ -66,14 +76,15 @@ async function _healthy(base, timeoutMs = 2500) {
 // the failure is visible instead of silently masked by a fallback.
 export async function resolveApiBase() {
     const mode = apiMode();
-    const candidates = mode === 'local' ? [LOCAL_BASE]
-        : mode === 'aws' ? [AWS_BASE].filter(Boolean)
+    const candidates = mode === 'local' && allowLocal ? [LOCAL_BASE]
+        : mode === 'aws' && AWS_BASE ? [AWS_BASE]
         : [...new Set([
             _strip(localStorage.getItem('planningApiBase')),
-            ON_LOCALHOST ? LOCAL_BASE : AWS_BASE,
-            LEGACY_BASE, LOCAL_BASE, AWS_BASE,
+            // the real host: its own API first; a localhost page: the local API first
+            allowLocal ? LOCAL_BASE : '/api/v1/planning',
+            AWS_BASE, LEGACY_BASE, LOCAL_BASE,
             '/api/v1/planning',
-        ].filter(Boolean))];
+        ].filter(usable))];
 
     for (const base of candidates) {
         if (await _healthy(base)) {
