@@ -15021,27 +15021,22 @@ body {
     white-space   : nowrap;
     text-overflow : ellipsis;
     font-weight   : 600;
-    /* Subtle 3D: thin dark border, slightly rounded, soft outer shadow */
-    border        : 1px solid rgba(0, 0, 0, 0.28);
+    /* Flat (2D) bar: solid colour, thin dark edge, no shadow, no gradient */
+    border        : 1px solid rgba(0, 0, 0, 0.35);
     border-left   : 2px solid #111;   /* order-to-order separator (FastReact) */
     border-right  : 2px solid #111;
-    border-radius : 3px;
-    box-shadow    : inset 0 1px 0 rgba(255, 255, 255, 0.45),
-                    0 2px 4px rgba(0, 0, 0, 0.25);
+    border-radius : 0;
+    box-shadow    : none;
 }
 
-/* 3D fill on top of ANY dynamic base colour (risk / buyer / plan-status):
-   light highlight above → base → darker shade below, no per-colour shades */
+/* Overlay layer kept for the hatch patterns (qty mismatch …) — no fill of
+   its own, so the bar shows its plain base colour */
 .b-sch-event::before {
     content        : '';
     position       : absolute;
     inset          : 0;
     pointer-events : none;
-    background     : linear-gradient(
-        to bottom,
-        rgba(255, 255, 255, 0.30) 0%,
-        rgba(255, 255, 255, 0.00) 45%,
-        rgba(0, 0, 0, 0.18) 100%);
+    background     : none;
 }
 
 
@@ -15407,7 +15402,7 @@ body {
     right        : 0;
     height       : 2.4px;   /* 40% of the previous 6px strip */
     background   : #ff1744;
-    border-radius: 3px 3px 0 0;
+    border-radius: 0;
     pointer-events : none;
     z-index      : 5;
 }
@@ -15426,7 +15421,7 @@ body {
     right        : 0;
     height       : 2.4px;   /* 40% of the previous 6px strip */
     background   : #3d84d6;
-    border-radius: 3px 3px 0 0;
+    border-radius: 0;
     pointer-events : none;
     z-index      : 5;
 }
@@ -15436,9 +15431,10 @@ body {
     filter  : grayscale(0.45);
 }
 
-.b-sch-event.mb-search-hit {
+.b-sch-event.mb-search-hit,
+.mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event.mb-search-hit {
     outline    : 2px solid #fff;
-    box-shadow : 0 0 0 2px #1b52ad;
+    box-shadow : 0 0 0 2px #1b52ad !important;
     z-index    : 4;
 }
 
@@ -15448,14 +15444,13 @@ body {
     outline-offset : 1px;
 }
 
-/* FastReact 3D fill — high-specificity so theme/colour rules can't undo it */
+/* Flat bar — high-specificity so theme/colour rules can't add depth back */
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
-    border-radius : 3px !important;
-    border        : 1px solid rgba(0, 0, 0, 0.28);
+    border-radius : 0 !important;
+    border        : 1px solid rgba(0, 0, 0, 0.35);
     border-left   : 2px solid #111;
     border-right  : 2px solid #111;
-    box-shadow    : inset 0 1px 0 rgba(255, 255, 255, 0.45),
-                    0 2px 4px rgba(0, 0, 0, 0.25) !important;
+    box-shadow    : none !important;
     font-weight   : 600 !important;
     overflow      : hidden;
 }
