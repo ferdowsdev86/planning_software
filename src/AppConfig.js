@@ -2384,7 +2384,7 @@ const tipApiBase = () => globalThis.__mbmApiBase
         ? (import.meta.env.VITE_API_URL_LOCAL || 'http://localhost:4000/api/v1/planning')
         : '/api/v1/planning');
 const tipAllPos  = r => (Array.isArray(r.poList) && r.poList.length > 0 ? r.poList : (r.po ? [String(r.po)] : []));
-function tipPoQuery(r) {
+export function tipPoQuery(r) {
     if (orderTypeOf(r.po, r.orderType) !== 'confirm') return null;
     const allPos = tipAllPos(r);
     if (!allPos.length) return null;
@@ -2395,6 +2395,13 @@ function tipPoQuery(r) {
 }
 const ssGet = k => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : undefined; } catch { return undefined; } };
 const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* quota */ } };
+
+// Board open: the bulk answer lands in the same session cache the hover path
+// reads — tooltips then open complete, with no request at all
+export function warmTipCache(po, detail, qs, rows) {
+    if (po && detail !== undefined) ssSet(`tip-${po}`, detail);
+    if (qs && Array.isArray(rows)) ssSet(`pos-sum-${qs}`, rows);
+}
 
 // { detail, poSummary } when everything the tooltip needs is cached, else null
 export function tipDataFromCache(r) {

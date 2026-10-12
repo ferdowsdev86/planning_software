@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipDataFromCache, warmTipCache, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
@@ -29,7 +29,7 @@ import {
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
-    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1071,6 +1071,7 @@ function ensureRowsCoverBoard(s) {
 async function revealBoard(s) {
     setBoardLoad(true, 'Laying out the board…', 90);
     refreshStripNotes();          // note markers on the bars (no wait — the board shows at once)
+    warmTooltipsForBoard(s);      // every bar's tooltip data in one request — hovers then need none
     await nextFrame();
     try {
         window.dispatchEvent(new Event('resize'));
@@ -7359,6 +7360,34 @@ function snWhen(d) {
     const x = new Date(d);
     if (Number.isNaN(x.getTime())) return '—';
     return `${fmtDate(x)} ${x.toLocaleTimeString('en-US', { hour : 'numeric', minute : '2-digit' })}`;
+}
+
+// Board open: one request brings every bar's ERP detail and PO rows into
+// the tooltip's session cache (chunks of 300) — a hover then opens the
+// complete tooltip with no request at all
+async function warmTooltipsForBoard(s = getInstance()) {
+    if (!s?.eventStore) return;
+    const pos = new Set(), groups = [], seen = new Set();
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage || tipDataFromCache(r)) continue;
+        if (r.po) pos.add(String(r.po));
+        const qs = tipPoQuery(r);
+        if (qs && qs.startsWith('ids=') && !seen.has(qs)) {
+            seen.add(qs);
+            groups.push({ key : qs, ids : (Array.isArray(r.idList) ? r.idList : []).map(Number).filter(n => n > 0) });
+        }
+    }
+    if (!pos.size && !groups.length) return;
+    try {
+        const posArr = [...pos];
+        for (let i = 0; i < Math.max(posArr.length, groups.length); i += 300) {
+            const out = await tooltipBulkDb(posArr.slice(i, i + 300), groups.slice(i, i + 300));
+            for (const [po, d] of Object.entries(out.details || {})) warmTipCache(po, d, null, null);
+            for (const [k, rows] of Object.entries(out.groups || {})) warmTipCache(null, undefined, k, rows);
+        }
+    }
+    catch { /* offline — the hover path (with its own breaker) takes over */ }
 }
 
 // All live notes → shared store (bar markers + tooltip); board repaint

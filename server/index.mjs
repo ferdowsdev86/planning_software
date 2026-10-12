@@ -5,6 +5,7 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
@@ -60,6 +61,8 @@ const dbOfflineReply = res => res.status(503).json({ success : false, offline : 
 
 const app = express();
 app.use(cors());
+// gzip every JSON answer above 1 KB: a 5 MB board load travels as ~0.5 MB
+app.use(compression({ threshold : 1024 }));
 // text/plain included: sendBeacon() payloads (board-lock release / session
 // end on tab close) must be CORS-simple — a JSON content-type would need a
 // preflight, which beacons cannot do, and the release would silently fail
@@ -100,43 +103,8 @@ process.on('uncaughtException',  e => console.error('[uncaughtException]',  e?.m
 // --------------------------------------------------------------------------
 // Scheduler load API (document 6)
 // --------------------------------------------------------------------------
-app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
-    try {
-        const projectId = Number(req.params.id);
-        const unitId    = req.query.unit_id ? Number(req.query.unit_id) : null;
-
-        const [[project]] = await pool.query(
-            `SELECT id, project_name, plan_status, version_no, plan_from, plan_to, unit_id
-             FROM planning_projects WHERE id = ?`,
-            [projectId]
-        );
-        if (!project) return res.status(404).json({ success : false, error : 'Project not found' });
-
-        const effUnit = unitId || project.unit_id || null;
-
-        let resourceSql = `
-            SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
-                   default_efficiency, manpower, machine_count, capacity_minutes_per_day,
-                   working_hours_per_day, sort_order
-             FROM planning_resources WHERE active = TRUE`;
-        const resourceParams = [];
-        if (effUnit) {
-            resourceSql += ' AND unit_id = ?';
-            resourceParams.push(effUnit);
-        }
-        resourceSql += ' ORDER BY sort_order';
-        let [resources] = await pool.query(resourceSql, resourceParams);
-        // AQL board (unit 3) often shares lines stored under a legacy unit_id
-        if (!resources.length && effUnit) {
-            [resources] = await pool.query(
-                `SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
-                        default_efficiency, manpower, machine_count, capacity_minutes_per_day,
-                        working_hours_per_day, sort_order
-                 FROM planning_resources WHERE active = TRUE ORDER BY sort_order`
-            );
-        }
-
-        let eventSql = `
+// Board events with their order / projection row (scheduler-data)
+const EVENT_SQL_HEAD = `
             SELECT e.id, e.planning_order_id, e.event_code, e.event_name, e.production_stage, e.start_date, e.end_date,
                     e.duration, e.duration_unit, e.planned_quantity, e.percent_done,
                     e.manually_scheduled, e.event_status, e.notes,
@@ -170,11 +138,71 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                   AND e.event_code LIKE 'ev-proj:%'
                   AND p.id = (SELECT x.id FROM planning_orders x
                               WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
-                              ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
-             WHERE e.project_id = ? AND e.event_status != 'cancelled'`;
-        const eventParams = [projectId];
-        // (unit filtering happens below, once the assignments are known)
-        let [events] = await pool.query(eventSql, eventParams);
+                              ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)`;
+
+app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
+    try {
+        const projectId = Number(req.params.id);
+        const unitId    = req.query.unit_id ? Number(req.query.unit_id) : null;
+
+        const [[project]] = await pool.query(
+            `SELECT id, project_name, plan_status, version_no, plan_from, plan_to, unit_id
+             FROM planning_projects WHERE id = ?`,
+            [projectId]
+        );
+        if (!project) return res.status(404).json({ success : false, error : 'Project not found' });
+
+        const effUnit = unitId || project.unit_id || null;
+
+        let resourceSql = `
+            SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
+                   default_efficiency, manpower, machine_count, capacity_minutes_per_day,
+                   working_hours_per_day, sort_order
+             FROM planning_resources WHERE active = TRUE`;
+        const resourceParams = [];
+        if (effUnit) {
+            resourceSql += ' AND unit_id = ?';
+            resourceParams.push(effUnit);
+        }
+        resourceSql += ' ORDER BY sort_order';
+        // The DB sits behind a WAN hop from this API: every query costs a
+        // round trip, so the independent ones go out together
+        const [[resources0], [events0], [assignments], [dependencies], [calendars], [allRes], holdRes] = await Promise.all([
+            pool.query(resourceSql, resourceParams),
+            pool.query(EVENT_SQL_HEAD + `
+             WHERE e.project_id = ? AND e.event_status != 'cancelled'`, [projectId]),
+            pool.query(
+                `SELECT a.id, a.event_id, a.resource_id
+                 FROM planning_assignments a
+                 JOIN planning_events e ON e.id = a.event_id
+                 WHERE e.project_id = ?`, [projectId]),
+            pool.query(
+                'SELECT id, from_event_id, to_event_id, dependency_type, lag, lag_unit FROM planning_dependencies WHERE project_id = ? AND active = TRUE',
+                [projectId]),
+            pool.query(
+                `SELECT c.id, c.unit_id, c.calendar_code, c.calendar_name, i.interval_type, i.recurrent_rule,
+                        i.weekday_no, i.start_time, i.end_time, i.interval_name
+                 FROM planning_calendars c
+                 LEFT JOIN planning_calendar_intervals i ON i.calendar_id = c.id
+                 WHERE c.active = TRUE
+                 ORDER BY (c.unit_id = ?) DESC, c.id`, [effUnit || 0]),
+            effUnit ? pool.query('SELECT id, unit_id FROM planning_resources') : Promise.resolve([[]]),
+            pool.query(
+                `SELECT id, manpower, default_efficiency AS eff, working_hours_per_day AS hours, machine_count AS machines
+                 FROM planning_resources WHERE resource_code = ? LIMIT 1`, [`HOLD-${effUnit || 3}`]).catch(() => [[]])
+        ]);
+        let resources = resources0;
+        let events = events0;
+        // AQL board (unit 3) often shares lines stored under a legacy unit_id
+        if (!resources.length && effUnit) {
+            [resources] = await pool.query(
+                `SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
+                        default_efficiency, manpower, machine_count, capacity_minutes_per_day,
+                        working_hours_per_day, sort_order
+                 FROM planning_resources WHERE active = TRUE ORDER BY sort_order`
+            );
+        }
+
 
         // Board hygiene: a bar must never load for an order that is absent
         // from the Orders list — retired orders (planning_completed_orders)
@@ -188,21 +216,17 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                 ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
         const evCodes = [...new Set(events.map(evOrderCode).filter(Boolean))];
         if (evCodes.length) {
-            const completedSet = await completedOrderCodes();
             const ph = evCodes.map(() => '?').join(',');
-            const [erpRows] = await pool.query(
-                `SELECT DISTINCT order_code FROM cuttingedgedb.mr_order_entry WHERE order_code IN (${ph})`,
-                evCodes
-            );
-            const inErp = new Set(erpRows.map(r => r.order_code));
             // OS orders (mbm_os.os_orders — GSL-… codes) are just as real as
             // mr_order_entry ones: without this their planned projection bars
             // were silently dropped as "unknown to ERP" on every board load,
             // while the list kept showing them as Planned
-            const [osKnown] = await pool.query(
-                `SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`,
-                evCodes
-            );
+            const [completedSet, [erpRows], [osKnown]] = await Promise.all([
+                completedOrderCodes(),
+                pool.query(`SELECT DISTINCT order_code FROM cuttingedgedb.mr_order_entry WHERE order_code IN (${ph})`, evCodes),
+                pool.query(`SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, evCodes)
+            ]);
+            const inErp = new Set(erpRows.map(r => r.order_code));
             for (const r of osKnown) inErp.add(r.os_order_code);
             events = events.filter(e => {
                 const oc = evOrderCode(e);
@@ -213,20 +237,11 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             });
         }
 
-        const [assignments] = await pool.query(
-            `SELECT a.id, a.event_id, a.resource_id
-             FROM planning_assignments a
-             JOIN planning_events e ON e.id = a.event_id
-             WHERE e.project_id = ?`,
-            [projectId]
-        );
-
         if (effUnit) {
             const evResource = new Map();
             for (const a of assignments) {
                 if (!evResource.has(a.event_id)) evResource.set(a.event_id, a.resource_id);
             }
-            const [allRes] = await pool.query('SELECT id, unit_id FROM planning_resources');
             const resUnit = new Map(allRes.map(r => [r.id, r.unit_id]));
             // A bar belongs to ONE unit's board: its order's production unit,
             // else its projection row's, else the unit the board wrote into
@@ -246,21 +261,6 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             });
         }
 
-        const [dependencies] = await pool.query(
-            'SELECT id, from_event_id, to_event_id, dependency_type, lag, lag_unit FROM planning_dependencies WHERE project_id = ? AND active = TRUE',
-            [projectId]
-        );
-
-        const [calendars] = await pool.query(
-            `SELECT c.id, c.unit_id, c.calendar_code, c.calendar_name, i.interval_type, i.recurrent_rule,
-                    i.weekday_no, i.start_time, i.end_time, i.interval_name
-             FROM planning_calendars c
-             LEFT JOIN planning_calendar_intervals i ON i.calendar_id = c.id
-             WHERE c.active = TRUE
-             ORDER BY (c.unit_id = ?) DESC, c.id`
-        ,
-            [effUnit || 0]
-        );
         // One factory calendar per production unit: the unit's own calendar,
         // else the first active one (its working hours never mix with another unit's)
         const calIds = [...new Set(calendars.map(r => r.id))];
@@ -269,14 +269,7 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
 
         // Holding Row capacity (Setup → Line eff & hours): a hidden
         // planning_resources row 'HOLD-<unit>' (active = 0, never a line)
-        let holding = null;
-        try {
-            const [[h]] = await pool.query(
-                `SELECT id, manpower, default_efficiency AS eff, working_hours_per_day AS hours, machine_count AS machines
-                 FROM planning_resources WHERE resource_code = ? LIMIT 1`, [`HOLD-${effUnit || 3}`]);
-            if (h) holding = h;
-        }
-        catch { /* optional */ }
+        const holding = holdRes?.[0]?.[0] || null;
 
         res.json({
             success  : true,
@@ -1214,6 +1207,90 @@ app.get(`${BASE}/order-details`, async (req, res) => {
 // Return qty + delivery + colour for a bar's POs (tooltip PO breakdown).
 // Prefer exact planning_orders row ids — one PO NUMBER can span several
 // colours, so a number-based lookup can return the wrong colour's quantity.
+// --------------------------------------------------------------------------
+// Tooltip data in one go (board open): every bar's ERP detail (style +
+// bookings) and PO summary rows come back from three queries instead of two
+// requests per hover. A 10-minute in-memory cache serves repeats.
+// --------------------------------------------------------------------------
+const TIP_CACHE_MS = 10 * 60 * 1000;
+const tipCache = new Map();           // key → { at, value }
+const tipGet = k => { const c = tipCache.get(k); return c && Date.now() - c.at < TIP_CACHE_MS ? c.value : undefined; };
+const tipPut = (k, v) => { if (tipCache.size > 5000) tipCache.clear(); tipCache.set(k, { at : Date.now(), value : v }); };
+
+const STYLE_SQL = where => `
+    SELECT
+        po.po_id, po.po_no, po.po_qty,
+        oe.order_code, oe.order_status,
+        s.stl_no, s.stl_product_name, s.stl_description, s.stl_type,
+        s.stl_img_link, s.techpack, s.wash_recipe_status,
+        s.gender, s.stl_garment_description,
+        oe.order_id AS entry_id,
+        COALESCE(po.po_ex_fty, oe.order_delivery_date) AS shipment_date
+    FROM \`${ERP_DB}\`.mr_purchase_order   po
+    JOIN \`${ERP_DB}\`.mr_order_entry       oe ON oe.order_id = po.mr_order_entry_order_id
+    JOIN \`${ERP_DB}\`.mr_style             s  ON s.stl_id    = oe.mr_style_stl_id
+    WHERE ${where}`;
+const BOOKING_SQL = where => `
+    SELECT bk.order_id,
+           bm.mr_booking_id    AS booking_no,
+           bm.delivery_date    AS booking_eta,
+           bm.tracking_status,
+           bm.is_store_sent,
+           bm.store_sent_at    AS store_receive_date,
+           bm.status           AS booking_status
+    FROM \`${ERP_DB}\`.mr_booking         bk
+    JOIN \`${ERP_DB}\`.mr_booking_masters  bm ON bm.id = bk.mr_order_bom_costing_booking_id
+    WHERE ${where}
+    ORDER BY bm.delivery_date ASC`;
+
+app.post(`${BASE}/tooltip-bulk`, async (req, res) => {
+    if (dbOffline()) return dbOfflineReply(res);
+    const pos    = [...new Set((Array.isArray(req.body?.pos) ? req.body.pos : []).map(p => String(p || '').trim()).filter(Boolean))].slice(0, 500);
+    const groups = (Array.isArray(req.body?.groups) ? req.body.groups : [])
+        .map(g => ({ key : String(g?.key || ''), ids : (Array.isArray(g?.ids) ? g.ids : []).map(Number).filter(n => Number.isFinite(n) && n > 0).slice(0, 50) }))
+        .filter(g => g.key && g.ids.length).slice(0, 500);
+    const details = {}, rowsByKey = {};
+    try {
+        const needPos = pos.filter(p => { const c = tipGet(`d:${p}`); if (c !== undefined) { details[p] = c; return false; } return true; });
+        if (needPos.length) {
+            const ph = needPos.map(() => '?').join(',');
+            const [styles] = await pool.query(STYLE_SQL(`po.po_no IN (${ph})`), needPos);
+            const byPo = new Map();
+            for (const s of styles) if (!byPo.has(String(s.po_no))) byPo.set(String(s.po_no), s);
+            const entryIds = [...new Set([...byPo.values()].map(s => s.entry_id).filter(Boolean))];
+            const bookingsByEntry = new Map();
+            if (entryIds.length) {
+                const [bk] = await pool.query(BOOKING_SQL(`bk.order_id IN (${entryIds.map(() => '?').join(',')})`), entryIds);
+                for (const b of bk) {
+                    const list = bookingsByEntry.get(b.order_id) || [];
+                    if (list.length < 8) list.push(b);
+                    bookingsByEntry.set(b.order_id, list);
+                }
+            }
+            for (const p of needPos) {
+                const style = byPo.get(p) || null;
+                const value = style ? { style, bookings : bookingsByEntry.get(style.entry_id) || [] } : null;
+                details[p] = value;
+                tipPut(`d:${p}`, value);
+            }
+        }
+        const needGroups = groups.filter(g => { const c = tipGet(`g:${g.key}`); if (c !== undefined) { rowsByKey[g.key] = c; return false; } return true; });
+        if (needGroups.length) {
+            const allIds = [...new Set(needGroups.flatMap(g => g.ids))];
+            const [rows] = await pool.query(
+                `SELECT id, po_number, color, order_quantity, shipment_date FROM planning_orders WHERE id IN (${allIds.map(() => '?').join(',')})`, allIds);
+            const byId = new Map(rows.map(r => [Number(r.id), r]));
+            for (const g of needGroups) {
+                const list = g.ids.map(i => byId.get(i)).filter(Boolean);
+                rowsByKey[g.key] = list;
+                tipPut(`g:${g.key}`, list);
+            }
+        }
+        res.json({ success : true, details, groups : rowsByKey });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
 app.get(`${BASE}/pos-summary`, async (req, res) => {
     if (dbOffline()) return dbOfflineReply(res);
     const rawIds = req.query.ids;

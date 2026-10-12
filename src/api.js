@@ -1382,3 +1382,16 @@ export async function deleteStripNoteDb(id, user) {
     if (!out?.success) throw new Error(out?.error || 'delete note failed');
     return true;
 }
+
+// Tooltip data for a whole board in one request (board open): ERP detail per
+// PO + PO summary rows per bar — see server tooltip-bulk
+export async function tooltipBulkDb(pos, groups) {
+    const res = await fetch(`${API_BASE}/tooltip-bulk`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ pos, groups })
+    });
+    const out = await res.json();
+    if (!out?.success) throw new Error(out?.error || 'tooltip bulk failed');
+    return out;
+}

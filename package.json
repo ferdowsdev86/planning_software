@@ -13,6 +13,7 @@
     "@bryntum/schedulerpro": "7.3.5",
     "@bryntum/schedulerpro-vue-3": "7.3.5",
     "@fortawesome/fontawesome-free": "^7.3.1",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
