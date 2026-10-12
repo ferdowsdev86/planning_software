@@ -1628,6 +1628,8 @@ export const schedulerProConfig = {
 
     readOnly            : false,
     useInitialAnimation : false,
+    // bars never slide into place (FastReact): no animated refresh
+    transitionDuration  : 0,
     zoomOnMouseWheel    : false,
     zoomOnTimeAxisDoubleClick : false,
     createEventOnDblClick     : false,

@@ -8870,14 +8870,13 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
     let placed = 0;
     beginBoardInteraction(s, 'light');
     try {
+        // a member is shown again only once it sits at its new place (shown
+        // earlier it would paint at its old place first and slide over)
+        const show = m => { const mr = m.data?.raw; if (m !== rec && mr && '_prevCls' in mr) { m.set('cls', mr._prevCls || ''); delete mr._prevCls; } };
         for (const m of ordered) {
             const mraw = m.data?.raw;
-            if (!mraw) continue;
+            if (!mraw) { show(m); continue; }
             mraw._carryGroup = false;
-            if (m !== rec) {
-                m.set('cls', mraw._prevCls || '');
-                delete mraw._prevCls;
-            }
             if (m === rec && ordered[0] === rec) {      // already sits at the drop point
                 prevEnd = new Date(rec.endDate);
                 continue;
@@ -8902,11 +8901,12 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
                 if (mraw.status === 'unplanned') mraw.status = 'draft';
                 mraw.userPinned = true;
             }
-            if (!(start instanceof Date) || Number.isNaN(+start) || !(end instanceof Date) || Number.isNaN(+end) || end <= start) continue;
+            if (!(start instanceof Date) || Number.isNaN(+start) || !(end instanceof Date) || Number.isNaN(+end) || end <= start) { show(m); continue; }
             mraw.latePlan = !parkHold && !!mraw.ship && end > new Date(mraw.ship);
             assignEventToLine(s, m, targetId);
             m.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
             m.data.resourceId = targetId;
+            show(m);
             mraw.start = start;
             mraw.end   = end;
             if (!parkHold) pushFollowers(s, targetId, m);
@@ -9395,9 +9395,10 @@ async function placeCarried(date, resourceRecord) {
     }
     raw.latePlan = !parkHold && !!raw.ship && end > new Date(raw.ship);
 
-    restoreCarriedCls();
     pushUndo(s, `move ${raw.po || rec.name}${carryGroup.length ? ` (+${carryGroup.length})` : ''}`);
     assignEventToLine(s, rec, targetId);
+    // the bar stays hidden until it has its new line and dates — shown
+    // earlier it would paint at its OLD place first and slide over
     rec.set({
         startDate  : start,
         endDate    : end,
@@ -9451,8 +9452,11 @@ async function placeCarried(date, resourceRecord) {
         status   : raw.status
     });
     ignorePickUntil = performance.now() + 450;
-    cancelCarry();
+    // the real bar appears at the drop point in the same paint the ghost
+    // leaves — no frame without a bar, no slide from the old place
+    restoreCarriedCls();
     s.refresh?.();
+    cancelCarry();
     markBoardDirty();
     touchBoardCache(s);
 }
@@ -15041,6 +15045,10 @@ body {
    ratio holds at every zoom, and the height is identical in normal /
    selected / hovered / dragging / resizing states — geometry never jumps. */
 .b-sch-event-wrap {
+    /* Bars never slide (FastReact): a placed / pushed / re-sized bar is
+       painted where it now is — Bryntum's animated transition is off */
+    transition : none !important;
+    --b-sch-event-transition : none;
     /* Keep Bryntum's per-row `top` so bars stay on their assigned line */
     height     : calc(var(--mb-row-h, 48px) / 2) !important;
     margin-top : 0;   /* bar sticks to the row's top line (common rule) */
