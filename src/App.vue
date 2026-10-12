@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
@@ -16,7 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
-import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd, productTypeFor } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -87,7 +87,7 @@ const colorMenuOpen = ref(false);
 const colorMode = ref((() => {
     const saved = localStorage.getItem('mbm-color-mode');
     // 'risk' was the old name of the first mode — it is "Product delivery" now
-    return ['delivery', 'buyer', 'status', 'style'].includes(saved) ? saved : 'delivery';
+    return ['delivery', 'buyer', 'product', 'style'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
 // the board root carries the colour mode: in Buyer / Plan status mode the
@@ -4332,6 +4332,8 @@ const PRODUCT_TYPES = [
     { name : 'Vest Padding', color : '#633974' },
     { name : 'Vest Regular', color : '#1a5276' },
 ];
+// the bar renderer's "Colour by: Product" paints with these
+colorState.productColors = Object.fromEntries(PRODUCT_TYPES.map(p => [p.name, p.color]));
 
 // Line capability chart (planning team's line / product matrix, Sep 2026):
 // AQL-A1 … A9 = Line 01 … Line 09 — the product types each line can run.
@@ -10681,8 +10683,39 @@ const colorModes = [
     { icon : '🧵', label : 'Style',            mode : 'style' },
     { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
     { icon : '👕', label : 'Buyer',            mode : 'buyer' },
-    { icon : '🏷', label : 'Plan status',      mode : 'status' }
+    { icon : '👖', label : 'Product',          mode : 'product' }
 ];
+
+// Legends for Style / Product: what is on the open board, in its colours
+const styleLegend = computed(() => {
+    void bcolTick.value;
+    const s = getInstance();
+    const n = new Map();
+    for (const ev of s?.eventStore?.records || []) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        const k = String(r.style || mbmOrderNo(r.po, r.mbmOrder) || '').trim();
+        if (!k) continue;
+        if (!n.has(k)) n.set(k, { key : k, bars : 0 });
+        n.get(k).bars++;
+    }
+    return [...n.values()].sort((a, b) => b.bars - a.bars).slice(0, 18)
+        .map(x => ({ ...x, bg : styleColorOf(x.key), fg : textOnColor(styleColorOf(x.key)) }));
+});
+const productLegend = computed(() => {
+    void bcolTick.value;
+    const s = getInstance();
+    const n = new Map();
+    for (const ev of s?.eventStore?.records || []) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        const k = String(r.productType || productTypeFor(r.po, r.productType) || '').trim() || '—';
+        if (!n.has(k)) n.set(k, { key : k, bars : 0 });
+        n.get(k).bars++;
+    }
+    return [...n.values()].sort((a, b) => b.bars - a.bars).slice(0, 18)
+        .map(x => ({ ...x, bg : productTypeColor(x.key), fg : textOnColor(productTypeColor(x.key)) }));
+});
 
 // Legend for Product delivery: this month and the next five, each in the
 // colour its bars wear on the board
@@ -10702,7 +10735,7 @@ const pickColorMode = m => {
     colorMode.value = m;
     colorState.mode = m;
     applyColorModeClass(m);
-    if (m === 'buyer') bcolTick.value++;
+    bcolTick.value++;   // legends recompute for the board on screen
     localStorage.setItem('mbm-color-mode', m); // survives refresh
     colorMenuOpen.value = false;
     // every bar repaints in the new mode at once (text and colour)
@@ -11100,7 +11133,17 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div v-if="colorMode === 'delivery'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Delivery month</div>
                             <span v-for="m in deliveryLegend" :key="m.label" class="fr-colormenu-chip" :style="{ background : m.bg, color : m.fg }">{{ m.label }}</span>
-                            <span class="fr-colormenu-chip" style="background:#ee2e24;color:#fff">overdue</span>
+                            <span class="fr-colormenu-chip fr-colormenu-late" title="a bar past its delivery date carries a red mark along its bottom edge">late = red bottom edge</span>
+                        </div>
+                        <div v-if="colorMode === 'style'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">Styles on this board</div>
+                            <span v-for="b in styleLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.key }}</span>
+                            <span v-if="!styleLegend.length" class="t4dim">no bars on the board</span>
+                        </div>
+                        <div v-if="colorMode === 'product'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">Product types on this board <a class="fr-colormenu-link" @click.stop="openEffProfiles">colours…</a></div>
+                            <span v-for="b in productLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.key }}</span>
+                            <span v-if="!productLegend.length" class="t4dim">no bars on the board</span>
                         </div>
                     </div>
                 </span>
@@ -15534,12 +15577,10 @@ body {
 /* Buyer / Plan status mode: the fill is the buyer's / status colour and
    nothing else — the mismatch keeps its orange outline, no hatch over it;
    a late bar shows a red marker along its bottom edge instead of a red fill */
-body.mb-color-buyer .b-sch-event.mb-qty-mismatch::before,
-body.mb-color-status .b-sch-event.mb-qty-mismatch::before { background : none !important; }
-body.mb-color-buyer .b-sch-event.mb-qty-mismatch,
-body.mb-color-status .b-sch-event.mb-qty-mismatch { color : inherit !important; }
-body.mb-color-buyer .b-sch-event.mb-late,
-body.mb-color-status .b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
+.b-sch-event.mb-qty-mismatch::before { background : none !important; }
+.b-sch-event.mb-qty-mismatch { color : inherit !important; }
+.b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
+.fr-colormenu-late { background : #fff; color : #b00020; border : 1px solid #ddd; box-shadow : inset 0 -3px 0 #ee2e24; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }
 .st-access { width : 100px; text-align : left; font-size : 11px; padding : 2px 4px; }

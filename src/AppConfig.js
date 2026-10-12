@@ -280,12 +280,31 @@ const hashColor = s => PALETTE[
     [...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length
 ];
 
-const STATUS_COLORS = {
-    draft : '#1e88e5', planned : '#5e7c8a', confirmed : '#7b1fa2',
-    running : '#0a8f3c', completed : '#9e9e9e', delayed : '#e53935'
-};
+export const colorState = { mode : 'delivery', buyerColors : {}, productColors : {} };
 
-export const colorState = { mode : 'risk', buyerColors : {} };
+// Style colour: one deterministic colour per style number (hundreds of
+// styles → a hue from the name, same everywhere, no table to keep)
+const hslToHex = (h, s, l) => {
+    const f = n => { const k = (n + h / 30) % 12; const a = s * Math.min(l, 1 - l); const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(v * 255).toString(16).padStart(2, '0'); };
+    return `#${f(0)}${f(8)}${f(4)}`;
+};
+export function styleColorOf(style) {
+    const k = String(style || '').trim().toUpperCase();
+    if (!k) return '#9e9e9e';
+    let h = 0;
+    for (let i = 0; i < k.length; i++) h = (h * 33 + k.charCodeAt(i)) >>> 0;
+    const hue = (h * 137.508) % 360;            // golden angle → neighbours differ
+    const light = [0.36, 0.44, 0.52][h % 3];
+    return hslToHex(hue, 0.62, light);
+}
+// Product (garment) type colour: the Efficiency profiles table's colour for
+// the type (set by App.vue), else a stable automatic one
+export function productTypeColor(name) {
+    const k = String(name || '').trim();
+    const own = colorState.productColors[k] || colorState.productColors[k.toUpperCase()];
+    if (own) return /^#f{6}$/i.test(own) ? '#d9d9d9' : own;   // a white swatch would be an invisible bar
+    return styleColorOf(`type:${k}`);
+}
 
 // ---------------------------------------------------------------------------
 // Buyer colours: the planner's own colour per buyer (Setup → Buyer colours,
@@ -2144,22 +2163,16 @@ export const schedulerProConfig = {
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
         }
 
-        // The fill follows the chosen colour mode. Product delivery / Style
-        // paint a late bar red ("overdue" in the legend) — in Buyer / Plan
-        // status mode the colour must mean ONE thing (every Nautica bar the
-        // same blue); lateness stays visible as the red marker (mb-late)
+        // The fill is the chosen colour mode's colour and NOTHING else — one
+        // colour means one thing (every Nautica bar the same blue, every
+        // 5 Pocket the same red). Lateness stays visible as the red marker
+        // along the bottom edge (mb-late), a qty mismatch as its outline.
         if (pastDelivery) renderData.cls.add('mb-late');
-        if (pastDelivery && !['buyer', 'status'].includes(colorState.mode)) {
-            renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
-        }
-        else if (colorState.mode === 'buyer') {
-            const bc = buyerColorOf(r.buyer);
-            renderData.style = `background-color:${bc};border-color:#222;color:${textOnColor(bc)}`;
-        }
-        else if (colorState.mode === 'status') {
-            renderData.style = `background-color:${STATUS_COLORS[r.status] || '#5e7c8a'};border-color:#222;color:#fff`;
-        }
-        else if (colorState.mode === 'delivery') {
+        const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
+        if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
+        else if (colorState.mode === 'product') paint(productTypeColor(r.productType || productTypeFor(r.po, r.productType)));
+        else if (colorState.mode === 'style')   paint(styleColorOf(r.style || mbmOrderNo(r.po, r.mbmOrder)));
+        else {
             // Product delivery: the bar wears its delivery month's colour
             const c = deliveryMonthColor(r.ship);
             if (c) renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
