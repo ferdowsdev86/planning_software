@@ -9788,7 +9788,15 @@ onMounted(() => {
             const rec = s.resolveEventRecord?.(wrap);
             if (!rec) return;
             handleBarMouseDown({ eventRecord : rec, domEvent : e });
-            if (carried.value) e.preventDefault();   // no text selection / native drag image under the carry
+            if (carried.value) {
+                // The bar is ours now: no text selection / native drag image,
+                // and the grid's own drag / resize handlers must not see this
+                // press — the element is hidden under the carry (0 px wide),
+                // and the resize feature's handle test threw on it
+                // ("Incorrect type for Rectangle.width, got -0.5")
+                e.preventDefault();
+                e.stopPropagation();
+            }
         }, true);
         // Ctrl+click is multi-select — on a Mac the OS turns it into a
         // right-click, and with the bar menu suppressed the BROWSER's own
@@ -15009,6 +15017,9 @@ body {
     /* Keep Bryntum's per-row `top` so bars stay on their assigned line */
     height     : calc(var(--mb-row-h, 48px) / 2) !important;
     margin-top : 0;   /* bar sticks to the row's top line (common rule) */
+    /* a tiny piece at a narrow zoom still has a measurable box — the
+       resize feature's handle maths needs a positive width */
+    min-width  : 3px;
 }
 
 .b-sch-event {
