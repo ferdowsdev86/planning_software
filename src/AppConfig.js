@@ -2,7 +2,7 @@ import { DateHelper, StringHelper } from '@bryntum/schedulerpro';
 import {
     LINES, LINE_BY_ID, STAGE_RESOURCES, DEPENDENCIES,
     PLAN_START, PLAN_END, VIEW_START, VIEW_END, TOTAL_AVAIL_MIN,
-    computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, isLineOffDay, nextLineWorkingDay, fmtQty, fmtDate,
+    computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, isLineOffDay, nextLineWorkingDay, lineOverrideOf, fmtQty, fmtDate,
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
@@ -128,7 +128,10 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
         if (lim ? d >= lim : remaining <= 0) break;
         // a line given 0 hours for the date (Selected lines) is off that day
         const hrsF    = dayCapacityFactor(d, lineHours, lineId);
-        const off = isOffDay(d) || hrsF <= 0;
+        // a line's own figure for the date decides (Selected lines): 0 = off,
+        // > 0 = it works even on a unit off day; else the unit calendar
+        const lo  = lineOverrideOf(d, lineId);
+        const off = lo !== undefined ? lo <= 0 : (isOffDay(d) || hrsF <= 0);
         const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
         const ramping = !!lc && !off && rampIdx < period;
         const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;

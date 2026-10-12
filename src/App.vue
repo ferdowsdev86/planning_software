@@ -9699,24 +9699,19 @@ function applyCalendarToBoard({ pack = true } = {}) {
     const s = getInstance();
     if (!s) return;
 
-    const intervals = [...calendarState.offDays].map(d => ({
-        recurrentStartDate : `on ${DAY_NAMES[d]} at 0:00`,
-        recurrentEndDate   : `on ${DAY_NAMES[(d + 1) % 7]} at 0:00`,
-        isWorking          : false
-    }));
-    // Date-specific overrides (Change working hours): a zeroed date becomes
-    // non-working, a positive override on a weekly-off date becomes working
-    for (const [ymd, hrsOv] of Object.entries(calendarState.overrides || {})) {
-        const d0 = new Date(`${ymd}T00:00:00`);
-        if (Number.isNaN(d0.getTime())) continue;
+    // One static non-working interval per OFF DATE of the plan window —
+    // weekly off days and zeroed dates alike, an overridden-to-working date
+    // (a Friday given 11:00) simply left out. A recurrent "every Friday"
+    // rule beat a static working override in Bryntum's calendar no matter
+    // the priority, so such a Friday stayed non-working in the grid.
+    const intervals = [];
+    for (const d = new Date(VIEW_START); d < VIEW_END; d.setDate(d.getDate() + 1)) {
+        if (!isOffDay(d)) continue;
+        const d0 = new Date(d);
+        d0.setHours(0, 0, 0, 0);
         const d1 = new Date(d0);
         d1.setDate(d1.getDate() + 1);
-        intervals.push({
-            startDate : d0,
-            endDate   : d1,
-            priority  : 30,
-            isWorking : Number(hrsOv) > 0
-        });
+        intervals.push({ startDate : d0, endDate : d1, isWorking : false });
     }
     s.project.calendarManagerStore.data = [{ id : 'factory', name : calendarState.name, intervals }];
     s.project.calendar = 'factory';
