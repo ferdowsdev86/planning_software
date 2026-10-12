@@ -2875,6 +2875,51 @@ const SNAP_TIME = '23:30';
 // strip, keyed by PO so every piece / re-plan of that PO shows them. Soft
 // delete keeps the trail.
 // --------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// Buyer colours (Setup → Buyer colours): one colour per buyer, shared by
+// every planner; "Colour by: Buyer" paints the bars with them
+// --------------------------------------------------------------------------
+async function ensureBuyerColorsTable() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS planning_buyer_colors (
+        buyer VARCHAR(120) NOT NULL PRIMARY KEY,
+        color VARCHAR(9) NOT NULL,
+        updated_by VARCHAR(60) NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+}
+app.get(`${BASE}/buyer-colors`, async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT buyer, color, updated_by, updated_at FROM planning_buyer_colors ORDER BY buyer');
+        res.json({ success : true, rows });
+    }
+    catch (e) { dbFail(res, e); }
+});
+// { colors : { BUYER : '#rrggbb' | null }, by } — null / '' removes the buyer's own colour (back to automatic)
+app.put(`${BASE}/buyer-colors`, async (req, res) => {
+    const colors = req.body?.colors && typeof req.body.colors === 'object' ? req.body.colors : {};
+    const by = req.body?.by ? String(req.body.by).slice(0, 60) : null;
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        let saved = 0, removed = 0;
+        for (const [buyer0, color0] of Object.entries(colors)) {
+            const buyer = String(buyer0 || '').trim().toUpperCase().slice(0, 120);
+            if (!buyer) continue;
+            const color = String(color0 || '').trim().toLowerCase();
+            if (!color) { const [r] = await conn.query('DELETE FROM planning_buyer_colors WHERE buyer = ?', [buyer]); removed += r.affectedRows; continue; }
+            if (!/^#[0-9a-f]{6}$/.test(color)) continue;
+            await conn.query(
+                `INSERT INTO planning_buyer_colors (buyer, color, updated_by) VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE color = VALUES(color), updated_by = VALUES(updated_by)`, [buyer, color, by]);
+            saved++;
+        }
+        await conn.commit();
+        res.json({ success : true, saved, removed });
+    }
+    catch (e) { try { await conn.rollback(); } catch { /* gone */ } dbFail(res, e); }
+    finally { conn.release(); }
+});
+
 async function ensureStripNotesTable() {
     await pool.query(`CREATE TABLE IF NOT EXISTS planning_strip_notes (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -3453,6 +3498,7 @@ app.listen(PORT, () => {
     console.log(`[prod-sync] ERP production sync at ${PROD_SYNC_TIMES.join(' & ')} ${SNAP_TZ} (daily rows from ${PROD_SYNC_FROM})`);
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
     ensureStripNotesTable().catch(e => console.error('[strip-notes] table init failed:', e.message));
+    ensureBuyerColorsTable().catch(e => console.error('[buyer-colors] table init failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
         .catch(e => console.error('[snapshot] table init failed:', e.message));

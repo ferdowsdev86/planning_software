@@ -282,7 +282,34 @@ const STATUS_COLORS = {
     running : '#0a8f3c', completed : '#9e9e9e', delayed : '#e53935'
 };
 
-export const colorState = { mode : 'risk' };
+export const colorState = { mode : 'risk', buyerColors : {} };
+
+// ---------------------------------------------------------------------------
+// Buyer colours: the planner's own colour per buyer (Setup → Buyer colours,
+// DB-shared) — else a stable automatic one from a 24-hue palette, so every
+// buyer gets a clearly different colour even before anyone sets one.
+// ---------------------------------------------------------------------------
+export const BUYER_PALETTE = [
+    '#d32f2f', '#1976d2', '#388e3c', '#f57c00', '#7b1fa2', '#0097a7', '#c2185b', '#5d4037',
+    '#455a64', '#e64a19', '#303f9f', '#689f38', '#fbc02d', '#512da8', '#00796b', '#afb42b',
+    '#8e24aa', '#0288d1', '#f4511e', '#2e7d32', '#6d4c41', '#1e88e5', '#d81b60', '#3949ab'
+];
+export const buyerKey = b => String(b || '').trim().toUpperCase();
+export function autoBuyerColor(buyer) {
+    const k = buyerKey(buyer);
+    let h = 0;
+    for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) >>> 0;
+    return BUYER_PALETTE[h % BUYER_PALETTE.length];
+}
+export const buyerColorOf = buyer => colorState.buyerColors[buyerKey(buyer)] || autoBuyerColor(buyer);
+// white or dark text, whichever reads on the colour
+export function textOnColor(hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+    if (!m) return '#fff';
+    const [r, g, b] = [m[1], m[2], m[3]].map(x => parseInt(x, 16) / 255);
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return lum > 0.6 ? '#222' : '#fff';
+}
 // query = the toolbar quick search (text); ids = the Find panel's result set
 // (multi-criteria) — when set it decides hit / dim, the text query is ignored
 export const searchState = { query : '', ids : null };
@@ -2118,7 +2145,8 @@ export const schedulerProConfig = {
             renderData.style = 'background-color:#ee2e24;border-color:#7a0000;color:#fff';
         }
         else if (colorState.mode === 'buyer') {
-            renderData.style = `background-color:${hashColor(r.buyer)};border-color:#222;color:#fff`;
+            const bc = buyerColorOf(r.buyer);
+            renderData.style = `background-color:${bc};border-color:#222;color:${textOnColor(bc)}`;
         }
         else if (colorState.mode === 'status') {
             renderData.style = `background-color:${STATUS_COLORS[r.status] || '#5e7c8a'};border-color:#222;color:#fff`;

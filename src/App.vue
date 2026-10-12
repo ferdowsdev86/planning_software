@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipDataFromCache, warmTipCache, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
@@ -29,7 +29,7 @@ import {
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
-    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -551,6 +551,7 @@ const openWindows = computed(() => [
     { id : 'settings', icon : '⚙️', title : 'Settings',            open : settingsOpen.value, min : settingsMin.value },
     { id : 'roles',    icon : '👤', title : 'Planning roles',      open : rolesOpen.value,    min : rolesMin.value },
     { id : 'eff',      icon : '📊', title : 'Efficiency profiles', open : effOpen.value,      min : effMin.value },
+    { id : 'bcol',     icon : '🎨', title : 'Buyer colours',       open : bcolOpen.value,     min : bcolMin.value },
     { id : 'cal',      icon : '📅', title : 'Calendars',           open : calOpen.value,      min : calMin.value },
     { id : 'bc',       icon : '📈', title : 'Build up curves',     open : bcOpen.value,       min : bcMin.value },
     { id : 'props',    icon : '🧭', title : 'Strip properties',    open : propsOpen.value,    min : propsMin.value },
@@ -567,6 +568,7 @@ function restoreWin(id) {
     if (id === 'settings') settingsMin.value = false;
     if (id === 'roles')    rolesMin.value = false;
     if (id === 'eff')      effMin.value = false;
+    if (id === 'bcol')     bcolMin.value = false;
     if (id === 'cal')      calMin.value = false;
     if (id === 'bc')       bcMin.value = false;
     if (id === 'props')    propsMin.value = false;
@@ -583,6 +585,7 @@ function closeWin(id) {
     if (id === 'settings') settingsOpen.value = false;
     if (id === 'roles')    rolesOpen.value = false;
     if (id === 'eff')      effOpen.value = false;
+    if (id === 'bcol')     bcolOpen.value = false;
     if (id === 'cal')      calOpen.value = false;
     if (id === 'bc')       bcOpen.value = false;
     if (id === 'props')    propsOpen.value = false;
@@ -4493,6 +4496,124 @@ function saveEffState() {
     saveEffProfilesDb(buildEffProfileRows(getInstance()))
         .catch(() => { /* API offline - localStorage stays the source */ });
 }
+
+// ---------------------------------------------------------------------------
+// Buyer colours (Setup → Buyer colours): every buyer the planning knows
+// (order book, orders list, unplanned panel, bars on the board) with ONE
+// colour each — the planner's own pick, else an automatic distinct one.
+// "Colour by: Buyer" paints the bars with these; the colour menu shows a
+// legend of the buyers on the open board. Saved in the DB for everyone.
+// ---------------------------------------------------------------------------
+const bcolOpen   = ref(false);
+const bcolMin    = ref(false);
+const bcolSearch = ref('');
+const bcolDraft  = ref({});          // buyer key → '#rrggbb' being edited ('' = automatic)
+const bcolSaved  = ref({});          // as in the DB
+const bcolBusy   = ref(false);
+const bcolTick   = ref(0);           // bumps when board / lists change → list recomputes
+
+function applyBuyerColors(rows) {
+    const map = {};
+    for (const r of rows || []) { const k = buyerKey(r.buyer); if (k && r.color) map[k] = String(r.color).toLowerCase(); }
+    colorState.buyerColors = map;
+    bcolSaved.value = { ...map };
+    try { localStorage.setItem('mbm-buyer-colors', JSON.stringify(map)); } catch { /* quota */ }
+    if (colorState.mode === 'buyer') getInstance()?.refreshRows?.();
+}
+async function loadBuyerColors() {
+    try { applyBuyerColors(await loadBuyerColorsDb()); }
+    catch {
+        // offline: this browser's last copy
+        try { const m = JSON.parse(localStorage.getItem('mbm-buyer-colors') || '{}'); colorState.buyerColors = m; bcolSaved.value = { ...m }; } catch { /* none */ }
+    }
+}
+
+// every buyer known right now, with bar / order counts
+const bcolRows = computed(() => {
+    void bcolTick.value;
+    const by = new Map();
+    const add = (name, field) => {
+        const k = buyerKey(name);
+        if (!k) return;
+        if (!by.has(k)) by.set(k, { key : k, name : String(name).trim(), bars : 0, orders : 0 });
+        by.get(k)[field]++;
+    };
+    const s = getInstance();
+    for (const ev of s?.eventStore?.records || []) { const r = ev.data?.raw; if (r && !r.stage) add(r.buyer, 'bars'); }
+    for (const o of erpAllOrders.value || []) add(o.buyer, 'orders');
+    for (const o of ordersRows.value || []) add(o.buyer, 'orders');
+    for (const u of unplanned.value || []) add(u.buyer, 'orders');
+    const q = bcolSearch.value.trim().toUpperCase();
+    return [...by.values()]
+        .filter(r => !q || r.key.includes(q))
+        .sort((a, b) => (b.bars - a.bars) || a.key.localeCompare(b.key))
+        .map(r => {
+            const own = bcolDraft.value[r.key];
+            const color = own || autoBuyerColor(r.key);
+            return { ...r, color, own : !!own, auto : autoBuyerColor(r.key), fg : textOnColor(color), changed : (own || '') !== (bcolSaved.value[r.key] || '') };
+        });
+});
+const bcolChanged = computed(() => bcolRows.value.some(r => r.changed) || Object.keys(bcolDraft.value).some(k => (bcolDraft.value[k] || '') !== (bcolSaved.value[k] || '')));
+
+function openBuyerColors() {
+    openMenu.value = null;
+    bcolDraft.value = { ...colorState.buyerColors };
+    bcolSearch.value = '';
+    bcolTick.value++;
+    bcolOpen.value = true;
+    bcolMin.value = false;
+    loadBuyerColors().then(() => { bcolDraft.value = { ...colorState.buyerColors }; bcolTick.value++; });
+}
+function bcolSet(key, color) {
+    bcolDraft.value = { ...bcolDraft.value, [key] : String(color || '').toLowerCase() };
+}
+function bcolReset(key) {
+    const d = { ...bcolDraft.value };
+    delete d[key];
+    bcolDraft.value = d;
+}
+// one clearly different colour per buyer, in board order (most bars first)
+function bcolAutoDistinct() {
+    const d = { ...bcolDraft.value };
+    bcolRows.value.forEach((r, i) => { d[r.key] = BUYER_PALETTE[i % BUYER_PALETTE.length]; });
+    bcolDraft.value = d;
+}
+async function bcolSave() {
+    const colors = {};
+    const keys = new Set([...Object.keys(bcolDraft.value), ...Object.keys(bcolSaved.value)]);
+    for (const k of keys) {
+        const v = bcolDraft.value[k] || '';
+        if (v !== (bcolSaved.value[k] || '')) colors[k] = v || null;
+    }
+    if (!Object.keys(colors).length) { toast('Nothing changed', 'ok'); return; }
+    bcolBusy.value = true;
+    try {
+        await saveBuyerColorsDb(colors, authUser.value?.username || currentUser.value?.username || '—');
+        await loadBuyerColors();
+        bcolDraft.value = { ...colorState.buyerColors };
+        getInstance()?.refreshRows?.();
+        toast(`Buyer colours saved (${Object.keys(colors).length} buyer(s)) — shared with every planner`, 'ok');
+    }
+    catch (e) { toast(`Buyer colours not saved: ${e.message}`, 'error'); }
+    finally { bcolBusy.value = false; }
+}
+
+// Colour menu legend while colouring by buyer: the buyers on the open board
+const buyerLegend = computed(() => {
+    void bcolTick.value;
+    const s = getInstance();
+    const n = new Map();
+    for (const ev of s?.eventStore?.records || []) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        const k = buyerKey(r.buyer);
+        if (!k) continue;
+        if (!n.has(k)) n.set(k, { key : k, name : String(r.buyer).trim(), bars : 0 });
+        n.get(k).bars++;
+    }
+    return [...n.values()].sort((a, b) => b.bars - a.bars).slice(0, 16)
+        .map(x => ({ ...x, bg : buyerColorOf(x.key), fg : textOnColor(buyerColorOf(x.key)) }));
+});
 
 function openEffProfiles() {
     openMenu.value = null;
@@ -9732,6 +9853,7 @@ function toast(text, type = 'error') {
 }
 
 onMounted(() => {
+    loadBuyerColors();   // shared buyer colours (Colour by: Buyer)
     ensureCarryDom();
     uiHooks.onOrderSelect = eventRecord => {
         const raw = eventRecord?.data?.raw;
@@ -10521,6 +10643,7 @@ const deliveryLegend = computed(() => {
 const pickColorMode = m => {
     colorMode.value = m;
     colorState.mode = m;
+    if (m === 'buyer') bcolTick.value++;
     localStorage.setItem('mbm-color-mode', m); // survives refresh
     colorMenuOpen.value = false;
     // every bar repaints in the new mode at once (text and colour)
@@ -10840,6 +10963,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openLineEffForm">🏭 Line eff &amp; hours</div>
                     <div class="fr-dd-item" @click="openWorkHours(null)">🕐 Change working hours — per unit calendar</div>
                     <div class="fr-dd-item" @click="openBuildUps">📈 Build up / Learning curves</div>
+                    <div class="fr-dd-item" @click="openBuyerColors">🎨 Buyer colours</div>
                 </div>
             </span>
         </div>
@@ -10908,6 +11032,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             @click="pickColorMode(c.mode)"
                         >
                             <span class="fr-colormenu-ico">{{ c.icon }}</span>{{ c.label }}
+                        </div>
+                        <div v-if="colorMode === 'buyer'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">Buyers on this board <a class="fr-colormenu-link" @click.stop="openBuyerColors">edit colours…</a></div>
+                            <span v-for="b in buyerLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.name }}</span>
+                            <span v-if="!buyerLegend.length" class="t4dim">no bars on the board</span>
                         </div>
                         <div v-if="colorMode === 'delivery'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Delivery month</div>
@@ -11810,6 +11939,45 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tbody>
                     </table>
                     <div v-else class="st-hint dp-hint">এই তারিখে কোনো strip planned নেই — Save date বদলে ⟳ Load চাপুন</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Buyer colours (Setup): one colour per buyer, used by Colour by: Buyer -->
+        <div v-if="bcolOpen && !bcolMin" class="cal-overlay" @click.self="bcolOpen = false">
+            <div class="cal-dialog bcol-dialog">
+                <div class="cal-title">
+                    🎨 Buyer colours
+                    <span class="cal-title-btns">
+                        <span class="cal-x cal-minbtn" @click="bcolMin = true">—</span>
+                        <span class="cal-x" @click="bcolOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="st-body">
+                    <div class="bcol-head">
+                        <input v-model="bcolSearch" class="cal-in bcol-search" placeholder="Search buyer…">
+                        <span class="t4dim">{{ bcolRows.length }} buyer(s)</span>
+                        <button class="cal-btn st-btn" @click="bcolAutoDistinct" title="Give every buyer a clearly different colour (board order: most bars first)">✨ Auto-assign distinct</button>
+                        <button class="cal-btn cal-btn-primary st-btn" :disabled="bcolBusy || !bcolChanged" @click="bcolSave">💾 {{ bcolBusy ? 'Saving…' : 'Save' }}</button>
+                        <button class="cal-btn st-btn" @click="colorMode !== 'buyer' && pickColorMode('buyer')" :disabled="colorMode === 'buyer'">👕 Colour board by buyer</button>
+                    </div>
+                    <div class="bcol-list">
+                        <table class="st-table bcol-table">
+                            <thead><tr><th>Colour</th><th>Buyer</th><th class="od-num">Bars on board</th><th class="od-num">Orders</th><th>Pick</th><th></th></tr></thead>
+                            <tbody>
+                                <tr v-for="r in bcolRows" :key="r.key" :class="{ 'bcol-changed' : r.changed }">
+                                    <td><span class="bcol-chip" :style="{ background : r.color, color : r.fg }">{{ r.name }}</span></td>
+                                    <td><b>{{ r.name }}</b><span v-if="!r.own" class="t4dim"> · automatic</span></td>
+                                    <td class="od-num">{{ r.bars }}</td>
+                                    <td class="od-num">{{ r.orders }}</td>
+                                    <td><input type="color" class="bcol-pick" :value="r.color" @input="bcolSet(r.key, $event.target.value)" :title="r.color"></td>
+                                    <td><button v-if="r.own" class="cal-btn st-btn bcol-mini" @click="bcolReset(r.key)" title="Back to the automatic colour">↺ auto</button></td>
+                                </tr>
+                                <tr v-if="!bcolRows.length"><td colspan="6" class="t4dim">No buyer matches</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">প্রতিটি buyer-এর একটা রঙ · রঙ না দিলে automatic (24-রঙের palette থেকে, buyer নাম ধরে স্থির) · Save করলে সব planner-এর board-এ একই রঙ · Board-এ 🎨 Colour by → <b>Buyer</b> দিলে bar গুলো এই রঙে দেখায়, menu-তে legend থাকে · ✨ Auto-assign = সবাইকে আলাদা আলাদা রঙ (board-এ যার bar বেশি সে আগে)</div>
                 </div>
             </div>
         </div>
@@ -14133,6 +14301,20 @@ body {
 
 /* Lines tab (line-wise efficiency summary) */
 .ef-dialog { width : 740px; }   /* widen dialog for Lines tab */
+/* Buyer colours (Setup) */
+.bcol-dialog { width : 760px; max-width : 96vw; max-height : 90vh; display : flex; flex-direction : column; }
+.bcol-dialog .st-body { overflow : auto; }
+.bcol-head { display : flex; gap : 8px; align-items : center; margin-bottom : 8px; flex-wrap : wrap; }
+.bcol-search { flex : 1 1 180px; font : inherit; font-size : 12px; padding : 4px 8px; }
+.bcol-list { border : 1px solid #b9c4d0; border-radius : 4px; background : #fff; max-height : 56vh; overflow : auto; }
+.bcol-table { width : 100%; border-collapse : collapse; font-size : 12.5px; }
+.bcol-table th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 5px 8px; font-weight : 600; }
+.bcol-table td { padding : 4px 8px; border-bottom : 1px solid #eef1f5; vertical-align : middle; }
+.bcol-table tr.bcol-changed td { background : #fff8e1; }
+.bcol-chip { display : inline-block; min-width : 120px; max-width : 220px; overflow : hidden; text-overflow : ellipsis; white-space : nowrap; padding : 2px 8px; border : 1px solid rgba(0,0,0,.35); border-left : 2px solid #111; border-right : 2px solid #111; font-size : 11px; font-weight : 700; }
+.bcol-pick { width : 44px; height : 26px; padding : 0; border : 1px solid #b9c4d0; border-radius : 3px; background : #fff; cursor : pointer; }
+.bcol-mini { padding : 2px 8px; font-size : 11px; }
+.fr-colormenu-link { color : #1a5dab; cursor : pointer; margin-left : 6px; text-decoration : underline; font-size : 11px; }
 .ls-body { padding : 0; }
 .ls-filter { padding : 8px 10px; gap : 10px; border-bottom : 1px solid #dde3ee; background : #f6f7fb; }
 /* the window keeps its size — the line list scrolls inside it */

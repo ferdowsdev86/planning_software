@@ -1395,3 +1395,20 @@ export async function tooltipBulkDb(pos, groups) {
     if (!out?.success) throw new Error(out?.error || 'tooltip bulk failed');
     return out;
 }
+
+// Buyer colours (Setup → Buyer colours), shared by every planner
+export async function loadBuyerColorsDb() {
+    const j = await get('/buyer-colors', 8000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return j.rows || [];
+}
+export async function saveBuyerColorsDb(colors, by) {
+    const res = await fetch(`${API_BASE}/buyer-colors`, {
+        method  : 'PUT',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ colors, by })
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'save failed');
+    return j;
+}
