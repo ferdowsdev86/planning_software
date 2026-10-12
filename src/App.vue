@@ -1951,6 +1951,20 @@ const chPeriodHours = wd => {
     return seen.length <= 2 ? seen.join(' / ') : `${seen[0]} …`;
 };
 
+// "Whole calendar — every line": the planner's decision for those dates
+// applies to EVERY line, so any line-specific figure (Selected lines) on
+// them goes — otherwise a line's earlier "Friday 10:00" would still beat
+// the unit's new "Friday off". Returns the number of line-days cleared.
+function chClearLineFigures(lineOv, ymds) {
+    let n = 0;
+    for (const rid of Object.keys(lineOv || {})) {
+        const map = lineOv[rid];
+        for (const k of ymds) if (map && k in map) { delete map[k]; n++; }
+        if (map && !Object.keys(map).length) delete lineOv[rid];
+    }
+    return n;
+}
+
 function openWorkHours(rec) {
     openMenu.value = null;
     // Prefill the period with the clicked bar's span when opened from a bar
@@ -2016,7 +2030,7 @@ function chApply() {
     if (!chTargetIsOpenBoard.value) { chApplyToOtherUnit(from, to, timeH); return; }
     pushUndo(getInstance(), 'change working hours');
     let changed = 0;
-    const changedDates = [], sameDates = [];
+    const changedDates = [], sameDates = [], touched = [];
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
         const wd = d.getDay();
@@ -2034,13 +2048,18 @@ function chApply() {
             else if (chAction.value === 'setNew')  calendarState.overrides[k] = timeH;
             else /* addTime */                     calendarState.overrides[k] = dayHoursOf(d) + timeH;
             if (Math.abs(dayHoursOf(d) - before) < 0.01) sameDates.push(new Date(d)); else changedDates.push(new Date(d));
+            touched.push(k);
             changed++;
         }
         d.setDate(d.getDate() + 1);
     }
+    // every line follows the unit calendar on those dates again
+    const lineCleared = chClearLineFigures(calendarState.lineOverrides, touched);
+    if (lineCleared) changedDates.length || changedDates.push(...sameDates.splice(0));
     localStorage.setItem(calOverridesKey(calendarState.id || 1), JSON.stringify(calendarState.overrides));
-    saveCalendarOverridesDb({ ...calendarState.overrides }, calendarState.id || 1)
+    saveCalendarOverridesDb({ ...calendarState.overrides }, calendarState.id || 1, JSON.parse(JSON.stringify(calendarState.lineOverrides)))
         .catch(e => toast(`Working hours kept in this browser only — DB save failed: ${e.message}`, 'warn'));
+    if (lineCleared) toast(`${lineCleared} line-specific hour(s) on those dates removed — every line follows the ${calendarState.name} now`, 'ok');
     applyCalendarToBoard();
     const s = getInstance();
     let rs = null;
@@ -2072,12 +2091,12 @@ async function chApplyToOtherUnit(from, to, timeH) {
     const cal = chTargetCal.value;
     if (!cal) return;
     if (boardReadOnly.value) { toast('🔒 Read only — working hours cannot be changed', 'warn'); return; }
-    let ov = {};
-    try { ov = { ...(await loadCalendarOverridesDb(cal.id)) }; }
+    let ov = {}, lov = {};
+    try { const full = await loadCalendarOverridesFullDb(cal.id); ov = { ...full.overrides }; lov = JSON.parse(JSON.stringify(full.lineOverrides || {})); }
     catch (e) { toast(`Could not read the ${cal.name}: ${e.message}`, 'error'); return; }
     const weekly = wd => hmToHours(cal.days?.[wd]?.hours || '0');
     const hoursOf = d => { const v = ov[ymdOf(d)]; return v != null && v !== '' ? (Number(v) || 0) : weekly(d.getDay()); };
-    const changedDates = [], sameDates = [];
+    const changedDates = [], sameDates = [], touched = [];
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
         const wd = d.getDay();
@@ -2094,12 +2113,15 @@ async function chApplyToOtherUnit(from, to, timeH) {
             else if (chAction.value === 'setNew')  ov[k] = timeH;
             else /* addTime */                     ov[k] = hoursOf(d) + timeH;
             if (Math.abs(hoursOf(d) - before) < 0.01) sameDates.push(new Date(d)); else changedDates.push(new Date(d));
+            touched.push(k);
         }
         d.setDate(d.getDate() + 1);
     }
+    const lineCleared = chClearLineFigures(lov, touched);
     try {
-        await saveCalendarOverridesDb(ov, cal.id);
+        await saveCalendarOverridesDb(ov, cal.id, lov);
         localStorage.setItem(calOverridesKey(cal.id), JSON.stringify(ov));
+        if (lineCleared) toast(`${lineCleared} line-specific hour(s) on those dates removed on ${cal.name}`, 'ok');
         toast(chOutcomeText(chAction.value, changedDates, sameDates, timeH, `calendar "${cal.name}" (${cal.unitName}) — that board takes the new hours when it opens`), changedDates.length ? 'ok' : 'warn');
         chOpen.value = false;
     }
