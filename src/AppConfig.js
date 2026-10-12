@@ -2377,7 +2377,12 @@ export const schedulerProConfig = {
 // onEventMouseEnter prefetches during the hover delay; the template only
 // awaits when the cache is still cold.
 // ---------------------------------------------------------------------------
-const tipApiBase = () => import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1/planning';
+// the base the page resolved (api.js) — never a build-time URL of its own:
+// on the live site that pointed every tooltip request at localhost:4000
+const tipApiBase = () => globalThis.__mbmApiBase
+    || (/^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname)
+        ? (import.meta.env.VITE_API_URL_LOCAL || 'http://localhost:4000/api/v1/planning')
+        : '/api/v1/planning');
 const tipAllPos  = r => (Array.isArray(r.poList) && r.poList.length > 0 ? r.poList : (r.po ? [String(r.po)] : []));
 function tipPoQuery(r) {
     if (orderTypeOf(r.po, r.orderType) !== 'confirm') return null;

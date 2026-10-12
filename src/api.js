@@ -52,6 +52,9 @@ export let API_BASE = (() => {
     if (usable(LEGACY_BASE)) return LEGACY_BASE;
     return allowLocal ? LOCAL_BASE : (AWS_BASE || '/api/v1/planning');
 })();
+// The resolved base for modules that cannot import this one (AppConfig's
+// tooltip fetches) — always the base the page actually talks to
+globalThis.__mbmApiBase = API_BASE;
 
 async function _healthy(base, timeoutMs = 2500) {
     if (!base) return false;
@@ -89,11 +92,13 @@ export async function resolveApiBase() {
     for (const base of candidates) {
         if (await _healthy(base)) {
             API_BASE = base;
+            globalThis.__mbmApiBase = base;
             localStorage.setItem('planningApiBase', base);
             return { base, mode, ok : true };
         }
     }
     if (candidates.length) API_BASE = candidates[0];
+    globalThis.__mbmApiBase = API_BASE;
     return { base : API_BASE, mode, ok : false };
 }
 
