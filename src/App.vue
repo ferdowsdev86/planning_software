@@ -1844,6 +1844,28 @@ const chDays   = ref({ 1 : false, 2 : false, 3 : false, 4 : false, 5 : false, 6 
 const chDayMode = ref('selected');   // selected | normalOnly | all | workingOnly
 const chAction  = ref('setNew');     // resetNormal | zero | setNew | addTime
 const chTime    = ref('');
+// Typing a time means "Change to new working hours" — a planner who types
+// 10:00 while "Set to zero" is still ticked expects 10 hours, not a holiday
+watch(chTime, v => { if (String(v || '').trim() && (chAction.value === 'zero' || chAction.value === 'resetNormal')) chAction.value = 'setNew'; });
+
+// What the dates will run on after the action, and which of them already
+// do — so Apply can say "already off" instead of silently saving the same
+// figure (a Friday is off in the weekly calendar: zeroing it changes nothing)
+const chDdMm = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+function chOutcomeText(action, changedDates, sameDates, targetH, calLabel) {
+    const fmtList = arr => arr.slice(0, 6).map(chDdMm).join(', ') + (arr.length > 6 ? ` … (+${arr.length - 6})` : '');
+    const what = action === 'resetNormal' ? 'back to normal hours'
+        : action === 'zero' ? 'OFF (0:00)'
+        : action === 'setNew' ? `${hoursToHm(targetH)} hours`
+        : `+${hoursToHm(targetH)}`;
+    let msg = changedDates.length
+        ? `${changedDates.length} day(s) → ${what}: ${fmtList(changedDates)} — ${calLabel}`
+        : `No change on ${calLabel}`;
+    if (sameDates.length) msg += changedDates.length
+        ? ` · ${sameDates.length} day(s) were already ${what === 'OFF (0:00)' ? 'off' : 'so'}`
+        : ` — ${fmtList(sameDates)} ${sameDates.length > 1 ? 'are' : 'is'} already ${what === 'OFF (0:00)' ? 'OFF (0:00) in the weekly calendar' : what}`;
+    return msg;
+}
 const chFrom    = ref(isoInputDate(new Date()));
 const chTo      = ref(isoInputDate(addCalDays(new Date(), 6)));
 
@@ -1986,6 +2008,7 @@ function chApply() {
     if (!chTargetIsOpenBoard.value) { chApplyToOtherUnit(from, to, timeH); return; }
     pushUndo(getInstance(), 'change working hours');
     let changed = 0;
+    const changedDates = [], sameDates = [];
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
         const wd = d.getDay();
@@ -1997,10 +2020,12 @@ function chApply() {
             : /* workingOnly */                  dayHoursOf(d) > 0;
         if (include) {
             const k = ymdOf(d);
+            const before = dayHoursOf(d);
             if (chAction.value === 'resetNormal')  delete calendarState.overrides[k];
             else if (chAction.value === 'zero')    calendarState.overrides[k] = 0;
             else if (chAction.value === 'setNew')  calendarState.overrides[k] = timeH;
             else /* addTime */                     calendarState.overrides[k] = dayHoursOf(d) + timeH;
+            if (Math.abs(dayHoursOf(d) - before) < 0.01) sameDates.push(new Date(d)); else changedDates.push(new Date(d));
             changed++;
         }
         d.setDate(d.getDate() + 1);
@@ -2024,7 +2049,10 @@ function chApply() {
     if (rs && (rs.shrunk || rs.grown)) {
         toast(`${rs.shrunk + rs.grown} bar(s) re-sized to the new hours (${rs.shrunk} shorter, ${rs.grown} longer${rs.pushed ? `, ${rs.pushed} follower(s) shifted` : ''}) — Save to keep`, 'ok');
     }
-    toast(`${changed} day(s) updated on calendar "${calendarState.name}" — shared with every planner`, 'ok');
+    toast(chOutcomeText(chAction.value, changedDates, sameDates, timeH, `calendar "${calendarState.name}" (shared with every planner)`), changedDates.length ? 'ok' : 'warn');
+    if (!changedDates.length && sameDates.length && chAction.value === 'zero') {
+        toast('To make a WORKING day a holiday tick that weekday (or "All days of the week") and set the period to the date(s) — a weekly off day needs no change', 'warn');
+    }
     chOpen.value = false;
 }
 
@@ -2041,7 +2069,7 @@ async function chApplyToOtherUnit(from, to, timeH) {
     catch (e) { toast(`Could not read the ${cal.name}: ${e.message}`, 'error'); return; }
     const weekly = wd => hmToHours(cal.days?.[wd]?.hours || '0');
     const hoursOf = d => { const v = ov[ymdOf(d)]; return v != null && v !== '' ? (Number(v) || 0) : weekly(d.getDay()); };
-    let changed = 0;
+    const changedDates = [], sameDates = [];
     const d = new Date(from);
     for (let guard = 0; d <= to && guard < 400; guard++) {
         const wd = d.getDay();
@@ -2052,18 +2080,19 @@ async function chApplyToOtherUnit(from, to, timeH) {
             : /* workingOnly */                  hoursOf(d) > 0;
         if (include) {
             const k = ymdOf(d);
+            const before = hoursOf(d);
             if (chAction.value === 'resetNormal')  delete ov[k];
             else if (chAction.value === 'zero')    ov[k] = 0;
             else if (chAction.value === 'setNew')  ov[k] = timeH;
             else /* addTime */                     ov[k] = hoursOf(d) + timeH;
-            changed++;
+            if (Math.abs(hoursOf(d) - before) < 0.01) sameDates.push(new Date(d)); else changedDates.push(new Date(d));
         }
         d.setDate(d.getDate() + 1);
     }
     try {
         await saveCalendarOverridesDb(ov, cal.id);
         localStorage.setItem(calOverridesKey(cal.id), JSON.stringify(ov));
-        toast(`${changed} day(s) updated on calendar "${cal.name}" (${cal.unitName}) — the ${cal.unitName} board takes the new hours when it opens`, 'ok');
+        toast(chOutcomeText(chAction.value, changedDates, sameDates, timeH, `calendar "${cal.name}" (${cal.unitName}) — that board takes the new hours when it opens`), changedDates.length ? 'ok' : 'warn');
         chOpen.value = false;
     }
     catch (e) { toast(`DB save failed: ${e.message}`, 'error'); }
@@ -2124,6 +2153,7 @@ async function chApplyToLines(from, to, timeH) {
     const weekly = wd => hmToHours((other ? other.days?.[wd]?.hours : calendarState.days[wd]?.hours) || '0');
     const lines = chSelectedLines.value;
     let changed = 0;
+    const changedDates = [], sameDates = [];
     for (const l of lines) {
         const key  = String(l.dbId);
         const mine = { ...(lineOv[key] || {}) };
@@ -2142,10 +2172,13 @@ async function chApplyToLines(from, to, timeH) {
                 : /* workingOnly */                  hoursOf(d) > 0;
             if (include) {
                 const k = ymdOf(d);
+                const before = hoursOf(d);
                 if (chAction.value === 'resetNormal')  delete mine[k];
                 else if (chAction.value === 'zero')    mine[k] = 0;
                 else if (chAction.value === 'setNew')  mine[k] = timeH;
                 else /* addTime */                     mine[k] = hoursOf(d) + timeH;
+                if (Math.abs(hoursOf(d) - before) < 0.01) { if (l === lines[0]) sameDates.push(new Date(d)); }
+                else if (l === lines[0]) changedDates.push(new Date(d));
                 changed++;
             }
             d.setDate(d.getDate() + 1);
@@ -2199,10 +2232,10 @@ async function chApplyToLines(from, to, timeH) {
         if (rs && (rs.shrunk || rs.grown)) {
             toast(`${rs.shrunk + rs.grown} bar(s) re-sized to the new hours (${rs.shrunk} shorter, ${rs.grown} longer${rs.pushed ? `, ${rs.pushed} follower(s) shifted` : ''}) — Save to keep`, 'ok');
         }
-        toast(`${changed} line-day(s) updated — ${names} only, calendar "${calName}" — shared with every planner`, 'ok');
+        toast(chOutcomeText(chAction.value, changedDates, sameDates, timeH, `${names} only, calendar "${calName}" (${changed} line-day(s), shared with every planner)`), changedDates.length ? 'ok' : 'warn');
     }
     else {
-        toast(`${changed} line-day(s) updated — ${names} only, calendar "${calName}" (${other.unitName}) — that board takes the new hours when it opens`, 'ok');
+        toast(chOutcomeText(chAction.value, changedDates, sameDates, timeH, `${names} only, calendar "${calName}" (${other.unitName}) — that board takes the new hours when it opens`), changedDates.length ? 'ok' : 'warn');
     }
     chOpen.value = false;
 }
