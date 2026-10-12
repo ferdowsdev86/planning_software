@@ -1,6 +1,6 @@
 import { DateHelper, StringHelper } from '@bryntum/schedulerpro';
 import {
-    LINES, LINE_BY_ID, STAGE_RESOURCES, ORDERS, STAGE_EVENTS, DEPENDENCIES,
+    LINES, LINE_BY_ID, STAGE_RESOURCES, DEPENDENCIES,
     PLAN_START, PLAN_END, VIEW_START, VIEW_END, TOTAL_AVAIL_MIN,
     computeLineUtil, calcRisk, addWorkDays, isFriday, isOffDay, isLineOffDay, nextLineWorkingDay, fmtQty, fmtDate,
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
@@ -349,7 +349,6 @@ const resources = [
     }))
 ];
 
-const events = [...ORDERS, ...STAGE_EVENTS];
 
 // ---------------------------------------------------------------------------
 // Grand totals footer data: day-wise plan qty of every sewing strip and the
@@ -636,6 +635,21 @@ export function noteManualGap(scheduler, lineId, rec, start) {
 // Actual line of an event. The assignment store is the source of truth:
 // cross-line moves update the assignment, so data.resourceId can be stale.
 // ---------------------------------------------------------------------------
+// Put an event on ONE line through the assignment store (the board's source
+// of truth). Never set resourceId on the event itself: that flips Bryntum's
+// stores into single-assignment mode and the next board load throws.
+export function assignEventLine(scheduler, rec, lineId) {
+    const st = scheduler?.assignmentStore;
+    if (!st || !rec || lineId == null) return;
+    const mine = st.records.filter(x => (x.eventId ?? x.data?.eventId ?? x.data?.event) === rec.id);
+    if (mine.length) {
+        mine[0].set('resourceId', lineId);
+        if (mine.length > 1) st.remove(mine.slice(1));
+    }
+    else st.add({ eventId : rec.id, resourceId : lineId });
+    rec.data.resourceId = lineId;   // plain data mirror for the fallback readers
+}
+
 export function lineIdOf(scheduler, ev) {
     const a = scheduler.assignmentStore?.records.find(x =>
         (x.eventId ?? x.data.eventId ?? x.data.event) === ev.id);
@@ -1260,7 +1274,6 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const id = `${rec.id}-sp${++splitSeq}`;
     scheduler.eventStore.add({
         id,
-        resourceId : line.id,
         startDate  : start2,
         endDate    : end2,
         duration   : elapsedDays(start2, end2),
@@ -1270,6 +1283,7 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
         raw         : raw2
     });
     const rec2 = scheduler.eventStore.getById(id);
+    if (rec2) assignEventLine(scheduler, rec2, line.id);
 
     const pushed = rec2 && !onHold ? pushFollowers(scheduler, line.id, rec2) : 0;
     const util   = recalcCapacity(scheduler) || {};
@@ -1530,7 +1544,6 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     const targetId = parkHold ? firstHoldId(scheduler) : line.id;
     scheduler.eventStore.add({
         id : `ev-${order.id}`,
-        resourceId : targetId,
         startDate  : startFinal,
         endDate    : end,
         duration   : elapsedDays(startFinal, end),
@@ -1542,6 +1555,7 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     });
 
     const placedRec = scheduler.eventStore.getById(`ev-${order.id}`);
+    if (placedRec) assignEventLine(scheduler, placedRec, targetId);
     if (!parkHold) {
         const pushedCnt = placedRec ? pushFollowers(scheduler, line.id, placedRec) : 0;
         if (pushedCnt) {
@@ -2247,7 +2261,6 @@ export const schedulerProConfig = {
                     else s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
                     rec.data.resourceId = targetId;
                     rec.set({
-                        resourceId : targetId,
                         startDate  : start,
                         endDate    : end,
                         duration   : elapsedDays(start, end)
@@ -2350,7 +2363,12 @@ export const schedulerProConfig = {
             }]
         }],
         resources,
-        events,
+        // The board starts EMPTY, in multi-assignment mode: a row carrying a
+        // resourceId (the old demo events) would lock the stores into single-
+        // assignment mode, and every board load with assignments would throw
+        // ("Data loading into AssignmentStore … cannot be combined …")
+        events             : [],
+        assignments        : [],
         dependencies       : DEPENDENCIES,
         resourceTimeRanges : buildManpowerRanges(LINES),
         timeRanges         : [

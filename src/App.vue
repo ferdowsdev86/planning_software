@@ -715,13 +715,13 @@ function pgCommit(opt) {
         };
         const [rec] = s.eventStore.add({
             id : `pg-${Date.now()}-${seqNo++}`,
-            resourceId : lineRes.id,
             startDate : start, endDate : end,
             manuallyScheduled : true,
             name : `${f.orderNo} | ${colour} ${fmtQty(qty)} (${po})`,
             percentDone : 0,
             raw
         });
+        if (rec) assignEventToLine(s, rec, lineRes.id);
         if (rec) pushFollowers(s, lineRes.id, rec);
         cursor = nextStartAfter(end);
     }
@@ -1368,6 +1368,37 @@ function expandTimeAxisForEvents(s) {
 
 let boardLoadedUnitId = null;
 
+// Bryntum 7 refuses event rows that carry a resourceId when assignments are
+// loaded with them (single- vs multi-assignment mode) — the line comes from
+// the assignment. The rows go in without the field; the data-level
+// resourceId the rest of the app reads as a fallback (lineIdOf, tooltips,
+// pushFollowers) is written back from the assignments afterwards.
+function loadBoardInline(s, data) {
+    const strip = e => {
+        if (!e || typeof e !== 'object' || !('resourceId' in e)) return e;
+        const { resourceId, ...rest } = e;   // eslint-disable-line no-unused-vars
+        return rest;
+    };
+    const events = Array.isArray(data.events) ? data.events.map(strip)
+        : (data.events?.rows ? { ...data.events, rows : data.events.rows.map(strip) } : data.events);
+    s.project.loadInlineData({
+        resources          : data.resources,
+        events,
+        assignments        : data.assignments || [],
+        dependencies       : data.dependencies,
+        resourceTimeRanges : data.resourceTimeRanges
+    });
+    const line = new Map();
+    for (const a of s.assignmentStore?.records || []) {
+        const evId = a.eventId ?? a.data.eventId ?? a.data.event;
+        if (!line.has(String(evId))) line.set(String(evId), a.resourceId ?? a.data.resourceId);
+    }
+    for (const ev of s.eventStore.records) {
+        const rid = line.get(String(ev.id));
+        if (rid != null) ev.data.resourceId = rid;
+    }
+}
+
 function applyApiBoardData(s, data) {
     boardLoadedUnitId = data.unitId || null;
     // this board's lines become THE line table (another unit's board may
@@ -1381,15 +1412,7 @@ function applyApiBoardData(s, data) {
     // Every board open (fresh or cached) refreshes the shared efficiency
     // profiles from the DB; bars re-render once they arrive
     loadEffProfilesDb().then(rows => { if (applyEffProfilesFromDb(rows)) getInstance()?.refreshRows?.(); }).catch(() => { /* offline */ });
-    withBoardBatch(s, () => {
-        s.project.loadInlineData({
-            resources          : data.resources,
-            events             : data.events,
-            assignments        : data.assignments || [],
-            dependencies       : data.dependencies,
-            resourceTimeRanges : data.resourceTimeRanges
-        });
-    });
+    withBoardBatch(s, () => loadBoardInline(s, data));
     boardDbState = snapshotBoardState(s);
     unplanned.value = (data.unplanned || []).filter(u => String(u.buyer || '').trim());
     currentUnitId.value = data.unitId || currentBoard.value?.unitId || null;
@@ -5746,7 +5769,7 @@ function replaceProjectionsWithConfirms(s) {
                 raw2.end = end;
                 raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
                 s.eventStore.add({
-                    id : evId, resourceId : lid,
+                    id : evId,
                     startDate : cursor, endDate : end,
                     duration : elapsedDays(cursor, end), durationUnit : 'day',
                     manuallyScheduled : true,
@@ -5754,6 +5777,7 @@ function replaceProjectionsWithConfirms(s) {
                     percentDone : 0,
                     raw : raw2
                 });
+                assignEventToLine(s, s.eventStore.getById(evId), lid);
                 pendingSwapIds.add(evId);
                 cursor = end;
             }
@@ -7765,7 +7789,7 @@ function buildDraftRec(s, src, u) {
         risk     : { score : 0, level : 'draft', label : 'Draft', reasons : [] }
     };
     s.eventStore.add({
-        id : evId, resourceId : firstHoldId(s),
+        id : evId,
         startDate : start, endDate : end,
         duration : elapsedDays(start, end), durationUnit : 'day',
         manuallyScheduled : true,
@@ -7774,6 +7798,7 @@ function buildDraftRec(s, src, u) {
         raw
     });
     rec = s.eventStore.getById(evId);
+    if (rec) assignEventToLine(s, rec, firstHoldId(s));
     if (rec && u) unplanned.value = unplanned.value.filter(x => x !== u);
     return rec;
 }
@@ -8880,7 +8905,7 @@ function placeGroupMembers(s, rec, targetId, parkHold) {
             if (!(start instanceof Date) || Number.isNaN(+start) || !(end instanceof Date) || Number.isNaN(+end) || end <= start) continue;
             mraw.latePlan = !parkHold && !!mraw.ship && end > new Date(mraw.ship);
             assignEventToLine(s, m, targetId);
-            m.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : targetId });
+            m.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
             m.data.resourceId = targetId;
             mraw.start = start;
             mraw.end   = end;
@@ -9376,8 +9401,7 @@ async function placeCarried(date, resourceRecord) {
     rec.set({
         startDate  : start,
         endDate    : end,
-        duration   : elapsedDays(start, end),
-        resourceId : targetId
+        duration   : elapsedDays(start, end)
     });
     rec.data.resourceId = targetId;
     raw.start = start;
@@ -13066,6 +13090,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 </template>
 
 <style>
+/* Bryntum 7: structural CSS (layout) + theme (colours) are separate files —
+   without the first one the grid fetched it from a CDN at runtime */
+@import '@bryntum/schedulerpro/schedulerpro.css';
 @import '@bryntum/schedulerpro/svalbard-light.css';
 @import '@bryntum/schedulerpro/fontawesome/css/fontawesome.css';
 @import '@bryntum/schedulerpro/fontawesome/css/solid.css';
