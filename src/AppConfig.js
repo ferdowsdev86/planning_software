@@ -2169,8 +2169,10 @@ export const schedulerProConfig = {
     onEventMouseEnter({ eventRecord }) {
         // warm the tooltip's ERP data during the hover delay — it then opens
         // with its content instead of a "Loading…" placeholder
+        // (not while a bar is carried — the pointer sweeps over many bars
+        // then, and the tooltip is off anyway)
         const raw = eventRecord?.data?.raw;
-        if (raw && !raw.stage && !tipDataFromCache(raw)) fetchTipData(raw).catch(() => {});
+        if (raw && !raw.stage && !uiHooks.boardUserActive && !tipOffline() && !tipDataFromCache(raw)) fetchTipData(raw).catch(() => {});
         uiHooks.onBarHover?.(eventRecord);
     },
 
@@ -2400,31 +2402,47 @@ export function tipDataFromCache(r) {
 }
 
 const tipInflight = new Map();
+// API / DB unreachable: no tooltip request at all for TIP_OFFLINE_MS — the
+// tooltip shows the bar's own data; hovering must never flood a dead link
+const TIP_OFFLINE_MS = 60000;
+let tipOfflineUntil = 0;
+export const tipOffline = () => Date.now() < tipOfflineUntil;
+function tipFailed(res) {
+    // a 5xx (DB breaker → 503) or a network failure = the link is down
+    if (!res || res.status >= 500) tipOfflineUntil = Date.now() + TIP_OFFLINE_MS;
+}
 export function fetchTipData(r) {
     const key = `${r.po || ''}|${tipPoQuery(r) || ''}`;
     if (tipInflight.has(key)) return tipInflight.get(key);
+    if (tipOffline()) return Promise.resolve({ detail : null, poSummary : [] });
     const p = (async () => {
         const API_BASE = tipApiBase();
         let detail = r.po ? ssGet(`tip-${r.po}`) : null;
         if (r.po && detail === undefined) {
             detail = null;
+            let res = null;
             try {
-                const res  = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
+                res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
                 const json = await res.json();
                 if (json.success) { detail = json.data; ssSet(`tip-${r.po}`, detail); }
+                // a clean "not found" is cached too — no re-ask on every hover
+                else if (res.ok && !json.offline) ssSet(`tip-${r.po}`, null);
+                else tipFailed(res);
             }
-            catch { /* API offline */ }
+            catch { tipFailed(res); }
         }
         const qs = tipPoQuery(r);
         let poSummary = qs ? ssGet(`pos-sum-${qs}`) : [];
-        if (qs && poSummary === undefined) {
+        if (qs && poSummary === undefined && !tipOffline()) {
             poSummary = [];
+            let resPo = null;
             try {
-                const resPo = await fetch(`${API_BASE}/pos-summary?${qs}`);
+                resPo = await fetch(`${API_BASE}/pos-summary?${qs}`);
                 const jsPo  = await resPo.json();
                 if (jsPo.success) { poSummary = jsPo.rows; ssSet(`pos-sum-${qs}`, poSummary); }
+                else tipFailed(resPo);
             }
-            catch { /* offline */ }
+            catch { tipFailed(resPo); }
         }
         return { detail : detail || null, poSummary : Array.isArray(poSummary) ? poSummary : [] };
     })().finally(() => tipInflight.delete(key));

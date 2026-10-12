@@ -32,8 +32,31 @@ const pool = mysql.createPool({
     connectionLimit : 20,
     dateStrings     : true,
     enableKeepAlive : true,
-    keepAliveInitialDelay : 10000
+    keepAliveInitialDelay : 10000,
+    // a DB that cannot be reached (VPN / LAN down) answers in seconds, not
+    // after the OS's long TCP timeout — the breaker below takes over
+    connectTimeout  : 6000
 });
+
+// --------------------------------------------------------------------------
+// DB-unreachable breaker for the per-hover endpoints (bar tooltip ERP detail,
+// PO summary, strip notes): once a connection attempt fails with a network
+// error, those endpoints answer 503 at once for DB_DOWN_MS instead of each
+// hover waiting on its own timeout and flooding the log with 500s.
+// --------------------------------------------------------------------------
+const DB_NET_ERRORS = new Set(['ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'PROTOCOL_CONNECTION_LOST', 'ECONNRESET']);
+const DB_DOWN_MS = 30000;
+let dbDownUntil = 0;
+const dbOffline = () => Date.now() < dbDownUntil;
+function dbFail(res, e) {
+    if (DB_NET_ERRORS.has(e?.code)) {
+        if (!dbOffline()) console.warn(`[db] unreachable (${e.code}) — per-hover endpoints answer 503 for ${DB_DOWN_MS / 1000}s`);
+        dbDownUntil = Date.now() + DB_DOWN_MS;
+        return res.status(503).json({ success : false, offline : true, error : `database unreachable (${e.code})` });
+    }
+    return res.status(500).json({ success : false, error : e.message });
+}
+const dbOfflineReply = res => res.status(503).json({ success : false, offline : true, error : 'database unreachable' });
 
 const app = express();
 app.use(cors());
@@ -1146,6 +1169,7 @@ const ERP_QUERY = (cutoff) => [`
 app.get(`${BASE}/order-details`, async (req, res) => {
     const po = req.query.po;
     if (!po) return res.status(400).json({ success : false, error : 'Missing po' });
+    if (dbOffline()) return dbOfflineReply(res);
     try {
         const [[style]] = await pool.query(`
             SELECT
@@ -1183,7 +1207,7 @@ app.get(`${BASE}/order-details`, async (req, res) => {
         res.json({ success : true, data : { style, bookings } });
     }
     catch (e) {
-        res.status(500).json({ success : false, error : e.message });
+        dbFail(res, e);
     }
 });
 
@@ -1191,6 +1215,7 @@ app.get(`${BASE}/order-details`, async (req, res) => {
 // Prefer exact planning_orders row ids — one PO NUMBER can span several
 // colours, so a number-based lookup can return the wrong colour's quantity.
 app.get(`${BASE}/pos-summary`, async (req, res) => {
+    if (dbOffline()) return dbOfflineReply(res);
     const rawIds = req.query.ids;
     if (rawIds) {
         const ids = String(rawIds).split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0).slice(0, 50);
@@ -1207,7 +1232,7 @@ app.get(`${BASE}/pos-summary`, async (req, res) => {
             return res.json({ success : true, rows });
         }
         catch (e) {
-            return res.status(500).json({ success : false, error : e.message });
+            return dbFail(res, e);
         }
     }
     const raw = req.query.pos;
@@ -1226,7 +1251,7 @@ app.get(`${BASE}/pos-summary`, async (req, res) => {
         );
         res.json({ success : true, rows });
     } catch (e) {
-        res.status(500).json({ success : false, error : e.message });
+        dbFail(res, e);
     }
 });
 
@@ -1267,7 +1292,7 @@ app.post(`${BASE}/orders/complete`, async (req, res) => {
                 await new Promise(r => setTimeout(r, 400 * attempt));
                 continue;
             }
-            return res.status(500).json({ success : false, error : e.message });
+            return dbFail(res, e);
         }
     }
 });
@@ -1299,7 +1324,7 @@ app.post(`${BASE}/orders/reopen`, async (req, res) => {
             try { await conn.rollback(); } catch { /* already gone */ }
             conn.release();
             if (RETRYABLE.has(e.code) && attempt < 3) { await new Promise(r => setTimeout(r, 400 * attempt)); continue; }
-            return res.status(500).json({ success : false, error : e.message });
+            return dbFail(res, e);
         }
     }
 });
@@ -2795,6 +2820,7 @@ const noteDto = r => ({
 
 // All live notes (no po) or one PO's notes, newest first
 app.get(`${BASE}/strip-notes`, async (req, res) => {
+    if (dbOffline()) return dbOfflineReply(res);
     try {
         const po = req.query.po ? String(req.query.po).slice(0, 60) : null;
         const [rows] = await pool.query(
@@ -2805,7 +2831,7 @@ app.get(`${BASE}/strip-notes`, async (req, res) => {
               LIMIT 5000`, po ? [po] : []);
         res.json({ success : true, notes : rows.map(noteDto) });
     }
-    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+    catch (e) { dbFail(res, e); }
 });
 
 app.post(`${BASE}/strip-notes`, async (req, res) => {
