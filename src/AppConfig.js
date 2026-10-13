@@ -2208,9 +2208,17 @@ export const schedulerProConfig = {
             ? `<span class="mb-linked-badge" title="${StringHelper.encodeHtml(
                 `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
             : '';
+        // Product mode: the type sits in the MIDDLE of the bar as a pill that
+        // stays readable over the learning-curve hatch and its LC badge
+        let inner = StringHelper.encodeHtml(text);
+        if (colorState.mode === 'product') {
+            const ptype = barProductLine(r, true);
+            const rest  = compact ? '' : full.slice(ptype.length).replace(/^\s*:\s*/, '');
+            inner = `<span class="mb-ptype">${StringHelper.encodeHtml(ptype)}</span>${rest ? `<span class="mb-ptype-rest">${StringHelper.encodeHtml(rest)}</span>` : ''}`;
+        }
         return `
-            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center">
-                <div class="mb-bar-l1">${StringHelper.encodeHtml(text)}</div>
+            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
+                <div class="mb-bar-l1">${inner}</div>
             </div>`;
     },
 

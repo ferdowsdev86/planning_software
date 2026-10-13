@@ -15734,6 +15734,23 @@ body {
     padding         : 0 4px;
 }
 .mb-bar-center .mb-bar-l1 { text-overflow : ellipsis; overflow : hidden; }
+/* Colour by: Product — the product type as a pill in the middle of the bar,
+   above the LC hatch / badge, readable on any bar colour */
+.mb-bar-product { position : relative; z-index : 3; }
+.mb-bar-product .mb-bar-l1 { display : flex; align-items : center; justify-content : center; gap : 6px; overflow : hidden; }
+.mb-ptype {
+    flex          : 0 0 auto;
+    padding       : 1px 8px;
+    border-radius : 10px;
+    background    : rgba(0, 0, 0, 0.55);
+    color         : #fff;
+    font-size     : 11px;
+    font-weight   : 800;
+    letter-spacing : .2px;
+    box-shadow    : 0 0 0 1px rgba(255, 255, 255, 0.55);
+    white-space   : nowrap;
+}
+.mb-ptype-rest { flex : 0 1 auto; overflow : hidden; text-overflow : ellipsis; white-space : nowrap; font-weight : 600; opacity : .95; }
 
 .b-sch-event.mb-risk-green  { background : #43a047; color : #fff; }
 .b-sch-event.mb-risk-yellow { background : #f9a825; color : #222; }
