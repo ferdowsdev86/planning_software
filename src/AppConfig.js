@@ -6,7 +6,7 @@ import {
     buildManpowerRanges, buildOffDayRanges, nextWorkingDay,
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
-    elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, addCalDays, randSmv, productTypeFor,
+    elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor
@@ -2189,7 +2189,9 @@ export const schedulerProConfig = {
         // (the bar colour/border already distinguishes confirm orders).
         // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
         // position, duration and colour coding stay exactly as-is.
-        const line = colorState.mode === 'style' ? barStyleLine : barDisplayLine;
+        const line = colorState.mode === 'style' ? barStyleLine
+            : colorState.mode === 'product' ? barProductLine
+            : barDisplayLine;
         const full = line(r);
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;

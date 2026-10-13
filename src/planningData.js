@@ -536,6 +536,16 @@ export function fmtDateDdMmmYyyy(d) {
 // Missing pieces show N/A (never undefined/null/blank). Grouped bars show
 // every colour comma-separated and the EARLIEST PO delivery in the group.
 // Style falls back to the order code so the bar is still identifiable.
+// "Product" colour mode: the bar reads product type first — Pant, 5 Pocket,
+// Jacket… — then the usual buyer : style : order line
+export function barProductLine(raw, compact = false) {
+    if (!raw) return 'N/A';
+    const type = String(raw.productType || productTypeFor(raw.po, raw.productType) || '').trim() || 'N/A';
+    if (compact) return type;
+    const mbm = mbmOrderNo(raw.po, raw.mbmOrder);
+    return `${type} : ${raw.buyer || '—'} : ${raw.style || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
+}
+
 export function barStyleLine(raw, compact = false) {
     if (!raw) return 'N/A : N/A : N/A';
     const style = String(raw.style || '').trim()
