@@ -1159,26 +1159,20 @@ const ERP_QUERY = (cutoff) => [`
 `, [cutoff]];
 
 // Order details: style info + fabric booking for tooltip
+// One PO NUMBER can sit on several orders / styles (G-STAR reuses PO
+// numbers across styles): the row whose order code is the bar's wins, else
+// the first — a bare LIMIT 1 showed another style's data in the tooltip
+const pickStyleRow = (rows, orderCode) => {
+    const want = String(orderCode || '').trim().toUpperCase();
+    return (want && rows.find(r => String(r.order_code || '').trim().toUpperCase() === want)) || rows[0] || null;
+};
 app.get(`${BASE}/order-details`, async (req, res) => {
     const po = req.query.po;
     if (!po) return res.status(400).json({ success : false, error : 'Missing po' });
     if (dbOffline()) return dbOfflineReply(res);
     try {
-        const [[style]] = await pool.query(`
-            SELECT
-                po.po_id, po.po_no, po.po_qty,
-                oe.order_code, oe.order_status,
-                s.stl_no, s.stl_product_name, s.stl_description, s.stl_type,
-                s.stl_img_link, s.techpack, s.wash_recipe_status,
-                s.gender, s.stl_garment_description,
-                oe.order_id AS entry_id,
-                COALESCE(po.po_ex_fty, oe.order_delivery_date) AS shipment_date
-            FROM \`${ERP_DB}\`.mr_purchase_order   po
-            JOIN \`${ERP_DB}\`.mr_order_entry       oe ON oe.order_id = po.mr_order_entry_order_id
-            JOIN \`${ERP_DB}\`.mr_style             s  ON s.stl_id    = oe.mr_style_stl_id
-            WHERE po.po_no = ?
-            LIMIT 1
-        `, [String(po)]);
+        const [rows] = await pool.query(`${STYLE_SQL('po.po_no = ?')} LIMIT 25`, [String(po)]);
+        const style = pickStyleRow(rows, req.query.order);
 
         if (!style) return res.json({ success : false, error : 'Not found' });
 
@@ -1245,19 +1239,25 @@ const BOOKING_SQL = where => `
 
 app.post(`${BASE}/tooltip-bulk`, async (req, res) => {
     if (dbOffline()) return dbOfflineReply(res);
-    const pos    = [...new Set((Array.isArray(req.body?.pos) ? req.body.pos : []).map(p => String(p || '').trim()).filter(Boolean))].slice(0, 500);
+    // each item: "po" or "po|ORDER CODE" — the order code picks the right
+    // style when the PO number sits on several orders
+    const keys   = [...new Set((Array.isArray(req.body?.pos) ? req.body.pos : []).map(p => String(p || '').trim()).filter(Boolean))].slice(0, 500);
+    const parse  = k => { const i = k.indexOf('|'); return i < 0 ? { po : k, order : '' } : { po : k.slice(0, i), order : k.slice(i + 1) }; };
     const groups = (Array.isArray(req.body?.groups) ? req.body.groups : [])
         .map(g => ({ key : String(g?.key || ''), ids : (Array.isArray(g?.ids) ? g.ids : []).map(Number).filter(n => Number.isFinite(n) && n > 0).slice(0, 50) }))
         .filter(g => g.key && g.ids.length).slice(0, 500);
     const details = {}, rowsByKey = {};
     try {
-        const needPos = pos.filter(p => { const c = tipGet(`d:${p}`); if (c !== undefined) { details[p] = c; return false; } return true; });
-        if (needPos.length) {
+        const needKeys = keys.filter(k => { const c = tipGet(`d:${k}`); if (c !== undefined) { details[k] = c; return false; } return true; });
+        if (needKeys.length) {
+            const needPos = [...new Set(needKeys.map(k => parse(k).po).filter(Boolean))];
             const ph = needPos.map(() => '?').join(',');
             const [styles] = await pool.query(STYLE_SQL(`po.po_no IN (${ph})`), needPos);
-            const byPo = new Map();
-            for (const s of styles) if (!byPo.has(String(s.po_no))) byPo.set(String(s.po_no), s);
-            const entryIds = [...new Set([...byPo.values()].map(s => s.entry_id).filter(Boolean))];
+            const byPo = new Map();                       // po → every row of that PO number
+            for (const s of styles) { const k = String(s.po_no); if (!byPo.has(k)) byPo.set(k, []); byPo.get(k).push(s); }
+            const pick = new Map();                       // key → the row for that PO + order
+            for (const k of needKeys) { const { po, order } = parse(k); pick.set(k, pickStyleRow(byPo.get(po) || [], order)); }
+            const entryIds = [...new Set([...pick.values()].filter(Boolean).map(s => s.entry_id).filter(Boolean))];
             const bookingsByEntry = new Map();
             if (entryIds.length) {
                 const [bk] = await pool.query(BOOKING_SQL(`bk.order_id IN (${entryIds.map(() => '?').join(',')})`), entryIds);
@@ -1267,11 +1267,11 @@ app.post(`${BASE}/tooltip-bulk`, async (req, res) => {
                     bookingsByEntry.set(b.order_id, list);
                 }
             }
-            for (const p of needPos) {
-                const style = byPo.get(p) || null;
+            for (const k of needKeys) {
+                const style = pick.get(k) || null;
                 const value = style ? { style, bookings : bookingsByEntry.get(style.entry_id) || [] } : null;
-                details[p] = value;
-                tipPut(`d:${p}`, value);
+                details[k] = value;
+                tipPut(`d:${k}`, value);
             }
         }
         const needGroups = groups.filter(g => { const c = tipGet(`g:${g.key}`); if (c !== undefined) { rowsByKey[g.key] = c; return false; } return true; });

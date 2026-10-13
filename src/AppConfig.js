@@ -2467,15 +2467,19 @@ const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } 
 
 // Board open: the bulk answer lands in the same session cache the hover path
 // reads — tooltips then open complete, with no request at all
-export function warmTipCache(po, detail, qs, rows) {
-    if (po && detail !== undefined) ssSet(`tip-${po}`, detail);
+// The ERP detail is keyed by PO + ORDER CODE: one PO number can sit on
+// several orders / styles (G-STAR), the order code picks the right one
+export const tipKeyOf = r => (r?.po ? `${String(r.po).trim()}|${String(r.mbmOrder || '').trim().toUpperCase()}` : '');
+export function warmTipCache(key, detail, qs, rows) {
+    if (key && detail !== undefined) ssSet(`tip-${key}`, detail);
     if (qs && Array.isArray(rows)) ssSet(`pos-sum-${qs}`, rows);
 }
 
 // { detail, poSummary } when everything the tooltip needs is cached, else null
 export function tipDataFromCache(r) {
-    const detail = r.po ? ssGet(`tip-${r.po}`) : null;
-    if (r.po && detail === undefined) return null;
+    const tk = tipKeyOf(r);
+    const detail = tk ? ssGet(`tip-${tk}`) : null;
+    if (tk && detail === undefined) return null;
     const qs = tipPoQuery(r);
     const poSummary = qs ? ssGet(`pos-sum-${qs}`) : [];
     if (qs && poSummary === undefined) return null;
@@ -2493,21 +2497,22 @@ function tipFailed(res) {
     if (!res || res.status >= 500) tipOfflineUntil = Date.now() + TIP_OFFLINE_MS;
 }
 export function fetchTipData(r) {
-    const key = `${r.po || ''}|${tipPoQuery(r) || ''}`;
+    const tk  = tipKeyOf(r);
+    const key = `${tk}|${tipPoQuery(r) || ''}`;
     if (tipInflight.has(key)) return tipInflight.get(key);
     if (tipOffline()) return Promise.resolve({ detail : null, poSummary : [] });
     const p = (async () => {
         const API_BASE = tipApiBase();
-        let detail = r.po ? ssGet(`tip-${r.po}`) : null;
-        if (r.po && detail === undefined) {
+        let detail = tk ? ssGet(`tip-${tk}`) : null;
+        if (tk && detail === undefined) {
             detail = null;
             let res = null;
             try {
-                res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}`);
+                res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}&order=${encodeURIComponent(String(r.mbmOrder || ''))}`);
                 const json = await res.json();
-                if (json.success) { detail = json.data; ssSet(`tip-${r.po}`, detail); }
+                if (json.success) { detail = json.data; ssSet(`tip-${tk}`, detail); }
                 // a clean "not found" is cached too — no re-ask on every hover
-                else if (res.ok && !json.offline) ssSet(`tip-${r.po}`, null);
+                else if (res.ok && !json.offline) ssSet(`tip-${tk}`, null);
                 else tipFailed(res);
             }
             catch { tipFailed(res); }
