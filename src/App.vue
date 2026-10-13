@@ -3734,6 +3734,24 @@ const boardViewOnly = computed(() =>
     currentUser.value?.role === 'Management'
     || (!!currentBoard.value && boardAccessOf(currentUser.value, currentBoard.value.id) === 'read'));
 
+// Production update: a planner sees (and enters) only the lines of the
+// units whose board they may WRITE — a read-only board's unit is not
+// theirs to update. Planning Manager sees every unit; Management none.
+// null = no restriction (Planning Manager)
+const puWriteUnits = computed(() => {
+    const u = currentUser.value || authUser.value;
+    const role = u?.role || authUser.value?.role;
+    if (role === 'Planning Manager') return null;
+    const set = new Set();
+    if (role === 'Management') return set;
+    for (const b of boards.value) {
+        if (boardAccessOf(u, b.id) === 'write' && b.unitName) set.add(String(b.unitName).toUpperCase());
+    }
+    return set;
+});
+const puUnitAllowed = unit => !puWriteUnits.value || puWriteUnits.value.has(String(unit || '').toUpperCase());
+const puUnitsLabel = computed(() => puWriteUnits.value ? ([...puWriteUnits.value].join(', ') || 'no unit') : 'all units');
+
 function savePerms() {
     localStorage.setItem('mbm-boards', JSON.stringify(boards.value));
     localStorage.setItem('mbm-users', JSON.stringify(users.value));
@@ -7475,7 +7493,8 @@ async function buildPuRows() {
     }
     rows.push(...byLine.values());
     rows.sort((a, b) => String(a.line).localeCompare(String(b.line)) || String(a.po).localeCompare(String(b.po)));
-    puRows.value = rows;
+    // only the units this planner may write (board write permission)
+    puRows.value = rows.filter(r => puUnitAllowed(r.unit));
 }
 
 function saveProdUpdate() {
@@ -7676,6 +7695,7 @@ function snPrint() {
 async function openStripProd(rec) {
     const raw = eventRawOf(rec);
     if (!raw || raw.stage) { toast('Production update শুধু sewing strip-এর জন্য', 'warn'); return; }
+    if (boardViewOnly.value) { toast('🔒 Read-only board — production can be updated only with write access to this board', 'warn'); return; }
     spRec.value = rec;
     spComplete.value = false;
     spOpen.value = true;
@@ -11926,6 +11946,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="cal-dialog od-dialog pu-dialog">
                 <div class="cal-title">
                     Daily production update — day_production_update_plan
+                    <span class="pu-units" :title="'Lines of the units whose board you may write (Setup → Settings → board access)'">· {{ puUnitsLabel }}</span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="puMin = true">—</span>
                         <span class="cal-x" @click="puOpen = false">✕</span>
@@ -13950,6 +13971,7 @@ body {
 }
 
 /* One-line toolbar: date range + Generate / Excel / PDF ... Close */
+.pu-units { margin-left : 10px; font-weight : 500; font-size : 11.5px; color : #1a5dab; }
 .dp-toolbar {
     display       : flex;
     align-items   : center;
