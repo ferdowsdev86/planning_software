@@ -7224,7 +7224,7 @@ async function buildPuReport() {
     if (!from || !to || from > to) { toast('From date must not be after To date', 'warn'); return; }
     puBusy.value = true;
     try {
-        const all = await loadProdRowsApplied();
+        const all = (await loadProdRowsApplied()).filter(r => puUnitAllowed(r.unit));   // write-permission units only
         const dkey = d => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toLocaleDateString('en-CA'));
         const dates = [...new Set(all.map(r => dkey(r.save_date)).filter(d => d >= from && d <= to))].sort();
         const lines = new Map();
