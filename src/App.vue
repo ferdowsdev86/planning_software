@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
@@ -87,7 +87,7 @@ const colorMenuOpen = ref(false);
 const colorMode = ref((() => {
     const saved = localStorage.getItem('mbm-color-mode');
     // 'risk' was the old name of the first mode — it is "Product delivery" now
-    return ['delivery', 'buyer', 'product', 'style'].includes(saved) ? saved : 'delivery';
+    return ['delivery', 'buyer', 'product', 'ptype', 'style'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
 // the board root carries the colour mode: in Buyer / Plan status mode the
@@ -10764,8 +10764,10 @@ const colorModes = [
     { icon : '🧵', label : 'Style',            mode : 'style' },
     { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
     { icon : '👕', label : 'Buyer',            mode : 'buyer' },
-    { icon : '👖', label : 'Product',          mode : 'product' }
+    { icon : '👖', label : 'Item',             mode : 'product' },
+    { icon : '🏷', label : 'Product type',     mode : 'ptype' }
 ];
+const planStateLegend = Object.entries(PLAN_STATE_COLORS).map(([key, c]) => ({ key, ...c }));
 
 // Legends for Style / Product: what is on the open board, in its colours
 const styleLegend = computed(() => {
@@ -11221,8 +11223,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <span v-for="b in styleLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.key }}</span>
                             <span v-if="!styleLegend.length" class="t4dim">no bars on the board</span>
                         </div>
+                        <div v-if="colorMode === 'ptype'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">Plan state</div>
+                            <span v-for="c in planStateLegend" :key="c.key" class="fr-colormenu-chip" :style="{ background : c.bg, color : c.fg }">{{ c.label }}</span>
+                        </div>
                         <div v-if="colorMode === 'product'" class="fr-colormenu-legend">
-                            <div class="fr-colormenu-legend-t">Product types on this board <a class="fr-colormenu-link" @click.stop="openEffProfiles">colours…</a></div>
+                            <div class="fr-colormenu-legend-t">Items on this board <a class="fr-colormenu-link" @click.stop="openEffProfiles">colours…</a></div>
                             <span v-for="b in productLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.key }}</span>
                             <span v-if="!productLegend.length" class="t4dim">no bars on the board</span>
                         </div>

@@ -299,6 +299,25 @@ export function styleColorOf(style) {
 }
 // Product (garment) type colour: the Efficiency profiles table's colour for
 // the type (set by App.vue), else a stable automatic one
+// "Product type" colour mode (FastReact plan-state colours): one of four
+// states per bar — Projection order (red) · Delivery delay / late strip
+// (blue) · Before PCD plan (yellow) · On-time delivery (grey)
+export const PLAN_STATE_COLORS = {
+    projection : { bg : '#ee2e24', fg : '#fff', label : 'Projection Order' },
+    late       : { bg : '#1e88e5', fg : '#fff', label : 'Delivery Delay (Late Strip)' },
+    beforePcd  : { bg : '#f9a825', fg : '#222', label : 'Before PCD Plan' },
+    onTime     : { bg : '#9e9e9e', fg : '#fff', label : 'On-Time Delivery' }
+};
+export function planStateOf(raw, startDate, endDate) {
+    if (!raw) return 'onTime';
+    if (orderTypeOf(raw.po, raw.orderType) === 'projection') return 'projection';
+    if (raw.status !== 'completed' && isLateVsDelivery(endDate || raw.end, raw.ship)) return 'late';
+    const pcd = raw.pcd ? new Date(raw.pcd) : null;
+    const st  = startDate || raw.start;
+    if (pcd && !Number.isNaN(+pcd) && st && new Date(st) < pcd) return 'beforePcd';
+    return 'onTime';
+}
+
 export function productTypeColor(name) {
     const k = String(name || '').trim();
     const own = colorState.productColors[k] || colorState.productColors[k.toUpperCase()];
@@ -2172,6 +2191,10 @@ export const schedulerProConfig = {
         if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(r.productType || productTypeFor(r.po, r.productType)));
         else if (colorState.mode === 'style')   paint(styleColorOf(r.style || mbmOrderNo(r.po, r.mbmOrder)));
+        else if (colorState.mode === 'ptype') {
+            const c = PLAN_STATE_COLORS[planStateOf(r, e.startDate, e.endDate)];
+            renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
+        }
         else {
             // Product delivery: the bar wears its delivery month's colour
             const c = deliveryMonthColor(r.ship);
