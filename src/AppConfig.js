@@ -9,10 +9,65 @@ import {
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
-    dayCapacityFactor
-, workDayUnits, planQtyOf, workingMinutesBetween,
+    dayCapacityFactor, hmToHours, calendarState,
+    workDayUnits, planQtyOf, workingMinutesBetween,
     buyerDefaultEff, deliveryMonthColor
 } from './planningData.js';
+
+// ---------------------------------------------------------------------------
+// Flush bars (FastReact): a bar that ends at its line's working-day end and
+// is followed by a bar that starts the next working morning is DRAWN up to
+// that bar's left edge — the overnight hours the axis still shows (longer
+// lines, overtime slot) never open a hatch gap between two consecutive bars.
+// Data stays exact: only the rendered width grows. The next-bar map is
+// rebuilt once per render pass (bars render in one synchronous sweep).
+// ---------------------------------------------------------------------------
+let flushMap = null, flushMapAt = 0, flushMapCount = -1;
+function flushNextOf(scheduler, ev) {
+    const now = performance.now();
+    const count = scheduler.eventStore?.count ?? 0;
+    if (!flushMap || now - flushMapAt > 60 || count !== flushMapCount) {
+        flushMap = new Map();
+        flushMapAt = now;
+        flushMapCount = count;
+        for (const [lid, list] of Object.entries(rebuildBarsCache(scheduler))) {
+            if (isHoldId(lid)) continue;
+            const sorted = [...list].sort((a, b) => a.startDate - b.startDate);
+            for (let i = 0; i + 1 < sorted.length; i++) flushMap.set(sorted[i].id, sorted[i + 1]);
+        }
+    }
+    return flushMap.get(ev.id) || null;
+}
+// the line's working-day end for a date: start + the line's hours that day
+function lineDayEnd(scheduler, lineId, date) {
+    const res  = scheduler.resourceStore?.getById(lineId);
+    const d    = new Date(date);
+    const base = Number(res?.data?.hours) > 0 ? Number(res.data.hours) : hmToHours(calendarState.days[d.getDay()]?.hours || '0');
+    const hours = base * dayCapacityFactor(d, base, lineId);
+    const end = startOfWorkDay(d);
+    end.setMinutes(end.getMinutes() + Math.round(hours * 60));
+    return end;
+}
+function flushWidth(scheduler, ev, renderData) {
+    const raw = ev.data?.raw;
+    if (!raw || raw.stage || !(renderData.width > 0)) return;
+    const next = flushNextOf(scheduler, ev);
+    if (!next || !(next.startDate > ev.endDate)) return;
+    const endDay = new Date(ev.endDate); endDay.setHours(0, 0, 0, 0);
+    const nextDay = new Date(next.startDate); nextDay.setHours(0, 0, 0, 0);
+    if (!(nextDay > endDay)) return;                       // same day: already touching or a real gap
+    const lid = lineIdOf(scheduler, ev);
+    if (!lid || isHoldId(lid)) return;
+    // this bar must really run to its day's end (±20 min of snapping), and
+    // the next must start at ITS day's first hour — then the only "gap" is
+    // the night, which is not plannable time
+    if (Math.abs(ev.endDate - lineDayEnd(scheduler, lid, ev.endDate)) > 20 * 60000) return;
+    if (Math.abs(next.startDate - startOfWorkDay(next.startDate)) > 20 * 60000) return;
+    let nextLeft;
+    try { nextLeft = scheduler.getCoordinateFromDate(next.startDate, true); } catch { return; }
+    if (!(nextLeft > renderData.left + renderData.width)) return;
+    renderData.width = nextLeft - renderData.left;
+}
 import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
 
@@ -2155,6 +2210,7 @@ export const schedulerProConfig = {
     eventRenderer({ eventRecord : e, renderData }) {
         const r = e.data.raw;
         if (!r) return StringHelper.encodeHtml(e.name || '');
+        flushWidth(this, e, renderData);   // consecutive bars touch (FastReact)
 
         const pastDelivery = r.status !== 'completed'
             && isLateVsDelivery(e.endDate || r.end, r.ship);

@@ -9821,12 +9821,18 @@ function applyCalendarToBoard({ pack = true } = {}) {
     s.project.calendarManagerStore.data = [{ id : 'factory', name : calendarState.name, intervals }];
     s.project.calendar = 'factory';
 
-    // Visible day window on the axis = calendar start -> work hours + OT
+    // Visible day window on the axis = calendar start → the LONGEST working
+    // day anywhere in the plan (weekly hours, changed-hours dates, a line's
+    // own hours) — no overtime slot: an empty slot after every bar's day end
+    // showed as a hatch gap between consecutive bars
     const workCfgs = Object.values(calendarState.days).filter(c => hmToHours(c.hours) > 0);
     if (workCfgs.length) {
         const fromHour = Math.floor(Math.min(...workCfgs.map(c => hmToHours(c.start))));
-        const toHour   = Math.ceil(Math.max(...workCfgs.map(c =>
-            hmToHours(c.start) + hmToHours(c.hours) + hmToHours(c.ot))));
+        let maxHours = Math.max(...workCfgs.map(c => hmToHours(c.hours)));
+        for (const v of Object.values(calendarState.overrides || {})) maxHours = Math.max(maxHours, Number(v) || 0);
+        for (const m of Object.values(calendarState.lineOverrides || {})) for (const v of Object.values(m || {})) maxHours = Math.max(maxHours, Number(v) || 0);
+        for (const r of s.resourceStore?.records || []) if (r.data?.lineRow && Number(r.data.hours) > maxHours) maxHours = Number(r.data.hours);
+        const toHour = Math.ceil(fromHour + maxHours);
         s.workingTime = { fromHour, toHour : Math.min(24, Math.max(fromHour + 1, toHour)) };
     }
 
@@ -15506,8 +15512,8 @@ body {
     font-weight   : 600;
     /* Flat (2D) bar: solid colour, thin dark edge, no shadow, no gradient */
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 2px solid #111;   /* order-to-order separator (FastReact) */
-    border-right  : 2px solid #111;
+    border-left   : 1px solid #111;   /* order-to-order separator (FastReact) */
+    border-right  : 1px solid #111;
     border-radius : 0;
     box-shadow    : none;
 }
@@ -15955,8 +15961,8 @@ body {
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
     border-radius : 0 !important;
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 2px solid #111;
-    border-right  : 2px solid #111;
+    border-left   : 1px solid #111;
+    border-right  : 1px solid #111;
     box-shadow    : none !important;
     font-weight   : 600 !important;
     overflow      : hidden;
