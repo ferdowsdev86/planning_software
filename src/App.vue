@@ -6621,6 +6621,52 @@ const dpSummary = computed(() => {
     };
 });
 
+// Load vs Capacity (FastReact "Factory" block) for the report range:
+//   Working Days      = unit calendar days with hours in the range
+//   Avg. Working Hour = line-hours ÷ (lines × working days)
+//   Capacity SAH      = Σ lines Σ days  manpower × hours   (man-hours at 100 %)
+//   Load SAH          = Σ bars  plan qty × SMV ÷ 60 ÷ plan efficiency  (hours the
+//                       plan really needs at the efficiency it is planned on)
+//   Load %            = Load ÷ Capacity · Free = Capacity − Load
+//   Planned Qty / SAH / Avg SMV / Plan Eff % = the Summary figures
+//   Fty Eff           = average line efficiency (planning_resources)
+const dpLoadCap = computed(() => {
+    const s = getInstance();
+    if (!s?.resourceStore || !dpGroups.value.length) return null;
+    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    const from = new Date(dpFrom.value + 'T00:00:00'), to = new Date(dpTo.value + 'T00:00:00');
+    if (!lines.length || Number.isNaN(+from) || Number.isNaN(+to) || from > to) return null;
+    let workDays = 0, lineHours = 0, lineDays = 0, capSah = 0;
+    for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        if (!isOffDay(d)) workDays++;
+        for (const r of lines) {
+            if (isLineOffDay(d, r.id)) continue;
+            const h = hmToHours(lineHoursLabel({ id : r.id, hours : r.data.hours }, d));
+            if (!(h > 0)) continue;
+            lineHours += h;
+            lineDays++;
+            capSah += (Number(r.data.manpower) || 0) * h;
+        }
+    }
+    const sm = dpSummary.value;
+    const rows = dpGroups.value.filter(g => !isHoldId(g.lineId)).flatMap(g => g.rows);
+    const effs = lines.map(r => Number(r.data.eff) || 0).filter(e => e > 0);
+    const ftyEff = effs.length ? effs.reduce((a, b) => a + b, 0) / effs.length : 0;
+    let loadSah = 0;
+    for (const r of rows) {
+        const eff = Number(r.planEff) > 0 ? Number(r.planEff) : (sm.eff || ftyEff || 50);
+        loadSah += (r.planQty * (Number(r.smv) || 0) / 60) / (eff / 100);
+    }
+    const loadPct = capSah > 0 ? loadSah / capSah * 100 : 0;
+    return {
+        unit : dpUnitName.value, to : fmtDdMmYy(to), ftyEff : Math.round(ftyEff * 100) / 100,
+        workDays, avgHours : lineDays ? Math.round(lineHours / lineDays * 100) / 100 : 0,
+        capSah : Math.round(capSah), loadSah : Math.round(loadSah), loadPct : Math.round(loadPct),
+        freeSah : Math.round(capSah - loadSah),
+        planQty : sm.planQty, planSah : sm.sah, avgSmv : sm.avgSmv, planEff : sm.eff
+    };
+});
+
 const dpFloorMatrix = computed(() => {
     const floors = new Map();
     for (const g of dpGroups.value) {
@@ -7032,7 +7078,21 @@ ${frow('Plan Lines', f => f ? f.lines : s.lines)}
 ${frow('Manpower', f => fmtQty(f ? f.manpower : s.manpower))}
 ${frow('CM Plan (Pre-costing)', f => '$ ' + fmtQty(Math.round(f ? f.cm : s.cm)))}
 </tbody></table>` : '';
-    return `${kv}<br>${buyers}<br>${floors}`;
+    const lc = dpLoadCap.value;
+    const loadCap = lc ? `<table border="1" cellspacing="0" cellpadding="3">
+<thead><tr><th colspan="3">LOAD VS CAPACITY</th></tr><tr><th>Factory</th><th></th><th>${dpEsc(lc.to)}</th></tr></thead><tbody>
+<tr><td rowspan="2" style="background:#f6a8a0;font-weight:bold">${dpEsc(lc.unit)}</td><td style="background:#9ff3f6">Working Days</td><td style="background:#9ff3f6;text-align:right">${lc.workDays}</td></tr>
+<tr><td style="background:#9ff3f6">Avg. Working Hour</td><td style="background:#9ff3f6;text-align:right">${lc.avgHours}</td></tr>
+<tr><td></td><td style="background:#c9f7c5">Capacity SAH</td><td style="background:#c9f7c5;text-align:right">${fmtQty(lc.capSah)}</td></tr>
+<tr><td style="background:#9ff3f6;text-align:center">Fty Eff</td><td style="background:#c9f7c5">Load SAH</td><td style="background:#c9f7c5;text-align:right">${fmtQty(lc.loadSah)}</td></tr>
+<tr><td style="background:#9ff3f6;text-align:center">${lc.ftyEff}</td><td style="background:#c9f7c5">Load %</td><td style="background:#c9f7c5;text-align:right"><b>${lc.loadPct}</b></td></tr>
+<tr><td></td><td style="background:#ff8fc8">Free Capacity SAH</td><td style="background:#ff8fc8;text-align:right">${fmtQty(lc.freeSah)}</td></tr>
+<tr><td></td><td style="background:#d9d4f7">Planned Qty</td><td style="background:#d9d4f7;text-align:right">${fmtQty(lc.planQty)}</td></tr>
+<tr><td></td><td style="background:#d9d4f7">Planned SAH</td><td style="background:#d9d4f7;text-align:right">${fmtQty(lc.planSah)}</td></tr>
+<tr><td></td><td style="background:#d9d4f7">Average SMV</td><td style="background:#d9d4f7;text-align:right">${lc.avgSmv}</td></tr>
+<tr><td></td><td style="background:#d9d4f7">Plan Efficiency %</td><td style="background:#d9d4f7;text-align:right">${lc.planEff}</td></tr>
+</tbody></table>` : '';
+    return `${kv}<br>${buyers}<br>${loadCap}<br>${floors}`;
 }
 
 function dpBuildFloorsHtml() {
@@ -11615,6 +11675,24 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         <tr class="dp-grand"><td>Total</td><td class="od-num">{{ fmtQty(dpSummary.planQty) }}</td></tr>
                                     </tbody>
                                 </table>
+                                <table v-if="dpLoadCap" class="st-table dp-table dps-loadcap" style="flex:0 0 auto">
+                                    <thead>
+                                        <tr><th colspan="3">LOAD VS CAPACITY</th></tr>
+                                        <tr><th>Factory</th><th></th><th class="od-num">{{ dpLoadCap.to }}</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td class="lc-fty" rowspan="2">{{ dpLoadCap.unit }}</td><td class="lc-cyan">Working Days</td><td class="od-num lc-cyan">{{ dpLoadCap.workDays }}</td></tr>
+                                        <tr><td class="lc-cyan">Avg. Working Hour</td><td class="od-num lc-cyan">{{ dpLoadCap.avgHours }}</td></tr>
+                                        <tr><td></td><td class="lc-green">Capacity SAH</td><td class="od-num lc-green">{{ fmtQty(dpLoadCap.capSah) }}</td></tr>
+                                        <tr><td class="lc-fty-h">Fty Eff</td><td class="lc-green">Load SAH</td><td class="od-num lc-green">{{ fmtQty(dpLoadCap.loadSah) }}</td></tr>
+                                        <tr><td class="lc-fty-v">{{ dpLoadCap.ftyEff }}</td><td class="lc-green">Load %</td><td class="od-num lc-green"><b>{{ dpLoadCap.loadPct }}</b></td></tr>
+                                        <tr><td></td><td class="lc-pink">Free Capacity SAH</td><td class="od-num lc-pink">{{ fmtQty(dpLoadCap.freeSah) }}</td></tr>
+                                        <tr><td></td><td class="lc-lav">Planned Qty</td><td class="od-num lc-lav">{{ fmtQty(dpLoadCap.planQty) }}</td></tr>
+                                        <tr><td></td><td class="lc-lav">Planned SAH</td><td class="od-num lc-lav">{{ fmtQty(dpLoadCap.planSah) }}</td></tr>
+                                        <tr><td></td><td class="lc-lav">Average SMV</td><td class="od-num lc-lav">{{ dpLoadCap.avgSmv }}</td></tr>
+                                        <tr><td></td><td class="lc-lav">Plan Efficiency %</td><td class="od-num lc-lav">{{ dpLoadCap.planEff }}</td></tr>
+                                    </tbody>
+                                </table>
                             </div>
                             <table v-if="dpSummary.floors.length" class="st-table dp-table dps-floors">
                                 <thead>
@@ -14017,6 +14095,17 @@ body {
 .dps-buyers { max-width : 300px; }
 .dps-buyers thead th { background : #cfd8ea; }
 .dps-floors { max-width : 720px; margin-bottom : 10px; }
+/* Load vs Capacity (FastReact colour bands) */
+.dp-table.dps-loadcap { min-width : 0; width : 360px; }
+.dps-loadcap thead th { background : #cfd8ea; }
+.dps-loadcap td { padding : 4px 8px; }
+.dps-loadcap .lc-fty   { background : #f6a8a0; font-weight : 700; vertical-align : top; }
+.dps-loadcap .lc-fty-h { background : #9ff3f6; text-align : center; font-weight : 600; font-size : 11px; }
+.dps-loadcap .lc-fty-v { background : #9ff3f6; text-align : center; font-weight : 700; }
+.dps-loadcap .lc-cyan  { background : #9ff3f6; }
+.dps-loadcap .lc-green { background : #c9f7c5; }
+.dps-loadcap .lc-pink  { background : #ff8fc8; font-weight : 600; }
+.dps-loadcap .lc-lav   { background : #d9d4f7; }
 .dps-floors thead th { background : #a5d6a7; }
 .dp-day-click { cursor : pointer; }
 .dp-day-click:hover { background : #ffe082; }
