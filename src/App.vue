@@ -10768,6 +10768,12 @@ const colorModes = [
     { icon : '🏷', label : 'Product type',     mode : 'ptype' }
 ];
 const planStateLegend = Object.entries(PLAN_STATE_COLORS).map(([key, c]) => ({ key, ...c }));
+const colorModeLabel = computed(() => colorModes.find(c => c.mode === colorMode.value)?.label || '');
+// the palette button steps through the modes: Style → Product delivery → Buyer → Item → Product type → Style …
+function cycleColorMode() {
+    const i = colorModes.findIndex(c => c.mode === colorMode.value);
+    pickColorMode(colorModes[(i + 1) % colorModes.length].mode);
+}
 
 // Legends for Style / Product: what is on the open board, in its colours
 const styleLegend = computed(() => {
@@ -11194,9 +11200,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <template v-for="(b, i) in toolbar" :key="i">
                 <span v-if="b.sep" class="fr-tb-sep"></span>
                 <span v-else-if="b.anchor" class="fr-tb-anchor">
-                    <button class="fr-tb-btn" :class="b.cls" :title="b.title" @click="act(b.action)">
+                    <!-- the palette itself steps to the next colour mode; the arrow opens the list -->
+                    <button class="fr-tb-btn fr-tb-palette" :class="b.cls" :title="`Colour by: ${colorModeLabel} — click = next mode`" @click="cycleColorMode">
                         <i class="fa-solid fr-tb-fa" :class="b.fa" aria-hidden="true"></i>
-                        <span v-if="b.caret" class="fr-tb-caret">▾</span>
+                    </button>
+                    <button v-if="b.caret" class="fr-tb-btn fr-tb-caret-btn" :class="{ 'fr-tb-on' : colorMenuOpen }" title="Choose the colour mode" @click="act(b.action)">
+                        <span class="fr-tb-caret">▾</span>
                     </button>
                     <div v-if="colorMenuOpen" class="fr-colormenu">
                         <div
@@ -11207,6 +11216,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             @click="pickColorMode(c.mode)"
                         >
                             <span class="fr-colormenu-ico">{{ c.icon }}</span>{{ c.label }}
+                            <span v-if="c.mode === colorMode" class="fr-colormenu-check">✓</span>
                         </div>
                         <div v-if="colorMode === 'buyer'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Buyers on this board <a class="fr-colormenu-link" @click.stop="openBuyerColors">edit colours…</a></div>
@@ -15220,6 +15230,12 @@ body {
 .fr-tb-fa   { font-size : 13px; line-height : 1; }
 .fr-tb-caret { font-size : 8px; line-height : 1; color : inherit; }
 .fr-tb-anchor > .fr-tb-btn { width : auto; padding : 0 6px; }
+.fr-tb-anchor { display : inline-flex; align-items : center; gap : 0; }
+.fr-tb-palette .fr-tb-fa { font-size : 18px; }          /* a touch bigger than the other tools */
+.fr-tb-palette { padding : 0 7px !important; }
+.fr-tb-caret-btn { width : 16px !important; padding : 0 !important; margin-left : -2px; }
+.fr-tb-caret-btn .fr-tb-caret { font-size : 10px; }
+.fr-colormenu-check { margin-left : auto; padding-left : 12px; color : #1b52ad; font-weight : 700; }
 .fr-tb-sep  { width : 1px; height : 18px; background : #d9d9d9; margin : 0 4px; }
 
 /* Plan Pull Forward: FastReact-style beveled button with blue double arrow */
