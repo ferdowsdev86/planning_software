@@ -1412,3 +1412,15 @@ export async function saveBuyerColorsDb(colors, by) {
     if (!j.success) throw new Error(j.error || 'save failed');
     return j;
 }
+
+// Explicit plan lock (toolbar key / padlock)
+export async function setPlanLockDb({ unitId, username, name, role, lock }) {
+    const res = await fetch(`${API_BASE}/plan-lock`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ unitId, username, name, role, lock })
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'plan lock failed');
+    return j;   // { ok, lock, error? }
+}

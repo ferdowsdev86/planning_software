@@ -2061,6 +2061,12 @@ export const schedulerProConfig = {
             const de = context.domEvent || context.event;
             if (uiHooks.modifierHeld || de?.ctrlKey || de?.metaKey) return false;
             const items = context.items || context;
+            // plan locked by another user: no editing entry at all — only the
+            // look-only ones (Properties / Planned schedule / Strip notes)
+            if (uiHooks.boardFrozen) {
+                for (const k of Object.keys(items)) if (!['stripProps', 'planSchedule', 'stripNotes'].includes(k)) items[k] = false;
+                return;
+            }
             const rec = context.eventRecord;
             const raw = rec?.data?.raw || rec?.raw;
             const s   = uiHooks.instance;

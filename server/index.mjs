@@ -2250,6 +2250,60 @@ function lockBanned(username) {
     return true;
 }
 
+// --------------------------------------------------------------------------
+// Explicit PLAN LOCK (FastReact "lock this plan to other users until you
+// unlock it"): the toolbar key. Unlike the edit lock above it does not
+// expire — it stays until the same planner (or a Planning Manager) opens
+// the plan again, across logouts and restarts (planning_plan_locks).
+// --------------------------------------------------------------------------
+const planLocks = new Map();      // unitId -> { username, name, at }
+async function ensurePlanLocksTable() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS planning_plan_locks (
+        unit_id INT NOT NULL PRIMARY KEY,
+        username VARCHAR(60) NOT NULL,
+        name VARCHAR(120) NULL,
+        locked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    const [rows] = await pool.query('SELECT unit_id, username, name, locked_at FROM planning_plan_locks');
+    planLocks.clear();
+    for (const r of rows) planLocks.set(String(r.unit_id), { username : r.username, name : r.name || r.username, at : r.locked_at });
+}
+const planLockOf = unitId => planLocks.get(String(unitId)) || null;
+
+app.get(`${BASE}/plan-lock`, (req, res) => {
+    res.json({ success : true, lock : planLockOf(req.query.unit_id) });
+});
+// { unitId, username, name, role, lock : true | false }
+app.post(`${BASE}/plan-lock`, async (req, res) => {
+    const { unitId, username, name, role, lock } = req.body || {};
+    if (!unitId || !username) return res.json({ success : false, error : 'unitId and username required' });
+    const key = String(unitId);
+    const cur = planLockOf(key);
+    try {
+        if (lock) {
+            if (cur && cur.username !== username) {
+                return res.json({ success : true, ok : false, lock : cur, error : `Plan is locked by ${cur.name || cur.username}` });
+            }
+            const entry = { username, name : name || username, at : new Date() };
+            await pool.query(
+                `INSERT INTO planning_plan_locks (unit_id, username, name, locked_at) VALUES (?, ?, ?, NOW())
+                 ON DUPLICATE KEY UPDATE username = VALUES(username), name = VALUES(name), locked_at = NOW()`,
+                [Number(unitId), username, entry.name]);
+            planLocks.set(key, entry);
+            console.log(`[plan-lock] unit ${key} locked by ${username}`);
+            return res.json({ success : true, ok : true, lock : entry });
+        }
+        if (cur && cur.username !== username && role !== 'Planning Manager') {
+            return res.json({ success : true, ok : false, lock : cur, error : `Only ${cur.name || cur.username} (or a Planning Manager) can open this plan` });
+        }
+        await pool.query('DELETE FROM planning_plan_locks WHERE unit_id = ?', [Number(unitId)]);
+        planLocks.delete(key);
+        console.log(`[plan-lock] unit ${key} opened by ${username}`);
+        return res.json({ success : true, ok : true, lock : null });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
 function liveLockHolder(unitId) {
     const l = boardLocks.get(String(unitId));
     if (!l) return null;
@@ -2268,6 +2322,12 @@ app.post(`${BASE}/board-lock/acquire`, (req, res) => {
     }
     const key = String(unitId);
     const cur = liveLockHolder(key);
+    // an explicit plan lock by someone else: the board is theirs, fully
+    // read-only for everyone else (no sandbox either)
+    const pl = planLockOf(key);
+    if (pl && pl.username !== username) {
+        return res.json({ success : true, ok : false, planLocked : true, planLock : pl, holder : { username : pl.username, name : pl.name } });
+    }
     if (lockBanned(username)) {
         const other = cur && cur.username !== username ? cur : null;
         return res.json({
@@ -2289,7 +2349,7 @@ app.post(`${BASE}/board-lock/acquire`, (req, res) => {
         acquiredAt : cur?.acquiredAt || Date.now(),
         lastSeen   : Date.now()
     });
-    res.json({ success : true, ok : true, holder : { username, name : name || username } });
+    res.json({ success : true, ok : true, holder : { username, name : name || username }, planLock : pl });
 });
 
 app.post(`${BASE}/board-lock/release`, (req, res) => {
@@ -3499,6 +3559,7 @@ app.listen(PORT, () => {
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
     ensureStripNotesTable().catch(e => console.error('[strip-notes] table init failed:', e.message));
     ensureBuyerColorsTable().catch(e => console.error('[buyer-colors] table init failed:', e.message));
+    ensurePlanLocksTable().catch(e => console.error('[plan-lock] table init failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
         .catch(e => console.error('[snapshot] table init failed:', e.message));

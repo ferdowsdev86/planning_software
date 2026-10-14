@@ -29,7 +29,7 @@ import {
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
-    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -4042,6 +4042,40 @@ function applyBoardFilter() {
 // ---------------------------------------------------------------------------
 const boardReadOnly   = ref(false);
 const boardLockHolder = ref(null);   // { username, name } when someone ELSE holds it
+// Explicit plan lock (FastReact toolbar key): { username, name, at } | null —
+// set by the holder, kept until they (or a Planning Manager) open it again;
+// everyone else gets a fully read-only board meanwhile
+const planLock = ref(null);
+const planLockedByMe    = computed(() => !!planLock.value && planLock.value.username === (authUser.value?.username || currentUser.value?.username));
+const planLockedByOther = computed(() => !!planLock.value && !planLockedByMe.value);
+uiHooks.boardFrozen = false;
+watch(planLockedByOther, v => { uiHooks.boardFrozen = v; const s = getInstance(); if (s) s.readOnly = v || boardViewOnly.value; });
+const planLockFrozenMsg = () => `🔒 Plan locked by ${planLock.value?.name || planLock.value?.username || 'another user'} — nothing can be moved or planned until they open it`;
+
+async function togglePlanLock() {
+    if (view.value !== 'board' || !currentUnitId.value) { toast('Open a planning board first', 'warn'); return; }
+    const me = authUser.value || currentUser.value;
+    const unit = currentBoard.value?.unitName || 'Plan';
+    if (planLockedByOther.value) {
+        if (me?.role !== 'Planning Manager') { toast(planLockFrozenMsg(), 'warn'); return; }
+        if (!window.confirm(`${unit}\n\nThis plan is locked by ${planLock.value.name || planLock.value.username}. Open it to other users anyway (Planning Manager)?`)) return;
+    }
+    else if (planLockedByMe.value) {
+        if (!window.confirm(`${unit}\n\nOk to open this plan to other users after you have finished`)) return;
+    }
+    else {
+        if (boardViewOnly.value) { toast('🔒 Read only access — you cannot lock this plan', 'warn'); return; }
+        if (!window.confirm(`${unit}\n\nOk to lock this plan to other users until you unlock it`)) return;
+    }
+    try {
+        const r = await setPlanLockDb({ unitId : currentUnitId.value, username : me?.username, name : me?.name, role : me?.role, lock : !planLock.value });   // none → lock it; mine (or a manager over someone else's) → open it
+        if (!r.ok) { planLock.value = r.lock || null; toast(r.error || 'Could not change the plan lock', 'warn'); return; }
+        planLock.value = r.lock || null;
+        toast(planLock.value ? `🔒 ${unit} plan locked — other users can only look until you open it` : `🔑 ${unit} plan opened to other users`, 'ok');
+        syncBoardLock();
+    }
+    catch (e) { toast(`Plan lock failed: ${e.message}`, 'error'); }
+}
 let   lockTimer       = null;
 let   lockWorker      = null;        // worker ticks aren't throttled in background tabs
 let   lockActive      = false;       // false = heartbeat stopped: in-flight replies are stale
@@ -4068,6 +4102,7 @@ async function syncBoardLock() {
         // Stopped (minimize / close / logout) while this beat was in flight —
         // acting on the reply would resurrect UI state that was just cleared
         if (!lockActive) return;
+        planLock.value = r.planLock || null;
         const wasReadOnly = boardReadOnly.value;
         if (r.ok) {
             boardReadOnly.value   = false;
@@ -4085,7 +4120,9 @@ async function syncBoardLock() {
             boardReadOnly.value   = true;
             boardLockHolder.value = r.holder;
             if (!wasReadOnly) {
-                toast(`🔒 This board is in use by "${r.holder?.name || r.holder?.username}" — you can test anything, but SAVE is disabled`, 'warn');
+                toast(r.planLocked
+                    ? planLockFrozenMsg()
+                    : `🔒 This board is in use by "${r.holder?.name || r.holder?.username}" — you can test anything, but SAVE is disabled`, 'warn');
             }
         }
         // Re-assert the interaction mode every heartbeat: something in the
@@ -8071,6 +8108,7 @@ function buildDraftRec(s, src, u) {
 }
 
 function carryOrderToBoard(row) {
+    if (planLockedByOther.value) { toast(planLockFrozenMsg(), 'warn'); return; }
     if (row.status === 'completed') {
         toast(`${row.mbmOrder || row.po} is completed — it cannot be planned again`, 'warn');
         return;
@@ -9296,6 +9334,7 @@ function multiSelectMembers(s, rec) {
 
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
+    if (planLockedByOther.value) { toast(planLockFrozenMsg(), 'warn'); return; }
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
     const s = getInstance();
@@ -10727,6 +10766,7 @@ function syncRowHeightVar(s) {
 const act = name => {
     if (name === 'consolidate') { toggleConsolidate(); return; }
     if (name === 'find')        { toggleFindPanel(); return; }
+    if (name === 'planLock')    { togglePlanLock(); return; }
     if (name === 'equalOrder')  { openEqualOrder(); return; }
     if (name === 'colorMenu') {
         colorMenuOpen.value = !colorMenuOpen.value;
@@ -11015,6 +11055,9 @@ const toolbar = [
     // long-left arrow + a vertical line drawn in CSS (::after)
     { fa : 'fa-arrow-left-long', cls : 'fr-tb-pull', tip : 'Plan Pull Forward', action : 'pullForward' },
     { sep : true },
+    // FastReact plan lock: key = open, padlock = locked (by me: green, by someone else: red)
+    { fa : 'fa-key', dyn : 'planLock', title : 'Lock this plan to other users', action : 'planLock' },
+    { sep : true },
     // Consolidate orders: ON = an order's side-by-side bars on a line (a
     // projection replaced by its confirm POs, splits of one order) move as
     // one group; OFF = every bar moves alone
@@ -11187,7 +11230,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="boardReadOnly && boardViewOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
+                <template v-if="planLockedByOther">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan LOCKED by <b class="mb-holder-name">{{ planLock?.name || planLock?.username }}</b> · nothing can be moved, planned or saved until they open it</template>
+                <template v-else-if="planLockedByMe && !boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan locked by you ({{ authUser?.name || currentUser?.name }}) · other users can only look</template>
+                <template v-else-if="boardReadOnly && boardViewOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
                 <template v-else-if="boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
                 <template v-else>{{ currentBoard?.unitName || 'AQL' }} (Planning — in use by {{ authUser?.name || currentUser?.name }})</template>
             </span>
@@ -11250,8 +11295,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)) }]" :title="b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
-                    <i class="fa-solid fr-tb-fa" :class="b.fa" aria-hidden="true"></i>
+                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)), 'fr-tb-locked-me' : b.dyn === 'planLock' && planLockedByMe, 'fr-tb-locked-other' : b.dyn === 'planLock' && planLockedByOther }]" :title="b.dyn === 'planLock' ? (planLock ? `Plan locked by ${planLock.name || planLock.username}${planLockedByMe ? ' (you) — click to open it to other users' : ''}` : b.title) : b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
+                    <i class="fa-solid fr-tb-fa" :class="b.dyn === 'planLock' ? (planLock ? 'fa-lock' : 'fa-key') : b.fa" aria-hidden="true"></i>
                 </button>
             </template>
             <label class="fr-tb-search">
@@ -15232,6 +15277,8 @@ body {
 .fr-tb-red  { color : #bb0000; }
 .fr-tb-red:hover { background : #fbeaea; border-color : #e8b3b3; }
 .fr-tb-save { color : #107e3e; }
+.fr-tb-locked-me    { color : #107e3e; background : #e3f4e8; border-color : #a8d5bb; }
+.fr-tb-locked-other { color : #bb0000; background : #fbeaea; border-color : #e8b3b3; }
 .fr-tb-save:hover { background : #ebf5ef; border-color : #a8d5bb; }
 .fr-tb-fa   { font-size : 13px; line-height : 1; }
 .fr-tb-caret { font-size : 8px; line-height : 1; color : inherit; }
