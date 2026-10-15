@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -8411,10 +8411,46 @@ function updateHoverClock(clientX, clientY) {
 // when the selection clears, a bar is picked up, or the board reloads.
 // ---------------------------------------------------------------------------
 function clearDayPlanChips(s = getInstance()) {
+    if (Object.keys(headerDayQty.map).length) {
+        headerDayQty.map = {};
+        refreshHeaderDayQty(s);
+    }
+    document.body.classList.remove('mb-dq-header');
     const st = s?.resourceTimeRangeStore;
     if (!st) return;
     const olds = st.records.filter(r => String(r.id).startsWith('dq-'));
     if (olds.length) st.remove(olds);
+}
+
+// The same chips on the date header (the day renderer draws them from
+// headerDayQty.map) — re-render the header so they appear at once
+function refreshHeaderDayQty(s = getInstance()) {
+    try { s?.timeAxisColumn?.refreshHeader?.(); }
+    catch { /* header re-renders on the next scroll / zoom anyway */ }
+}
+
+// Where the chips are read from: on the Holding Row while that row is in
+// view, on the date header once the planner has scrolled it out of view
+// (the chips must stay readable at any scroll position)
+function updateDayQtyPlacement(s = getInstance()) {
+    const has = Object.keys(headerDayQty.map).length > 0;
+    let holdVisible = false;
+    if (has && s) {
+        try {
+            const res  = s.resourceStore?.getById?.(firstHoldId(s));
+            const row  = res ? s.rowManager?.getRowFor?.(res) : null;
+            const el   = row?.element;
+            const body = s.bodyContainer?.getBoundingClientRect?.();
+            if (el && body) {
+                const r = el.getBoundingClientRect();
+                // visible = at least half of the row inside the body viewport
+                const seen = Math.min(r.bottom, body.bottom) - Math.max(r.top, body.top);
+                holdVisible = seen >= Math.min(r.height, 1) * 0.5;
+            }
+        }
+        catch { holdVisible = false; }
+    }
+    document.body.classList.toggle('mb-dq-header', has && !holdVisible);
 }
 
 function showDayPlanChips(s, rec) {
@@ -8425,11 +8461,16 @@ function showDayPlanChips(s, rec) {
     d.setHours(0, 0, 0, 0);
     const end = new Date(rec.endDate);
     const ranges = [];
+    const hdr = {};
     for (let guard = 0; d < end && guard < 200; guard++) {
         const info = barDayQty(s, rec, d);
         const next = new Date(d);
         next.setDate(next.getDate() + 1);
         if (info) {
+            hdr[ymdOf(d)] = {
+                text : info.off ? 'off' : fmtQty(info.qty),
+                cls  : info.off ? 'mb-hdr-dq-off' : (info.lcDay ? 'mb-hdr-dq-lc' : '')
+            };
             ranges.push({
                 id         : `dq-${guard}`,
                 resourceId : firstHoldId(s),
@@ -8446,6 +8487,9 @@ function showDayPlanChips(s, rec) {
         d.setDate(d.getDate() + 1);
     }
     if (ranges.length) s.resourceTimeRangeStore.add(ranges);
+    headerDayQty.map = hdr;
+    refreshHeaderDayQty(s);
+    updateDayQtyPlacement(s);
 }
 
 // Working hours for a line on a specific DATE. Priority: the date's
@@ -10836,11 +10880,15 @@ function bindFrHScroll(s, bar) {
         const sync = () => {
             updateFrVScroll(s);
             updateFrHScroll(s);
+            updateDayQtyPlacement(s);   // chips move to the date header once the Holding Row scrolls away
         };
         // vertical scrolls fire on the grid body scroller, horizontal ones
         // on the time-axis subgrid scroller — the thumb must follow BOTH
         s.scrollable?.on?.({ scroll : sync });
         s.timeAxisSubGrid?.scrollable?.on?.({ scroll : sync });
+        // the raw DOM scroll too — Bryntum's scroller event can coalesce a
+        // programmatic jump, and the chip placement must follow every move
+        s.bodyContainer?.addEventListener?.('scroll', () => updateDayQtyPlacement(s), { passive : true });
     }
 }
 
@@ -15973,9 +16021,50 @@ body {
 /* Bryntum nests the label — push the bold through every inner node */
 .b-sch-resource-time-range.mb-dayqty-range,
 .b-sch-resource-time-range.mb-dayqty-range * {
-    font-weight : bold !important;
-    color       : #17356b !important;
+    font-weight    : bold !important;
+    color          : #17356b !important;
+    font-size      : 10px !important;
+    letter-spacing : -0.3px;
+    padding        : 0 !important;
+    white-space    : nowrap;
 }
+
+/* The same chips on the date header: drawn by the day header renderer
+   (headerDayQty), shown only while the Holding Row is out of view —
+   the day label moves up to the top half, the quantity takes the bottom */
+.mb-hdr-dq { display : none; }
+body.mb-dq-header .b-sch-header-row.b-lowest .b-sch-header-time-axis-cell { overflow : visible; }
+body.mb-dq-header .b-sch-header-row.b-lowest .b-sch-header-text {
+    display         : flex;
+    flex-direction  : column;
+    justify-content : flex-start;
+    align-items     : center;
+    height          : 100%;
+    padding-top     : 1px;
+    line-height     : 11px;
+}
+body.mb-dq-header .b-sch-header-row.b-lowest .mb-hdr-day2 { line-height : 1; font-size : 10px; }
+body.mb-dq-header .mb-hdr-dq {
+    display        : block;
+    position       : absolute;
+    left           : 0;
+    right          : 0;
+    bottom         : 0;
+    height         : 13px;
+    line-height    : 13px;
+    font-size      : 10px;
+    font-weight    : bold;
+    letter-spacing : -0.3px;
+    color          : #17356b;
+    background     : #fff3a8;
+    border-top     : 1px solid #c9b45a;
+    text-align     : center;
+    white-space    : nowrap;
+    overflow       : visible;
+    z-index        : 3;
+}
+body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-lc  { color : #8a4a00; }
+body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal; background : #eee; }
 .b-sch-resource-time-range.mb-dayqty-lc,
 .b-sch-resource-time-range.mb-dayqty-lc * { color : #8a4a00 !important; }
 .b-sch-resource-time-range.mb-dayqty-off,

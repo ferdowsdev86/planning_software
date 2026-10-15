@@ -338,6 +338,16 @@ const hashColor = s => PALETTE[
 
 export const colorState = { mode : 'delivery', buyerColors : {}, productColors : {} };
 
+// Day-wise plan chips of the clicked / hovered bar, mirrored on the date
+// header: App.vue fills the map (ymd → { text, cls }) when the chips show on
+// the Holding Row; the day header renderer draws them and CSS shows them
+// only while that Holding Row is scrolled out of view (body.mb-dq-header)
+export const headerDayQty = { map : {} };
+function headerDayQtyHtml(start) {
+    const dq = headerDayQty.map[DateHelper.format(start, 'YYYY-MM-DD')];
+    return dq ? `<span class="mb-hdr-dq${dq.cls ? ` ${dq.cls}` : ''}">${StringHelper.encodeHtml(dq.text)}</span>` : '';
+}
+
 // Style colour: one deterministic colour per style number (hundreds of
 // styles → a hue from the name, same everywhere, no table to keep)
 const hslToHex = (h, s, l) => {
@@ -1833,12 +1843,13 @@ export const schedulerProConfig = {
                 renderer : start => {
                     const w    = uiHooks.instance?.tickSize || 72;
                     const dow2 = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][start.getDay()];
-                    if (w < 22)  return dow2[0];
-                    if (w < 54)  return dow2;
+                    const dq   = headerDayQtyHtml(start);
+                    if (w < 22)  return dow2[0] + dq;
+                    if (w < 54)  return dow2 + dq;
                     const dd = DateHelper.format(start, 'DD');
-                    if (w < 72)  return `${dow2} ${dd}`;
-                    if (w < 112) return `${DateHelper.format(start, 'ddd')} ${dd}`;
-                    return `<div class="mb-hdr-day2"><div>${DateHelper.format(start, 'dddd')}</div><div>${DateHelper.format(start, 'DD/MM/YY')}</div></div>`;
+                    if (w < 72)  return `${dow2} ${dd}${dq}`;
+                    if (w < 112) return `${DateHelper.format(start, 'ddd')} ${dd}${dq}`;
+                    return `<div class="mb-hdr-day2"><div>${DateHelper.format(start, 'dddd')}</div><div>${DateHelper.format(start, 'DD/MM/YY')}</div></div>${dq}`;
                 }
             }
         ]
