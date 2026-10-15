@@ -23,6 +23,7 @@ import {
 // rebuilt once per render pass (bars render in one synchronous sweep).
 // ---------------------------------------------------------------------------
 let flushMap = null, flushMapAt = 0, flushMapCount = -1;
+const lateQtyCache = new Map();   // Late strip qty mode: per bar position → qty after the desired finish
 function flushNextOf(scheduler, ev) {
     const now = performance.now();
     const count = scheduler.eventStore?.count ?? 0;
@@ -2328,13 +2329,20 @@ export const schedulerProConfig = {
                 let x = renderData.left;
                 try { x = this.getCoordinateFromDate(shipEnd, true); } catch { /* keep left */ }
                 const frac = Math.max(0, Math.min(1, (x - renderData.left) / renderData.width));
-                let lateQty = 0;
-                try {
-                    const lid = lineIdOf(this, e);
-                    const sim = simulateStrip(this, r, lid, new Date(e.startDate), new Date(e.endDate));
-                    for (const d of sim?.days || []) if (d.date > shipEnd) lateQty += Number(d.q) || 0;
+                // the day-by-day model once per bar position (not on every repaint)
+                const lid = lineIdOf(this, e);
+                const key = `${e.id}|${+e.startDate}|${+e.endDate}|${+shipEnd}|${r.qty}|${r.made || 0}|${lid}`;
+                let lateQty = lateQtyCache.get(key);
+                if (lateQty === undefined) {
+                    lateQty = 0;
+                    try {
+                        const sim = simulateStrip(this, r, lid, new Date(e.startDate), new Date(e.endDate));
+                        for (const d of sim?.days || []) if (d.date > shipEnd) lateQty += Number(d.q) || 0;
+                    }
+                    catch { /* no simulation — the segment still shows */ }
+                    if (lateQtyCache.size > 4000) lateQtyCache.clear();
+                    lateQtyCache.set(key, lateQty);
                 }
-                catch { /* no simulation — the segment still shows */ }
                 if (e.startDate > shipEnd && !lateQty) lateQty = Number(r.qty) || 0;
                 const wide = renderData.width * (1 - frac) > 46;
                 lateHtml = `<div class="mb-late-part" style="left:${(frac * 100).toFixed(2)}%" title="after the desired sewing finish ${StringHelper.encodeHtml(fmtDate(shipEnd))} (delivery ${StringHelper.encodeHtml(fmtDate(r.ship))} − ${lead} days, ${wash ? 'wash' : 'non-wash'}): ${StringHelper.encodeHtml(fmtQty(lateQty))} pcs">${wide && lateQty ? `<span class="mb-late-qty">late ${StringHelper.encodeHtml(fmtQty(lateQty))}</span>` : ''}</div>`;
