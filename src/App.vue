@@ -6529,7 +6529,68 @@ const dpReportTitle = computed(() => dpScope.value === 'board' ? 'Board Plan Rep
 const dpGroups      = ref([]);
 const dpGeneratedAt = ref('');
 
-const dpUnitName = computed(() => currentBoard.value?.unitName || dpGroups.value[0]?.unit || 'AQL');
+const dpAllUnits = ref(false);           // report generated across every unit board
+const dpUnitName = computed(() => (dpAllUnits.value ? 'All units' : (currentBoard.value?.unitName || dpGroups.value[0]?.unit || 'AQL')));
+
+// Filters (Generate applies them): one floor / line / buyer, '' = all
+const dpFloorF = ref('');
+const dpLineF  = ref('');
+const dpBuyerF = ref('');
+const dpFilterTick = ref(0);
+const dpFilterOptions = computed(() => {
+    void dpFilterTick.value;
+    const s = getInstance();
+    const lines = [], floors = new Set(), buyers = new Set();
+    for (const r of s?.resourceStore?.records || []) {
+        if (!r.data?.lineRow) continue;
+        lines.push({ id : r.id, name : r.data.name || r.name });
+        floors.add(dpFloorLabel(r, LINE_BY_ID[r.id]));
+    }
+    for (const ev of s?.eventStore?.records || []) {
+        const b = String(ev.data?.raw?.buyer || '').trim();
+        if (b && !ev.data.raw.stage) buyers.add(b);
+    }
+    return { lines, floors : [...floors].sort(), buyers : [...buyers].sort((a, b) => a.localeCompare(b)) };
+});
+const dpFiltersLabel = computed(() => {
+    const parts = [];
+    if (dpFloorF.value) parts.push(`Floor ${dpFloorF.value}`);
+    if (dpLineF.value)  parts.push(dpFilterOptions.value.lines.find(l => l.id === dpLineF.value)?.name || dpLineF.value);
+    if (dpBuyerF.value) parts.push(dpBuyerF.value);
+    return parts.join(' · ');
+});
+
+// Generate button: one unit (the open board) or every unit the planner may open
+async function dpGenerateClick() {
+    if (dpUnit.value === 'all') { await dpGenerateAllUnits(); return; }
+    dpAllUnits.value = false;
+    generateDayPlan();
+}
+async function dpGenerateAllUnits() {
+    const units = dpUnits.value;
+    if (!units.length) { toast('No unit board to report on', 'warn'); return; }
+    const all = [];
+    let orders = 0;
+    dpAllUnits.value = true;
+    for (const u of units) {
+        if (Number(currentBoard.value?.unitId) !== u.unitId) {
+            openBoard(u.board);
+            setBoardLoad(true, `Loading ${u.name} board for the report…`, 0);
+            try { for (let i = 0; i < 300 && boardLoadedUnitId !== u.unitId; i++) await new Promise(r => setTimeout(r, 100)); }
+            finally { setBoardLoad(false); }
+            if (boardLoadedUnitId !== u.unitId) { toast(`${u.name} board did not load — skipped`, 'warn'); continue; }
+        }
+        const n = generateDayPlan({ quiet : true });
+        if (n === false) continue;
+        orders += n;
+        all.push(...dpGroups.value.map(g => ({ ...g, unit : g.unit || u.name })));
+    }
+    dpGroups.value = all;
+    dpGenerated.value = all.length > 0;
+    dpGeneratedAt.value = fmtClock(new Date());
+    dpView.value = 'report';
+    toast(orders ? `Day Plan Report — all units: ${orders} order(s) on ${all.length} line(s)` : 'No planned orders found in any unit', orders ? 'ok' : 'warn');
+}
 
 // Unit filter: only the units whose board the user may open (read or write)
 const dpUnits = computed(() => {
@@ -6544,6 +6605,8 @@ const dpUnits = computed(() => {
 const dpUnit = ref(null);
 // Picking a unit opens that unit's board (the report reads the board) and regenerates
 async function dpSelectUnit(uid) {
+    if (uid === 'all') { dpUnit.value = 'all'; dpFloorF.value = ''; dpLineF.value = ''; await dpGenerateAllUnits(); return; }
+    dpAllUnits.value = false;
     const u = dpUnits.value.find(x => x.unitId === Number(uid));
     if (!u) { toast('You have no access to that unit\'s board', 'warn'); return; }
     dpUnit.value = u.unitId;
@@ -6669,7 +6732,7 @@ const dpSummary = computed(() => {
 //   Fty Eff           = average line efficiency (planning_resources)
 const dpLoadCap = computed(() => {
     const s = getInstance();
-    if (!s?.resourceStore || !dpGroups.value.length) return null;
+    if (!s?.resourceStore || !dpGroups.value.length || dpAllUnits.value) return null;
     const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
     const from = new Date(dpFrom.value + 'T00:00:00'), to = new Date(dpTo.value + 'T00:00:00');
     if (!lines.length || Number.isNaN(+from) || Number.isNaN(+to) || from > to) return null;
@@ -6813,12 +6876,13 @@ function openBoardPlanReport() {
     generateDayPlan();
 }
 
-function generateDayPlan() {
+function generateDayPlan({ quiet = false } = {}) {
     const s = getInstance();
     if (!s) {
         toast('Open a planning board first, then generate the report', 'warn');
-        return;
+        return false;
     }
+    dpFilterTick.value++;
     let from, to;
     if (dpScope.value === 'board') {
         // Whole board: span = earliest start … latest end of every bar
@@ -6829,8 +6893,8 @@ function generateDayPlan() {
             if (!max || ev.endDate > max) max = ev.endDate;
         }
         if (!min) {
-            toast('The board is empty — nothing to report', 'warn');
-            return;
+            if (!quiet) toast('The board is empty — nothing to report', 'warn');
+            return false;
         }
         from = new Date(min); from.setHours(0, 0, 0, 0);
         to   = new Date(max); to.setHours(23, 59, 59, 0);
@@ -6842,13 +6906,13 @@ function generateDayPlan() {
         to   = new Date(dpTo.value + 'T23:59:59');
         if (!(from instanceof Date) || Number.isNaN(+from) || Number.isNaN(+to) || from > to) {
             toast('Select a valid date range', 'warn');
-            return;
+            return false;
         }
     }
     const dayCount = Math.round((+to - +from) / 86400000) + 1;
     if (dayCount > 1830 && dpScope.value !== 'board') {
         toast('Date range is too long — keep it within 5 years', 'warn');
-        return;
+        return false;
     }
     // ≤ 3 months: one column per day; longer ranges: one column per month
     dpMode.value = dayCount > 92 ? 'month' : 'day';
@@ -6875,6 +6939,10 @@ function generateDayPlan() {
 
         const res  = s.resourceStore.getById(lid);
         const line = LINE_BY_ID[lid] || res?.data || {};
+        // Line / floor / buyer filters (Generate applies them)
+        if (dpLineF.value && lid !== dpLineF.value) continue;
+        if (dpFloorF.value && dpFloorLabel(res, line) !== dpFloorF.value) continue;
+        if (dpBuyerF.value && String(raw.buyer || '').trim().toUpperCase() !== dpBuyerF.value.toUpperCase()) continue;
         const smv  = Number(raw.smv) || randSmv(raw.po);
         const qty  = Number(raw.qty) || 0;
         // Orders-list parity: a confirm bar's PO Qty is its colour-group total
@@ -6985,8 +7053,10 @@ function generateDayPlan() {
     dpGroups.value = [...byLine.values()].sort((a, b) => a.sort - b.sort);
     dpGenerated.value = true;
     dpGeneratedAt.value = fmtClock(new Date());
+    dpView.value = 'report';   // Generate shows the line plan
     const n = dpGroups.value.reduce((a, g) => a + g.rows.length, 0);
-    toast(n ? `${dpReportTitle.value} — ${n} order(s)` : 'No planned orders found', n ? 'ok' : 'warn');
+    if (!quiet) toast(n ? `${dpReportTitle.value} — ${n} order(s)${dpFiltersLabel.value ? ` (${dpFiltersLabel.value})` : ''}` : 'No planned orders found', n ? 'ok' : 'warn');
+    return n;
 }
 
 function dpCell(row, col) {
@@ -11825,7 +11895,17 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <label class="dp-range" title="Only the units whose board you may open">Unit
                         <select class="cal-in dp-unit" :value="dpUnit ?? currentBoard?.unitId ?? 3" @change="dpSelectUnit($event.target.value)">
                             <option v-for="u in dpUnits" :key="u.unitId" :value="u.unitId">{{ u.name }}</option>
+                            <option v-if="dpUnits.length > 1" value="all">All units</option>
                         </select>
+                    </label>
+                    <label class="dp-range" title="Only this floor (Generate applies it)">Floor
+                        <select v-model="dpFloorF" class="cal-in dp-filter"><option value="">all</option><option v-for="f in dpFilterOptions.floors" :key="f" :value="f">{{ f }}</option></select>
+                    </label>
+                    <label class="dp-range" title="Only this line (Generate applies it)">Line
+                        <select v-model="dpLineF" class="cal-in dp-filter"><option value="">all</option><option v-for="l in dpFilterOptions.lines" :key="l.id" :value="l.id">{{ l.name }}</option></select>
+                    </label>
+                    <label class="dp-range" title="Only this buyer (Generate applies it)">Buyer
+                        <select v-model="dpBuyerF" class="cal-in dp-filter dp-filter-buyer"><option value="">all</option><option v-for="b in dpFilterOptions.buyers" :key="b" :value="b">{{ b }}</option></select>
                     </label>
                     <label v-if="dpScope !== 'board'" class="dp-range">From
                         <input v-model="dpFrom" class="cal-in dp-date" type="date">
@@ -11834,7 +11914,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <input v-model="dpTo" class="cal-in dp-date" type="date">
                     </label>
                     <span v-if="dpScope === 'board'" class="dp-range">Whole board — every line + Holding Row, as placed</span>
-                    <button class="dp-act dp-act-gen" @click="generateDayPlan">⚙ Generate</button>
+                    <button class="dp-act dp-act-gen" @click="dpGenerateClick">⚙ Generate</button>
                     <button class="dp-act dp-act-xls" :disabled="!dpGenerated" @click="exportDayPlanExcel">📊 Excel</button>
                     <button class="dp-act dp-act-pdf" :disabled="!dpGenerated" @click="exportDayPlanPdf">📄 PDF</button>
                     <button class="dp-act dp-act-view" :disabled="!dpGenerated" :class="{ 'dp-act-on' : dpView === 'summary' }"
@@ -11853,7 +11933,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div class="dp-rephead">
                             <div class="dp-rep-unit">{{ dpUnitName }}</div>
                             <div class="dp-rep-title">{{ dpReportTitle }}</div>
-                            <div class="dp-rep-range">{{ dpRangeLabel }} <span class="dp-rep-dim">· Generated {{ dpGeneratedAt }}</span></div>
+                            <div class="dp-rep-range">{{ dpRangeLabel }}<span v-if="dpFiltersLabel"> · {{ dpFiltersLabel }}</span> <span class="dp-rep-dim">· Generated {{ dpGeneratedAt }}</span></div>
                         </div>
                         <div class="dp-cards">
                             <div class="dp-card"><b>{{ dpGrand.orders }}</b><span>Orders</span></div>
@@ -14286,6 +14366,8 @@ body {
 }
 .dp-date { width : 138px; }
 .dp-unit { width : 96px; }
+.dp-filter { width : 110px; }
+.dp-filter-buyer { width : 150px; }
 .dp-flex { flex : 1 1 auto; }
 
 .dp-act {
