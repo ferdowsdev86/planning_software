@@ -16686,7 +16686,13 @@ body {
     text-overflow : ellipsis;
     max-width   : 260px;
 }
-.tip4-hdr-badges { display : flex; gap : 5px; flex-shrink : 0; }
+.tip4-hdr-badges { display : flex; gap : 5px; flex-wrap : wrap; justify-content : flex-end; flex : 1 1 auto; min-width : 0; }
+.tip4-hdr { flex-wrap : wrap; }
+.tip4-hdr-name { flex : 0 1 auto; }
+/* the two-column rows (Order Qty · strip share, SMV / Eff breakdown) wrap
+   instead of being cut at the column edge */
+.tip4-2col .t4r { align-items : flex-start; }
+.tip4-2col .t4v { white-space : normal; overflow : visible; text-overflow : clip; line-height : 1.35; }
 
 /* Cards */
 .tip4-card {

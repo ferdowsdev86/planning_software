@@ -2725,7 +2725,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                 : '';
 
             const mismatchBadge = r.confirmMismatch
-                ? `<span class="tip4-badge tip4-proj" title="Confirm quantity must equal the projection quantity before it replaces this bar">⚠ Confirm ${enc(fmtQty(r.confirmMismatch.confirmed))} / ${enc(fmtQty(r.confirmMismatch.full))} — not replaced</span>`
+                ? `<span class="tip4-badge tip4-proj" title="Confirmed ${enc(fmtQty(r.confirmMismatch.confirmed))} of ${enc(fmtQty(r.confirmMismatch.full))} — the confirm quantity must equal the projection quantity before it replaces this bar">⚠ Confirm ${enc(fmtQty(r.confirmMismatch.confirmed))} / ${enc(fmtQty(r.confirmMismatch.full))}</span>`
                 : '';
             const orderTypeBadge = (isConfirm
                 ? '<span class="tip4-badge tip4-confirm">✔ Confirm</span>'
@@ -2816,15 +2816,15 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Color', colorHtml)}
           ${R('PO', `<b>${poCell}</b>`)}
           ${(() => {
-              // this strip's own ERP quantity (plan qty = it + 3 %); the whole
-              // order's figure follows in dim text when the strip is a piece of it
-              let mine = Number(r.baseQty) > 0 ? Number(r.baseQty) : (Number(r.orderQty) > 0 ? Number(r.orderQty) : Number(r.qty) || 0);
+              // Order Qty = the ORDER's full ERP quantity; when this bar is a
+              // piece of it, its own share follows ("strip N") — the Plan Qty
+              // row is that share + 3 %
               const planQ = Number(r.qty) || 0;
-              // a piece cut before the qty split was carried (ERP figure larger
-              // than its own plan qty): its ERP qty is the plan qty less the 3 %
-              if (planQ > 0 && mine > planQ) mine = Math.round(planQ / 1.03);
-              const whole = Number(r.fullOrderQty) || 0;
-              return R('Order Qty', `<b>${enc(fmtQty(mine))}</b>${whole > 0 && Math.abs(whole - mine) > 1 ? ` <span class="t4dim" title="the whole order (every PO / colour / piece)">(order ${enc(fmtQty(whole))})</span>` : ''}`);
+              const strip = Math.round(planQ / 1.03);                       // this strip's ERP share
+              const whole = Number(r.fullOrderQty) > 0 ? Number(r.fullOrderQty)
+                  : Math.max(Number(r.orderQty) || 0, Number(r.baseQty) || 0, strip);
+              const piece = whole > 0 && Math.abs(whole - strip) > Math.max(1, whole * 0.01);
+              return R('Order Qty', `<b>${enc(fmtQty(whole))}</b>${piece ? ` <span class="t4dim" title="this strip's share of the order (its plan qty is this + 3 %)">· strip ${enc(fmtQty(strip))}</span>` : ''}`);
           })()}
           ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>`)}
           ${R('Ship date', enc(ddMon(deliv)))}
