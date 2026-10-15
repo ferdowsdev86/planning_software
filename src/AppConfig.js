@@ -1366,8 +1366,11 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const end2   = endOfWork(start2, d2);
 
     // Part 1: the original record shrinks (ERP base qty follows the same split)
-    const base0 = Number(orig.baseQty) > 0 ? Number(orig.baseQty) : null;
-    if (base0) raw.baseQty = Math.round(base0 * q1 / Math.max(1, orig.qty));
+    const base0  = Number(orig.baseQty) > 0 ? Number(orig.baseQty) : null;
+    const order0 = Number(orig.orderQty) > 0 ? Number(orig.orderQty) : null;
+    const share1 = q1 / Math.max(1, orig.qty);
+    if (base0)  raw.baseQty  = Math.round(base0 * share1);
+    if (order0) raw.orderQty = Math.round(order0 * share1);   // the piece's ERP qty = its share (plan qty = this + 3 %)
     raw.qty    = q1;
     raw.reqMin = Math.round(q1 * orig.smv);
     raw.dur    = d1;
@@ -1385,6 +1388,8 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
     const raw2 = {
         ...orig,
         qty : q2, reqMin : Math.round(q2 * orig.smv), dur : d2,
+        ...(base0  ? { baseQty  : base0 - raw.baseQty } : {}),
+        ...(order0 ? { orderQty : order0 - raw.orderQty } : {}),
         start : start2, end : end2, progress : 0, status : 'draft',
         eventCode : strip2Code,
         // The piece needs its OWN board identity — copying the parent's id
@@ -1466,18 +1471,20 @@ export function mergeBars(scheduler, recs) {
         if (lineIdOf(scheduler, r) !== lid) return { ok : false, msg : 'The bars must sit on the same line / row' };
     }
     const others = list.filter(r => r !== first);
-    let qty = Number(r0.qty) || 0, made = Number(r0.made) || 0, base = Number(r0.baseQty) || 0, progW = (Number(r0.progress) || 0) * qty;
+    let qty = Number(r0.qty) || 0, made = Number(r0.made) || 0, base = Number(r0.baseQty) || 0, order = Number(r0.orderQty) || 0, progW = (Number(r0.progress) || 0) * qty;
     let dur = Number(r0.dur) || elapsedDays(new Date(first.startDate), new Date(first.endDate));
     for (const r of others) {
         const x = r.data.raw;
         qty  += Number(x.qty) || 0;
         made += Number(x.made) || 0;
         base += Number(x.baseQty) || 0;
+        order += Number(x.orderQty) || 0;
         progW += (Number(x.progress) || 0) * (Number(x.qty) || 0);
         dur  += Number(x.dur) || elapsedDays(new Date(r.startDate), new Date(r.endDate));
     }
     r0.qty = qty;
     if (base > 0) r0.baseQty = base;
+    if (order > 0) r0.orderQty = order;
     if (made > 0) r0.made = made;
     r0.progress = qty ? Math.round(progW / qty) : 0;
     r0.reqMin = Math.round(qty * (Number(r0.smv) || 0));
@@ -2808,7 +2815,17 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
         <div class="tip4-2col">
           ${R('Color', colorHtml)}
           ${R('PO', `<b>${poCell}</b>`)}
-          ${R('Order Qty', `<b>${enc(fmtQty(r.fullOrderQty || r.baseQty || r.orderQty || r.qty))}</b>${Number(r.fullOrderQty) > 0 && Number(r.baseQty ?? r.orderQty) > 0 && Number(r.fullOrderQty) !== Number(r.baseQty ?? r.orderQty) ? ` <span class="t4dim" title="this colour's quantity">(colour ${enc(fmtQty(r.baseQty ?? r.orderQty))})</span>` : ''}`)}
+          ${(() => {
+              // this strip's own ERP quantity (plan qty = it + 3 %); the whole
+              // order's figure follows in dim text when the strip is a piece of it
+              let mine = Number(r.baseQty) > 0 ? Number(r.baseQty) : (Number(r.orderQty) > 0 ? Number(r.orderQty) : Number(r.qty) || 0);
+              const planQ = Number(r.qty) || 0;
+              // a piece cut before the qty split was carried (ERP figure larger
+              // than its own plan qty): its ERP qty is the plan qty less the 3 %
+              if (planQ > 0 && mine > planQ) mine = Math.round(planQ / 1.03);
+              const whole = Number(r.fullOrderQty) || 0;
+              return R('Order Qty', `<b>${enc(fmtQty(mine))}</b>${whole > 0 && Math.abs(whole - mine) > 1 ? ` <span class="t4dim" title="the whole order (every PO / colour / piece)">(order ${enc(fmtQty(whole))})</span>` : ''}`);
+          })()}
           ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>`)}
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
