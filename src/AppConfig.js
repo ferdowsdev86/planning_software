@@ -2317,7 +2317,13 @@ export const schedulerProConfig = {
         // end, with the quantity that falls after the date
         let lateHtml = '';
         if (colorState.mode === 'latesplit' && r.ship && r.status !== 'completed' && renderData.width > 0) {
-            const shipEnd = new Date(r.ship); shipEnd.setHours(23, 59, 59, 999);
+            // Desired sewing finish = delivery date minus the finishing lead:
+            // 6 days with wash, 4 days without (wash from the ERP style
+            // detail when the tooltip cache has it, else the bar's own flag)
+            const det  = tipDataFromCache(r)?.detail?.style;
+            const wash = det ? !!(det.wash_type || det.wash_name) : !!(r.wash || r.washType);
+            const lead = wash ? 6 : 4;
+            const shipEnd = new Date(r.ship); shipEnd.setDate(shipEnd.getDate() - lead); shipEnd.setHours(23, 59, 59, 999);
             if (e.endDate > shipEnd) {
                 let x = renderData.left;
                 try { x = this.getCoordinateFromDate(shipEnd, true); } catch { /* keep left */ }
@@ -2331,7 +2337,7 @@ export const schedulerProConfig = {
                 catch { /* no simulation — the segment still shows */ }
                 if (e.startDate > shipEnd && !lateQty) lateQty = Number(r.qty) || 0;
                 const wide = renderData.width * (1 - frac) > 46;
-                lateHtml = `<div class="mb-late-part" style="left:${(frac * 100).toFixed(2)}%" title="after the delivery date ${StringHelper.encodeHtml(fmtDate(r.ship))}: ${StringHelper.encodeHtml(fmtQty(lateQty))} pcs">${wide && lateQty ? `<span class="mb-late-qty">late ${StringHelper.encodeHtml(fmtQty(lateQty))}</span>` : ''}</div>`;
+                lateHtml = `<div class="mb-late-part" style="left:${(frac * 100).toFixed(2)}%" title="after the desired sewing finish ${StringHelper.encodeHtml(fmtDate(shipEnd))} (delivery ${StringHelper.encodeHtml(fmtDate(r.ship))} − ${lead} days, ${wash ? 'wash' : 'non-wash'}): ${StringHelper.encodeHtml(fmtQty(lateQty))} pcs">${wide && lateQty ? `<span class="mb-late-qty">late ${StringHelper.encodeHtml(fmtQty(lateQty))}</span>` : ''}</div>`;
             }
         }
         return `

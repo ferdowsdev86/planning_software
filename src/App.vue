@@ -11487,9 +11487,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <span v-for="c in planStateLegend" :key="c.key" class="fr-colormenu-chip" :style="{ background : c.bg, color : c.fg }">{{ c.label }}</span>
                         </div>
                         <div v-if="colorMode === 'latesplit'" class="fr-colormenu-legend">
-                            <div class="fr-colormenu-legend-t">One strip, two parts</div>
-                            <span class="fr-colormenu-chip" style="background:#9e9e9e;color:#fff">on time — up to the delivery date</span>
-                            <span class="fr-colormenu-chip" style="background:#1e88e5;color:#fff">late — after the delivery date (qty shown)</span>
+                            <div class="fr-colormenu-legend-t">One strip, two parts · desired sewing finish = delivery − 6 days (wash) / − 4 days (non-wash)</div>
+                            <span class="fr-colormenu-chip" style="background:#9e9e9e;color:#fff">on time — up to the desired finish</span>
+                            <span class="fr-colormenu-chip" style="background:#1e88e5;color:#fff">late — planned after it (qty shown)</span>
                         </div>
                         <div v-if="colorMode === 'product'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Items on this board <a class="fr-colormenu-link" @click.stop="openEffProfiles">colours…</a></div>
