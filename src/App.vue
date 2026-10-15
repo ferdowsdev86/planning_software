@@ -9593,14 +9593,7 @@ function requestPlace(clientX, clientY, hint = {}, { force = false } = {}) {
         return;
     }
     placeCarried(clampToWorkWindow(raw), resource)
-        .catch(err => {
-            // a placement that throws must not leave the bar hanging on the
-            // pointer (its ghost over the board, every click "placing" again)
-            console.error('[place]', err);
-            cancelCarry();
-            getInstance()?.refreshRows?.();
-            toast(`Placement failed: ${err.message} — the bar was put back`, 'error');
-        });
+        .catch(err => toast(`Placement failed: ${err.message}`, 'error'));
 }
 
 function onCarryPointerUp(e) {
@@ -10123,18 +10116,6 @@ function toast(text, type = 'error') {
 
 onMounted(() => {
     loadBuyerColors();   // shared buyer colours (Colour by: Buyer)
-    // Any uncaught error reaches the planner as a toast (with the message to
-    // report) instead of a silently dead board; a carry in the air is put back
-    const lastErr = { msg : '', at : 0 };
-    const showErr = msg => {
-        const m = String(msg || '').slice(0, 160);
-        if (!m || (m === lastErr.msg && performance.now() - lastErr.at < 5000)) return;
-        lastErr.msg = m; lastErr.at = performance.now();
-        if (carried.value) { try { cancelCarry(); } catch { /* ignore */ } }
-        toast(`⚠ App error: ${m} — press F12 › Console and send the red line`, 'error');
-    };
-    window.addEventListener('error', e => showErr(e?.message));
-    window.addEventListener('unhandledrejection', e => showErr(e?.reason?.message || e?.reason));
     ensureCarryDom();
     uiHooks.onOrderSelect = eventRecord => {
         const raw = eventRecord?.data?.raw;
