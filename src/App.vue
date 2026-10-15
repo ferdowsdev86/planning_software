@@ -5763,6 +5763,48 @@ async function saveMarkedComplete() {
 // Complete orders (Orders list tick / strip Production update "Mark
 // complete"): DB (orders/complete), every bar of theirs off the board
 // (cancelled server-side), out of the unplanned pool, Orders list flipped
+// A strip with nothing left to make (production ≥ plan qty) leaves the board
+// — the cut piece of an order that still has open strips just goes; an
+// order with no open strip left is marked COMPLETE (Orders list, DB), the
+// same path as the Orders list tick. Runs after every production save.
+async function autoCompleteFinished(s) {
+    if (!s?.eventStore || boardReadOnly.value) return;
+    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && Number(r.made) >= Number(r.qty);
+    const done = s.eventStore.records.filter(ev => isDone(ev.data?.raw));
+    if (!done.length) return;
+    const codes = [...new Set(done.map(ev => String(ev.data.raw.mbmOrder || '')).filter(Boolean))];
+    const fullyDone = codes.filter(code => s.eventStore.records.every(ev => {
+        const r = ev.data?.raw;
+        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || Number(r.made) >= Number(r.qty);
+    }));
+    const fullSet = new Set(fullyDone);
+    const pieces = done.filter(ev => !fullSet.has(String(ev.data.raw.mbmOrder || '')));
+    if (pieces.length) {
+        for (const ev of pieces) {
+            const sid = String(ev.id);
+            if (sid.startsWith('db-') && !sid.includes('-sp')) {
+                const dbId = Number(sid.slice(3).split('-')[0]);
+                if (dbId) removedDbEventIds.add(dbId);
+            }
+            const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+            if (asgn.length) s.assignmentStore.remove(asgn);
+        }
+        s.eventStore.remove(pieces);
+        s.features?.eventTooltip?.hide?.();
+        s.refreshRows?.();
+        try { await syncToApi(s, { eventIds : [], unitId : currentUnitId.value }); } catch (e) { toast(`Finished strip removal not saved: ${e.message}`, 'warn'); }
+        if (boardDbState) for (const ev of pieces) delete boardDbState[String(ev.id)];
+        setBoardBaseline(s);
+        recalcCapacity(s);
+        touchBoardCache(s);
+        toast(`${pieces.length} finished strip(s) removed from the board (production reached the plan qty)`, 'ok');
+    }
+    if (fullyDone.length) {
+        try { await completeOrders(fullyDone); }
+        catch (e) { toast(`Auto complete failed: ${e.message}`, 'error'); }
+    }
+}
+
 async function completeOrders(codes) {
     const s = getInstance();
     await completeOrdersDb(codes);
@@ -7693,7 +7735,7 @@ function saveProdUpdate() {
     localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
     pushUndo(s, `production update ${puDate.value}`);
     applyProdUpdates(s);
-    buildPuRows();
+    autoCompleteFinished(s).then(() => buildPuRows());
 
     // Persist to the fastreact DB (day_production_update_plan)
     const payload = entries.map(r => ({
@@ -7994,6 +8036,10 @@ async function spSave() {
             toast(`Production saved — ${res.saved} day(s) of ${head.po} (day_production_update_plan), strip updated`, 'ok');
         }
         catch (e) { toast(`DB save failed (${e.message}) — saved locally only`, 'warn'); }
+        // production saved → a strip with nothing left to make leaves the
+        // board, an order with no open strip left is completed
+        await autoCompleteFinished(s);
+        if (!s.eventStore.getById(head.evId)) { spComplete.value = false; spOpen.value = false; if (puOpen.value) buildPuRows(); return; }
     }
     // "Mark order complete": the order is completed in the DB, every bar of
     // it leaves the board (cancelled server-side) and the Orders list shows
