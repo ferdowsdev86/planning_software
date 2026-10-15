@@ -11074,18 +11074,22 @@ const findPlanSummary = computed(() => {
 const findOrderSummary = computed(() => {
     const rows = findResults.value;
     if (!rows.length) return null;
-    const orders = new Map();
-    const pos = new Set(), buyers = new Map();
+    // Orders / POs / order qty of the MATCHED strips only: a strip is one
+    // PO + colour piece; its split pieces share the same ERP qty, so the
+    // qty counts once per PO + colour (a consolidated bar's full PO list
+    // belongs to the whole order, not to these strips)
+    const orders = new Set(), pos = new Set(), pieces = new Map(), buyers = new Map();
     for (const r of rows) {
-        if (!orders.has(r.order)) orders.set(r.order, { orderQty : 0, pos : new Set() });
-        const o = orders.get(r.order);
-        for (const p of r.pos) { pos.add(p); if (!o.pos.has(p)) { o.pos.add(p); o.orderQty += r.orderQty; } }
+        orders.add(r.order);
+        if (r.po) pos.add(r.po);
+        const key = `${r.po}|${r.color}`;
+        if (!pieces.has(key)) pieces.set(key, r.orderQty);
         buyers.set(r.buyer, (buyers.get(r.buyer) || 0) + r.qty);
     }
     const ships = rows.map(r => r.ship ? +r.ship : 0).filter(Boolean);
     return {
         orders : orders.size, pos : pos.size,
-        orderQty : [...orders.values()].reduce((a, o) => a + o.orderQty, 0),
+        orderQty : [...pieces.values()].reduce((a, q) => a + q, 0),
         buyers : [...buyers.entries()].sort((a, b) => b[1] - a[1]).map(([b]) => b),
         shipFirst : ships.length ? fmtDate(new Date(Math.min(...ships))) : '—',
         shipLast  : ships.length ? fmtDate(new Date(Math.max(...ships))) : '—'
