@@ -87,7 +87,7 @@ const colorMenuOpen = ref(false);
 const colorMode = ref((() => {
     const saved = localStorage.getItem('mbm-color-mode');
     // 'risk' was the old name of the first mode — it is "Product delivery" now
-    return ['delivery', 'buyer', 'product', 'ptype', 'style'].includes(saved) ? saved : 'delivery';
+    return ['delivery', 'buyer', 'product', 'ptype', 'latesplit', 'style'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
 // the board root carries the colour mode: in Buyer / Plan status mode the
@@ -10887,7 +10887,8 @@ const colorModes = [
     { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
     { icon : '👕', label : 'Buyer',            mode : 'buyer' },
     { icon : '👖', label : 'Item',             mode : 'product' },
-    { icon : '🏷', label : 'Product type',     mode : 'ptype' }
+    { icon : '🏷', label : 'Product type',     mode : 'ptype' },
+    { icon : '⏱', label : 'Late strip qty',   mode : 'latesplit' }
 ];
 const planStateLegend = Object.entries(PLAN_STATE_COLORS).map(([key, c]) => ({ key, ...c }));
 const colorModeLabel = computed(() => colorModes.find(c => c.mode === colorMode.value)?.label || '');
@@ -11484,6 +11485,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div v-if="colorMode === 'ptype'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Plan state</div>
                             <span v-for="c in planStateLegend" :key="c.key" class="fr-colormenu-chip" :style="{ background : c.bg, color : c.fg }">{{ c.label }}</span>
+                        </div>
+                        <div v-if="colorMode === 'latesplit'" class="fr-colormenu-legend">
+                            <div class="fr-colormenu-legend-t">One strip, two parts</div>
+                            <span class="fr-colormenu-chip" style="background:#9e9e9e;color:#fff">on time — up to the delivery date</span>
+                            <span class="fr-colormenu-chip" style="background:#1e88e5;color:#fff">late — after the delivery date (qty shown)</span>
                         </div>
                         <div v-if="colorMode === 'product'" class="fr-colormenu-legend">
                             <div class="fr-colormenu-legend-t">Items on this board <a class="fr-colormenu-link" @click.stop="openEffProfiles">colours…</a></div>
@@ -16036,6 +16042,16 @@ body {
 .b-sch-event.mb-qty-mismatch::before { background : none !important; }
 .b-sch-event.mb-qty-mismatch { color : inherit !important; }
 .b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
+/* Late strip qty mode: the blue part of a bar after its delivery date */
+.mb-late-part {
+    position : absolute; top : 0; bottom : 0; right : 0;
+    background : #1e88e5; z-index : 1; pointer-events : none;
+    border-left : 1px solid #0d47a1;
+    display : flex; align-items : center; justify-content : center; overflow : hidden;
+}
+.mb-late-qty { font-size : 10px; font-weight : 800; color : #fff; background : rgba(0,0,0,.35); padding : 0 6px; border-radius : 8px; white-space : nowrap; }
+body.mb-color-latesplit .b-sch-event.mb-late { box-shadow : none !important; }   /* the blue part already says it */
+body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2; }
 .fr-colormenu-late { background : #fff; color : #b00020; border : 1px solid #ddd; box-shadow : inset 0 -3px 0 #ee2e24; }
 .sop-opts { display : flex; align-items : center; gap : 12px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12.5px; }
 .bs-dialog { width : 1040px; }

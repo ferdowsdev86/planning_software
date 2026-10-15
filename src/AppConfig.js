@@ -2264,6 +2264,11 @@ export const schedulerProConfig = {
             const c = PLAN_STATE_COLORS[planStateOf(r, e.startDate, e.endDate)];
             renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
         }
+        else if (colorState.mode === 'latesplit') {
+            // Late strip qty: the part planned up to the delivery date stays
+            // grey, the part after it is blue (overlay below) — one bar, two parts
+            renderData.style = 'background-color:#9e9e9e;border-color:#222;color:#fff';
+        }
         else {
             // Product delivery: the bar wears its delivery month's colour
             const c = deliveryMonthColor(r.ship);
@@ -2308,8 +2313,29 @@ export const schedulerProConfig = {
             const rest  = compact ? '' : full.slice(ptype.length).replace(/^\s*:\s*/, '');
             inner = `<span class="mb-ptype">${StringHelper.encodeHtml(ptype)}</span>${rest ? `<span class="mb-ptype-rest">${StringHelper.encodeHtml(rest)}</span>` : ''}`;
         }
+        // Late strip qty mode: blue overlay from the delivery date to the bar's
+        // end, with the quantity that falls after the date
+        let lateHtml = '';
+        if (colorState.mode === 'latesplit' && r.ship && r.status !== 'completed' && renderData.width > 0) {
+            const shipEnd = new Date(r.ship); shipEnd.setHours(23, 59, 59, 999);
+            if (e.endDate > shipEnd) {
+                let x = renderData.left;
+                try { x = this.getCoordinateFromDate(shipEnd, true); } catch { /* keep left */ }
+                const frac = Math.max(0, Math.min(1, (x - renderData.left) / renderData.width));
+                let lateQty = 0;
+                try {
+                    const lid = lineIdOf(this, e);
+                    const sim = simulateStrip(this, r, lid, new Date(e.startDate), new Date(e.endDate));
+                    for (const d of sim?.days || []) if (d.date > shipEnd) lateQty += Number(d.q) || 0;
+                }
+                catch { /* no simulation — the segment still shows */ }
+                if (e.startDate > shipEnd && !lateQty) lateQty = Number(r.qty) || 0;
+                const wide = renderData.width * (1 - frac) > 46;
+                lateHtml = `<div class="mb-late-part" style="left:${(frac * 100).toFixed(2)}%" title="after the delivery date ${StringHelper.encodeHtml(fmtDate(r.ship))}: ${StringHelper.encodeHtml(fmtQty(lateQty))} pcs">${wide && lateQty ? `<span class="mb-late-qty">late ${StringHelper.encodeHtml(fmtQty(lateQty))}</span>` : ''}</div>`;
+            }
+        }
         return `
-            ${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
+            ${lateHtml}${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
                 <div class="mb-bar-l1">${inner}</div>
             </div>`;
     },
