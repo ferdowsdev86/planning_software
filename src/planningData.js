@@ -546,6 +546,26 @@ export function barProductLine(raw, compact = false) {
     return `${type} : ${raw.buyer || '—'} : ${raw.style || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
 }
 
+// ERP labels the server sends with the board / the unplanned list:
+// erpOrderInfo[orderCode] = { gmt : 'Chino', ptype : 'Pant' },
+// buyerShortNames['NAUTICA'] = 'NCA'
+export const erpOrderInfo = {};
+export const buyerShortNames = {};
+export function mergeErpInfo(data) {
+    if (!data) return;
+    if (data.erpByOrder) for (const [k, v] of Object.entries(data.erpByOrder)) if (v) erpOrderInfo[k] = { ...(erpOrderInfo[k] || {}), ...v };
+    if (data.buyerShort) Object.assign(buyerShortNames, data.buyerShort);
+}
+export function buyerShortOf(name) {
+    const n = String(name || '').trim();
+    return (n && buyerShortNames[n.toUpperCase()]) || n;
+}
+export function garmentTypeOf(raw) {
+    if (!raw) return '';
+    const code = mbmOrderNo(raw.po, raw.mbmOrder);
+    return String(erpOrderInfo[code]?.gmt || '').trim();
+}
+
 export function barStyleLine(raw, compact = false) {
     if (!raw) return 'N/A : N/A : N/A';
     const style = String(raw.style || '').trim()

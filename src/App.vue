@@ -5,7 +5,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -16,7 +16,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
-import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd, productTypeFor } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd, productTypeFor, erpOrderInfo } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -29,7 +29,7 @@ import {
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
-    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -83,11 +83,12 @@ const unplanned = ref([...UNPLANNED_INIT]);
 const replacedOrders = ref([]);
 const toasts = ref([]);
 const colorMenuOpen = ref(false);
-// Display mode (risk | buyer | status | style) — last choice survives refresh
+// Display mode (delivery | buyer | product | ptype | latesplit) — last choice survives refresh
 const colorMode = ref((() => {
     const saved = localStorage.getItem('mbm-color-mode');
-    // 'risk' was the old name of the first mode — it is "Product delivery" now
-    return ['delivery', 'buyer', 'product', 'ptype', 'latesplit', 'style'].includes(saved) ? saved : 'delivery';
+    // 'risk' was the old name of the first mode — it is "Product delivery" now;
+    // 'style' (removed) falls back to it too
+    return ['delivery', 'buyer', 'product', 'ptype', 'latesplit'].includes(saved) ? saved : 'delivery';
 })());
 colorState.mode = colorMode.value;
 // the board root carries the colour mode: in Buyer / Plan status mode the
@@ -10953,41 +10954,27 @@ const act = name => {
     }
 };
 
-// Order as the planner asked: Style first, then Product delivery (every bar
-// due in the same month wears one colour, the next month another), Buyer,
-// Plan status
+// Order as the planner asked. Each mode also decides what the bar SAYS:
+// Product delivery → the delivery date (bars due in the same month wear one
+// colour), Buyer → the ERP buyer short name, Item → the ERP garment type
+// (5 Pocket, Chino, Cargo…), Product/Order → the style (plan-state colours),
+// Late strip qty → the usual buyer : style : order line
 const colorModes = [
-    { icon : '🧵', label : 'Style',            mode : 'style' },
     { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
     { icon : '👕', label : 'Buyer',            mode : 'buyer' },
     { icon : '👖', label : 'Item',             mode : 'product' },
-    { icon : '🏷', label : 'Product type',     mode : 'ptype' },
+    { icon : '🏷', label : 'Product/Order',    mode : 'ptype' },
     { icon : '⏱', label : 'Late strip qty',   mode : 'latesplit' }
 ];
 const planStateLegend = Object.entries(PLAN_STATE_COLORS).map(([key, c]) => ({ key, ...c }));
 const colorModeLabel = computed(() => colorModes.find(c => c.mode === colorMode.value)?.label || '');
-// the palette button steps through the modes: Style → Product delivery → Buyer → Item → Product type → Style …
+// the palette button steps through the modes: Product delivery → Buyer → Item → Product/Order → Late strip qty → …
 function cycleColorMode() {
     const i = colorModes.findIndex(c => c.mode === colorMode.value);
     pickColorMode(colorModes[(i + 1) % colorModes.length].mode);
 }
 
-// Legends for Style / Product: what is on the open board, in its colours
-const styleLegend = computed(() => {
-    void bcolTick.value;
-    const s = getInstance();
-    const n = new Map();
-    for (const ev of s?.eventStore?.records || []) {
-        const r = ev.data?.raw;
-        if (!r || r.stage) continue;
-        const k = String(r.style || mbmOrderNo(r.po, r.mbmOrder) || '').trim();
-        if (!k) continue;
-        if (!n.has(k)) n.set(k, { key : k, bars : 0 });
-        n.get(k).bars++;
-    }
-    return [...n.values()].sort((a, b) => b.bars - a.bars).slice(0, 18)
-        .map(x => ({ ...x, bg : styleColorOf(x.key), fg : textOnColor(styleColorOf(x.key)) }));
-});
+// Legend for Item: the garment types on the open board, in their colours
 const productLegend = computed(() => {
     void bcolTick.value;
     const s = getInstance();
@@ -10995,7 +10982,7 @@ const productLegend = computed(() => {
     for (const ev of s?.eventStore?.records || []) {
         const r = ev.data?.raw;
         if (!r || r.stage) continue;
-        const k = String(r.productType || productTypeFor(r.po, r.productType) || '').trim() || '—';
+        const k = itemLabelOf(r) || '—';
         if (!n.has(k)) n.set(k, { key : k, bars : 0 });
         n.get(k).bars++;
     }
@@ -11032,6 +11019,24 @@ const pickColorMode = m => {
     }
     const picked = colorModes.find(c => c.mode === m);
     if (picked) toast(`Colour by: ${picked.label}`, 'ok');
+    // bars placed this session may still lack their ERP garment type /
+    // buyer short name — fetch them, then repaint once more
+    if (m === 'product' || m === 'buyer') {
+        const codes = [];
+        for (const ev of s?.eventStore?.records || []) {
+            const r = ev.data?.raw;
+            if (!r || r.stage) continue;
+            const code = mbmOrderNo(r.po, r.mbmOrder);
+            if (code && !erpOrderInfo[code]) codes.push(code);
+        }
+        if (codes.length) {
+            loadErpOrderInfoDb(codes).then(ok => {
+                if (!ok) return;
+                bcolTick.value++;
+                getInstance()?.refreshRows?.(true);
+            }).catch(() => { /* offline — labels fall back */ });
+        }
+    }
 };
 
 const boardSearch = ref('');
@@ -11551,13 +11556,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <span v-for="m in deliveryLegend" :key="m.label" class="fr-colormenu-chip" :style="{ background : m.bg, color : m.fg }">{{ m.label }}</span>
                             <span class="fr-colormenu-chip fr-colormenu-late" title="a bar past its delivery date carries a red mark along its bottom edge">late = red bottom edge</span>
                         </div>
-                        <div v-if="colorMode === 'style'" class="fr-colormenu-legend">
-                            <div class="fr-colormenu-legend-t">Styles on this board</div>
-                            <span v-for="b in styleLegend" :key="b.key" class="fr-colormenu-chip" :style="{ background : b.bg, color : b.fg }" :title="`${b.bars} bar(s)`">{{ b.key }}</span>
-                            <span v-if="!styleLegend.length" class="t4dim">no bars on the board</span>
-                        </div>
                         <div v-if="colorMode === 'ptype'" class="fr-colormenu-legend">
-                            <div class="fr-colormenu-legend-t">Plan state</div>
+                            <div class="fr-colormenu-legend-t">Plan state · bars show the style</div>
                             <span v-for="c in planStateLegend" :key="c.key" class="fr-colormenu-chip" :style="{ background : c.bg, color : c.fg }">{{ c.label }}</span>
                         </div>
                         <div v-if="colorMode === 'latesplit'" class="fr-colormenu-legend">

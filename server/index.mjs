@@ -140,6 +140,54 @@ const EVENT_SQL_HEAD = `
                               WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
                               ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)`;
 
+// ERP style masters per order code — garment type (Chino, 5 Pocket, Shorts
+// Cargo…) and product type (Pant, Shorts…): the board's Item mode labels its
+// bars with the garment type. One grouped query for the codes on the board.
+async function erpOrderInfo(codes) {
+    const list = [...new Set((codes || []).map(c => String(c || '').trim()).filter(Boolean))];
+    const out = {};
+    if (!list.length) return out;
+    try {
+        const ph = list.map(() => '?').join(',');
+        const [rows] = await pool.query(
+            `SELECT oe.order_code, MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype
+               FROM \`${ERP_DB}\`.mr_order_entry oe
+               JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+               LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+               LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+              WHERE oe.order_code IN (${ph})
+              GROUP BY oe.order_code`, list);
+        for (const r of rows) out[r.order_code] = { gmt : r.gmt || null, ptype : r.ptype || null };
+    }
+    catch { /* ERP unreachable — the bar labels fall back to the planning data */ }
+    return out;
+}
+
+// ERP buyer short names (mr_buyer.b_shortname: LEVI STRAUSS & CO → LEVIS,
+// Nautica → NCA) — the Buyer colour mode writes them on the bars
+let buyerShortCache = { at : 0, map : {} };
+async function buyerShortNames() {
+    if (Date.now() - buyerShortCache.at < 10 * 60 * 1000) return buyerShortCache.map;
+    try {
+        const [rows] = await pool.query(`SELECT b_name, b_shortname FROM \`${ERP_DB}\`.mr_buyer`);
+        const map = {};
+        for (const r of rows) {
+            const n = String(r.b_name || '').trim(), s = String(r.b_shortname || '').trim();
+            if (n && s) map[n.toUpperCase()] = s;
+        }
+        buyerShortCache = { at : Date.now(), map };
+    }
+    catch { /* keep the last map */ }
+    return buyerShortCache.map;
+}
+
+// bars placed during a session (from the Orders list) ask for their ERP labels
+app.get(`${BASE}/erp-order-info`, async (req, res) => {
+    const codes = String(req.query.codes || '').split(',').slice(0, 1000);
+    const [erpByOrder, buyerShort] = await Promise.all([erpOrderInfo(codes), buyerShortNames()]);
+    res.json({ success : true, erpByOrder, buyerShort });
+});
+
 app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
     try {
         const projectId = Number(req.params.id);
@@ -261,6 +309,9 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             });
         }
 
+        // ERP labels for the bars on this board (Item / Buyer colour modes)
+        const [erpByOrder, buyerShort] = await Promise.all([erpOrderInfo(events.map(evOrderCode)), buyerShortNames()]);
+
         // One factory calendar per production unit: the unit's own calendar,
         // else the first active one (its working hours never mix with another unit's)
         const calIds = [...new Set(calendars.map(r => r.id))];
@@ -287,7 +338,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             events       : { rows : events },
             assignments  : { rows : assignments },
             dependencies : { rows : dependencies },
-            calendars    : { rows : unitCalendar }
+            calendars    : { rows : unitCalendar },
+            erpByOrder, buyerShort
         });
     }
     catch (e) {
@@ -416,7 +468,8 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
             const idList = [...new Set(idRaw.map(Number))];
             return { ...r, po_list : poList, id_list : idList, po_count : poList.length, po_details : detRaw, unit_name : unitLabel(r.unit_id) };
         });
-        res.json({ success : true, rows : enriched, total, limit, offset, unitId });
+        const erpByOrder = await erpOrderInfo(enriched.map(r => r.order_code));
+        res.json({ success : true, rows : enriched, total, limit, offset, unitId, erpByOrder });
     }
     catch (e) {
         res.status(500).json({ success : false, error : e.message });

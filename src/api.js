@@ -7,7 +7,7 @@ import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
     addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
-    workingMinutesBetween, planQtyOf
+    workingMinutesBetween, planQtyOf, mergeErpInfo
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds, isHoldId, floorLabelOf } from './AppConfig.js';
 
@@ -868,6 +868,17 @@ export function calendarDaysFromRows(rows) {
     return { calendarDays, calendarName, calendarId };
 }
 
+// ERP labels (garment type / buyer short name) for order codes the board
+// has not got them for yet — bars placed from the Orders list this session
+export async function loadErpOrderInfoDb(codes) {
+    const list = [...new Set((codes || []).filter(Boolean))];
+    if (!list.length) return false;
+    const j = await get(`/erp-order-info?codes=${encodeURIComponent(list.join(','))}`, 15000);
+    if (!j?.success) return false;
+    mergeErpInfo(j);
+    return true;
+}
+
 // Every unit's factory calendar: { id, unitId, unitName, name, days }
 export async function loadCalendarsDb() {
     const j = await get('/calendars', 8000);
@@ -887,11 +898,13 @@ export async function loadFromApi(unitId = null) {
     // an aborted load used to leave the app on "demo data" for good
     const data = await get(`/projects/1/scheduler-data${unitQ}`, 90000);
     if (!data.success) throw new Error(data.error || 'load failed');
+    mergeErpInfo(data);   // garment types + buyer short names for the bar labels
 
     const effUnitId = unitId || data.project?.unitId || null;
     const effUnitName = data.project?.unitName || unitLabel(effUnitId);
     const unpQ  = effUnitId ? `?unit_id=${effUnitId}` : '';
     const unp    = await get(`/unplanned-orders${unpQ}`, 60000);
+    mergeErpInfo(unp);
 
     const dbIdToBoardId = {};
     const mapped = data.resources.rows.map(r => {

@@ -7,7 +7,7 @@ import {
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
-    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, resolveProfileType, resolveProfileEfficiency,
+    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
     dayCapacityFactor, hmToHours, calendarState,
     workDayUnits, planQtyOf, workingMinutesBetween,
@@ -372,6 +372,38 @@ export function planStateOf(raw, startDate, endDate) {
     const st  = startDate || raw.start;
     if (pcd && !Number.isNaN(+pcd) && st && new Date(st) < pcd) return 'beforePcd';
     return 'onTime';
+}
+
+// Item mode label: the ERP garment type (5 Pocket, Chino, Cargo…) — from
+// the board load, else from the tooltip's style detail when that is cached,
+// else the planning product type
+export function itemLabelOf(r) {
+    if (!r) return '';
+    let g = garmentTypeOf(r);
+    if (!g) {
+        const s = tipDataFromCache(r)?.detail?.style;
+        if (s?.erp_garment_type) {
+            const code = mbmOrderNo(r.po, r.mbmOrder);
+            erpOrderInfo[code] = { ...(erpOrderInfo[code] || {}), gmt : s.erp_garment_type, ptype : s.erp_product_type || null };
+            g = String(s.erp_garment_type).trim();
+        }
+    }
+    return g || String(r.productType || productTypeFor(r.po, r.productType) || '').trim();
+}
+
+// What a bar says in each colour mode — one thing per mode:
+//   Buyer → the ERP buyer short name · Item → the garment type ·
+//   Product/Order → the style · Product delivery → the delivery date ·
+//   Late strip qty → the usual buyer : style : order line
+export function barModeLine(r, mode, compact = false) {
+    if (!r) return '';
+    switch (mode) {
+        case 'buyer'    : return buyerShortOf(r.buyer) || 'N/A';
+        case 'product'  : return itemLabelOf(r) || 'N/A';
+        case 'ptype'    : return String(r.style || '').trim() || mbmOrderNo(r.po, r.mbmOrder) || 'N/A';
+        case 'delivery' : return fmtDateDdMonRr(orderDeliveryOf(r.ship)) || 'N/A';
+        default         : return barDisplayLine(r, compact);
+    }
 }
 
 export function productTypeColor(name) {
@@ -2246,7 +2278,7 @@ export const schedulerProConfig = {
         }
         else if (q) {
             const hay = [
-                r.buyer, r.po, r.style, r.status, r.productType,
+                r.buyer, r.po, r.style, r.status, r.productType, buyerShortOf(r.buyer), itemLabelOf(r),
                 orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name
             ].join(' ').toLowerCase();
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
@@ -2259,7 +2291,7 @@ export const schedulerProConfig = {
         if (pastDelivery) renderData.cls.add('mb-late');
         const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
         if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
-        else if (colorState.mode === 'product') paint(productTypeColor(r.productType || productTypeFor(r.po, r.productType)));
+        else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));
         else if (colorState.mode === 'style')   paint(styleColorOf(r.style || mbmOrderNo(r.po, r.mbmOrder)));
         else if (colorState.mode === 'ptype') {
             const c = PLAN_STATE_COLORS[planStateOf(r, e.startDate, e.endDate)];
@@ -2285,11 +2317,9 @@ export const schedulerProConfig = {
         // lost on selection repaints and made clicked bars jump to full row.
         // Single line, vertically centred — no confirm/projection label
         // (the bar colour/border already distinguishes confirm orders).
-        // "Style" display mode swaps ONLY the text (Style : Color : Delivery);
-        // position, duration and colour coding stay exactly as-is.
-        const line = colorState.mode === 'style' ? barStyleLine
-            : colorState.mode === 'product' ? barProductLine
-            : barDisplayLine;
+        // The colour mode decides the text too (barModeLine): position,
+        // duration and colour coding stay exactly as-is.
+        const line = (raw, c) => barModeLine(raw, colorState.mode, c);
         const full = line(r);
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
@@ -2310,9 +2340,7 @@ export const schedulerProConfig = {
         // stays readable over the learning-curve hatch and its LC badge
         let inner = StringHelper.encodeHtml(text);
         if (colorState.mode === 'product') {
-            const ptype = barProductLine(r, true);
-            const rest  = compact ? '' : full.slice(ptype.length).replace(/^\s*:\s*/, '');
-            inner = `<span class="mb-ptype">${StringHelper.encodeHtml(ptype)}</span>${rest ? `<span class="mb-ptype-rest">${StringHelper.encodeHtml(rest)}</span>` : ''}`;
+            inner = `<span class="mb-ptype">${StringHelper.encodeHtml(full)}</span>`;
         }
         // Late strip qty mode: blue overlay from the delivery date to the bar's
         // end, with the quantity that falls after the date
