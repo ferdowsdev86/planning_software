@@ -2852,9 +2852,8 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       <div class="tip4-rows">
         ${R('Order No', `<b class="t4-order-no">${enc(r.mbmOrder || s.order_code || order || '—')}</b>`, 't4-full')}
         ${R('Buyer', enc(r.buyer || '—'), 't4-full')}
+        ${R('Color', colorHtml, 't4-full')}
         <div class="tip4-2col">
-          ${R('Color', colorHtml)}
-          ${R('PO', `<b>${poCell}</b>`)}
           ${(() => {
               // Order Qty = the ORDER's full ERP quantity; when this bar is a
               // piece of it, its own share follows ("strip N") — the Plan Qty
