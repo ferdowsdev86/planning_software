@@ -1454,6 +1454,9 @@ function applyApiBoardData(s, data) {
         // looked for. Repairing on the stale saved ends pushed bars away from
         // the point the planner had saved them at.
         applyProdUpdates(s);
+        // strips already finished by the production on file leave the board
+        // as soon as this planner holds the edit lock (see syncBoardLock)
+        autoCompleteAfterLock = true;
         autoSyncBarLengths(s);
         packBoardGaps(s);
     }
@@ -4042,6 +4045,7 @@ function applyBoardFilter() {
 // ---------------------------------------------------------------------------
 const boardReadOnly   = ref(false);
 const boardLockHolder = ref(null);   // { username, name } when someone ELSE holds it
+let autoCompleteAfterLock = false;   // board just loaded: run the finished-strip sweep once the lock is ours
 // Explicit plan lock (FastReact toolbar key): { username, name, at } | null —
 // set by the holder, kept until they (or a Planning Manager) open it again;
 // everyone else gets a fully read-only board meanwhile
@@ -4107,6 +4111,11 @@ async function syncBoardLock() {
         if (r.ok) {
             boardReadOnly.value   = false;
             boardLockHolder.value = null;
+            if (autoCompleteAfterLock) {
+                autoCompleteAfterLock = false;
+                const sb = getInstance();
+                if (sb) autoCompleteFinished(sb).catch(() => { /* reported by its toasts */ });
+            }
             if (wasReadOnly) {
                 toast('Edit access granted — board reloading from the saved plan (test changes discarded)', 'ok');
                 // The sandbox experiments must never be saved by accident:
