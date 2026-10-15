@@ -11024,6 +11024,77 @@ function resetFind() {
 
 function closeFindPanel() {
     clearFind(false);
+    findMin.value = false;
+}
+
+// Compact window: minimize to its title bar, drag it anywhere over the board
+const findMin = ref(false);
+const findPos = ref(null);                 // { x, y } once dragged (px inside the board area)
+let findDrag = null;
+function findDragStart(e) {
+    if (e.button !== 0 || e.target.closest('.cal-x, button, input, select')) return;
+    const el = e.currentTarget.closest('.fnd-panel');
+    const host = el?.parentElement;
+    if (!el || !host) return;
+    const r = el.getBoundingClientRect(), h = host.getBoundingClientRect();
+    findDrag = { dx : e.clientX - r.left, dy : e.clientY - r.top, host : h };
+    const move = ev => {
+        if (!findDrag) return;
+        const x = Math.max(0, Math.min(findDrag.host.width - 60, ev.clientX - findDrag.host.left - findDrag.dx));
+        const y = Math.max(0, Math.min(findDrag.host.height - 30, ev.clientY - findDrag.host.top - findDrag.dy));
+        findPos.value = { x, y };
+    };
+    const up = () => { findDrag = null; window.removeEventListener('mousemove', move, true); window.removeEventListener('mouseup', up, true); };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+    e.preventDefault();
+}
+const findPanelStyle = computed(() => (findPos.value ? { left : `${findPos.value.x}px`, top : `${findPos.value.y}px`, right : 'auto' } : {}));
+const findTotalQty = computed(() => findResults.value.reduce((a, r) => a + (Number(r.qty) || 0), 0));
+
+// Report of the find: the criteria, every matching strip and the plan-qty total
+function findCriteriaText() {
+    const f = findForm.value;
+    const parts = [];
+    if (f.style)   parts.push(`Style = ${f.style}`);
+    if (f.order)   parts.push(`Order = ${f.order}`);
+    if (f.product) parts.push(`Product = ${f.product}`);
+    if (f.buyer)   parts.push(`Buyer = ${f.buyer}`);
+    if (f.shipFrom || f.shipTo) parts.push(`Shipment ${f.shipFrom || '…'} → ${f.shipTo || '…'}`);
+    if (f.floor)   parts.push(`Floor = ${f.floor}`);
+    if (f.unit)    parts.push(`Unit = ${f.unit}`);
+    return parts.join(' · ') || 'no criteria';
+}
+function findReportHtml() {
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rows = findResults.value.map((r, i) => `<tr>
+<td style="text-align:right">${i + 1}</td><td>${esc(r.order)}</td><td>${esc(r.po)}</td><td>${esc(r.style)}${r.color ? ' : ' + esc(r.color) : ''}</td>
+<td>${esc(r.buyer)}</td><td style="text-align:right">${fmtQty(r.qty)}</td><td>${esc(r.line)}</td><td>${esc(r.floor)}</td><td>${esc(r.unit)}</td>
+<td>${esc(fmtDate(r.start))}</td><td>${esc(fmtDate(r.rec?.endDate))}</td><td>${r.ship ? esc(fmtDate(r.ship)) : '—'}</td><td>${r.completed ? 'completed' : ''}</td></tr>`).join('');
+    return `<h2 style="margin:0 0 4px">Find strips — ${esc(currentBoard.value?.name || currentBoard.value?.unitName || 'board')}</h2>
+<div style="margin:0 0 8px;font-size:9pt">${esc(findCriteriaText())} · <b>${findResults.value.length}</b> strip(s) · Plan qty <b>${fmtQty(findTotalQty.value)}</b> · ${esc(new Date().toLocaleString())}</div>
+<table><thead><tr><th>#</th><th>Order</th><th>PO</th><th>Style : Colour</th><th>Buyer</th><th>Plan Qty</th><th>Line</th><th>Floor</th><th>Unit</th><th>Start</th><th>End</th><th>Ship</th><th></th></tr></thead>
+<tbody>${rows}</tbody><tfoot><tr><td colspan="5" style="text-align:right"><b>Total plan qty</b></td><td style="text-align:right"><b>${fmtQty(findTotalQty.value)}</b></td><td colspan="7"></td></tr></tfoot></table>`;
+}
+function findPrint() {
+    if (!findResults.value.length) { toast('Run a Find first — nothing to report', 'warn'); return; }
+    const w = window.open('', '_blank', 'width=1000,height=700');
+    if (!w) { toast('Pop-up blocked — allow pop-ups to print', 'warn'); return; }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Find strips report</title><style>body{font:11px Verdana,sans-serif;padding:14px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:3px 6px;white-space:nowrap}th{background:#eee}tfoot td{background:#f4f2ec}</style></head><body>${findReportHtml()}</body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+}
+function findExcel() {
+    if (!findResults.value.length) { toast('Run a Find first — nothing to export', 'warn'); return; }
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"><style>table{border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:9pt}th,td{border:1px solid #000;white-space:nowrap;padding:2px 6px}th{background:#17356b;color:#fff;font-weight:bold}</style></head><body>${findReportHtml()}</body></html>`;
+    const blob = new Blob(['\uFEFF' + html], { type : 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `FindStrips_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${findResults.value.length} strip(s) to Excel`, 'ok');
 }
 
 const findSummary = computed(() => {
@@ -11312,12 +11383,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Board -->
         <div class="mb-main">
             <!-- Find strips panel (floats over the board, the board stays live) -->
-            <div v-if="findOpen" class="fnd-panel" @keydown.esc.stop="closeFindPanel" @keydown.enter.stop="runFind">
-                <div class="fnd-title">
+            <div v-if="findOpen" class="fnd-panel" :class="{ 'fnd-minimized' : findMin }" :style="findPanelStyle" @keydown.esc.stop="closeFindPanel" @keydown.enter.stop="runFind">
+                <div class="fnd-title" title="Drag to move · double-click to minimize / restore" @mousedown="findDragStart" @dblclick="findMin = !findMin">
                     <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find strips
                     <span class="fnd-sum">{{ findSummary }}</span>
+                    <span class="cal-x" :title="findMin ? 'Restore' : 'Minimize'" @click="findMin = !findMin">{{ findMin ? '▢' : '—' }}</span>
                     <span class="cal-x" title="Close (Esc)" @click="closeFindPanel">✕</span>
                 </div>
+                <div v-show="!findMin" class="fnd-body">
                 <div class="fnd-hint">Fields in <b>bold</b> accept a wild card find (<code>*</code> = any, <code>?</code> = one character); plain text = contains. All filled fields apply together.</div>
                 <div class="fnd-grid">
                     <label class="fnd-b">Style</label>     <input v-model.trim="findForm.style"   class="cal-in" placeholder="00AFB or 00A*">
@@ -11345,6 +11418,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <button class="cal-btn st-btn" :disabled="!findResults.length" @click="findGoTo(findIdx - 1)">◀ Prev</button>
                     <button class="cal-btn st-btn" :disabled="!findResults.length" @click="findGoTo(findIdx + 1)">Next ▶</button>
                     <button class="cal-btn st-btn" @click="resetFind">Clear</button>
+                    <span class="fnd-sp"></span>
+                    <button class="cal-btn st-btn" :disabled="!findResults.length" title="Print the find report" @click="findPrint">📄 Report</button>
+                    <button class="cal-btn st-btn" :disabled="!findResults.length" title="Export the find to Excel" @click="findExcel">📊 Excel</button>
                 </div>
                 <div v-if="findIds" class="fnd-list">
                     <table v-if="findResults.length">
@@ -11362,8 +11438,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td>{{ r.ship ? fmtDate(r.ship) : '—' }}</td>
                             </tr>
                         </tbody>
+                        <tfoot>
+                            <tr class="fnd-total"><td colspan="4">Total plan qty · {{ findResults.length }} strip(s)</td><td class="fnd-num">{{ fmtQty(findTotalQty) }}</td><td colspan="4"></td></tr>
+                        </tfoot>
                     </table>
                     <div v-else class="fnd-none">No strip on this board matches. Change the criteria or press Clear.</div>
+                </div>
                 </div>
             </div>
             <div
@@ -14346,28 +14426,34 @@ body {
     top        : 0;
     right      : 10px;
     z-index    : 150;
-    width      : 560px;
+    width      : 430px;
     max-width  : calc(100vw - 20px);
     max-height : calc(100% - 10px);
     overflow   : auto;
     background : #f0efe8;
     border     : 1px solid #7a7a7a;
     box-shadow : 3px 4px 12px rgba(0, 0, 0, 0.4);
-    font-size  : 12px;
-    padding    : 0 0 8px;
+    font-size  : 11.5px;
+    padding    : 0 0 6px;
 }
-.fnd-title { display : flex; align-items : center; gap : 6px; padding : 6px 10px; font-weight : bold; font-size : 13px; background : #fff; border-bottom : 1px solid #c9c5b8; }
+.fnd-panel.fnd-minimized { width : 260px; padding : 0; overflow : hidden; }
+.fnd-title { display : flex; align-items : center; gap : 6px; padding : 4px 8px; font-weight : bold; font-size : 12.5px; background : #fff; border-bottom : 1px solid #c9c5b8; cursor : move; user-select : none; }
+.fnd-minimized .fnd-title { border-bottom : none; }
+.fnd-body { display : contents; }
+.fnd-sp { flex : 1 1 auto; }
+.fnd-total td { background : #f4f2ec; font-weight : 700; color : #17356b; border-top : 2px solid #c9c5b8; }
 .fnd-title .fa-solid { color : #0a6ed1; }
 .fnd-sum { margin-left : auto; font-weight : 600; color : #1b52ad; font-size : 12px; }
-.fnd-hint { padding : 6px 10px 2px; color : #5b6673; font-size : 11px; }
+.fnd-hint { padding : 4px 8px 0; color : #5b6673; font-size : 10.5px; }
 .fnd-hint code { background : #e6e9ee; padding : 0 4px; border-radius : 3px; }
-.fnd-grid { display : grid; grid-template-columns : 80px 1fr; gap : 5px 8px; align-items : center; padding : 6px 10px; }
-.fnd-grid label { font-size : 12px; }
+.fnd-grid { display : grid; grid-template-columns : 66px 1fr; gap : 3px 6px; align-items : center; padding : 4px 8px; }
+.fnd-grid label { font-size : 11.5px; }
 .fnd-grid .fnd-b { font-weight : 700; }
-.fnd-grid .cal-in { width : 100%; box-sizing : border-box; font-size : 12px; }
+.fnd-grid .cal-in { width : 100%; box-sizing : border-box; font-size : 11.5px; padding : 2px 5px; }
 .fnd-range { display : flex; gap : 6px; align-items : center; }
-.fnd-btns { display : flex; gap : 6px; padding : 4px 10px 6px; }
-.fnd-list { margin : 0 10px; border : 1px solid #b9c4d0; border-radius : 4px; max-height : 240px; overflow : auto; background : #fff; }
+.fnd-btns { display : flex; gap : 4px; padding : 3px 8px 5px; flex-wrap : wrap; align-items : center; }
+.fnd-btns .st-btn { padding : 3px 9px; font-size : 11.5px; }
+.fnd-list { margin : 0 8px; border : 1px solid #b9c4d0; border-radius : 4px; max-height : 200px; overflow : auto; background : #fff; }
 .fnd-list table { border-collapse : collapse; width : 100%; font-size : 11.5px; }
 .fnd-list th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 4px 6px; font-weight : 600; }
 .fnd-list td { padding : 3px 6px; border-bottom : 1px solid #eef1f5; white-space : nowrap; cursor : pointer; }
