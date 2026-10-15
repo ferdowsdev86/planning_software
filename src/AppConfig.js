@@ -2822,8 +2822,8 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       <div class="tip4-rows">
         <div class="tip4-2col">
           ${R('Style No', `<b>${enc(s.stl_no || r.style || '—')}</b>`)}
-          ${R('Type', enc((ptype !== '_Default' && ptype) || s.stl_type || '—'))}
-          ${R('Product', enc(s.stl_product_name || (ptype !== '_Default' && ptype) || '—'))}
+          ${R('Type', enc(s.erp_product_type || (ptype !== '_Default' && ptype) || s.stl_type || '—'))}
+          ${R('Product', enc(s.erp_garment_type || s.stl_product_name || (ptype !== '_Default' && ptype) || '—'))}
           ${R('Wash', washLbl)}
         </div>
         ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(s.stl_description || s.stl_garment_description)}</i>`, 't4-full') : ''}

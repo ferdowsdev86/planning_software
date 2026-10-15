@@ -1218,11 +1218,15 @@ const STYLE_SQL = where => `
         s.stl_no, s.stl_product_name, s.stl_description, s.stl_type,
         s.stl_img_link, s.techpack, s.wash_recipe_status,
         s.gender, s.stl_garment_description,
+        pt.prd_type_name AS erp_product_type,     /* mr_style.prd_type_id → mr_product_type (tooltip "Type") */
+        gt.gmt_name      AS erp_garment_type,     /* mr_style.gmt_id → mr_garment_type (tooltip "Product") */
         oe.order_id AS entry_id,
         COALESCE(po.po_ex_fty, oe.order_delivery_date) AS shipment_date
     FROM \`${ERP_DB}\`.mr_purchase_order   po
     JOIN \`${ERP_DB}\`.mr_order_entry       oe ON oe.order_id = po.mr_order_entry_order_id
     JOIN \`${ERP_DB}\`.mr_style             s  ON s.stl_id    = oe.mr_style_stl_id
+    LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+    LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
     WHERE ${where}`;
 const BOOKING_SQL = where => `
     SELECT bk.order_id,
