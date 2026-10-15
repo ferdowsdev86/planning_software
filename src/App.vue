@@ -10928,8 +10928,11 @@ function findRowInfo(s, ev) {
         line : res?.name || lid || '—',
         floor : res?.data?.lineRow ? floorLabelOf(unit, res.data.floor) : (isHoldId(lid) ? 'Holding' : '—'),
         unit,
-        start : ev.startDate, ship : raw.ship ? new Date(raw.ship) : null,
-        completed : raw.status === 'completed'
+        start : ev.startDate, end : ev.endDate, ship : raw.ship ? new Date(raw.ship) : null,
+        completed : raw.status === 'completed',
+        hold : isHoldId(lid),
+        orderQty : Number(raw.orderQty) || 0,
+        pos : Array.isArray(raw.poList) && raw.poList.length ? raw.poList.map(String) : (raw.po ? [String(raw.po)] : [])
     };
 }
 
@@ -11051,6 +11054,43 @@ function findDragStart(e) {
 }
 const findPanelStyle = computed(() => (findPos.value ? { left : `${findPos.value.x}px`, top : `${findPos.value.y}px`, right : 'auto' } : {}));
 const findTotalQty = computed(() => findResults.value.reduce((a, r) => a + (Number(r.qty) || 0), 0));
+// Plan summary (what the matching strips occupy) and order summary (which
+// orders they belong to) under the list — and in the report
+const findPlanSummary = computed(() => {
+    const rows = findResults.value;
+    if (!rows.length) return null;
+    const onLine = rows.filter(r => !r.hold), hold = rows.filter(r => r.hold);
+    const lines = new Set(onLine.map(r => r.line));
+    const starts = rows.map(r => +r.start).filter(Boolean), ends = rows.map(r => +r.end).filter(Boolean);
+    return {
+        strips : rows.length, qty : findTotalQty.value,
+        onLine : onLine.length, onLineQty : onLine.reduce((a, r) => a + r.qty, 0),
+        hold : hold.length, holdQty : hold.reduce((a, r) => a + r.qty, 0),
+        lines : lines.size, completed : rows.filter(r => r.completed).length,
+        first : starts.length ? fmtDate(new Date(Math.min(...starts))) : '—',
+        last  : ends.length ? fmtDate(new Date(Math.max(...ends))) : '—'
+    };
+});
+const findOrderSummary = computed(() => {
+    const rows = findResults.value;
+    if (!rows.length) return null;
+    const orders = new Map();
+    const pos = new Set(), buyers = new Map();
+    for (const r of rows) {
+        if (!orders.has(r.order)) orders.set(r.order, { orderQty : 0, pos : new Set() });
+        const o = orders.get(r.order);
+        for (const p of r.pos) { pos.add(p); if (!o.pos.has(p)) { o.pos.add(p); o.orderQty += r.orderQty; } }
+        buyers.set(r.buyer, (buyers.get(r.buyer) || 0) + r.qty);
+    }
+    const ships = rows.map(r => r.ship ? +r.ship : 0).filter(Boolean);
+    return {
+        orders : orders.size, pos : pos.size,
+        orderQty : [...orders.values()].reduce((a, o) => a + o.orderQty, 0),
+        buyers : [...buyers.entries()].sort((a, b) => b[1] - a[1]).map(([b]) => b),
+        shipFirst : ships.length ? fmtDate(new Date(Math.min(...ships))) : '—',
+        shipLast  : ships.length ? fmtDate(new Date(Math.max(...ships))) : '—'
+    };
+});
 
 // Report of the find: the criteria, every matching strip and the plan-qty total
 function findCriteriaText() {
@@ -11073,6 +11113,12 @@ function findReportHtml() {
 <td>${esc(fmtDate(r.start))}</td><td>${esc(fmtDate(r.rec?.endDate))}</td><td>${r.ship ? esc(fmtDate(r.ship)) : '—'}</td><td>${r.completed ? 'completed' : ''}</td></tr>`).join('');
     return `<h2 style="margin:0 0 4px">Find strips — ${esc(currentBoard.value?.name || currentBoard.value?.unitName || 'board')}</h2>
 <div style="margin:0 0 8px;font-size:9pt">${esc(findCriteriaText())} · <b>${findResults.value.length}</b> strip(s) · Plan qty <b>${fmtQty(findTotalQty.value)}</b> · ${esc(new Date().toLocaleString())}</div>
+${(() => { const p = findPlanSummary.value, o = findOrderSummary.value; if (!p || !o) return ''; return `<table style="margin:0 0 8px;width:auto"><tr><th colspan="2">Plan summary</th><th colspan="2">Order summary</th></tr>
+<tr><td>Strips</td><td style="text-align:right">${p.strips}</td><td>Orders</td><td style="text-align:right">${o.orders}</td></tr>
+<tr><td>Plan qty</td><td style="text-align:right">${fmtQty(p.qty)}</td><td>POs</td><td style="text-align:right">${o.pos}</td></tr>
+<tr><td>On lines / Holding Row</td><td style="text-align:right">${p.onLine} (${fmtQty(p.onLineQty)}) / ${p.hold} (${fmtQty(p.holdQty)})</td><td>Order qty</td><td style="text-align:right">${fmtQty(o.orderQty)}</td></tr>
+<tr><td>Lines used</td><td style="text-align:right">${p.lines}</td><td>Buyers</td><td>${esc(o.buyers.join(', '))}</td></tr>
+<tr><td>Plan span</td><td>${esc(p.first)} → ${esc(p.last)}</td><td>Shipment</td><td>${esc(o.shipFirst)} → ${esc(o.shipLast)}</td></tr></table>`; })()}
 <table><thead><tr><th>#</th><th>Order</th><th>PO</th><th>Style : Colour</th><th>Buyer</th><th>Plan Qty</th><th>Line</th><th>Floor</th><th>Unit</th><th>Start</th><th>End</th><th>Ship</th><th></th></tr></thead>
 <tbody>${rows}</tbody><tfoot><tr><td colspan="5" style="text-align:right"><b>Total plan qty</b></td><td style="text-align:right"><b>${fmtQty(findTotalQty.value)}</b></td><td colspan="7"></td></tr></tfoot></table>`;
 }
@@ -11443,6 +11489,26 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tfoot>
                     </table>
                     <div v-else class="fnd-none">No strip on this board matches. Change the criteria or press Clear.</div>
+                </div>
+                <div v-if="findPlanSummary && findOrderSummary" class="fnd-sums">
+                    <div class="fnd-sum-box">
+                        <div class="fnd-sum-h">Plan summary</div>
+                        <div><span>Strips</span><b>{{ findPlanSummary.strips }}</b></div>
+                        <div><span>Plan qty</span><b>{{ fmtQty(findPlanSummary.qty) }}</b></div>
+                        <div><span>On lines</span><b>{{ findPlanSummary.onLine }} · {{ fmtQty(findPlanSummary.onLineQty) }}</b></div>
+                        <div><span>Holding Row</span><b>{{ findPlanSummary.hold }} · {{ fmtQty(findPlanSummary.holdQty) }}</b></div>
+                        <div><span>Lines used</span><b>{{ findPlanSummary.lines }}</b></div>
+                        <div><span>Plan span</span><b>{{ findPlanSummary.first }} → {{ findPlanSummary.last }}</b></div>
+                        <div v-if="findPlanSummary.completed"><span>Completed</span><b>{{ findPlanSummary.completed }}</b></div>
+                    </div>
+                    <div class="fnd-sum-box">
+                        <div class="fnd-sum-h">Order summary</div>
+                        <div><span>Orders</span><b>{{ findOrderSummary.orders }}</b></div>
+                        <div><span>POs</span><b>{{ findOrderSummary.pos }}</b></div>
+                        <div><span>Order qty</span><b>{{ fmtQty(findOrderSummary.orderQty) }}</b></div>
+                        <div><span>Buyers</span><b :title="findOrderSummary.buyers.join(', ')">{{ findOrderSummary.buyers.slice(0, 3).join(', ') }}{{ findOrderSummary.buyers.length > 3 ? ` +${findOrderSummary.buyers.length - 3}` : '' }}</b></div>
+                        <div><span>Shipment</span><b>{{ findOrderSummary.shipFirst }} → {{ findOrderSummary.shipLast }}</b></div>
+                    </div>
                 </div>
                 </div>
             </div>
@@ -14452,7 +14518,13 @@ body {
 .fnd-grid .cal-in { width : 100%; box-sizing : border-box; font-size : 11.5px; padding : 2px 5px; }
 .fnd-range { display : flex; gap : 6px; align-items : center; }
 .fnd-btns { display : flex; gap : 4px; padding : 3px 8px 5px; flex-wrap : wrap; align-items : center; }
-.fnd-btns .st-btn { padding : 3px 9px; font-size : 11.5px; }
+.fnd-btns .cal-btn { width : auto !important; flex : 0 0 auto; margin : 0; padding : 3px 9px; font-size : 11.5px; }
+.fnd-sums { display : flex; gap : 6px; margin : 6px 8px 0; }
+.fnd-sum-box { flex : 1 1 0; border : 1px solid #b9c4d0; border-radius : 4px; background : #fff; padding : 4px 6px; font-size : 11px; }
+.fnd-sum-h { font-weight : 700; color : #17356b; border-bottom : 1px solid #e3e0d6; margin-bottom : 3px; padding-bottom : 2px; }
+.fnd-sum-box > div:not(.fnd-sum-h) { display : flex; justify-content : space-between; gap : 6px; padding : 1px 0; }
+.fnd-sum-box > div > span { color : #5b6673; }
+.fnd-sum-box > div > b { color : #17356b; white-space : nowrap; overflow : hidden; text-overflow : ellipsis; }
 .fnd-list { margin : 0 8px; border : 1px solid #b9c4d0; border-radius : 4px; max-height : 200px; overflow : auto; background : #fff; }
 .fnd-list table { border-collapse : collapse; width : 100%; font-size : 11.5px; }
 .fnd-list th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 4px 6px; font-weight : 600; }
