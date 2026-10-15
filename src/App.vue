@@ -6674,7 +6674,13 @@ const dpSummary = computed(() => {
     const sah     = rows.reduce((a, r) => a + r.planQty * (Number(r.smv) || 0), 0) / 60;
     const effW    = rows.reduce((a, r) => a + r.planEff * r.planQty, 0);
     const buyers  = new Map();
-    for (const r of rows) buyers.set(r.buyer || '—', (buyers.get(r.buyer || '—') || 0) + r.planQty);
+    for (const r of rows) {
+        const k = r.buyer || '—';
+        if (!buyers.has(k)) buyers.set(k, { qty : 0, sah : 0 });
+        const b = buyers.get(k);
+        b.qty += r.planQty;
+        b.sah += r.planQty * (Number(r.smv) || 0) / 60;
+    }
     // Working days = date columns that actually carry planned quantity
     const dayKeys = new Set();
     for (const g of lineGroups) {
@@ -6716,7 +6722,7 @@ const dpSummary = computed(() => {
         lines    : lineGroups.length,
         manpower : lineGroups.reduce((a, g) => a + g.totals.manpower, 0),
         cm       : lineGroups.reduce((a, g) => a + g.totals.totalCm, 0),
-        buyers   : [...buyers.entries()].map(([buyer, qty]) => ({ buyer, qty })).sort((a, b) => b.qty - a.qty),
+        buyers   : [...buyers.entries()].map(([buyer, b]) => ({ buyer, qty : b.qty, sah : Math.round(b.sah) })).sort((a, b) => b.qty - a.qty),
         floors   : floorRows
     };
 });
@@ -7168,9 +7174,9 @@ function dpBuildSummaryHtml() {
 <tr><td>CM Plan (Pre-costing)</td><td style="text-align:right">$ ${fmtQty(Math.round(s.cm))}</td></tr>
 </tbody></table>`;
     const buyers = `<table border="1" cellspacing="0" cellpadding="3">
-<thead><tr><th colspan="2">BUYER WISE PLAN QTY</th></tr><tr><th>Buyer</th><th>Plan Qty</th></tr></thead><tbody>
-${s.buyers.map(b => `<tr><td>${dpEsc(b.buyer)}</td><td style="text-align:right">${fmtQty(b.qty)}</td></tr>`).join('')}
-<tr class="dp-grand"><td>Total</td><td style="text-align:right">${fmtQty(s.planQty)}</td></tr>
+<thead><tr><th colspan="3">BUYER WISE PLAN QTY</th></tr><tr><th>Buyer</th><th>Plan Qty</th><th>Plan SAH</th></tr></thead><tbody>
+${s.buyers.map(b => `<tr><td>${dpEsc(b.buyer)}</td><td style="text-align:right">${fmtQty(b.qty)}</td><td style="text-align:right">${fmtQty(b.sah)}</td></tr>`).join('')}
+<tr class="dp-grand"><td>Total</td><td style="text-align:right">${fmtQty(s.planQty)}</td><td style="text-align:right">${fmtQty(s.sah)}</td></tr>
 </tbody></table>`;
     const fl = s.floors;
     const frow = (label, fn) =>
@@ -11962,14 +11968,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 </table>
                                 <table class="st-table dp-table dps-buyers" style="width:300px;flex:0 0 auto">
                                     <thead>
-                                        <tr><th colspan="2">BUYER WISE PLAN QTY</th></tr>
-                                        <tr><th>Buyer</th><th class="od-num">Plan Qty</th></tr>
+                                        <tr><th colspan="3">BUYER WISE PLAN QTY</th></tr>
+                                        <tr><th>Buyer</th><th class="od-num">Plan Qty</th><th class="od-num">Plan SAH</th></tr>
                                     </thead>
                                     <tbody>
                                         <tr v-for="b in dpSummary.buyers" :key="b.buyer">
-                                            <td>{{ b.buyer }}</td><td class="od-num">{{ fmtQty(b.qty) }}</td>
+                                            <td>{{ b.buyer }}</td><td class="od-num">{{ fmtQty(b.qty) }}</td><td class="od-num">{{ fmtQty(b.sah) }}</td>
                                         </tr>
-                                        <tr class="dp-grand"><td>Total</td><td class="od-num">{{ fmtQty(dpSummary.planQty) }}</td></tr>
+                                        <tr class="dp-grand"><td>Total</td><td class="od-num">{{ fmtQty(dpSummary.planQty) }}</td><td class="od-num">{{ fmtQty(dpSummary.sah) }}</td></tr>
                                     </tbody>
                                 </table>
                                 <table v-if="dpLoadCap" class="st-table dp-table dps-loadcap" style="flex:0 0 auto">
@@ -14388,10 +14394,10 @@ body {
 .dps-wrap { display : flex; gap : 18px; align-items : flex-start; margin : 8px 0 14px; }
 /* dp-table sets min-width:100% — the compact summary tables must undo it */
 .dp-table.dps-kv     { min-width : 320px; width : 380px; }
-.dp-table.dps-buyers { min-width : 260px; width : 320px; }
+.dp-table.dps-buyers { min-width : 300px; width : 380px; }
 .dp-table.dps-floors { min-width : 0; width : auto; max-width : 860px; }
 .dps-kv td:first-child { font-weight : 600; }
-.dps-buyers { max-width : 300px; }
+.dps-buyers { max-width : 400px; }
 .dps-buyers thead th { background : #cfd8ea; }
 .dps-floors { max-width : 720px; margin-bottom : 10px; }
 /* Load vs Capacity (FastReact colour bands) */
