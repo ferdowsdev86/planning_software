@@ -16042,12 +16042,17 @@ body {
 .b-sch-event.mb-qty-mismatch::before { background : none !important; }
 .b-sch-event.mb-qty-mismatch { color : inherit !important; }
 .b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
+/* Bryntum wraps the renderer's HTML in .b-sch-event-content — a sticky box
+   only as wide as its text. Our full-bar overlays (late part, learning-curve
+   hatch) must span the BAR, so that box is a plain static block of full
+   width and the bar (position: relative) is the containing block */
+.b-sch-event > .b-sch-event-content { position : static !important; width : 100%; min-width : 0; }
 /* Late strip qty mode: the blue part of a bar after its delivery date */
 .mb-late-part {
     position : absolute; top : 0; bottom : 0; right : 0;
     background : #1e88e5; z-index : 1; pointer-events : none;
     border-left : 1px solid #0d47a1;
-    display : flex; align-items : center; justify-content : center; overflow : hidden;
+    display : flex; align-items : center; justify-content : flex-end; padding-right : 4px; box-sizing : border-box; overflow : hidden;
 }
 .mb-late-qty { font-size : 10px; font-weight : 800; color : #fff; background : rgba(0,0,0,.35); padding : 0 6px; border-radius : 8px; white-space : nowrap; }
 body.mb-color-latesplit .b-sch-event.mb-late { box-shadow : none !important; }   /* the blue part already says it */
