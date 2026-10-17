@@ -3190,6 +3190,127 @@ async function takeBoardSnapshot(unitId, source = 'auto', by = null, dateStr = n
     return { id : ins.insertId, snapshotDate : snapDate, bars : rows.length };
 }
 
+// --------------------------------------------------------------------------
+// What-if? databases (Tools): a named copy of the plan a planner takes for
+// themselves — list / new / rename / delete (soft) / restore. Each one is a
+// board snapshot (planning_board_snapshots) with a name, an owner and an
+// expiry date; the owner sees their own, a Planning Manager sees everyone's.
+// Expired ones retire by themselves (soft delete, deleted_by = 'expired').
+// --------------------------------------------------------------------------
+async function ensureWhatIfTable() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS planning_whatif_dbs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(80) NOT NULL,
+        snapshot_id INT NOT NULL,
+        unit_id INT NULL,
+        bars INT NOT NULL DEFAULT 0,
+        created_by VARCHAR(60) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_after DATE NOT NULL,
+        deleted_at DATETIME NULL,
+        deleted_by VARCHAR(60) NULL,
+        KEY idx_wi_user (created_by, deleted_at),
+        KEY idx_wi_created (created_at)
+    )`);
+}
+async function whatIfUser(username) {
+    const u = String(username || '').trim();
+    if (!u) return null;
+    const [[row]] = await pool.query('SELECT username, role, display_name FROM planning_users WHERE username = ? AND active = 1', [u]);
+    return row || null;
+}
+const whatIfSees = (user, row) => user.role === 'Planning Manager' || row.created_by === user.username;
+const whatIfRow = (r, user) => ({
+    id : r.id, name : r.name, unitId : r.unit_id, unit : r.unit_id ? unitLabel(r.unit_id) : 'All units',
+    bars : r.bars, createdBy : r.created_by, createdAt : snapFmt(r.created_at),
+    expiresAfter : ymdStr(r.expires_after), snapshotId : r.snapshot_id,
+    mine : r.created_by === user.username
+});
+
+app.get(`${BASE}/whatif`, async (req, res) => {
+    try {
+        const user = await whatIfUser(req.query.by);
+        if (!user) return res.status(403).json({ success : false, error : 'Sign in first' });
+        // expired copies retire by themselves
+        await pool.query(`UPDATE planning_whatif_dbs SET deleted_at = NOW(), deleted_by = 'expired'
+                           WHERE deleted_at IS NULL AND expires_after < CURDATE()`);
+        const [rows] = await pool.query(
+            `SELECT * FROM planning_whatif_dbs WHERE deleted_at IS NULL
+              ${user.role === 'Planning Manager' ? '' : 'AND created_by = ?'}
+              ORDER BY created_at DESC, id DESC LIMIT 300`, user.role === 'Planning Manager' ? [] : [user.username]);
+        res.json({ success : true, rows : rows.map(r => whatIfRow(r, user)), planningManager : user.role === 'Planning Manager' });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
+app.post(`${BASE}/whatif`, async (req, res) => {
+    try {
+        const user = await whatIfUser(req.body?.by);
+        if (!user) return res.status(403).json({ success : false, error : 'Sign in first' });
+        const name = String(req.body?.name || '').trim().slice(0, 80);
+        if (!name) return res.status(400).json({ success : false, error : 'Give the What-if database a name' });
+        const exp = String(req.body?.expiresAfter || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return res.status(400).json({ success : false, error : 'Expiry date missing' });
+        const unitId = req.body?.unit ? Number(req.body.unit) : null;
+        const [[dup]] = await pool.query(
+            'SELECT id FROM planning_whatif_dbs WHERE deleted_at IS NULL AND created_by = ? AND name = ?', [user.username, name]);
+        if (dup) return res.status(409).json({ success : false, error : `You already have a What-if database named "${name}"` });
+        const snap = await takeBoardSnapshot(unitId, 'whatif', user.username);
+        const [ins] = await pool.query(
+            `INSERT INTO planning_whatif_dbs (name, snapshot_id, unit_id, bars, created_by, expires_after) VALUES (?, ?, ?, ?, ?, ?)`,
+            [name, snap.id, unitId, snap.bars, user.username, exp]);
+        console.log(`[whatif] "${name}" by ${user.username}: unit ${unitId ?? 'all'}, ${snap.bars} bars, expires ${exp} (id ${ins.insertId})`);
+        res.json({ success : true, id : ins.insertId, bars : snap.bars });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
+async function whatIfOwned(req, res) {
+    const user = await whatIfUser(req.body?.by);
+    if (!user) { res.status(403).json({ success : false, error : 'Sign in first' }); return null; }
+    const [[row]] = await pool.query('SELECT * FROM planning_whatif_dbs WHERE id = ? AND deleted_at IS NULL', [Number(req.params.id)]);
+    if (!row) { res.status(404).json({ success : false, error : 'What-if database not found' }); return null; }
+    if (!whatIfSees(user, row)) { res.status(403).json({ success : false, error : 'Not your What-if database' }); return null; }
+    return { user, row };
+}
+
+app.put(`${BASE}/whatif/:id`, async (req, res) => {
+    try {
+        const o = await whatIfOwned(req, res);
+        if (!o) return;
+        const name = String(req.body?.name || '').trim().slice(0, 80);
+        const exp  = String(req.body?.expiresAfter || ymdStr(o.row.expires_after)).slice(0, 10);
+        if (!name) return res.status(400).json({ success : false, error : 'Give the What-if database a name' });
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return res.status(400).json({ success : false, error : 'Expiry date missing' });
+        await pool.query('UPDATE planning_whatif_dbs SET name = ?, expires_after = ? WHERE id = ?', [name, exp, o.row.id]);
+        res.json({ success : true });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
+app.delete(`${BASE}/whatif/:id`, async (req, res) => {
+    try {
+        const o = await whatIfOwned(req, res);
+        if (!o) return;
+        await pool.query('UPDATE planning_whatif_dbs SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [o.user.username, o.row.id]);
+        console.log(`[whatif] "${o.row.name}" (id ${o.row.id}) deleted by ${o.user.username}`);
+        res.json({ success : true });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
+// Restore the plan to a What-if database — the board restore itself, with
+// its own permission check (Backup / Restore) and its "before restore" backup
+app.post(`${BASE}/whatif/:id/restore`, async (req, res) => {
+    try {
+        const o = await whatIfOwned(req, res);
+        if (!o) return;
+        req.params = { id : String(o.row.snapshot_id) };
+        return restoreSnapshotHandler(req, res);
+    }
+    catch (e) { dbFail(res, e); }
+});
+
 // 23:30 Dhaka time, once per day per board unit
 let snapLastRunDate = null;
 async function snapshotTick() {
@@ -3255,7 +3376,7 @@ const noteIds = notes => {
     try { const n = typeof notes === 'string' ? JSON.parse(notes) : notes; return Array.isArray(n?.idList) ? n.idList.map(Number).filter(Boolean) : []; }
     catch { return []; }
 };
-app.post(`${BASE}/board-snapshots/:id/restore`, async (req, res) => {
+const restoreSnapshotHandler = async (req, res) => {
     const by = String(req.body?.by || '').trim();
     try {
         if (!(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
@@ -3353,7 +3474,8 @@ app.post(`${BASE}/board-snapshots/:id/restore`, async (req, res) => {
         res.json({ success : true, restored, recreated, cancelled, missing, preRestoreId : pre.id, bars : bars.length });
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
-});
+};
+app.post(`${BASE}/board-snapshots/:id/restore`, restoreSnapshotHandler);
 
 // Snapshot vs the live plan: added / removed / line / moved / resized / qty
 app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
@@ -3637,6 +3759,7 @@ app.listen(PORT, () => {
     ensurePlanLocksTable().catch(e => console.error('[plan-lock] table init failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
+        .then(() => ensureWhatIfTable())
         .catch(e => console.error('[snapshot] table init failed:', e.message));
     // Run once on startup so orders are fresh immediately
     runAutoSync();

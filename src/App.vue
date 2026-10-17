@@ -29,7 +29,8 @@ import {
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
-    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb
+    loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb,
+    loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, restoreWhatIfDb
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -3962,6 +3963,133 @@ function openLoginStatus() {
     openMenu.value = null;
     lsOpen.value = true;
     refreshLoginStatus();
+}
+
+// ---------------------------------------------------------------------------
+// What-if? Databases (Tools) — like FastReact's, minus the file path: a named
+// copy of the plan with its backup date and expiry. The planner who takes it
+// sees it; a Planning Manager sees everyone's. Delete is a soft delete on the
+// server; expired copies retire by themselves. Restore = the board restore
+// (Backup / Restore permission, "before restore" backup taken first).
+// ---------------------------------------------------------------------------
+const wiOpen  = ref(false);
+const wiList  = ref([]);
+const wiSel   = ref(null);
+const wiBusy  = ref(false);
+const wiName  = ref('');
+const wiExp   = ref('');
+const wiPM    = ref(false);
+const wiSelRow = computed(() => wiList.value.find(r => r.id === wiSel.value) || null);
+const wiUser  = () => authUser.value?.username || currentUser.value?.username || '';
+const wiYmd   = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// FastReact names a what-if by its date (14-10-26) and lets it live 14 days
+function wiDefaults() {
+    const now = new Date();
+    const base = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getFullYear()).slice(-2)}`;
+    let name = base, n = 2;
+    while (wiList.value.some(r => r.mine && r.name === name)) name = `${base} (${n++})`;
+    wiName.value = name;
+    const exp = new Date(now); exp.setDate(exp.getDate() + 14);
+    wiExp.value = wiYmd(exp);
+}
+async function wiRefresh() {
+    wiBusy.value = true;
+    try {
+        const j = await loadWhatIfDb(wiUser());
+        wiList.value = j.rows || [];
+        wiPM.value = !!j.planningManager;
+        if (wiSel.value && !wiList.value.some(r => r.id === wiSel.value)) wiSel.value = null;
+    }
+    catch (e) { toast(`What-if list failed: ${e.message}`, 'error'); }
+    finally { wiBusy.value = false; }
+}
+async function openWhatIf() {
+    openMenu.value = null;
+    if (!wiUser()) { toast('Sign in first', 'warn'); return; }
+    wiOpen.value = true;
+    wiSel.value = null;
+    await wiRefresh();
+    wiDefaults();
+}
+// picking a row shows its name / expiry in the fields (Rename edits them)
+watch(wiSel, id => {
+    const r = wiList.value.find(x => x.id === id);
+    if (r) { wiName.value = r.name; wiExp.value = r.expiresAfter; }
+    else wiDefaults();
+});
+const wiNameFree = computed(() => {
+    const n = wiName.value.trim();
+    return !!n && !wiList.value.some(r => r.mine && r.name === n && r.id !== wiSel.value);
+});
+async function wiNew() {
+    const name = wiName.value.trim();
+    if (!name) { toast('Give the What-if database a name', 'warn'); return; }
+    if (!wiExp.value) { toast('Set the expiry date', 'warn'); return; }
+    if (wiList.value.some(r => r.mine && r.name === name)) { toast(`You already have "${name}" — pick another name`, 'warn'); return; }
+    wiBusy.value = true;
+    try {
+        // a copy of the OPEN board's saved plan; no board open = every unit
+        const unit = view.value === 'board' ? (currentUnitId.value || null) : null;
+        const r = await createWhatIfDb(wiUser(), name, wiExp.value, unit);
+        toast(`What-if database "${name}" saved — ${r.bars} bar(s)${boardHasUnsaved() ? ' (saved plan only — your unsaved changes are not in it)' : ''}`, 'ok');
+        await wiRefresh();
+        wiSel.value = r.id;
+    }
+    catch (e) { toast(`What-if backup failed: ${e.message}`, 'error'); }
+    finally { wiBusy.value = false; }
+}
+async function wiRename() {
+    const r = wiSelRow.value;
+    if (!r) { toast('Pick a What-if database from the list first', 'warn'); return; }
+    const name = wiName.value.trim();
+    if (!name) { toast('Give the What-if database a name', 'warn'); return; }
+    wiBusy.value = true;
+    try {
+        await renameWhatIfDb(r.id, wiUser(), name, wiExp.value || r.expiresAfter);
+        toast(`Renamed to "${name}"`, 'ok');
+        await wiRefresh();
+    }
+    catch (e) { toast(`Rename failed: ${e.message}`, 'error'); }
+    finally { wiBusy.value = false; }
+}
+async function wiDelete() {
+    const r = wiSelRow.value;
+    if (!r) { toast('Pick a What-if database from the list first', 'warn'); return; }
+    if (!window.confirm(`Delete the What-if database "${r.name}" (${r.createdAt}, ${r.bars} bars)?\n\nIt leaves the list; the copy stays on the server for recovery.`)) return;
+    wiBusy.value = true;
+    try {
+        await deleteWhatIfDb(r.id, wiUser());
+        toast(`"${r.name}" deleted`, 'ok');
+        wiSel.value = null;
+        await wiRefresh();
+        wiDefaults();
+    }
+    catch (e) { toast(`Delete failed: ${e.message}`, 'error'); }
+    finally { wiBusy.value = false; }
+}
+async function wiRestore() {
+    const r = wiSelRow.value;
+    if (!r) { toast('Pick a What-if database from the list first', 'warn'); return; }
+    if (!canBackupRestore.value) { toast('🔒 Restore needs the Backup / Restore permission (Setup → Settings)', 'warn'); return; }
+    if (view.value !== 'board' || !currentBoard.value) { toast('Open the planning board first', 'warn'); return; }
+    if (r.unitId && Number(r.unitId) !== Number(currentUnitId.value)) { toast(`"${r.name}" is a copy of the ${r.unit} board — open that board to restore it`, 'warn'); return; }
+    if (boardReadOnly.value) { toast('🔒 This board is read only / in use by another user — restore is not possible now', 'warn'); return; }
+    const msg = `RESTORE the plan to the What-if database "${r.name}" (${r.createdAt}, ${r.bars} bars, ${r.unit})?\n\n`
+        + '• every bar goes back to its line / dates / quantity of that copy\n'
+        + '• bars planned AFTER that copy leave the board (orders return to unplanned)\n'
+        + (boardHasUnsaved() ? '• your UNSAVED changes on screen are discarded\n' : '')
+        + '\nThe current plan is backed up first ("before restore"), so this can be undone.';
+    if (!window.confirm(msg)) return;
+    wiBusy.value = true;
+    try {
+        const res = await restoreWhatIfDb(r.id, wiUser());
+        wiOpen.value = false;
+        toast(`♻ Plan restored to "${r.name}": ${res.restored + res.recreated} bar(s) restored, ${res.cancelled} removed${res.missing?.length ? `, ${res.missing.length} could not be restored` : ''} — reloading…`, res.missing?.length ? 'warn' : 'ok');
+        skipAutoBarSync = true;
+        await reloadBoardForUnit(currentBoard.value, { force : true });
+    }
+    catch (e) { toast(`Restore failed: ${e.message}`, 'error'); }
+    finally { wiBusy.value = false; skipAutoBarSync = false; }
 }
 
 // While the dialog is open it refreshes itself every 5s — a logout, exit or
@@ -11616,6 +11744,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openLoginStatus">
                         <i class="fa-solid fa-user-group fr-dd-fa" aria-hidden="true"></i> Login status — who is online
                     </div>
+                    <div class="fr-dd-item" title="Named copies of the plan with a backup date and an expiry — yours, and everyone's for a Planning Manager" @click="openWhatIf">
+                        <i class="fa-solid fa-database fr-dd-fa" aria-hidden="true"></i> What-if? Databases
+                    </div>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Setup'" class="fr-dropdown">
                     <div v-if="canManageUsers" class="fr-dd-item" @click="openSettings">⚙️ Settings — users &amp; permissions</div>
@@ -13390,6 +13521,56 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div v-else class="ls-dim">No difference — the current plan is identical to this backup.</div>
                     </template>
                     <div class="st-hint">প্রতিদিন রাত 23:30-এ (Asia/Dhaka) server নিজে board-এর backup নেয় (তারিখ ধরে) · যেকোনো backup বেছে Compare দিলে current plan-এর সাথে পার্থক্য দেখায় · Backup now = এখনই একটা backup · Restore this backup = বাছা backup-এ board ফিরিয়ে নেওয়া (আগে এখনকার plan-এর backup নেয়) · <b>Backup now</b> ও <b>Restore</b> চালু থাকে শুধু যার Setup → Settings-এ <b>Backup / Restore</b> টিক আছে (Planning Manager সবসময়)</div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Tools → What-if? Databases -->
+        <Teleport to="body">
+        <div v-if="wiOpen" class="cal-overlay" @click.self="wiOpen = false">
+            <div class="cal-dialog pf-dialog wi-dialog">
+                <div class="cal-title">
+                    🗄 Create/remove What-if? databases
+                    <span class="cal-title-btns"><span class="cal-x" @click="wiOpen = false">✕</span></span>
+                </div>
+                <div class="st-body wi-body">
+                    <div class="wi-left">
+                        <div class="wi-lbl">Database</div>
+                        <input v-model="wiName" class="cal-in wi-name" type="text" maxlength="80" placeholder="name (e.g. 14-10-26)" @keydown.enter="wiSelRow ? wiRename() : wiNew()">
+                        <div class="wi-list">
+                            <div v-if="wiBusy && !wiList.length" class="ls-dim">Loading…</div>
+                            <div v-else-if="!wiList.length" class="ls-dim">No What-if database yet — type a name and click New.</div>
+                            <div
+                                v-for="r in wiList"
+                                :key="r.id"
+                                class="wi-row"
+                                :class="{ 'wi-sel' : r.id === wiSel, 'wi-other' : !r.mine }"
+                                :title="`${r.bars} bars · ${r.unit} · by ${r.createdBy}`"
+                                @click="wiSel = (wiSel === r.id ? null : r.id)"
+                            >
+                                <span class="wi-row-name">{{ r.name }}</span>
+                                <span class="wi-row-date">{{ r.createdAt }}</span>
+                                <span v-if="wiPM" class="wi-row-by">{{ r.createdBy }}</span>
+                            </div>
+                        </div>
+                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiBusy || !wiName.trim() || !!wiSelRow" title="Save a copy of the open board's saved plan under this name" @click="wiNew">💾 New</button>
+                        <button class="cal-btn st-btn wi-btn" :disabled="wiBusy || !wiSelRow || !wiNameFree" title="Give the selected copy the name / expiry typed above" @click="wiRename">✏️ Rename</button>
+                        <button class="cal-btn st-btn wi-btn wi-del" :disabled="wiBusy || !wiSelRow" @click="wiDelete">❌ Delete</button>
+                    </div>
+                    <div class="wi-right">
+                        <div class="wi-field"><label>Backup date</label><div class="wi-val">{{ wiSelRow ? wiSelRow.createdAt : 'now — when you click New' }}</div></div>
+                        <div class="wi-field"><label>Expires after</label><input v-model="wiExp" class="cal-in wi-exp" type="date"></div>
+                        <div class="wi-field"><label>Plan</label><div class="wi-val">{{ wiSelRow ? `${wiSelRow.unit} · ${wiSelRow.bars} bars` : (view === 'board' && currentBoard ? `${currentBoard.name || currentBoard.label || 'open board'} — saved plan` : 'every unit — saved plan') }}</div></div>
+                        <div class="wi-field"><label>Taken by</label><div class="wi-val">{{ wiSelRow ? wiSelRow.createdBy : wiUser() }}</div></div>
+                        <div class="wi-actions">
+                            <button class="cal-btn st-btn wi-btn rs-go" :disabled="wiBusy || !wiSelRow || !canBackupRestore"
+                                    :title="canBackupRestore ? 'Bring the plan back to this What-if database (the current plan is backed up first)' : '🔒 Needs the Backup / Restore permission (Setup → Settings — users & permissions)'"
+                                    @click="wiRestore">♻️ {{ wiBusy ? 'Working…' : 'Restore this What-if' }}</button>
+                            <button class="cal-btn st-btn wi-btn" @click="wiOpen = false">Close</button>
+                        </div>
+                        <div class="st-hint">What-if? database = plan-এর একটা নামসহ copy (saved plan, backup date আর expiry date সহ) · <b>New</b> = এখনকার saved plan-এর copy · <b>Rename</b> = নাম/expiry বদল · <b>Delete</b> = list থেকে সরায় (server-এ copy থাকে) · expiry পেরোলে নিজে থেকেই সরে যায় · যে user নিয়েছে সে-ই দেখে, Planning Manager সবারটা দেখে · <b>Restore</b> চালু শুধু Backup / Restore permission থাকলে</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -16344,6 +16525,30 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .bs-table tr.bs-removed td { background : #fdecea; }
 .bs-table tr.bs-line td { background : #fff8e1; }
 .sop-opts label { display : inline-flex; align-items : center; gap : 6px; font-weight : 600; }
+
+/* What-if? Databases (Tools) */
+.wi-dialog { width : 820px; }
+.wi-body { display : flex; gap : 18px; align-items : stretch; }
+.wi-left { width : 320px; flex : 0 0 320px; display : flex; flex-direction : column; gap : 6px; }
+.wi-right { flex : 1 1 auto; border : 1px solid #c9d2dc; border-radius : 4px; padding : 12px 14px; background : #f7f9fb; display : flex; flex-direction : column; gap : 10px; }
+.wi-lbl { font-size : 12px; font-weight : 700; }
+.wi-name { width : 100%; box-sizing : border-box; }
+.wi-list { height : 260px; overflow-y : auto; border : 1px solid #b9c4d0; background : #fff; border-radius : 3px; font-size : 12.5px; }
+.wi-row { display : flex; align-items : center; gap : 8px; padding : 4px 8px; cursor : pointer; border-bottom : 1px solid #eef1f4; }
+.wi-row:hover { background : #eef4fb; }
+.wi-row.wi-sel { background : #1e5fb8; color : #fff; }
+.wi-row.wi-other .wi-row-name { font-style : italic; }
+.wi-row-name { flex : 1 1 auto; font-weight : 600; white-space : nowrap; overflow : hidden; text-overflow : ellipsis; }
+.wi-row-date { flex : 0 0 auto; font-size : 11.5px; opacity : .85; }
+.wi-row-by { flex : 0 0 auto; font-size : 11px; opacity : .8; }
+.wi-btn { width : 100%; }
+.wi-del { color : #b00020; }
+.wi-field { display : grid; grid-template-columns : 110px 1fr; align-items : center; gap : 8px; font-size : 12.5px; }
+.wi-field label { font-weight : 600; }
+.wi-val { padding : 4px 8px; border : 1px solid #d5dde6; background : #fff; border-radius : 3px; min-height : 18px; }
+.wi-exp { width : 160px; }
+.wi-actions { display : flex; gap : 8px; margin-top : auto; }
+.wi-actions .wi-btn { width : auto; flex : 1 1 auto; }
 
 /* Multiple strip handling */
 .msh-dialog { width : 960px; max-width : 97vw; max-height : 92vh; overflow-y : auto; }

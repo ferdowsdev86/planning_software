@@ -478,6 +478,26 @@ export async function restoreBoardSnapshot(id, by) {
     if (!j.success) throw new Error(j.error || 'restore failed');
     return j;
 }
+// What-if? databases (Tools): the planner's own named copies of the plan
+async function whatIfCall(path, method, body) {
+    const res = await fetch(`${API_BASE}/whatif${path}`, {
+        method, headers : { 'Content-Type' : 'application/json' },
+        body : body ? JSON.stringify(body) : undefined
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!j.success) throw new Error(j.error || `${method} failed`);
+    return j;
+}
+export async function loadWhatIfDb(by) {
+    const j = await get(`/whatif?by=${encodeURIComponent(by || '')}`, 10000);
+    if (!j.success) throw new Error(j.error || 'load failed');
+    return j;
+}
+export const createWhatIfDb  = (by, name, expiresAfter, unit) => whatIfCall('', 'POST', { by, name, expiresAfter, unit });
+export const renameWhatIfDb  = (id, by, name, expiresAfter) => whatIfCall(`/${id}`, 'PUT', { by, name, expiresAfter });
+export const deleteWhatIfDb  = (id, by) => whatIfCall(`/${id}`, 'DELETE', { by });
+export const restoreWhatIfDb = (id, by) => whatIfCall(`/${id}/restore`, 'POST', { by });
+
 export async function compareBoardSnapshot(id, unitId) {
     const j = await get(`/board-snapshots/${id}/compare${unitId ? `?unit=${unitId}` : ''}`, 15000);
     if (!j.success) throw new Error(j.error || 'compare failed');
