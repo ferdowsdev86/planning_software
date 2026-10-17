@@ -316,15 +316,18 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             // while the list kept showing them as Planned
             const [completedSet, [erpRows], [osKnown]] = await Promise.all([
                 completedOrderCodes(),
-                pool.query(`SELECT DISTINCT order_code FROM cuttingedgedb.mr_order_entry WHERE order_code IN (${ph})`, evCodes),
+                pool.query(`SELECT order_code, MAX(${erpOrderOk('')}) AS ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, evCodes),
                 pool.query(`SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, evCodes)
             ]);
             const inErp = new Set(erpRows.map(r => r.order_code));
+            // dropped (qty 0) / sample / 2nd-quality orders: not a production order
+            const notProd = new Set(erpRows.filter(r => !Number(r.ok)).map(r => r.order_code));
             for (const r of osKnown) inErp.add(r.os_order_code);
             events = events.filter(e => {
                 const oc = evOrderCode(e);
                 if (!oc) return true;
                 if (completedSet.has(oc)) return false;
+                if (notProd.has(oc)) return false;
                 // delivered before the cut-off: out of the plan on every unit
                 if (e.shipment_date && ymdStr(e.shipment_date) < ERP_CUTOFF) return false;
                 if (!inErp.has(oc) && e.planning_order_id == null) return false;
@@ -1235,6 +1238,15 @@ const ymdStr = d => d instanceof Date
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     : String(d || '').slice(0, 10);
 const ERP_CUTOFF = /^\d{4}-\d{2}-\d{2}$/.test(process.env.ERP_CUTOFF || '') ? process.env.ERP_CUTOFF : '2026-10-09';
+// Orders that are not production orders stay out of the plan (list, sync,
+// boards): order qty 0 = dropped / cancelled in ERP; mr_order_entry.order_type
+// 2 sample, 5 SMS, 6 sample courier, 7 2nd quality (1 bulk, 3 combine,
+// 4 chemical, 8 liability, 9 excess, 10 replenishment, 11 development, 99 dummy)
+const ERP_SKIP_TYPES = [2, 5, 6, 7];
+const erpOrderOk = (alias = 'oe') => {
+    const a = alias ? `${alias}.` : '';
+    return `${a}order_qty > 0 AND COALESCE(${a}order_type, 1) NOT IN (${ERP_SKIP_TYPES.join(',')})`;
+};
 
 const ERP_QUERY = (cutoff) => [`
     SELECT
@@ -1265,6 +1277,7 @@ const ERP_QUERY = (cutoff) => [`
       AND (po.status IS NULL OR po.status != 3)
       AND (po.po_status IS NULL OR po.po_status != 3)
       AND oe.order_status NOT IN ('Closed','Inactive')
+      AND ${erpOrderOk('oe')}
     ORDER BY COALESCE(po.po_ex_fty, oe.order_delivery_date)
 `, [cutoff]];
 
@@ -1563,16 +1576,25 @@ async function findHiddenEvents(conn) {
     // Projection bars without an order link: known to ERP / OS by order code.
     // An ERP lookup that fails or finds nothing proves nothing — skip the check.
     const projCodes = [...new Set(events.filter(e => e.planning_order_id == null).map(codeOf).filter(Boolean))];
+    const allCodes  = [...new Set(events.map(codeOf).filter(Boolean))];
     let known = null;
-    if (projCodes.length) {
+    // orders that stopped being production orders in ERP (qty 0 = dropped,
+    // sample, SMS, sample courier, 2nd quality) — their bars go, confirm or projection
+    const notProd = new Set();
+    if (allCodes.length) {
         try {
-            const ph = projCodes.map(() => '?').join(',');
+            const ph = allCodes.map(() => '?').join(',');
             const [erp] = await conn.query(
-                `SELECT DISTINCT order_code FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph})`, projCodes);
-            const [os] = await conn.query(
-                `SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, projCodes);
-            const set = new Set([...erp.map(r => r.order_code), ...os.map(r => r.os_order_code)]);
-            if (set.size) known = set;
+                `SELECT order_code, MAX(${erpOrderOk('')}) AS ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, allCodes);
+            for (const r of erp) if (!Number(r.ok)) notProd.add(r.order_code);
+            const erpSet = new Set(erp.map(r => r.order_code));
+            if (projCodes.length) {
+                const ph2 = projCodes.map(() => '?').join(',');
+                const [os] = await conn.query(
+                    `SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph2})`, projCodes);
+                const set = new Set([...projCodes.filter(c => erpSet.has(c)), ...os.map(r => r.os_order_code)]);
+                if (set.size) known = set;
+            }
         }
         catch (e) { console.warn(`[board-hygiene] ERP lookup skipped: ${e.message}`); }
     }
@@ -1596,6 +1618,7 @@ async function findHiddenEvents(conn) {
         if (!(Number(e.planned_quantity) > 0)) reason = 'zero quantity';
         else if (code && completed.has(code)) reason = 'order marked complete';
         else if (ship && ymdStr(ship) < ERP_CUTOFF) reason = `delivery ${ymdStr(ship)} before the cut-off ${ERP_CUTOFF}`;
+        else if (code && notProd.has(code)) reason = 'order dropped in ERP (qty 0) or sample / 2nd quality';
         else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
         else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
         else if (e.o_id != null && e.line_unit != null && e.order_unit != null
@@ -1775,6 +1798,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
             LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po
                    ON po.mr_order_entry_order_id = oe.order_id AND po.po_qty > 0
             WHERE oe.order_status NOT IN ('Closed','Inactive')
+              AND ${erpOrderOk('oe')}
               ${puf}
             GROUP BY oe.order_id, oe.order_code, oe.order_status, b.b_name, s.stl_no,
                      pt.prd_type_name, s.stl_type, oe.unit_id, oe.prod_unit, oe.order_qty,
@@ -1964,6 +1988,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po
                    ON po.mr_order_entry_order_id = oe.order_id AND po.po_qty > 0
             WHERE oe.order_status NOT IN ('Closed','Inactive')
+              AND ${erpOrderOk('oe')}
               ${puf}
             GROUP BY oe.order_id, oe.order_code, b.b_name, s.stl_no,
                      pt.prd_type_name, s.stl_type, oe.unit_id, oe.prod_unit, oe.order_qty,
@@ -2813,7 +2838,7 @@ async function runAutoSync() {
             JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
             LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
             WHERE oe.order_status NOT IN ('Closed','Inactive')
-              AND oe.order_qty > 0
+              AND ${erpOrderOk('oe')}
               AND oe.order_delivery_date >= ?`, [ERP_CUTOFF]);
         for (const r of projSrc) r.key = `proj-${r.src_id}`;
 
@@ -2925,7 +2950,7 @@ async function runAutoSync() {
         // Projection rows whose ERP order is gone/closed leave the table
         const [liveOrd] = await conn.query(
             `SELECT order_id FROM \`${ERP_DB}\`.mr_order_entry
-             WHERE order_status NOT IN ('Closed','Inactive')`);
+             WHERE order_status NOT IN ('Closed','Inactive') AND ${erpOrderOk('')}`);
         const liveOrdKeys = new Set(liveOrd.map(r => `proj-${r.order_id}`));
         // OS-unit projections stay while their os_orders row is alive
         const [liveOs] = await conn.query(
