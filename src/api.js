@@ -496,7 +496,8 @@ export async function loadWhatIfDb(by) {
 export const createWhatIfDb  = (by, name, expiresAfter, unit) => whatIfCall('', 'POST', { by, name, expiresAfter, unit });
 export const renameWhatIfDb  = (id, by, name, expiresAfter) => whatIfCall(`/${id}`, 'PUT', { by, name, expiresAfter });
 export const deleteWhatIfDb  = (id, by) => whatIfCall(`/${id}`, 'DELETE', { by });
-export const restoreWhatIfDb = (id, by) => whatIfCall(`/${id}/restore`, 'POST', { by });
+// the board opens on a What-if copy (read only) while this is set
+export const whatIfView = { id : null, by : null };
 
 export async function compareBoardSnapshot(id, unitId) {
     const j = await get(`/board-snapshots/${id}/compare${unitId ? `?unit=${unitId}` : ''}`, 15000);
@@ -913,10 +914,11 @@ export async function loadCalendarsDb() {
 export async function loadFromApi(unitId = null) {
     skippedDbEvents.length = 0;
     const unitQ = unitId ? `?unit_id=${unitId}` : '';
+    const wiQ   = whatIfView.id ? `${unitQ ? '&' : '?'}whatif=${whatIfView.id}&by=${encodeURIComponent(whatIfView.by || '')}` : '';
     // The whole board in one answer (hundreds of bars, every order's notes):
     // over the internet this takes longer than the 4 s probe timeout, and
     // an aborted load used to leave the app on "demo data" for good
-    const data = await get(`/projects/1/scheduler-data${unitQ}`, 90000);
+    const data = await get(`/projects/1/scheduler-data${unitQ}${wiQ}`, 90000);
     if (!data.success) throw new Error(data.error || 'load failed');
     mergeErpInfo(data);   // garment types + buyer short names for the bar labels
 
@@ -1203,6 +1205,7 @@ export async function loadFromApi(unitId = null) {
     return {
         project : data.project, resources, events, assignments, dependencies, resourceTimeRanges,
         unplanned, lineById,
+        whatIf  : data.whatIf || null,
         calendarDays : Object.keys(calendarDays).length ? calendarDays : null,
         calendarName,
         calendarId,

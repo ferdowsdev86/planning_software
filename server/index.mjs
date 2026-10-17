@@ -202,6 +202,22 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
 
         const effUnit = unitId || project.unit_id || null;
 
+        // What-if view: the board as it was in a What-if copy — bars from the
+        // snapshot (dates / qty / status / notes of that day), nothing from the
+        // live plan rows, nothing written. The copy's owner or a Planning
+        // Manager may look at it.
+        let whatIf = null;
+        if (req.query.whatif) {
+            const user = await whatIfUser(req.query.by);
+            const [[wrow]] = await pool.query('SELECT * FROM planning_whatif_dbs WHERE id = ? AND deleted_at IS NULL', [Number(req.query.whatif)]);
+            if (!user || !wrow || !whatIfSees(user, wrow)) return res.status(403).json({ success : false, error : 'What-if database not available' });
+            const [[snap]] = await pool.query('SELECT data FROM planning_board_snapshots WHERE id = ?', [wrow.snapshot_id]);
+            let bars = [];
+            try { bars = JSON.parse(snap?.data || '[]'); } catch { bars = []; }
+            whatIf = { row : wrow, bars : Array.isArray(bars) ? bars : [] };
+        }
+        const whatIfIds = whatIf ? whatIf.bars.map(b => Number(b.id)).filter(Boolean) : [];
+
         let resourceSql = `
             SELECT id, resource_code, resource_name, resource_type, unit_id, floor_id,
                    default_efficiency, manpower, machine_count, capacity_minutes_per_day,
@@ -217,13 +233,19 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         // round trip, so the independent ones go out together
         const [[resources0], [events0], [assignments], [dependencies], [calendars], [allRes], holdRes] = await Promise.all([
             pool.query(resourceSql, resourceParams),
-            pool.query(EVENT_SQL_HEAD + `
+            whatIf
+                ? (whatIfIds.length
+                    ? pool.query(EVENT_SQL_HEAD + ` WHERE e.id IN (${whatIfIds.map(() => '?').join(',')})`, whatIfIds)
+                    : Promise.resolve([[]]))
+                : pool.query(EVENT_SQL_HEAD + `
              WHERE e.project_id = ? AND e.event_status != 'cancelled'`, [projectId]),
-            pool.query(
-                `SELECT a.id, a.event_id, a.resource_id
-                 FROM planning_assignments a
-                 JOIN planning_events e ON e.id = a.event_id
-                 WHERE e.project_id = ?`, [projectId]),
+            whatIf
+                ? Promise.resolve([whatIf.bars.filter(b => b.id && b.lineId).map((b, i) => ({ id : -(i + 1), event_id : Number(b.id), resource_id : Number(b.lineId) }))])
+                : pool.query(
+                    `SELECT a.id, a.event_id, a.resource_id
+                     FROM planning_assignments a
+                     JOIN planning_events e ON e.id = a.event_id
+                     WHERE e.project_id = ?`, [projectId]),
             pool.query(
                 'SELECT id, from_event_id, to_event_id, dependency_type, lag, lag_unit FROM planning_dependencies WHERE project_id = ? AND active = TRUE',
                 [projectId]),
@@ -241,6 +263,28 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         ]);
         let resources = resources0;
         let events = events0;
+        if (whatIf) {
+            // the bar as it was that day: the snapshot's saved row wins over
+            // whatever the live row says now
+            const byId = new Map(whatIf.bars.map(b => [Number(b.id), b]));
+            events = events.map(e => {
+                const b = byId.get(Number(e.id));
+                if (!b) return e;
+                const r = b.row || {};
+                return {
+                    ...e,
+                    start_date         : r.start_date || b.start || e.start_date,
+                    end_date           : r.end_date || b.end || e.end_date,
+                    duration           : r.duration ?? e.duration,
+                    duration_unit      : r.duration_unit ?? e.duration_unit,
+                    planned_quantity   : r.planned_quantity ?? b.qty ?? e.planned_quantity,
+                    percent_done       : r.percent_done ?? e.percent_done,
+                    manually_scheduled : r.manually_scheduled ?? e.manually_scheduled,
+                    event_status       : r.event_status || b.status || 'planned',
+                    notes              : r.notes ?? e.notes
+                };
+            }).filter(e => e.event_status !== 'cancelled');
+        }
         // AQL board (unit 3) often shares lines stored under a legacy unit_id
         if (!resources.length && effUnit) {
             [resources] = await pool.query(
@@ -263,7 +307,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             || (String(e.event_code || '').startsWith('ev-proj:')
                 ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
         const evCodes = [...new Set(events.map(evOrderCode).filter(Boolean))];
-        if (evCodes.length) {
+        // (a What-if copy shows that day's plan as it was — no hygiene filter)
+        if (!whatIf && evCodes.length) {
             const ph = evCodes.map(() => '?').join(',');
             // OS orders (mbm_os.os_orders — GSL-… codes) are just as real as
             // mr_order_entry ones: without this their planned projection bars
@@ -341,7 +386,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             assignments  : { rows : assignments },
             dependencies : { rows : dependencies },
             calendars    : { rows : unitCalendar },
-            erpByOrder, buyerShort
+            erpByOrder, buyerShort,
+            whatIf : whatIf ? { id : whatIf.row.id, name : whatIf.row.name, createdAt : snapFmt(whatIf.row.created_at), createdBy : whatIf.row.created_by, expiresAfter : ymdStr(whatIf.row.expires_after) } : null
         });
     }
     catch (e) {
@@ -3299,19 +3345,6 @@ app.delete(`${BASE}/whatif/:id`, async (req, res) => {
     catch (e) { dbFail(res, e); }
 });
 
-// Restore the plan to a What-if database — the board restore itself, with
-// its own permission check (Backup / Restore) and its "before restore" backup
-app.post(`${BASE}/whatif/:id/restore`, async (req, res) => {
-    try {
-        const o = await whatIfOwned(req, res);
-        if (!o) return;
-        req.params = { id : String(o.row.snapshot_id) };
-        req.whatIfAuthorized = true;
-        return restoreSnapshotHandler(req, res);
-    }
-    catch (e) { dbFail(res, e); }
-});
-
 // 23:30 Dhaka time, once per day per board unit
 let snapLastRunDate = null;
 async function snapshotTick() {
@@ -3380,9 +3413,7 @@ const noteIds = notes => {
 const restoreSnapshotHandler = async (req, res) => {
     const by = String(req.body?.by || '').trim();
     try {
-        // a What-if copy is executed by its owner (or a Planning Manager) — the
-        // whatif route has checked that already; plain backups keep the permission
-        if (!req.whatIfAuthorized && !(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
+        if (!(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
         const [[snap]] = await pool.query('SELECT * FROM planning_board_snapshots WHERE id = ?', [Number(req.params.id)]);
         if (!snap) return res.status(404).json({ success : false, error : 'backup not found' });
         let bars = [];

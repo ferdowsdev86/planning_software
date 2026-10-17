@@ -30,7 +30,7 @@ import {
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
     loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb,
-    loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, restoreWhatIfDb
+    loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, whatIfView
 } from './api.js';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
@@ -1597,6 +1597,8 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
         await syncCalendarOverrides(data.calendarId || 1);
         await refreshProdStoreFromDb();
         applyApiBoardData(s, boardUnitCache[uid].apiData);
+        // a What-if copy on screen: never keep it as this unit's cached plan
+        if (data.whatIf || whatIfView.id) boardUnitCache[uid].ready = false;
         apiReady.value = true;
         applyBoardFilter();
         finishBoardLoad(uid, data, s);
@@ -3738,7 +3740,8 @@ const canBackupRestore = computed(() =>
     || userHasPerm(currentUser.value, PERM_BACKUP) || userHasPerm(authUser.value, PERM_BACKUP));
 // View-only session: Management role (§17) or read access to the open board
 const boardViewOnly = computed(() =>
-    currentUser.value?.role === 'Management'
+    !!whatIfActive.value                      // a What-if copy is looked at, never edited
+    || currentUser.value?.role === 'Management'
     || (!!currentBoard.value && boardAccessOf(currentUser.value, currentBoard.value.id) === 'read'));
 
 // Production update: a planner sees (and enters) only the lines of the
@@ -4069,10 +4072,11 @@ async function wiDelete() {
 }
 // "Select What-if? database" (FastReact's screen when a plan opens): a
 // planner who has What-if copies of a board must choose BEFORE it opens —
-// the What-if copy (the plan is brought back to that copy; the current plan
-// is backed up first) or the normal plan. Closing the screen opens nothing.
-// A planner without copies gets the board straight away. The copy's owner
-// (or a Planning Manager) may execute it.
+// the What-if copy (the board shows the plan exactly as it was in that copy,
+// READ ONLY: the live plan and database are never touched) or the normal
+// plan. Closing the screen opens nothing. A planner without copies gets the
+// board straight away. The copy's owner (or a Planning Manager) may open it.
+const whatIfActive = ref(null);   // { id, name, createdAt, createdBy } while a copy is on screen
 const wiPickOpen  = ref(false);
 const wiPickRows  = ref([]);
 const wiPickSel   = ref(null);
@@ -4102,27 +4106,19 @@ function wiPickNormal() {
     wiPickBoard = null;
     if (b) openBoard(b);
 }
-async function wiPickExecute() {
+function wiPickExecute() {
     const r = wiPickRows.value.find(x => x.id === wiPickSel.value);
     const b = wiPickBoard;
     if (!r || !b) { toast('Select a database first', 'warn'); return; }
-    const msg = `Open the What-if database "${r.name}" (${r.createdAt}, ${r.bars} bars, ${r.unit})?\n\n`
-        + '• the plan becomes that copy: every bar goes back to its line / dates / quantity of the copy\n'
-        + '• bars planned AFTER the copy leave the board (orders return to unplanned)\n'
-        + '\nThe current plan is backed up first ("before restore"), so this can be undone from Reports → Board backup.';
-    if (!window.confirm(msg)) return;
-    wiPickBusy.value = true;
-    try {
-        const res = await restoreWhatIfDb(r.id, wiUser());
-        wiPickOpen.value = false;
-        wiPickBoard = null;
-        toast(`🗄 What-if "${r.name}" opened: ${res.restored + res.recreated} bar(s) restored, ${res.cancelled} removed${res.missing?.length ? `, ${res.missing.length} could not be restored` : ''}`, res.missing?.length ? 'warn' : 'ok');
-        skipAutoBarSync = true;   // the board shows the copy exactly as taken
-        openBoard(b, { forceReload : true });
-        setTimeout(() => { skipAutoBarSync = false; }, 15000);
-    }
-    catch (e) { toast(`What-if failed: ${e.message}`, 'error'); }
-    finally { wiPickBusy.value = false; }
+    wiPickOpen.value = false;
+    wiPickBoard = null;
+    openBoard(b, { whatIf : r });
+}
+// Leave a What-if copy: the board reloads from the live plan
+function exitWhatIf() {
+    const b = currentBoard.value;
+    if (!b || !whatIfActive.value) return;
+    openBoard(b);
 }
 
 // While the dialog is open it refreshes itself every 5s — a logout, exit or
@@ -4364,11 +4360,28 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-async function openBoard(b, { ask = false, forceReload = false } = {}) {
+async function openBoard(b, { ask = false, forceReload = false, whatIf = null } = {}) {
     openMenu.value = null;
     // from the Planning menu: a planner with What-if copies of this plan
     // chooses first (What-if or normal) — the board opens only through that screen
     if (ask && dataSource.value === 'db' && await whatIfGate(b)) return;
+    // entering / leaving a What-if copy: the board data must come fresh from
+    // the API (the copy, or the live plan again) — never from the unit cache
+    const wasWhatIf = !!whatIfActive.value;
+    if (whatIf) {
+        whatIfView.id = whatIf.id;
+        whatIfView.by = wiUser();
+        whatIfActive.value = { id : whatIf.id, name : whatIf.name, createdAt : whatIf.createdAt, createdBy : whatIf.createdBy };
+        skipAutoBarSync = true;         // the copy shows exactly as it was taken
+        forceReload = true;
+    }
+    else if (wasWhatIf) {
+        whatIfView.id = null;
+        whatIfView.by = null;
+        whatIfActive.value = null;
+        skipAutoBarSync = false;
+        forceReload = true;
+    }
     currentBoard.value = b;
     currentUnitId.value = b.unitId ?? 3;
     view.value = 'board';
@@ -4409,6 +4422,14 @@ async function openBoard(b, { ask = false, forceReload = false } = {}) {
 
 function closeBoard() {
     stopLockHeartbeat(true);
+    if (whatIfActive.value) {        // the next opening is the live plan again
+        whatIfView.id = null;
+        whatIfView.by = null;
+        whatIfActive.value = null;
+        skipAutoBarSync = false;
+        const uid = currentUnitId.value;
+        if (uid != null && boardUnitCache[uid]) boardUnitCache[uid].ready = false;
+    }
     view.value = 'home';
     currentBoard.value = null;
     boardMin.value = false;
@@ -11827,8 +11848,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <div class="fr-boardarea" :class="{ 'fr-board-hidden' : view !== 'board' }">
         <!-- Plan banner -->
         <div class="fr-banner">
-            <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly }">
-                <template v-if="planLockedByOther">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan LOCKED by <b class="mb-holder-name">{{ planLock?.name || planLock?.username }}</b> · nothing can be moved, planned or saved until they open it</template>
+            <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly, 'mb-banner-wi' : whatIfActive }">
+                <template v-if="whatIfActive">🗄 {{ currentBoard?.unitName || 'AQL' }} — WHAT-IF "<b>{{ whatIfActive.name }}</b>" (copy of {{ whatIfActive.createdAt }}{{ whatIfActive.createdBy ? ` by ${whatIfActive.createdBy}` : '' }}) · view only · the live plan is untouched <a class="mb-banner-link" @click="exitWhatIf">← back to the normal plan</a></template>
+                <template v-else-if="planLockedByOther">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan LOCKED by <b class="mb-holder-name">{{ planLock?.name || planLock?.username }}</b> · nothing can be moved, planned or saved until they open it</template>
                 <template v-else-if="planLockedByMe && !boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan locked by you ({{ authUser?.name || currentUser?.name }}) · other users can only look</template>
                 <template v-else-if="boardReadOnly && boardViewOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
                 <template v-else-if="boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — this board is in use by <b class="mb-holder-name">{{ boardLockHolder?.name || boardLockHolder?.username || 'another user' }}</b> (Test mode · your changes will NOT save)</template>
@@ -13587,10 +13609,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                     <div class="wi-pick-actions">
-                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Open the board on this What-if copy — the plan is brought back to it (the current plan is backed up first)" @click="wiPickExecute">🗄 {{ wiPickBusy ? 'Opening…' : 'What-if? database' }}</button>
-                        <button class="cal-btn st-btn wi-btn" :disabled="wiPickBusy" title="Open the board on the normal plan" @click="wiPickNormal">🗃 Normal database</button>
+                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Open the board on this What-if copy, exactly as the plan was that day — view only, the live plan is never touched" @click="wiPickExecute">🗄 What-if? database</button>
+                        <button class="cal-btn st-btn wi-btn" :disabled="wiPickBusy" title="Open the board on the normal (live) plan" @click="wiPickNormal">🗃 Normal database</button>
                     </div>
-                    <div class="st-hint">এই board-এর What-if copy আছে বলে আগে বেছে নিন: <b>What-if? database</b> = plan ওই copy হয়ে board খুলবে (আগে এখনকার plan-এর backup নেয়) · <b>Normal database</b> = plan যেমন আছে তেমন খুলবে · ✕ দিলে board খুলবে না</div>
+                    <div class="st-hint">এই board-এর What-if copy আছে বলে আগে বেছে নিন: <b>What-if? database</b> = ওই দিনের plan যেমন ছিল তেমন board-এ দেখাবে (শুধু দেখা, live plan/database-এ কোনো change হয় না) · <b>Normal database</b> = live plan খুলবে · ✕ দিলে board খুলবে না</div>
                 </div>
             </div>
         </div>
@@ -13636,7 +13658,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div class="wi-actions">
                             <button class="cal-btn st-btn wi-btn" @click="wiOpen = false">Close</button>
                         </div>
-                        <div class="st-hint">What-if? database = plan-এর একটা নামসহ copy (saved plan, backup date আর expiry date সহ) · <b>New</b> = এখনকার saved plan-এর copy · <b>Rename</b> = নাম/expiry বদল · <b>Delete</b> = list থেকে সরায় (server-এ copy থাকে) · expiry পেরোলে নিজে থেকেই সরে যায় · যে user নিয়েছে সে-ই দেখে, Planning Manager সবারটা দেখে · board খোলার সময় "Select What-if? database" screen থেকে copy-টা execute করা যায়</div>
+                        <div class="st-hint">What-if? database = plan-এর একটা নামসহ copy (saved plan, backup date আর expiry date সহ) · <b>New</b> = এখনকার saved plan-এর copy · <b>Rename</b> = নাম/expiry বদল · <b>Delete</b> = list থেকে সরায় (server-এ copy থাকে) · expiry পেরোলে নিজে থেকেই সরে যায় · যে user নিয়েছে সে-ই দেখে, Planning Manager সবারটা দেখে · board খোলার সময় "Select What-if? database" screen থেকে copy-টা খুলে ওই দিনের plan দেখা যায় (live plan অক্ষত থাকে)</div>
                     </div>
                 </div>
             </div>
@@ -16617,6 +16639,8 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .wi-actions { display : flex; gap : 8px; margin-top : auto; }
 .wi-actions .wi-btn { width : auto; flex : 1 1 auto; }
 .wi-pick-dialog { width : 520px; }
+.mb-banner-title.mb-banner-wi { background : #5b3a8c; color : #fff; }
+.mb-banner-link { margin-left : 10px; color : #ffe082; text-decoration : underline; cursor : pointer; font-weight : 600; }
 .wi-pick-list { height : 300px; margin : 6px 0 12px; }
 .wi-pick-actions { display : flex; gap : 10px; }
 .wi-pick-actions .wi-btn { width : auto; flex : 1 1 auto; }
