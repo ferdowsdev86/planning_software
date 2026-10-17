@@ -1,5 +1,5 @@
 <script setup>
-import { ref, shallowRef, computed, watch, onMounted } from 'vue';
+import { ref, shallowRef, computed, watch, onMounted, toRaw } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
@@ -8957,6 +8957,92 @@ function boardArrowKeys(e) {
 document.addEventListener('keydown', boardArrowKeys, true);
 
 // ---------------------------------------------------------------------------
+// D key: the selected bar(s) start at the DAY'S starting point — the line's
+// first working hour of the bar's start date (08:00 by the calendar). A
+// planner drops a bar mid-day after another one, presses D, and it moves to
+// that day's start; if an earlier bar still runs across that hour the bar
+// takes the NEXT day's start instead (plan never overlaps). Followers shift
+// later as after any move; Save keeps it. Works on the clicked bar or on the
+// whole multi-selection.
+// ---------------------------------------------------------------------------
+function snapSelectedToDayStart() {
+    const s = getInstance();
+    if (!s?.eventStore) return;
+    if (boardReadOnly.value) { toast('🔒 Read only — bars cannot be moved', 'warn'); return; }
+    let targets = [...multiSel].map(id => s.eventStore.getById(id)).filter(Boolean);
+    if (!targets.length && order.value) {
+        // order is a reactive ref — compare the underlying raw object
+        const want = toRaw(order.value);
+        const rec = s.eventStore.records.find(ev => ev.data?.raw === want || toRaw(ev.data?.raw) === want);
+        if (rec) targets = [rec];
+    }
+    if (!targets.length) { toast('Click a bar first, then press D to start it at the day\'s first hour', 'warn'); return; }
+    const touched = new Set();
+    const skipped = [];
+    let moved = 0, pushedTotal = 0, nextDay = 0;
+    const lineBars = lid => s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === lid);
+    let undoPushed = false;
+    beginBoardInteraction(s, 'light');
+    try {
+        for (const ev of targets.sort((a, b) => a.startDate - b.startDate)) {
+            const raw = ev.data?.raw;
+            const name = raw?.po || ev.name;
+            if (!raw || raw.stage) continue;
+            const lid = lineIdOf(s, ev);
+            if (!lid || isHoldId(lid)) { skipped.push(`${name}: on the Holding Row`); continue; }
+            if (raw.status === 'completed' || ev.draggable === false) { skipped.push(`${name}: completed / locked`); continue; }
+            let ns = clampIntoLineWorkWindow(startOfWorkDay(ev.startDate), lid);
+            // an earlier bar still running across that hour → the next day's start
+            let bumped = false;
+            for (let guard = 0; guard < 8; guard++) {
+                const obst = lineBars(lid).find(o => o.id !== ev.id && o.startDate < ns && o.endDate > ns);
+                if (!obst) break;
+                ns = clampIntoLineWorkWindow(startOfWorkDay(addCalDays(obst.endDate, 1)), lid);
+                bumped = true;
+            }
+            if (Math.abs(ns.getTime() - ev.startDate.getTime()) < 60000) { skipped.push(`${name}: already at the day start`); continue; }
+            if (raw.matReady && ns < raw.matReady) { skipped.push(`${name}: material not ready before ${fmtDate(raw.matReady)}`); continue; }
+            if (!undoPushed) { pushUndo(s, `day start ${name}${targets.length > 1 ? ` (+${targets.length - 1})` : ''}`); undoPushed = true; }
+            raw.start = ns;
+            applyLineFormulaDuration(s, raw, lid);   // hours / ramp differ by date — re-fit the end there
+            const ne = endOfWork(ns, raw.dur || 1);
+            ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+            raw.start = ns;
+            raw.end   = ne;
+            raw.userPinned = true;                    // the planner chose this start
+            raw.latePlan = !!raw.ship && ne > new Date(raw.ship);
+            noteManualGap(s, lid, ev, ns);
+            pushedTotal += pushFollowers(s, lid, ev) || 0;
+            touched.add(lid);
+            moved++;
+            if (bumped) nextDay++;
+        }
+        if (touched.size) applyLearningCurves(s, { lineIds : [...touched] });
+    }
+    finally { endBoardInteraction(s); }
+    if (!moved) { toast(skipped[0] || 'Nothing to move', 'warn'); return; }
+    recalcCapacity(s);
+    s.refresh?.();
+    markBoardDirty();
+    touchBoardCache(s);
+    toast(`${moved} bar(s) now start at the day's first hour${nextDay ? ` (${nextDay} on the next day — an earlier bar ran across that hour)` : ''}${pushedTotal ? `, ${pushedTotal} follower(s) shifted later` : ''}${skipped.length ? ` · ${skipped.length} skipped` : ''} — Save to keep`, 'ok');
+}
+
+function boardDayStartKey(e) {
+    if ((e.key !== 'd' && e.key !== 'D') || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (view.value !== 'board' || carried.value) return;
+    const s = getInstance();
+    if (!s?.element) return;
+    const ae = document.activeElement;
+    if (ae && (ae.matches?.(EDITABLE_SEL) || ae.closest?.('.b-popup, .b-menu, .cal-dialog, .od-dialog, .b-editor, .fnd-panel'))) return;
+    if (document.querySelector('.cal-overlay, .sn-dialog, .b-popup:not(.b-hidden) .b-textfield input:focus')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    snapSelectedToDayStart();
+}
+document.addEventListener('keydown', boardDayStartKey, true);
+
+// ---------------------------------------------------------------------------
 // Undo / redo (toolbar ↶ ↷, Ctrl+Z / Ctrl+Y): snapshots of the whole board
 // taken right before every planner action (move, split, change hours, curve,
 // recalc, equal order, production figures, pull forward). Bryntum's own STM
@@ -10291,7 +10377,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
