@@ -1,6 +1,7 @@
 <script setup>
 import { ref, shallowRef, computed, watch, onMounted, toRaw } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
+import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
@@ -4419,6 +4420,17 @@ async function openBoard(b, { ask = false, forceReload = false, whatIf = null } 
         requestAnimationFrame(() => { fitBoardView(s); scrollBoardToToday(s); });
     });
 }
+
+// Planning → High Level Planning Board: the standalone capacity &
+// reservation simulation (its own hl_* tables; the live plan is only read
+// for the optional reference import). A board that is open is minimised
+// first so its edit lock is released while the planner simulates.
+function openHighLevel() {
+    openMenu.value = null;
+    if (view.value === 'board' && currentBoard.value) minimizeBoard();
+    view.value = 'hlboard';
+}
+function closeHighLevel() { view.value = 'home'; }
 
 function closeBoard() {
     stopLockHeartbeat(true);
@@ -11795,6 +11807,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     >🗓 {{ b.name }}</div>
                     <div v-if="!menuBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
                     <div class="fr-dd-sep"></div>
+                    <div class="fr-dd-item" title="Standalone capacity & reservation simulation for UNIT-M / C / A / G — the live plans are never changed" @click="openHighLevel">📐 High Level Planning Board</div>
+                    <div class="fr-dd-sep"></div>
                     <div class="fr-dd-item" @click="addBoard">➕ Add planning board</div>
                 </div>
                 <div v-if="openMenu === m.label && m.label === 'Tools'" class="fr-dropdown">
@@ -11818,6 +11832,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Empty home workspace (FastReact shell) -->
+        <HighLevelBoard v-if="view === 'hlboard'" :user="authUser || currentUser" :toast="toast" @close="closeHighLevel" />
         <div v-if="view === 'home'" class="fr-home">
             <div class="fr-home-empty" @click="openMenu = null"></div>
             <div class="fr-statusbar">

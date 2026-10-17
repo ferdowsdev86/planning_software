@@ -496,6 +496,26 @@ export async function loadWhatIfDb(by) {
 export const createWhatIfDb  = (by, name, expiresAfter, unit) => whatIfCall('', 'POST', { by, name, expiresAfter, unit });
 export const renameWhatIfDb  = (id, by, name, expiresAfter) => whatIfCall(`/${id}`, 'PUT', { by, name, expiresAfter });
 export const deleteWhatIfDb  = (id, by) => whatIfCall(`/${id}`, 'DELETE', { by });
+// ---------------------------------------------------------------------------
+// High Level Planning Board (standalone simulation — hl_* tables only)
+// ---------------------------------------------------------------------------
+async function hlCall(path, method = 'GET', body) {
+    const res = await fetch(`${API_BASE}/hl${path}`, {
+        method, headers : { 'Content-Type' : 'application/json' },
+        body : body ? JSON.stringify(body) : undefined
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!j.success) { const e = new Error(j.error || `${method} failed`); e.conflict = !!j.conflict; e.version = j.version; throw e; }
+    return j;
+}
+export const hlListScenarios  = () => hlCall('/scenarios');
+export const hlCreateScenario = (by, name, { fromId = null, bundle = null } = {}) => hlCall('/scenarios', 'POST', { by, name, fromId, bundle });
+export const hlLoadScenario   = id => hlCall(`/scenarios/${encodeURIComponent(id)}`);
+export const hlSaveScenario   = (id, by, scenario) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'PUT', { by, scenario });
+export const hlRenameScenario = (id, by, name) => hlCall(`/scenarios/${encodeURIComponent(id)}/rename`, 'PUT', { by, name });
+export const hlDeleteScenario = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'DELETE', { by });
+export const hlReference      = (from, to) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}`);
+
 // the board opens on a What-if copy (read only) while this is set
 export const whatIfView = { id : null, by : null };
 

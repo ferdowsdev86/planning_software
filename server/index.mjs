@@ -3,6 +3,7 @@
 // Serves scheduler-data / scheduler-sync / unplanned-orders from MySQL
 // ---------------------------------------------------------------------------
 import 'dotenv/config';
+import { mountHighLevel } from './highLevel.mjs';
 import crypto from 'node:crypto';
 import express from 'express';
 import compression from 'compression';
@@ -3797,6 +3798,10 @@ app.post(`${BASE}/production-sync`, async (req, res) => {
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
+
+// High Level Planning Board — standalone simulation (hl_* tables only; the
+// live plan is read for the reference import and never written)
+mountHighLevel(app, { pool, BASE, dbFail, ERP_DB });
 
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);
