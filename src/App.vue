@@ -4067,40 +4067,45 @@ async function wiDelete() {
     catch (e) { toast(`Delete failed: ${e.message}`, 'error'); }
     finally { wiBusy.value = false; }
 }
-// "Select What-if? database" (FastReact's screen when a plan opens): when
-// the planner opens a board and has What-if copies for it, this asks which
-// plan to work on — a What-if copy (the plan is brought back to that copy;
-// the current plan is backed up first) or the normal plan. The copy's owner
-// (or a Planning Manager) may execute it. Shown once per board opening.
-const wiPickOpen = ref(false);
-const wiPickRows = ref([]);
-const wiPickSel  = ref(null);
-const wiPickBusy = ref(false);
-let wiPickBoardKey = null;
-async function offerWhatIfOnOpen(b) {
+// "Select What-if? database" (FastReact's screen when a plan opens): a
+// planner who has What-if copies of a board must choose BEFORE it opens —
+// the What-if copy (the plan is brought back to that copy; the current plan
+// is backed up first) or the normal plan. Closing the screen opens nothing.
+// A planner without copies gets the board straight away. The copy's owner
+// (or a Planning Manager) may execute it.
+const wiPickOpen  = ref(false);
+const wiPickRows  = ref([]);
+const wiPickSel   = ref(null);
+const wiPickBusy  = ref(false);
+let   wiPickBoard = null;          // the board waiting behind the screen
+// true = the screen is needed (and now showing) — the board must wait
+async function whatIfGate(b) {
     const user = wiUser();
-    if (!user || !b) return;
-    const key = `${user}|${b.id}`;
-    if (wiPickBoardKey === key && wiPickOpen.value) return;
+    if (!user || !b) return false;
     try {
         const j = await loadWhatIfDb(user);
         const unit = Number(b.unitId ?? 3);
         // copies of THIS board (or of every unit) that the user may execute
         const rows = (j.rows || []).filter(r => !r.unitId || Number(r.unitId) === unit);
-        if (!rows.length || currentBoard.value?.id !== b.id || view.value !== 'board') return;
+        if (!rows.length) return false;
         wiPickRows.value = rows;
         wiPickSel.value  = rows[0].id;
-        wiPickBoardKey   = key;
+        wiPickBoard      = b;
         wiPickOpen.value = true;
+        return true;
     }
-    catch { /* offline — the normal plan opens as usual */ }
+    catch { return false; }   // offline — the normal plan opens as usual
+}
+function wiPickNormal() {
+    const b = wiPickBoard;
+    wiPickOpen.value = false;
+    wiPickBoard = null;
+    if (b) openBoard(b);
 }
 async function wiPickExecute() {
     const r = wiPickRows.value.find(x => x.id === wiPickSel.value);
-    if (!r) { toast('Select a database first', 'warn'); return; }
-    // the board may still be loading — wait for it, the restore reloads it after
-    for (let i = 0; i < 100 && boardLoading.value; i++) await new Promise(res => setTimeout(res, 200));
-    if (boardReadOnly.value) { toast('🔒 This board is read only / in use by another user — the What-if cannot be executed now', 'warn'); return; }
+    const b = wiPickBoard;
+    if (!r || !b) { toast('Select a database first', 'warn'); return; }
     const msg = `Open the What-if database "${r.name}" (${r.createdAt}, ${r.bars} bars, ${r.unit})?\n\n`
         + '• the plan becomes that copy: every bar goes back to its line / dates / quantity of the copy\n'
         + '• bars planned AFTER the copy leave the board (orders return to unplanned)\n'
@@ -4110,12 +4115,14 @@ async function wiPickExecute() {
     try {
         const res = await restoreWhatIfDb(r.id, wiUser());
         wiPickOpen.value = false;
-        toast(`🗄 What-if "${r.name}" opened: ${res.restored + res.recreated} bar(s) restored, ${res.cancelled} removed${res.missing?.length ? `, ${res.missing.length} could not be restored` : ''} — reloading…`, res.missing?.length ? 'warn' : 'ok');
-        skipAutoBarSync = true;
-        await reloadBoardForUnit(currentBoard.value, { force : true });
+        wiPickBoard = null;
+        toast(`🗄 What-if "${r.name}" opened: ${res.restored + res.recreated} bar(s) restored, ${res.cancelled} removed${res.missing?.length ? `, ${res.missing.length} could not be restored` : ''}`, res.missing?.length ? 'warn' : 'ok');
+        skipAutoBarSync = true;   // the board shows the copy exactly as taken
+        openBoard(b, { forceReload : true });
+        setTimeout(() => { skipAutoBarSync = false; }, 15000);
     }
     catch (e) { toast(`What-if failed: ${e.message}`, 'error'); }
-    finally { wiPickBusy.value = false; skipAutoBarSync = false; }
+    finally { wiPickBusy.value = false; }
 }
 
 // While the dialog is open it refreshes itself every 5s — a logout, exit or
@@ -4357,17 +4364,19 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-function openBoard(b) {
+async function openBoard(b, { ask = false, forceReload = false } = {}) {
+    openMenu.value = null;
+    // from the Planning menu: a planner with What-if copies of this plan
+    // chooses first (What-if or normal) — the board opens only through that screen
+    if (ask && dataSource.value === 'db' && await whatIfGate(b)) return;
     currentBoard.value = b;
     currentUnitId.value = b.unitId ?? 3;
     view.value = 'board';
     boardMin.value = false;
-    openMenu.value = null;
     saveBoardView();
     startLockHeartbeat();
-    offerWhatIfOnOpen(b);   // "Select What-if? database" when the planner has copies of this plan
     if (dataSource.value === 'db') {
-        reloadBoardForUnit(b); // uses cache when ready — no API wipe
+        reloadBoardForUnit(b, { force : forceReload }); // uses cache when ready — no API wipe
     }
     else if (boardHydratePromise) {
         // the first load (maybe another unit's) is still running: this
@@ -11761,7 +11770,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         v-for="b in menuBoards"
                         :key="b.id"
                         class="fr-dd-item"
-                        @click="openBoard(b)"
+                        @click="openBoard(b, { ask : true })"
                     >🗓 {{ b.name }}</div>
                     <div v-if="!menuBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
                     <div class="fr-dd-sep"></div>
@@ -13578,9 +13587,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                     <div class="wi-pick-actions">
-                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Work on this What-if copy — the plan is brought back to it (the current plan is backed up first)" @click="wiPickExecute">🗄 {{ wiPickBusy ? 'Opening…' : 'What-if? database' }}</button>
-                        <button class="cal-btn st-btn wi-btn" :disabled="wiPickBusy" title="Work on the normal plan" @click="wiPickOpen = false">🗃 Normal database</button>
+                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Open the board on this What-if copy — the plan is brought back to it (the current plan is backed up first)" @click="wiPickExecute">🗄 {{ wiPickBusy ? 'Opening…' : 'What-if? database' }}</button>
+                        <button class="cal-btn st-btn wi-btn" :disabled="wiPickBusy" title="Open the board on the normal plan" @click="wiPickNormal">🗃 Normal database</button>
                     </div>
+                    <div class="st-hint">এই board-এর What-if copy আছে বলে আগে বেছে নিন: <b>What-if? database</b> = plan ওই copy হয়ে board খুলবে (আগে এখনকার plan-এর backup নেয়) · <b>Normal database</b> = plan যেমন আছে তেমন খুলবে · ✕ দিলে board খুলবে না</div>
                 </div>
             </div>
         </div>
