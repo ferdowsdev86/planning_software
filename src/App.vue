@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty
 } from './AppConfig.js';
@@ -1220,7 +1220,7 @@ function compactBoardNoGaps() {
 // becomes the moment the plan qty is made with today's line capacity,
 // efficiency, learning ramp and calendar. Extensions push followers.
 function resizeBars(s, keep = () => true, { dirty = true } = {}) {
-    let shrunk = 0, grown = 0, pushed = 0, skipped = 0;
+    let shrunk = 0, grown = 0, pushed = 0, pulled = 0, skipped = 0;
     const changed = new Set();
     beginBoardInteraction(s, 'batch');
     try {
@@ -1252,6 +1252,8 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 if (!changed.has(ev.id)) { changed.add(ev.id); end > oldEnd ? grown++ : shrunk++; }
                 if (isHoldId(lid)) { moved++; continue; }      // parked bars never push / ramp
                 if (end > oldEnd) pushed += pushFollowers(s, lid, ev) || 0;
+                // a shorter bar never leaves a hole: flush followers close up
+                else pulled += pullFlushFollowers(s, lid, ev, oldEnd) || 0;
                 touched.add(lid);
                 moved++;
             }
@@ -1263,7 +1265,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
     recalcCapacity(s);
     s.refreshWithTransition?.();
     if ((shrunk || grown) && dirty) { markBoardDirty(); touchBoardCache(s); }
-    return { shrunk, grown, pushed, skipped };
+    return { shrunk, grown, pushed, pulled, skipped };
 }
 
 // RULE (permanent): a bar's START and LINE are the planner's; its END always
@@ -1279,7 +1281,7 @@ function autoSyncBarLengths(s) {
     const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
     try {
         const r = withAutoAbsorb(s, () => resizeBars(s, open, { dirty : false }));
-        if (r.shrunk || r.grown) console.info(`[bar sync] ${r.shrunk} shorter, ${r.grown} longer, ${r.pushed} follower(s) shifted — derived, not a change`);
+        if (r.shrunk || r.grown) console.info(`[bar sync] ${r.shrunk} shorter, ${r.grown} longer, ${r.pushed} follower(s) shifted later, ${r.pulled} pulled flush — derived, not a change`);
     }
     catch (e) { console.warn('[bar sync] skipped:', e.message); }
 }
@@ -1290,9 +1292,9 @@ function resyncBarLengths() {
     const s = getInstance();
     if (!s) { toast('Open a planning board first', 'warn'); return; }
     if (boardReadOnly.value) { toast('🔒 Read only — bar lengths cannot be changed', 'warn'); return; }
-    const { shrunk, grown, pushed, skipped } = resizeBars(s);
+    const { shrunk, grown, pushed, pulled, skipped } = resizeBars(s);
     toast(shrunk || grown
-        ? `Bar lengths re-synced: ${shrunk} shortened, ${grown} extended${pushed ? `, ${pushed} follower(s) shifted` : ''}${skipped ? ` · ${skipped} skipped (no SMV)` : ''} — Save to keep`
+        ? `Bar lengths re-synced: ${shrunk} shortened, ${grown} extended${pushed ? `, ${pushed} follower(s) shifted later` : ''}${pulled ? `, ${pulled} pulled flush` : ''}${skipped ? ` · ${skipped} skipped (no SMV)` : ''} — Save to keep`
         : `All bars already match the production schedule${skipped ? ` · ${skipped} skipped (no SMV)` : ''}`, 'ok');
 }
 
@@ -10289,7 +10291,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 

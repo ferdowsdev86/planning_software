@@ -898,6 +898,44 @@ export function pushFollowers(scheduler, lineId, placed) {
     return pushed;
 }
 
+// The opposite of pushFollowers, for ONE case only: a bar whose END the
+// production model moved EARLIER (bar-length sync on load, a production
+// refresh, a capacity change) must not leave a hole behind it. Followers
+// that sat flush against its OLD end — the planner never opened that gap
+// (manualGap false) — slide back onto the new end, chain-wise, so the line
+// stays exactly as tight as the planner left it. A follower the planner
+// gapped on purpose, a locked / completed bar, or one that was not flush
+// ends the chain. (Outside this case a plan still never advances by itself.)
+export function pullFlushFollowers(scheduler, lineId, shrunk, oldEnd) {
+    if (!scheduler || !shrunk || !oldEnd) return 0;
+    const bars = barsOnLine(scheduler, lineId, shrunk.id)
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.startDate > shrunk.startDate)
+        .sort((a, b) => a.startDate - b.startDate);
+    let prevOldEnd = new Date(oldEnd);
+    let prevNewEnd = new Date(shrunk.endDate);
+    let pulled = 0;
+    for (const ev of bars) {
+        const raw = ev.data.raw;
+        if (lockedBar(ev) || raw.status === 'completed' || raw.manualGap) break;
+        // was it flush against the previous bar's old end? (20 min tolerance)
+        if (Math.abs(ev.startDate.getTime() - nextStartAfter(prevOldEnd).getTime()) > MANUAL_GAP_MS) break;
+        let ns = nextStartAfter(prevNewEnd);
+        if (isLineOffDay(ns, lineId)) ns = startOfWorkDay(nextLineWorkingDay(ns, lineId));
+        if (ns.getTime() >= ev.startDate.getTime()) break;   // nothing to close
+        const myOldEnd = new Date(ev.endDate);
+        raw.start = ns;
+        // its end follows the schedule at the new start (hours / ramp differ by date)
+        applyLineFormulaDuration(scheduler, raw, lineId);
+        const ne = endOfWork(ns, raw.dur || 1);
+        ev.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+        raw.end = ne;
+        pulled++;
+        prevOldEnd = myOldEnd;
+        prevNewEnd = ne;
+    }
+    return pulled;
+}
+
 // Re-sequence every line with zero gaps: bars are packed flush one after
 // another starting at the plan start (today's first working hour), ordered
 // by earliest PCD first (then delivery). Completed bars never move — they
