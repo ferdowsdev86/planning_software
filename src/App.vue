@@ -8965,6 +8965,9 @@ document.addEventListener('keydown', boardArrowKeys, true);
 // later as after any move; Save keeps it. Works on the clicked bar or on the
 // whole multi-selection.
 // ---------------------------------------------------------------------------
+// the bar the planner placed last (click-to-place clears the selection, so
+// D right after a placement must still know which bar is meant)
+let lastPlacedRec = null;
 function snapSelectedToDayStart() {
     const s = getInstance();
     if (!s?.eventStore) return;
@@ -8976,7 +8979,11 @@ function snapSelectedToDayStart() {
         const rec = s.eventStore.records.find(ev => ev.data?.raw === want || toRaw(ev.data?.raw) === want);
         if (rec) targets = [rec];
     }
-    if (!targets.length) { toast('Click a bar first, then press D to start it at the day\'s first hour', 'warn'); return; }
+    if (!targets.length && lastPlacedRec) {
+        const rec = s.eventStore.getById(lastPlacedRec.id);
+        if (rec) targets = [rec];
+    }
+    if (!targets.length) { toast('Click or place a bar first, then press D to start it at the day\'s first hour', 'warn'); return; }
     const touched = new Set();
     const skipped = [];
     let moved = 0, pushedTotal = 0, nextDay = 0;
@@ -9030,7 +9037,7 @@ function snapSelectedToDayStart() {
 
 function boardDayStartKey(e) {
     if ((e.key !== 'd' && e.key !== 'D') || e.altKey || e.ctrlKey || e.metaKey) return;
-    if (view.value !== 'board' || carried.value) return;
+    if (view.value !== 'board') return;
     const s = getInstance();
     if (!s?.element) return;
     const ae = document.activeElement;
@@ -9038,6 +9045,16 @@ function boardDayStartKey(e) {
     if (document.querySelector('.cal-overlay, .sn-dialog, .b-popup:not(.b-hidden) .b-textfield input:focus')) return;
     e.preventDefault();
     e.stopPropagation();
+    // a bar on the pointer: D drops it at the first hour of the day under
+    // the pointer, on the row under the pointer
+    if (carried.value) {
+        const date = pointerDate(s, lastMouse.x);
+        const res  = date ? resourceFromY(s, lastMouse.y, lastMouse.x) : null;
+        if (!date || !res) { toast('Point at a line and a day, then press D', 'warn'); return; }
+        const ds = isHoldingRes(res) ? startOfWorkDay(date) : clampIntoLineWorkWindow(startOfWorkDay(date), res.id);
+        placeCarried(ds, res);
+        return;
+    }
     snapSelectedToDayStart();
 }
 document.addEventListener('keydown', boardDayStartKey, true);
@@ -10034,6 +10051,7 @@ async function placeCarried(date, resourceRecord) {
     restoreCarriedCls();
     s.refresh?.();
     cancelCarry();
+    lastPlacedRec = rec;    // D right after this placement acts on this bar
     markBoardDirty();
     touchBoardCache(s);
 }
