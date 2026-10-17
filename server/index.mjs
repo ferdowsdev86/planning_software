@@ -3306,6 +3306,7 @@ app.post(`${BASE}/whatif/:id/restore`, async (req, res) => {
         const o = await whatIfOwned(req, res);
         if (!o) return;
         req.params = { id : String(o.row.snapshot_id) };
+        req.whatIfAuthorized = true;
         return restoreSnapshotHandler(req, res);
     }
     catch (e) { dbFail(res, e); }
@@ -3379,7 +3380,9 @@ const noteIds = notes => {
 const restoreSnapshotHandler = async (req, res) => {
     const by = String(req.body?.by || '').trim();
     try {
-        if (!(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
+        // a What-if copy is executed by its owner (or a Planning Manager) — the
+        // whatif route has checked that already; plain backups keep the permission
+        if (!req.whatIfAuthorized && !(await mayBackupRestore(by))) return res.status(403).json({ success : false, error : 'No permission to restore the board' });
         const [[snap]] = await pool.query('SELECT * FROM planning_board_snapshots WHERE id = ?', [Number(req.params.id)]);
         if (!snap) return res.status(404).json({ success : false, error : 'backup not found' });
         let bars = [];
