@@ -280,6 +280,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                 const oc = evOrderCode(e);
                 if (!oc) return true;
                 if (completedSet.has(oc)) return false;
+                // delivered before the cut-off: out of the plan on every unit
+                if (e.shipment_date && ymdStr(e.shipment_date) < ERP_CUTOFF) return false;
                 if (!inErp.has(oc) && e.planning_order_id == null) return false;
                 return true;
             });
@@ -1177,7 +1179,16 @@ const OS_DB       = 'mbm_os';
 const OS_UNIT_MAP = { 20 : 3 };  // os_units.id → planning prod unit (hr)
 const OS_UNIT_IDS = Object.keys(OS_UNIT_MAP).map(Number);
 const osUnitsForProdUnit = pu => OS_UNIT_IDS.filter(id => OS_UNIT_MAP[id] === Number(pu));
-const ERP_CUTOFF = '2026-08-20';
+// Delivery cut-off: orders (projection AND confirm, every unit) whose
+// delivery is BEFORE this date are out of the plan — not in the Orders
+// list, not in the unplanned pool, not synced, and their bars leave every
+// board (retired by board hygiene). 2026-10-09 = "08/10/26 and before
+// hidden" (user, 2026-10-17). Override with ERP_CUTOFF=YYYY-MM-DD.
+// a DATE column as YYYY-MM-DD, whether the driver hands back a Date or a string
+const ymdStr = d => d instanceof Date
+    ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    : String(d || '').slice(0, 10);
+const ERP_CUTOFF = /^\d{4}-\d{2}-\d{2}$/.test(process.env.ERP_CUTOFF || '') ? process.env.ERP_CUTOFF : '2026-10-09';
 
 const ERP_QUERY = (cutoff) => [`
     SELECT
@@ -1483,9 +1494,14 @@ async function findHiddenEvents(conn) {
         SELECT e.id, e.project_id, e.event_code, e.planning_order_id, e.notes,
                e.start_date, e.end_date, e.planned_quantity,
                o.id AS o_id, o.order_code, COALESCE(o.prod_unit, o.unit_id) AS order_unit,
+               o.shipment_date, p.shipment_date AS proj_shipment_date,
                r.unit_id AS line_unit, r.resource_name
         FROM planning_events e
         LEFT JOIN planning_orders o ON o.id = e.planning_order_id
+        LEFT JOIN planning_orders p ON e.planning_order_id IS NULL
+             AND e.event_code LIKE 'ev-proj:%'
+             AND p.erp_po_id LIKE 'proj-%'
+             AND p.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
         LEFT JOIN planning_assignments a ON a.event_id = e.id
         LEFT JOIN planning_resources r ON r.id = a.resource_id
         WHERE e.event_status != 'cancelled'
@@ -1530,8 +1546,10 @@ async function findHiddenEvents(conn) {
     for (const e of events) {
         const code = codeOf(e);
         let reason = null;
+        const ship = e.shipment_date || e.proj_shipment_date;
         if (!(Number(e.planned_quantity) > 0)) reason = 'zero quantity';
         else if (code && completed.has(code)) reason = 'order marked complete';
+        else if (ship && ymdStr(ship) < ERP_CUTOFF) reason = `delivery ${ymdStr(ship)} before the cut-off ${ERP_CUTOFF}`;
         else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
         else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
         else if (e.o_id != null && e.line_unit != null && e.order_unit != null
