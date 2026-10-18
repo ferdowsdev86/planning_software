@@ -516,6 +516,8 @@ export const hlRenameScenario = (id, by, name) => hlCall(`/scenarios/${encodeURI
 export const hlDeleteScenario = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'DELETE', { by });
 export const hlErpSmv         = by => hlCall(`/erp-smv?by=${encodeURIComponent(by || '')}`);
 export const hlErpSmvOrders   = (by, unitId, product) => hlCall(`/erp-smv-orders?by=${encodeURIComponent(by || '')}&unit=${encodeURIComponent(unitId)}&product=${encodeURIComponent(product)}`);
+export const hlErpMonthly     = by => hlCall(`/erp-monthly?by=${encodeURIComponent(by || '')}`);
+export const hlErpMonthOrders = (by, unitId, month) => hlCall(`/erp-month-orders?by=${encodeURIComponent(by || '')}&unit=${encodeURIComponent(unitId)}&month=${encodeURIComponent(month)}`);
 export const hlErpLoad        = (by, from) => hlCall(`/erp-load?by=${encodeURIComponent(by || '')}${from ? `&from=${from}` : ''}`);
 export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}&by=${encodeURIComponent(by || '')}`);
 

@@ -1979,8 +1979,9 @@ export const schedulerProConfig = {
                     </div>`;
                 if (d.holdingRow || d.subtotalRow) {
                     const s = uiHooks.instance;
-                    // a floor's Holding Row sums that floor's lines only
-                    const lines = (s
+                    // a floor's Holding Row sums that floor's lines only (a
+                    // destroyed / not yet painted instance has no store yet)
+                    const lines = (s?.resourceStore?.records
                         ? s.resourceStore.records.filter(x => x.data?.lineRow)
                         : LINES).filter(x => !d.holdFloor || (x.data?.floor ?? x.floor) === d.holdFloor);
                     let mp = lines.reduce((a, x) => a + Number(x.manpower ?? x.data?.manpower ?? 0), 0);

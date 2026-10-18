@@ -391,6 +391,179 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         catch (e) { dbFail(res, e); }
     });
 
+    // ---- ERP monthly active orders by delivery date (READ ONLY) -----------
+    // Every Active order grouped by the delivery month of its POs
+    // (mr_purchase_order.po_ex_fty, falling back to the order's
+    // order_delivery_date) — an order whose POs deliver in different months
+    // is allocated to each month by PO quantity. Only deliveries from the
+    // plan cut-off (ERP_CUTOFF — "after 08/10/26") are counted, same window
+    // as the boards; the stale pre-cut-off ERP tail stays out.
+    // Outstanding = PO qty − exported qty (mr_purchase_order.export_qty).
+    // Same "production order" filter as the ERP sync (server/index.mjs):
+    // order_status Active, order_qty > 0, order_type not sample / SMS /
+    // sample courier / 2nd quality; POs not cancelled with po_qty > 0.
+    const ERP_PO_OK  = `po.po_qty > 0 AND (po.status IS NULL OR po.status != 3) AND (po.po_status IS NULL OR po.po_status != 3)`;
+    // PO rows carry the real per-PO delivery month; active orders without a
+    // single valid PO still count once at order level (order date / qty).
+    // unit_id / product are COALESCEd in here so a NULL in the grouped result
+    // can only be a ROLLUP total row (MariaDB has no GROUPING() function).
+    const ERP_MONTH_ROWS = `
+        SELECT oe.order_id, COALESCE(oe.prod_unit, -1) AS unit_id,
+               DATE_FORMAT(COALESCE(po.po_ex_fty, oe.order_delivery_date), '%Y-%m') AS ym,
+               COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product,
+               po.po_qty AS qty,
+               GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0) AS outstanding
+          FROM \`${ERP_DB}\`.mr_purchase_order po
+          JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = po.mr_order_entry_order_id
+          JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+          LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+         WHERE ${ERP_ACTIVE} AND ${ERP_PO_OK}
+           AND COALESCE(po.po_ex_fty, oe.order_delivery_date) >= ?
+        UNION ALL
+        SELECT oe.order_id, COALESCE(oe.prod_unit, -1),
+               DATE_FORMAT(oe.order_delivery_date, '%Y-%m'),
+               COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other'),
+               oe.order_qty, oe.order_qty
+          FROM \`${ERP_DB}\`.mr_order_entry oe
+          JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+          LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+         WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ?
+           AND NOT EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_purchase_order po
+                            WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK})`;
+
+    // ---- ERP SMV by production unit and product type (READ ONLY) ---------
+    // Active production orders from the plan cut-off on: order count, order
+    // quantity and the quantity-weighted average SMV of the styles
+    // (mr_style.stl_smv, production_smv fallback) — the "average SMV" the
+    // configuration turns a unit's capacity into pieces with
+    app.get(`${HL}/erp-smv`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const [rows] = await pool.query(
+                `SELECT COALESCE(oe.prod_unit, -1) AS unit_id,
+                        COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product,
+                        COUNT(*) AS orders, SUM(oe.order_qty) AS qty,
+                        SUM(oe.order_qty * COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)) AS smv_qty,
+                        SUM(CASE WHEN COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) > 0 THEN oe.order_qty ELSE 0 END) AS qty_with_smv
+                   FROM \`${ERP_DB}\`.mr_order_entry oe
+                   JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                  WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ?
+                  GROUP BY unit_id, product ORDER BY unit_id, qty DESC`, [ERP_CUTOFF]);
+            res.json({ success : true, from : ERP_CUTOFF, takenAt : fmtDt(new Date()),
+                rows : rows.map(r => ({ unitId : Number(r.unit_id), product : r.product, orders : Number(r.orders), qty : Number(r.qty) || 0,
+                    avgSmv : Number(r.qty_with_smv) > 0 ? Math.round(Number(r.smv_qty) / Number(r.qty_with_smv) * 100) / 100 : null,
+                    qtyWithSmv : Number(r.qty_with_smv) || 0 })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+    // the orders behind one unit × product cell, each with its own SMV
+    app.get(`${HL}/erp-smv-orders`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const unitId = Number(req.query.unit);
+            const product = String(req.query.product || '');
+            if (!Number.isFinite(unitId)) return res.status(400).json({ success : false, error : 'unit missing' });
+            const [rows] = await pool.query(
+                `SELECT oe.order_code, b.b_name AS buyer, s.stl_no AS style, gt.gmt_name AS garment,
+                        oe.order_qty AS qty, oe.order_delivery_date AS delivery, CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
+                        COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) AS smv
+                   FROM \`${ERP_DB}\`.mr_order_entry oe
+                   JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+                  WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ? AND COALESCE(oe.prod_unit, -1) = ?
+                    AND COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') = ?
+                  ORDER BY oe.order_delivery_date, oe.order_code LIMIT 1000`, [ERP_CUTOFF, unitId, product]);
+            res.json({ success : true, rows : rows.map(r => ({ order : r.order_code, buyer : r.buyer || '', style : r.style || '', garment : r.garment || '',
+                qty : Number(r.qty) || 0, delivery : ymd(r.delivery), pcd : ymd(r.pcd), smv : Number(r.smv) || 0 })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    app.get(`${HL}/erp-monthly`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const [rows] = await pool.query(
+                `SELECT unit_id, ym, product, COUNT(DISTINCT order_id) AS orders, SUM(qty) AS qty, SUM(outstanding) AS outstanding
+                   FROM (${ERP_MONTH_ROWS}) t
+                  GROUP BY unit_id, ym, product WITH ROLLUP`, [ERP_CUTOFF, ERP_CUTOFF]);
+            const months = [], products = [], unitTotals = {};
+            let grand = { orders : 0, qty : 0, outstanding : 0 };
+            for (const r of rows) {
+                const v = { orders : Number(r.orders), qty : Number(r.qty) || 0, outstanding : Number(r.outstanding) || 0 };
+                if (r.unit_id == null) { grand = v; continue; }                      // ROLLUP grand total
+                const unitId = Number(r.unit_id);
+                if (r.ym == null) { unitTotals[unitId] = v; continue; }              // ROLLUP per-unit total (distinct orders)
+                if (r.product == null) { months.push({ unitId, ym : r.ym, ...v }); continue; }   // ROLLUP month total
+                products.push({ unitId, ym : r.ym, product : r.product, ...v });     // product of the month
+            }
+            months.sort((a, b) => a.unitId - b.unitId || a.ym.localeCompare(b.ym));
+            res.json({ success : true, takenAt : fmtDt(new Date()), from : ERP_CUTOFF, months, products, unitTotals, grand });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    // detailed active orders of one production unit and delivery month —
+    // one row per ERP order (its POs of that month summed, so a PO number
+    // or colour repeating never double-counts)
+    app.get(`${HL}/erp-month-orders`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const unitId = Number(req.query.unit);
+            const month  = String(req.query.month || '');
+            if (!Number.isFinite(unitId)) return res.status(400).json({ success : false, error : 'unit missing' });
+            if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ success : false, error : 'month must be YYYY-MM' });
+            const poDate = `COALESCE(po.po_ex_fty, oe.order_delivery_date)`;
+            const match  = d => `${d} >= ? AND DATE_FORMAT(${d}, '%Y-%m') = ?`;   // plan cut-off window, like the summary
+            const args   = [unitId, ERP_CUTOFF, month, unitId, ERP_CUTOFF, month];
+            const [rows] = await pool.query(
+                `SELECT order_code, MIN(buyer) AS buyer, MIN(style) AS style, MIN(product) AS product, MIN(garment) AS garment,
+                        COUNT(DISTINCT po_no) AS pos, SUBSTRING(GROUP_CONCAT(DISTINCT po_no ORDER BY po_no SEPARATOR ', '), 1, 400) AS po_list,
+                        SUM(qty) AS qty, SUM(outstanding) AS outstanding,
+                        MIN(pcd) AS pcd, MIN(ddate) AS delivery, MAX(ddate) AS delivery_max
+                   FROM (
+                        SELECT oe.order_id, oe.order_code, b.b_name AS buyer, s.stl_no AS style,
+                               pt.prd_type_name AS product, gt.gmt_name AS garment,
+                               po.po_no, po.po_qty AS qty,
+                               GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0) AS outstanding,
+                               CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd, ${poDate} AS ddate
+                          FROM \`${ERP_DB}\`.mr_purchase_order po
+                          JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = po.mr_order_entry_order_id
+                          JOIN \`${ERP_DB}\`.mr_buyer b  ON b.b_id   = oe.mr_buyer_b_id
+                          JOIN \`${ERP_DB}\`.mr_style s  ON s.stl_id = oe.mr_style_stl_id
+                          LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                          LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+                         WHERE ${ERP_ACTIVE} AND ${ERP_PO_OK} AND oe.prod_unit = ? AND ${match(poDate)}
+                        UNION ALL
+                        SELECT oe.order_id, oe.order_code, b.b_name, s.stl_no, pt.prd_type_name, gt.gmt_name,
+                               NULL, oe.order_qty, oe.order_qty,
+                               CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END, oe.order_delivery_date
+                          FROM \`${ERP_DB}\`.mr_order_entry oe
+                          JOIN \`${ERP_DB}\`.mr_buyer b  ON b.b_id   = oe.mr_buyer_b_id
+                          JOIN \`${ERP_DB}\`.mr_style s  ON s.stl_id = oe.mr_style_stl_id
+                          LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                          LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+                         WHERE ${ERP_ACTIVE} AND oe.prod_unit = ? AND ${match('oe.order_delivery_date')}
+                           AND NOT EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_purchase_order po
+                                            WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK})
+                   ) t
+                  GROUP BY order_id, order_code
+                  ORDER BY delivery, order_code
+                  LIMIT 2000`, args);
+            res.json({ success : true, takenAt : fmtDt(new Date()), unitId, month,
+                rows : rows.map(r => ({
+                    order : r.order_code, buyer : r.buyer || '', style : r.style || '',
+                    product : r.product || '', garment : r.garment || '',
+                    pos : Number(r.pos) || 0, poList : r.po_list || '',
+                    qty : Number(r.qty) || 0, outstanding : Number(r.outstanding) || 0,
+                    pcd : ymd(r.pcd), delivery : ymd(r.delivery), deliveryMax : ymd(r.delivery_max)
+                })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
     // ---- reference snapshot from the live board (READ ONLY) ---------------
     // Units, sewing lines (manpower / efficiency / hours), product types,
     // orders in the plan window and the live load per line — returned as a
