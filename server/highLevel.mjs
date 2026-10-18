@@ -103,7 +103,13 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             KEY idx_hl_res (scenario_id, line_id)
         )`);
     }
-    ensureTables().then(() => console.log('[hl] High Level Planning tables ready')).catch(e => console.error('[hl] tables:', e.message));
+    ensureTables()
+        .then(async () => {
+            // additive column (MariaDB: IF NOT EXISTS) — month-wise / day-wise unit hours
+            await pool.query('ALTER TABLE hl_units ADD COLUMN IF NOT EXISTS day_hours TEXT NULL');
+            console.log('[hl] High Level Planning tables ready');
+        })
+        .catch(e => console.error('[hl] tables:', e.message));
 
     const ymd = d => d instanceof Date
         ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -167,8 +173,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             id : s.id, name : s.name, version : s.version, createdBy : s.created_by, updatedAt : fmtDt(s.updated_at), updatedBy : s.updated_by,
             from : ymd(s.plan_from), to : ymd(s.plan_to), thresholds : thresholds || { partial : 0.4, full : 0.9 },
             source : s.source_note ? { note : s.source_note, at : fmtDt(s.source_at) } : null,
-            units : units.map(u => { let wd = [0, 1, 2, 3, 4, 6]; try { wd = JSON.parse(u.work_days); } catch { /* default */ }
-                return { code : u.code, name : u.name, label : u.label, hours : Number(u.hours), ot : Number(u.ot), workDays : wd, note : u.note || '' }; }),
+            units : units.map(u => { let wd = [0, 1, 2, 3, 4, 6], dh = {}; try { wd = JSON.parse(u.work_days); } catch { /* default */ } try { dh = JSON.parse(u.day_hours || '{}') || {}; } catch { dh = {}; }
+                return { code : u.code, name : u.name, label : u.label, hours : Number(u.hours), ot : Number(u.ot), workDays : wd, dayHours : dh, note : u.note || '' }; }),
             lines : lines.map(l => ({ id : l.id, unitCode : l.unit_code, name : l.name, active : !!l.active, manpower : Number(l.manpower),
                 hours : l.hours == null ? null : Number(l.hours), ot : l.ot == null ? null : Number(l.ot), eff : Number(l.eff), products : prodByLine.get(l.id) || {} })),
             products : products.map(p => ({ name : p.name, smv : Number(p.smv) })),
@@ -197,8 +203,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                 await conn.query(`${sql} VALUES ${ph}`, chunk.flat());
             }
         };
-        await bulk('INSERT INTO hl_units (scenario_id, code, name, label, hours, ot, work_days, note)', Array(8).fill(0),
-            (sc.units || []).map(u => [id, u.code, u.name, u.label || null, Number(u.hours) || 0, Number(u.ot) || 0, JSON.stringify(u.workDays || [0, 1, 2, 3, 4, 6]), u.note || null]));
+        await bulk('INSERT INTO hl_units (scenario_id, code, name, label, hours, ot, work_days, note, day_hours)', Array(9).fill(0),
+            (sc.units || []).map(u => [id, u.code, u.name, u.label || null, Number(u.hours) || 0, Number(u.ot) || 0, JSON.stringify(u.workDays || [0, 1, 2, 3, 4, 6]), u.note || null, JSON.stringify(u.dayHours || {})]));
         const lines = sc.lines || [];
         await bulk('INSERT INTO hl_lines (id, scenario_id, unit_code, name, active, manpower, hours, ot, eff, sort_order)', Array(10).fill(0),
             lines.map((l, i) => [l.id, id, l.unitCode, l.name, l.active ? 1 : 0, Number(l.manpower) || 0, l.hours == null || l.hours === '' ? null : Number(l.hours), l.ot == null || l.ot === '' ? null : Number(l.ot), Number(l.eff) || 0, i]));

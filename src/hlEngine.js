@@ -61,7 +61,8 @@ export function newScenario(name = 'Scenario A', by = '') {
         units : HL_UNITS.map(u => ({
             code : u.code, name : u.name, label : u.label,
             hours : 10, ot : 0,
-            workDays : [0, 1, 2, 3, 4, 6],   // Friday off (0 = Sunday)
+            workDays : [0, 1, 2, 3, 4, 6],   // Friday off (0 = Sunday) — the weekly pattern
+            dayHours : {},                   // date → hours for THAT day (0 = off): month-wise setup, beats the pattern
             note : ''
         })),
         products : DEFAULT_PRODUCTS.map(p => ({ ...p })),
@@ -94,9 +95,17 @@ export function orderById(sc, id) { return sc.orders.find(o => o.id === id) || n
 export function holidayOn(sc, unitCode, day) {
     return sc.holidays.find(h => h.date === day && (!h.unitCode || h.unitCode === unitCode)) || null;
 }
+// a day-wise figure of the unit (Units & calendar → Details, month setup)
+// decides that day outright: 0 = off, > 0 = working with those hours
+export function unitDayHours(sc, unitCode, day) {
+    const v = unitOf(sc, unitCode)?.dayHours?.[day];
+    return v == null || v === '' ? null : Number(v);
+}
 export function isWorkDay(sc, unitCode, day) {
     const u = unitOf(sc, unitCode);
     if (!u) return false;
+    const dh = unitDayHours(sc, unitCode, day);
+    if (dh != null) return dh > 0;
     if (!u.workDays.includes(fromYmd(day).getDay())) return false;
     return !holidayOn(sc, unitCode, day);
 }
@@ -106,7 +115,8 @@ export function lineDayMinutes(sc, line, day) {
     if (!line || !line.active) return 0;
     if (!isWorkDay(sc, line.unitCode, day)) return 0;
     const u = unitOf(sc, line.unitCode);
-    const hours = Number(line.hours ?? u.hours) || 0;
+    const dh = unitDayHours(sc, line.unitCode, day);
+    const hours = dh != null ? dh : (Number(line.hours ?? u.hours) || 0);
     const ot    = Number(line.ot ?? u.ot) || 0;
     const mp    = Number(line.manpower) || 0;
     const eff   = Number(line.eff) || 0;
@@ -206,8 +216,9 @@ export function lineSummary(sc, line, from, to, load) {
 
 export function unitSummary(sc, unitCode, from, to, load) {
     const lines = sc.lines.filter(l => l.unitCode === unitCode);
-    const s = { capMin : 0, usedMin : 0, availMin : 0, overDays : 0, activeLines : 0, lines : lines.length, idleMin : 0, util : 0, products : {} };
+    const s = { capMin : 0, usedMin : 0, availMin : 0, overDays : 0, activeLines : 0, lines : lines.length, idleMin : 0, util : 0, products : {}, workDays : 0 };
     const overSet = new Set();
+    for (let d = from, g = 0; d <= to && g < 2000; d = addDays(d, 1), g++) if (isWorkDay(sc, unitCode, d)) s.workDays++;
     for (const l of lines) {
         if (l.active) s.activeLines++;
         const ls = lineSummary(sc, l, from, to, load);

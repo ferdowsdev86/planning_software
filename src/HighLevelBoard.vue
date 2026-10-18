@@ -15,7 +15,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import { StringHelper } from '@bryntum/schedulerpro';
 import {
     HL_UNITS, newScenario, newLine, uid, ymd, addDays, daysBetween, fromYmd,
-    lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary,
+    lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary, isWorkDay, holidayOn,
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver
 } from './hlEngine.js';
 import {
@@ -460,6 +460,103 @@ const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 function cfgLines() { return (sc.value?.lines || []).filter(l => l.unitCode === cfgUnit.value); }
 function cfgChange(label = 'configuration') { mutate(label, () => { /* edited in place by v-model */ }); }
 function toggleWorkDay(u, d) { mutate('working days', s => { const x = s.units.find(y => y.code === u.code); x.workDays = x.workDays.includes(d) ? x.workDays.filter(v => v !== d) : [...x.workDays, d].sort(); }); }
+
+// ---- Units & calendar → Details: month-wise working days and hours -------
+// The weekly pattern (Su…Sa) is only the template. Inside Details a month
+// is set up day by day: which days work and how many hours each — stored
+// in unit.dayHours (date → hours, 0 = off). A date with a figure beats the
+// weekly pattern and the holidays; a month without figures follows them.
+const mdUnit = ref('');                 // unit whose Details are open
+const mdMonth = ref(ymd(new Date()).slice(0, 7));   // 'YYYY-MM'
+const mdDays = ref(0);                  // "working days" input of the month
+const mdHours = ref(null);              // "hours" input for every working day of the month
+function mdToggle(code) {
+    if (mdUnit.value === code) { mdUnit.value = ''; return; }
+    mdUnit.value = code;
+    const from = sc.value?.from || ymd(new Date());
+    const today = ymd(new Date());
+    mdMonth.value = (today > from ? today : from).slice(0, 7);
+    mdSyncInputs();
+}
+const mdUnitObj = computed(() => { void tick.value; return unitOf(sc.value, mdUnit.value); });
+const DOW_FULL = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const mdLabel = computed(() => { const [y, m] = mdMonth.value.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month : 'long', year : 'numeric' }); });
+function mdShift(n) { const [y, m] = mdMonth.value.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); mdMonth.value = ymd(d).slice(0, 7); mdSyncInputs(); }
+// every day of the month with its effective state (explicit figure or the
+// pattern / holiday) so the grid shows what the simulation will use
+const mdGrid = computed(() => {
+    void tick.value;
+    const s = sc.value, u = mdUnitObj.value;
+    if (!s || !u) return [];
+    const [y, m] = mdMonth.value.split('-').map(Number);
+    const days = new Date(y, m, 0).getDate();
+    const out = [];
+    for (let i = 1; i <= days; i++) {
+        const date = `${mdMonth.value}-${String(i).padStart(2, '0')}`;
+        const dow = new Date(y, m - 1, i).getDay();
+        const explicit = u.dayHours?.[date];
+        const hasExplicit = explicit != null && explicit !== '';
+        const hol = holidayOn(s, u.code, date);
+        const working = isWorkDay(s, u.code, date);
+        const hours = hasExplicit ? Number(explicit) : (working ? Number(u.hours) || 0 : 0);
+        out.push({ date, day : i, dow, dowLbl : DOW_FULL[dow], working, hours, explicit : hasExplicit, holiday : hol?.label || null, inRange : date >= s.from && date <= s.to });
+    }
+    return out;
+});
+const mdWorkingCount = computed(() => mdGrid.value.filter(d => d.working).length);
+const mdMonthHours = computed(() => mdGrid.value.reduce((a, d) => a + (d.working ? d.hours : 0), 0));
+function mdSyncInputs() { mdDays.value = mdWorkingCount.value; mdHours.value = null; }
+function mdSetDay(date, working, hours) {
+    mutate(`month setup ${date}`, s => {
+        const u = s.units.find(x => x.code === mdUnit.value);
+        u.dayHours = { ...(u.dayHours || {}), [date] : working ? (Number(hours) > 0 ? Number(hours) : Number(u.hours) || 0) : 0 };
+    });
+}
+function mdToggleDay(d) { mdSetDay(d.date, !d.working, d.hours || mdUnitObj.value?.hours); }
+function mdDayHours(d, v) { const h = Number(v); if (!(h >= 0)) return; mdSetDay(d.date, h > 0, h); }
+// "Working days" input: the first N days of the month by the weekly pattern
+// work (the holidays are skipped first), the rest are off — every day of the
+// month gets an explicit figure so the month is fully defined
+function mdApplyDays() {
+    const n = Math.max(0, Math.min(31, Math.round(Number(mdDays.value) || 0)));
+    const u = mdUnitObj.value; if (!u) return;
+    const s = sc.value;
+    const grid = mdGrid.value;
+    const hours = Number(mdHours.value) > 0 ? Number(mdHours.value) : null;
+    // candidates: pattern days first (not holiday), then the other days
+    const pattern = grid.filter(d => u.workDays.includes(d.dow) && !holidayOn(s, u.code, d.date));
+    const rest = grid.filter(d => !pattern.includes(d));
+    const chosen = new Set([...pattern, ...rest].slice(0, n).map(d => d.date));
+    mutate(`month ${mdMonth.value}: ${n} working days`, scn => {
+        const x = scn.units.find(y => y.code === mdUnit.value);
+        const o = { ...(x.dayHours || {}) };
+        for (const d of grid) o[d.date] = chosen.has(d.date) ? (hours || (d.explicit && d.hours > 0 ? d.hours : Number(x.hours) || 0)) : 0;
+        x.dayHours = o;
+    });
+}
+// "Hours" input: every working day of the month gets these hours
+function mdApplyHours() {
+    const h = Number(mdHours.value);
+    if (!(h > 0)) { props.toast('Give the hours per working day', 'warn'); return; }
+    mutate(`month ${mdMonth.value}: ${h} h`, scn => {
+        const x = scn.units.find(y => y.code === mdUnit.value);
+        const o = { ...(x.dayHours || {}) };
+        for (const d of mdGrid.value) o[d.date] = d.working ? h : 0;
+        x.dayHours = o;
+    });
+}
+// back to the weekly pattern for this month (explicit figures removed)
+function mdClearMonth() {
+    mutate(`month ${mdMonth.value}: pattern`, scn => {
+        const x = scn.units.find(y => y.code === mdUnit.value);
+        const o = { ...(x.dayHours || {}) };
+        for (const k of Object.keys(o)) if (k.startsWith(mdMonth.value)) delete o[k];
+        x.dayHours = o;
+    });
+    mdSyncInputs();
+}
+const mdMonthsSet = computed(() => { void tick.value; const u = mdUnitObj.value; const set = new Set(); for (const k of Object.keys(u?.dayHours || {})) set.add(k.slice(0, 7)); return [...set].sort(); });
+
 function addLine() { mutate('add line', s => { const n = s.lines.filter(l => l.unitCode === cfgUnit.value).length + 1; s.lines.push(newLine(s, cfgUnit.value, `Line ${String(n).padStart(2, '0')}`)); }); }
 function addLines(n) { mutate(`add ${n} lines`, s => { let k = s.lines.filter(l => l.unitCode === cfgUnit.value).length; for (let i = 0; i < n; i++) s.lines.push(newLine(s, cfgUnit.value, `Line ${String(++k).padStart(2, '0')}`)); }); }
 function removeLine(id) {
@@ -819,18 +916,44 @@ function close() {
                     </div>
                     <div v-if="cfgTab === 'units'" class="hl-cfg-units">
                         <table class="hl-table">
-                            <thead><tr><th>Unit</th><th>Label</th><th>Hours / day</th><th>OT / day</th><th>Working days</th><th>Lines (active)</th></tr></thead>
+                            <thead><tr><th>Unit</th><th>Label</th><th>Hours / day</th><th>OT / day</th><th title="Working days of the unit inside the plan range — month setups, holidays and the weekly pattern together">Working days<br><i class="hl-dim">{{ dmy(sc.from) }} → {{ dmy(sc.to) }}</i></th><th>Lines (active)</th><th></th></tr></thead>
                             <tbody>
-                                <tr v-for="u in sc.units" :key="u.code">
+                                <template v-for="u in sc.units" :key="u.code">
+                                <tr :class="{ 'hl-sel' : mdUnit === u.code }">
                                     <td><b>{{ u.name }}</b></td><td>{{ u.label }}</td>
                                     <td><input v-model.number="u.hours" type="number" step="0.5" min="0" max="24" class="cal-in hl-num" @change="cfgChange('unit hours')"></td>
                                     <td><input v-model.number="u.ot" type="number" step="0.5" min="0" max="12" class="cal-in hl-num" @change="cfgChange('unit OT')"></td>
-                                    <td><label v-for="(d, i) in DOW" :key="i" class="hl-dow"><input type="checkbox" :checked="u.workDays.includes(i)" @change="toggleWorkDay(u, i)">{{ d }}</label></td>
+                                    <td class="hl-r"><b>{{ unitStats[u.code]?.workDays }}</b> <i class="hl-dim">days · {{ Object.keys(u.dayHours || {}).length ? `${[...new Set(Object.keys(u.dayHours).map(k => k.slice(0, 7)))].length} month(s) set up` : 'weekly pattern' }}</i></td>
                                     <td>{{ unitStats[u.code]?.lines }} ({{ unitStats[u.code]?.activeLines }})</td>
+                                    <td><button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : mdUnit === u.code }" title="Month-wise working days and hours of this unit" @click="mdToggle(u.code)">📅 Details</button></td>
                                 </tr>
+                                <tr v-if="mdUnit === u.code" class="hl-detail-row"><td colspan="7">
+                                    <div class="hl-md-head">
+                                        <span class="hl-md-nav"><button class="cal-btn st-btn hl-btn" @click="mdShift(-1)">‹</button><b>{{ mdLabel }}</b><button class="cal-btn st-btn hl-btn" @click="mdShift(1)">›</button></span>
+                                        <label class="hl-lbl">Working days <input v-model.number="mdDays" type="number" min="0" max="31" class="cal-in hl-num"> <button class="cal-btn st-btn hl-btn" title="The first N days by the weekly pattern work (holidays skipped), the rest are off" @click="mdApplyDays">Apply</button></label>
+                                        <label class="hl-lbl">Hours / day <input v-model.number="mdHours" type="number" step="0.5" min="0" max="24" class="cal-in hl-num" :placeholder="String(u.hours)"> <button class="cal-btn st-btn hl-btn" title="Every working day of this month gets these hours" @click="mdApplyHours">Apply</button></label>
+                                        <span class="hl-dim">this month: <b>{{ mdWorkingCount }}</b> working days · <b>{{ fmtQty(Math.round(mdMonthHours)) }}</b> h per line</span>
+                                        <button class="cal-btn st-btn hl-btn" title="Remove this month's figures — the weekly pattern and holidays apply again" @click="mdClearMonth">↺ Weekly pattern</button>
+                                    </div>
+                                    <div class="hl-md-grid">
+                                        <div v-for="d in DOW_FULL" :key="d" class="hl-md-dow">{{ d }}</div>
+                                        <div v-for="i in ((mdGrid[0]?.dow) || 0)" :key="'pad' + i" class="hl-md-pad"></div>
+                                        <div v-for="d in mdGrid" :key="d.date" class="hl-md-day" :class="{ 'hl-md-on' : d.working, 'hl-md-off' : !d.working, 'hl-md-explicit' : d.explicit, 'hl-md-out' : !d.inRange, 'hl-md-hol' : d.holiday }" :title="`${dmy(d.date)} ${d.dowLbl} · ${d.working ? d.hours + ' h' : 'off'}${d.holiday ? ' · ' + d.holiday : ''}${d.explicit ? ' · set for this date' : ' · weekly pattern'}${d.inRange ? '' : ' · outside the plan range'}`">
+                                            <span class="hl-md-num" @click="mdToggleDay(d)">{{ d.day }}</span>
+                                            <input v-if="d.working" :value="d.hours" type="number" step="0.5" min="0" max="24" class="hl-md-hrs" @change="mdDayHours(d, $event.target.value)">
+                                            <span v-else class="hl-md-offlbl" @click="mdToggleDay(d)">off</span>
+                                        </div>
+                                    </div>
+                                    <div class="hl-md-foot">
+                                        <span class="hl-dim">Click a day number to switch it on / off · type the hours of a working day · <i class="hl-md-key hl-md-on"></i> working · <i class="hl-md-key hl-md-off"></i> off · a thick border = set for that date (beats the weekly pattern Su–Sa and the holidays)</span>
+                                        <span v-if="mdMonthsSet.length" class="hl-dim">Months set up: {{ mdMonthsSet.map(m => m.slice(5) + '/' + m.slice(2, 4)).join(', ') }}</span>
+                                        <label class="hl-lbl hl-md-pattern">Weekly pattern <label v-for="(dw, i) in DOW" :key="i" class="hl-dow"><input type="checkbox" :checked="u.workDays.includes(i)" @change="toggleWorkDay(u, i)">{{ dw }}</label></label>
+                                    </div>
+                                </td></tr>
+                                </template>
                             </tbody>
                         </table>
-                        <div class="st-hint">Line-level hours / OT override the unit's figures (leave blank to follow the unit). Working days and holidays are per unit; a holiday without a unit applies to all four.</div>
+                        <div class="st-hint">Hours / OT of the unit are the default for every working day (a line can have its own figure on the Lines tab). <b>📅 Details</b> = month-wise setup: type the working days of the month and the hours per day, or click the days one by one — those figures beat the weekly pattern, the holidays and the line hours for that date. A month without figures follows the weekly pattern and the Holidays tab. A holiday without a unit applies to all four.</div>
                     </div>
                     <div v-else-if="cfgTab === 'lines'">
                         <div class="hl-actions">
@@ -1107,6 +1230,24 @@ function close() {
 .hl-pcell { white-space : nowrap; }
 .hl-dow { margin-right : 6px; font-weight : 400; }
 .hl-scroll { max-height : 55vh; overflow : auto; }
+.hl-detail-row > td { background : #f7f9fc; padding : 8px 12px; }
+.hl-md-head { display : flex; align-items : center; gap : 14px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12px; }
+.hl-md-nav { display : inline-flex; align-items : center; gap : 6px; font-size : 13px; }
+.hl-md-grid { display : grid; grid-template-columns : repeat(7, 1fr); gap : 4px; max-width : 760px; }
+.hl-md-dow { text-align : center; font-weight : 700; font-size : 11px; color : #555; }
+.hl-md-day { border : 1px solid #cfd6df; border-radius : 4px; padding : 3px 5px; min-height : 40px; background : #fff; display : flex; flex-direction : column; gap : 2px; font-size : 11.5px; }
+.hl-md-day.hl-md-on { background : #e8f5e9; border-color : #a5d6a7; }
+.hl-md-day.hl-md-off { background : #f3f3f3; color : #888; }
+.hl-md-day.hl-md-hol { background : repeating-linear-gradient(45deg, #fdecea 0 4px, #fff 4px 8px); }
+.hl-md-day.hl-md-explicit { border-width : 2px; border-color : #1b52ad; }
+.hl-md-day.hl-md-out { opacity : .45; }
+.hl-md-num { font-weight : 700; cursor : pointer; }
+.hl-md-hrs { width : 100%; box-sizing : border-box; border : 1px solid #c9d2dc; border-radius : 3px; padding : 1px 4px; font-size : 11.5px; text-align : right; }
+.hl-md-offlbl { cursor : pointer; font-style : italic; }
+.hl-md-foot { display : flex; flex-wrap : wrap; align-items : center; gap : 8px 18px; margin-top : 8px; font-size : 11.5px; }
+.hl-md-key { display : inline-block; width : 12px; height : 10px; border : 1px solid #889; border-radius : 2px; vertical-align : middle; }
+.hl-md-pattern { margin-left : auto; }
+
 .hl-x-small { cursor : pointer; color : #b00020; font-weight : 700; }
 .hl-ord-body { display : flex; gap : 14px; }
 .hl-ord-left { flex : 1 1 55%; min-width : 0; } .hl-ord-right { flex : 1 1 45%; min-width : 380px; }
