@@ -859,16 +859,19 @@ const erpMonthByUnit = computed(() => {
     return out;
 });
 
-// month-wise capacity of each unit against the ERP order load: the month's
-// available minutes (lines inside the plan range) are turned into PIECES with
-// the month's order product mix (scenario SMV per product type), so capacity,
-// order quantity, the gap quantity and the load percentage sit side by side
-function smvOf(product) {
-    const list = sc.value?.products || [];
-    const p = list.find(x => x.name.toLowerCase() === String(product || '').toLowerCase());
-    if (p) return Number(p.smv) || 20;
-    const avg = list.reduce((a, x) => a + (Number(x.smv) || 0), 0) / (list.length || 1);
-    return avg > 0 ? avg : 20;
+// month-wise capacity of each unit against the ERP order load. Capacity of a
+// month = the SUM of the unit's lines for that month, exactly as the Lines tab
+// shows them: Line SAH (manpower × (hours + OT) × efficiency over the month's
+// working days inside the plan range) and Capacity pcs (line SAH × 60 ÷ the
+// unit average SMV). Order SAH = Σ qty × ERP product SMV ÷ 60.
+// SMV of an ERP product type on a unit: the ERP quantity-weighted average of
+// its styles, else the scenario product, else the unit average
+function smvOf(product, code) {
+    const e = erpSmvByUnit.value[code]?.products.find(x => String(x.product || '').toLowerCase() === String(product || '').toLowerCase());
+    if (e?.avgSmv > 0) return e.avgSmv;
+    const p = (sc.value?.products || []).find(x => x.name.toLowerCase() === String(product || '').toLowerCase());
+    if (p && Number(p.smv) > 0) return Number(p.smv);
+    return unitAvgSmv(code);
 }
 const monthCapRes = computed(() => {
     void tick.value;
@@ -879,20 +882,25 @@ const monthCapRes = computed(() => {
     for (const u of HL_UNITS) {
         const per = {};
         const total = { cap : 0, used : 0, capPcs : 0, qty : 0, reqMin : 0 };
+        const smv = unitAvgSmv(u.code);
+        const lines = s.lines.filter(l => l.unitCode === u.code);
         for (const row of erpMonthByUnit.value[u.code]?.months || []) {
             const [y, m] = row.ym.split('-').map(Number);
             const first = `${row.ym}-01`;
             const last  = `${row.ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
             const mFrom = first > s.from ? first : s.from;
             const mTo   = last  < s.to   ? last  : s.to;
-            const st = mFrom > mTo ? { capMin : 0, usedMin : 0 } : unitSummary(s, u.code, mFrom, mTo, load);
-            // weighted average SMV of the month's order mix → capacity in pcs
-            const reqMin = row.products.reduce((a, p) => a + p.qty * smvOf(p.product), 0);
-            const avgSmv = row.qty > 0 ? reqMin / row.qty : smvOf(null);
-            const capPcs = avgSmv > 0 ? Math.round(st.capMin / avgSmv) : 0;
-            per[row.ym] = { cap : st.capMin, used : st.usedMin, capPcs, capSah : st.capMin / 60, reqSah : reqMin / 60,
+            // Σ lines: SAH of the month and the pieces of each line (rounded per line, like the Lines tab)
+            let capMin = 0, usedMin = 0, capPcs = 0;
+            if (mFrom <= mTo) for (const l of lines) {
+                const ls = lineSummary(s, l, mFrom, mTo, load);
+                capMin += ls.capMin; usedMin += ls.usedMin;
+                capPcs += smv > 0 ? Math.round(ls.capMin / smv) : 0;
+            }
+            const reqMin = row.products.reduce((a, p) => a + p.qty * smvOf(p.product, u.code), 0);
+            per[row.ym] = { cap : capMin, used : usedMin, capPcs, capSah : capMin / 60, reqSah : reqMin / 60,
                 gapQty : capPcs - row.qty, pct : capPcs > 0 ? row.qty / capPcs : null };
-            total.cap += st.capMin; total.used += st.usedMin; total.capPcs += capPcs; total.qty += row.qty; total.reqMin += reqMin;
+            total.cap += capMin; total.used += usedMin; total.capPcs += capPcs; total.qty += row.qty; total.reqMin += reqMin;
         }
         per.total = { ...total, capSah : total.cap / 60, reqSah : total.reqMin / 60,
             gapQty : total.capPcs - total.qty, pct : total.capPcs > 0 ? total.qty / total.capPcs : null };
@@ -939,7 +947,7 @@ const emProducts = computed(() => {
     const month = erpMonthByUnit.value[u.code]?.months.find(m => m.ym === emMonth.value);
     const capMin = monthCapRes.value[u.code]?.[emMonth.value]?.cap || 0;
     return (month?.products || []).map(p => {
-        const smv = smvOf(p.product);
+        const smv = smvOf(p.product, u.code);
         const reqMin = p.qty * smv;
         return { ...p, smv : Math.round(smv * 10) / 10, reqH : reqMin / 60,
             capAlone : smv > 0 ? Math.round(capMin / smv) : 0,
@@ -1067,13 +1075,11 @@ function close() {
                 <div class="hl-uc-head"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span>
                     <span v-if="erpMonthByUnit[u.code]?.total.orders" class="hl-uc-oq" :title="`Total active ERP order quantity of production unit ${u.label} (all delivery months) · ${fmtQty(erpMonthByUnit[u.code].total.orders)} orders · outstanding ${fmtQty(erpMonthByUnit[u.code].total.outstanding)} pcs`">Order qty <b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b> pcs <i class="hl-dim">· {{ fmtQty(erpMonthByUnit[u.code].total.orders) }} orders</i></span>
                 </div>
-                <div class="hl-uc-row"><span>Capacity</span><b>{{ fmtMin(unitStats[u.code]?.capMin) }}</b><span>Reserved</span><b>{{ fmtMin(unitStats[u.code]?.usedMin) }}</b><span>Available</span><b>{{ fmtMin(unitStats[u.code]?.availMin) }}</b><span>Util</span><b>{{ fmtPct(unitStats[u.code]?.util) }}</b><span>Overloaded days</span><b>{{ unitStats[u.code]?.overDays }}</b><span>Idle</span><b>{{ fmtMin(unitStats[u.code]?.idleMin) }}</b></div>
-                <div class="hl-uc-prod"><span v-for="(v, p) in unitStats[u.code]?.products || {}" :key="p" :title="`${v.lines} line(s) can make it`">{{ p }}: <b>{{ fmtQty(v.pcsPerDay) }}</b>/day</span></div>
-                <div v-if="erpMonthly" class="hl-uc-erp" :title="`ERP active production orders with delivery from ${dmy(erpMonthly.from)} on, by PO delivery month, production unit ${u.label}. Capacity = the unit's available hours of the month (inside the plan range) in pieces, using the month's order product mix and the scenario SMVs. Click a month for the product-wise breakdown (snapshot ${erpMonthly.takenAt || ''})`">
-                    <span class="hl-uc-erp-t">Month wise capacity vs active orders <i class="hl-dim">· delivery after {{ dmy(addDays(erpMonthly.from || '', -1)) }}</i></span>
+                <div v-if="erpMonthly" class="hl-uc-erp" :title="`ERP active production orders (mr_order_entry, status Active) with delivery from ${dmy(erpMonthly.from)} on, by PO delivery month, production unit ${u.label}. Capacity = the sum of the unit's lines for the month (Lines tab: Line SAH and Capacity pcs at the unit average SMV ${unitAvgSmv(u.code)}). Click a month for the product-wise breakdown (snapshot ${erpMonthly.takenAt || ''})`">
+                    <span class="hl-uc-erp-t">Month wise capacity vs active orders <i class="hl-dim">· delivery after {{ dmy(addDays(erpMonthly.from || '', -1)) }} · avg SMV {{ unitAvgSmv(u.code) }}</i></span>
                     <div class="hl-em-scroll">
                         <table class="hl-em-tbl">
-                            <thead><tr><th>Delivery month</th><th title="Available capacity of the month in pieces (order product mix) — lines' manpower × hours × efficiency ÷ average SMV">Capacity (pcs)</th><th title="Capacity SAH — lines' manpower × (hours + OT) × efficiency, in standard hours">Cap SAH</th><th title="Active ERP order quantity of the month">Order qty</th><th title="Order SAH — Σ order qty × SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th></tr></thead>
+                            <thead><tr><th>Delivery month</th><th :title="`Σ of the lines' Capacity pcs for the month (Lines tab) — each line's SAH × 60 ÷ unit average SMV ${unitAvgSmv(u.code)}`">Capacity (pcs)</th><th title="Σ of the lines' Line SAH for the month (Lines tab) — manpower × (hours + OT) × efficiency, standard hours">Cap SAH</th><th title="Active ERP order quantity of the month (mr_order_entry, status Active, production unit of the order)">Order qty</th><th title="Order SAH — Σ order qty × ERP product SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th></tr></thead>
                             <tbody>
                                 <tr v-for="m in erpMonthByUnit[u.code].months" :key="m.ym" :class="{ 'hl-em-over' : m.overdue, 'hl-em-cur' : m.ym === thisYm }"
                                     :title="m.overdue ? 'Overdue — delivery month already past, order still Active in ERP' : `${m.orders} order(s), outstanding ${fmtQty(m.outstanding)} pcs — click for the product-wise breakdown`"
@@ -1410,7 +1416,7 @@ function close() {
                     <span class="cal-title-btns"><span class="cal-x" @click="emOpen = false">✕</span></span></div>
                 <div class="st-body">
                     <table v-if="emProducts.length" class="hl-table hl-table-s hl-em-prods">
-                        <thead><tr><th>Product wise</th><th>Orders</th><th>Order qty</th><th>Outstanding</th><th title="Scenario SMV of the product">SMV</th><th title="Hours this quantity needs (qty × SMV)">Required</th><th title="Month capacity if the unit made only this product">Capacity (pcs)</th><th title="Required hours as % of the month's capacity">Load %</th></tr></thead>
+                        <thead><tr><th>Product wise</th><th>Orders</th><th>Order qty</th><th>Outstanding</th><th title="ERP average SMV of the product type on this unit (quantity-weighted over its styles); the scenario product or the unit average when ERP has none">SMV</th><th title="Hours this quantity needs (qty × SMV)">Required</th><th title="Month capacity if the unit made only this product">Capacity (pcs)</th><th title="Required hours as % of the month's capacity">Load %</th></tr></thead>
                         <tbody>
                             <tr v-for="p in emProducts" :key="p.product" :class="{ 'hl-sel' : emProd === p.product }" title="Click to filter the order list below by this product" @click="emProd = emProd === p.product ? '' : p.product">
                                 <td><b>{{ p.product }}</b></td>
@@ -1509,9 +1515,6 @@ function close() {
 .hl-uc-head { font-size : 13px; margin-bottom : 4px; display : flex; align-items : baseline; gap : 6px; flex-wrap : wrap; }
 .hl-uc-oq { margin-left : auto; font-size : 11.5px; background : #e8f0fe; border : 1px solid #c3d4f0; border-radius : 3px; padding : 1px 6px; white-space : nowrap; }
 .hl-uc-oq b { color : #1646a0; }
-.hl-uc-row { display : grid; grid-template-columns : auto 1fr auto 1fr auto 1fr; gap : 2px 8px; font-size : 11.5px; }
-.hl-uc-row span { color : #555; } .hl-uc-row b { text-align : right; }
-.hl-uc-prod { margin-top : 4px; font-size : 11px; color : #333; display : flex; flex-wrap : wrap; gap : 4px 10px; }
 .hl-uc-erp { margin-top : 6px; padding-top : 5px; border-top : 1px dashed #d5dbe3; font-size : 11px; color : #333; }
 .hl-uc-erp-t { display : block; font-weight : 700; color : #1f3a5f; margin-bottom : 3px; }
 .hl-em-scroll { max-height : 150px; overflow : auto; border : 1px solid #e3e6ea; border-radius : 3px; }
