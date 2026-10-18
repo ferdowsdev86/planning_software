@@ -6790,7 +6790,15 @@ const dpGroups      = ref([]);
 const dpGeneratedAt = ref('');
 
 const dpAllUnits = ref(false);           // report generated across every unit board
-const dpUnitName = computed(() => (dpAllUnits.value ? 'All units' : (currentBoard.value?.unitName || dpGroups.value[0]?.unit || 'AQL')));
+// The unit of the board the report was generated from — the LOADED board,
+// never a stale fallback ("AQL" over MBM lines)
+const dpUnitName = computed(() => {
+    void dpFilterTick.value;
+    if (dpAllUnits.value) return 'All units';
+    const uid = boardLoadedUnitId ?? currentBoard.value?.unitId;
+    const b = boards.value.find(x => Number(x.unitId ?? 3) === Number(uid));
+    return b?.unitName || currentBoard.value?.unitName || unitLabel(uid) || dpGroups.value[0]?.unit || '—';
+});
 
 // Filters (Generate applies them): one floor / line / buyer, '' = all
 const dpFloorF = ref('');
@@ -6824,6 +6832,15 @@ const dpFiltersLabel = computed(() => {
 async function dpGenerateClick() {
     if (dpUnit.value === 'all') { await dpGenerateAllUnits(); return; }
     dpAllUnits.value = false;
+    // the report is always of the board on screen: a chosen unit opens its board first
+    const u = dpUnits.value.find(x => String(x.unitId) === String(dpUnit.value));
+    if (u && Number(boardLoadedUnitId) !== u.unitId) {
+        openBoard(u.board);
+        setBoardLoad(true, `Loading ${u.name} board for the report…`, 0);
+        try { for (let i = 0; i < 300 && boardLoadedUnitId !== u.unitId; i++) await new Promise(r => setTimeout(r, 100)); }
+        finally { setBoardLoad(false); }
+        if (boardLoadedUnitId !== u.unitId) { toast(`${u.name} board did not load`, 'warn'); return; }
+    }
     generateDayPlan();
 }
 async function dpGenerateAllUnits() {
@@ -6941,17 +6958,26 @@ const dpSummary = computed(() => {
         b.qty += r.planQty;
         b.sah += r.planQty * (Number(r.smv) || 0) / 60;
     }
-    // Working days = date columns that actually carry planned quantity
-    const dayKeys = new Set();
-    for (const g of lineGroups) {
-        for (const [k, v] of Object.entries(g.totals.days)) if (v > 0) dayKeys.add(k);
-    }
+    // Working days = the board calendar's working days in the report range
+    // (unit off days and holidays excluded); working hours = the hours the
+    // board actually plans with on those days — the unit calendar, the
+    // Change-working-hours overrides and the line's own hours (Setup → Line
+    // eff & hours), averaged over the report's lines × working days
     const s = getInstance();
-    let hrsSum = 0, hrsN = 0;
-    for (const g of lineGroups) {
-        const h = Number(s?.resourceStore?.getById(g.lineId)?.data?.hours);
-        if (h > 0) { hrsSum += h; hrsN++; }
+    const from = new Date(dpFrom.value + 'T00:00:00'), to = new Date(dpTo.value + 'T00:00:00');
+    let workDays = 0, hrsSum = 0, hrsN = 0;
+    if (!Number.isNaN(+from) && !Number.isNaN(+to) && from <= to && (+to - +from) < 1830 * 86400000) {
+        for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+            if (isOffDay(d)) continue;
+            workDays++;
+            for (const g of lineGroups) {
+                if (isLineOffDay(d, g.lineId)) continue;
+                const h = hmToHours(lineHoursLabel({ id : g.lineId, hours : s?.resourceStore?.getById(g.lineId)?.data?.hours }, d));
+                if (h > 0) { hrsSum += h; hrsN++; }
+            }
+        }
     }
+    const dayKeys = { size : workDays };
     const floors = new Map();
     for (const g of lineGroups) {
         const key = g.floor || '—';
@@ -7060,10 +7086,26 @@ const dpHoursMatrix = computed(() => {
     if (!s) return { rows : [], avg : {}, manpower : 0 };
     const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
     const rows = lines.map(r => {
-        const hours = Number(r.data?.hours) || 11;
+        const lineRef = { id : r.id, hours : r.data?.hours };
         const days = {};
         for (const d of dpDates.value) {
-            days[dpColKey(d)] = (dpMode.value !== 'month' && isOffDay(d)) ? null : hours;
+            if (dpMode.value === 'month') {
+                // month column: average hours of the line's working days in that month
+                const m = new Date(d.getFullYear(), d.getMonth(), 1);
+                let sum = 0, n = 0;
+                for (const x = new Date(m); x.getMonth() === m.getMonth(); x.setDate(x.getDate() + 1)) {
+                    if (isOffDay(x) || isLineOffDay(x, r.id)) continue;
+                    const h = hmToHours(lineHoursLabel(lineRef, x));
+                    if (h > 0) { sum += h; n++; }
+                }
+                days[dpColKey(d)] = n ? Math.round(sum / n * 100) / 100 : null;
+            }
+            else {
+                // the hours the board plans with on that day: unit calendar →
+                // Change-working-hours override → the line's own hours
+                const h = (isOffDay(d) || isLineOffDay(d, r.id)) ? 0 : hmToHours(lineHoursLabel(lineRef, d));
+                days[dpColKey(d)] = h > 0 ? Math.round(h * 100) / 100 : null;
+            }
         }
         return {
             floor    : dpFloorLabel(r, LINE_BY_ID[r.id]),
