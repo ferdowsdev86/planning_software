@@ -16,10 +16,14 @@ import { StringHelper } from '@bryntum/schedulerpro';
 import {
     HL_UNITS, newScenario, newLine, uid, ymd, addDays, daysBetween, fromYmd,
     lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary, isWorkDay, holidayOn,
-    unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver
+    unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver, lineSmv, ensurePoolLine
 } from './hlEngine.js';
 import {
-    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders
+    autoBalance, allocationReport, reconcileAllocation, balanceSettings, unitMakes, orderSmv, ymOf, buildCapIndex, mergeErpOrders, placeInUnit, EXT_STATUS, KIND_LABEL
+} from './hlBalance.js';
+import {
+    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders,
+    hlErpOrders, hlAutoBalance
 } from './api.js';
 
 const props = defineProps({
@@ -243,7 +247,9 @@ const config = {
     columns : [
         { type : 'tree', field : 'name', text : 'Unit / Line', width : 210, htmlEncode : false, renderer : ({ record, value }) => record.data.isUnit
             ? `<b class="hl-unit-name">${StringHelper.encodeHtml(value)}</b><span class="hl-unit-sub">${StringHelper.encodeHtml(record.data.label || '')} · ${record.data.activeLines}/${record.data.lineCount} lines</span>`
-            : `<span class="hl-line-name${record.data.active ? '' : ' hl-line-off'}">${StringHelper.encodeHtml(value)}</span><span class="hl-line-sub">${record.data.manpower} mp · ${record.data.eff}% · ${record.data.hoursLbl}</span>` },
+            : record.data.pool
+                ? `<span class="hl-line-name hl-line-pool">🌐 ${StringHelper.encodeHtml(value)}</span><span class="hl-line-sub">${record.data.hoursLbl}</span>`
+                : `<span class="hl-line-name${record.data.active ? '' : ' hl-line-off'}">${StringHelper.encodeHtml(value)}</span><span class="hl-line-sub">${record.data.manpower} mp · ${record.data.eff}% · ${record.data.hoursLbl}</span>` },
         { field : 'capLbl',   text : 'Capacity', width : 78, align : 'right', tooltip : 'Available production hours in the planning range' },
         { field : 'resLbl',   text : 'Reserved', width : 78, align : 'right' },
         { field : 'availLbl', text : 'Available', width : 80, align : 'right' },
@@ -271,7 +277,11 @@ const config = {
         if (r.conflict) renderData.cls.add('hl-res-conflict');
         if (r.late) renderData.cls.add('hl-res-late');
         if (r.source === 'live') renderData.cls.add('hl-res-live');
-        return `<span class="hl-res-txt">${r.locked ? '🔒 ' : ''}${StringHelper.encodeHtml(r.name || '')} · ${fmtQty(r.qty)}</span>`;
+        if (r.kind) renderData.cls.add(`hl-res-k-${r.kind}`);
+        if (r.extStatus) renderData.cls.add(`hl-res-ext-${r.extStatus}`);
+        if (r.risk) renderData.cls.add('hl-res-risk');
+        const pre = `${r.locked ? '🔒 ' : ''}${r.kind === 'transfer' ? `⇄${r.fromUnit || ''} ` : r.kind === 'gsl' ? `🌐${r.fromUnit || ''} ` : ''}${r.extStatus === 'pending' ? '⏳ ' : ''}`;
+        return `<span class="hl-res-txt">${pre}${StringHelper.encodeHtml(r.name || '')} · ${fmtQty(r.qty)}</span>`;
     }
 };
 
@@ -290,6 +300,10 @@ function tipHtml(ev) {
         ['Span', `${dmy(res?.start)} → ${dmy(res?.end)} (${rd ? rd.days.length : 0} working days)`],
         ['Status', `${r.status}${r.locked ? ' · locked' : ''}${r.conflict ? ' · ⚠ overloaded day(s)' : ''}${r.late ? ' · after delivery' : ''}`]
     ];
+    if (r.kind) rows.push(['Allocation', `${KIND_LABEL[r.kind] || r.kind}${r.fromUnit && line && r.fromUnit !== line.unitCode ? ` · contract ${unitName(r.fromUnit)} → ${unitName(line.unitCode)}` : ''}`]);
+    if (res?.reason) rows.push(['Reason', res.reason]);
+    if (r.extStatus) rows.push(['External capacity', EXT_STATUS[r.extStatus] || r.extStatus]);
+    if (o?.garment) rows.splice(3, 0, ['Garment', o.garment]);
     return `<div class="hl-tip"><b>${StringHelper.encodeHtml(r.name || '')}</b><table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${StringHelper.encodeHtml(String(v))}</td></tr>`).join('')}</table></div>`;
 }
 
@@ -310,9 +324,12 @@ function syncScheduler() {
                 id : `U-${u.code}`, name : u.name, label : u.label, isUnit : true, expanded : expandedUnits.has(u.code),
                 activeLines : st.activeLines || 0, lineCount : st.lines || 0,
                 capLbl : fmtMin(st.capMin), resLbl : fmtMin(st.usedMin), availLbl : fmtMin(st.availMin), utilLbl : fmtPct(st.util), utilCls : utilCls(st.util || 0),
-                children : scn.lines.filter(l => l.unitCode === u.code).map(l => {
+                // UNIT-G with an overflow pool shows exactly ONE row: the pool
+                children : scn.lines.filter(l => l.unitCode === u.code && (u.code !== 'G' || !scn.lines.some(x => x.pool) || l.pool)).map(l => {
                     const t = ls[l.id] || {};
                     const unit = unitOf(scn, l.unitCode);
+                    if (l.pool) return { id : l.id, name : l.name, isUnit : false, active : true, pool : true, manpower : '∞', eff : '—', hoursLbl : 'unlimited overflow pool',
+                        capLbl : '∞', resLbl : fmtMin(t.usedMin), availLbl : '∞', utilLbl : '—', utilCls : 'ok' };
                     return {
                         id : l.id, name : l.name, isUnit : false, active : l.active, manpower : l.manpower, eff : l.eff,
                         hoursLbl : `${(l.hours ?? unit.hours)}h${(l.ot ?? unit.ot) ? `+${l.ot ?? unit.ot}` : ''}`,
@@ -334,6 +351,8 @@ function syncScheduler() {
                 startDate : fromYmd(r.start), endDate : fromYmd(addDays(r.end, 1)),
                 qty : r.qty, product : r.product || o?.product || '', status : r.status, locked : !!r.locked, orderId : r.orderId, lineId : r.lineId,
                 conflict : conflictRes.has(r.id), late : !!(o?.delivery && r.end > o.delivery), source : r.source || null,
+                kind : r.kind || null, fromUnit : r.fromUnit || null, extStatus : r.kind === 'gsl' ? (r.extStatus || 'pending') : null,
+                risk : !!(r.kind === 'gsl' && (r.extStatus || 'pending') !== 'confirmed'),
                 draggable : !r.locked, resizable : !r.locked
             };
         });
@@ -382,6 +401,13 @@ function onBarMoved(resId, lineId, startDate, endDate) {
     mutate(`move ${r.label || product}`, scn => {
         const x = scn.reservations.find(y => y.id === resId);
         x.lineId = lineId; x.start = start; x.end = end < start ? start : end;
+        // an allocation keeps its meaning when the planner moves it between units
+        if (x.kind && x.kind !== 'live') {
+            const contract = x.fromUnit || o?.unitCode;
+            if (line.pool || line.unitCode === 'G') { x.kind = 'gsl'; x.extStatus = x.extStatus || 'pending'; }
+            else { x.kind = line.unitCode === contract ? 'contract' : 'transfer'; x.extStatus = null; }
+            x.reason = `moved by the planner to ${line.name}`;
+        }
     });
 }
 
@@ -429,7 +455,10 @@ function resSplit() {
         x.qty -= q;
         const load = buildLoad(s);
         const end = endForQty(s, splitLine.value, x.product || o?.product, q, x.start, load);
-        s.reservations.push({ id : uid('rs'), orderId : x.orderId, lineId : splitLine.value, product : x.product, start : x.start, end, qty : q, locked : false, status : 'reserved', label : x.label });
+        const tl = lineById(s, splitLine.value);
+        const contract = x.fromUnit || o?.unitCode;
+        s.reservations.push({ id : uid('rs'), orderId : x.orderId, lineId : splitLine.value, product : x.product, start : x.start, end, qty : q, locked : false, status : x.status || 'reserved', label : x.label, smv : x.smv || null,
+            kind : x.kind ? (tl?.pool ? 'gsl' : tl?.unitCode === contract ? 'contract' : 'transfer') : null, fromUnit : x.fromUnit || null, extStatus : tl?.pool ? 'pending' : null, reason : x.kind ? `split by the planner onto ${tl?.name}` : null });
     });
     props.toast(`${fmtQty(q)} pcs split onto another line`, 'ok');
 }
@@ -442,7 +471,9 @@ function resMoveUnit() {
     if (!res.allocations.length) { props.toast(`${unitOf(sc.value, moveUnit.value)?.name} has no compatible free capacity for this reservation`, 'warn'); return; }
     mutate(`move to ${moveUnit.value}`, s => {
         s.reservations = s.reservations.filter(y => y.id !== r.id);
-        for (const a of res.allocations) s.reservations.push({ ...a, status : 'reserved', label : r.label, locked : false });
+        const contract = r.fromUnit || o?.unitCode;
+        for (const a of res.allocations) s.reservations.push({ ...a, status : r.status === 'proposed' ? 'proposed' : 'reserved', label : r.label, locked : false, smv : r.smv || null,
+            kind : r.kind ? (moveUnit.value === contract ? 'contract' : 'transfer') : null, fromUnit : r.fromUnit || null, reason : r.kind ? `moved to ${unitName(moveUnit.value)} by the planner` : null });
     });
     props.toast(`Moved to ${unitOf(sc.value, moveUnit.value)?.name}: ${fmtQty(res.feasible)} of ${fmtQty(r.qty)} pcs${res.shortage ? ` — ${fmtQty(res.shortage)} could not be placed` : ''}`, res.shortage ? 'warn' : 'ok');
     resOpen.value = false;
@@ -457,7 +488,7 @@ const cfgUnit = ref('M');
 const newProduct = ref({ name : '', smv : 20 });
 const newHoliday = ref({ date : '', unitCode : '', label : '', kind : 'holiday' });
 const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-function cfgLines() { return (sc.value?.lines || []).filter(l => l.unitCode === cfgUnit.value); }
+function cfgLines() { return (sc.value?.lines || []).filter(l => l.unitCode === cfgUnit.value && !l.pool); }
 function cfgChange(label = 'configuration') { mutate(label, () => { /* edited in place by v-model */ }); }
 function toggleWorkDay(u, d) { mutate('working days', s => { const x = s.units.find(y => y.code === u.code); x.workDays = x.workDays.includes(d) ? x.workDays.filter(v => v !== d) : [...x.workDays, d].sort(); }); }
 
@@ -750,6 +781,240 @@ function apApply() {
     apOpen.value = false;
 }
 
+
+// ---------------------------------------------------------------------------
+// Central Auto Balance — contract unit first → other compatible internal
+// units → all remaining excess to the GSL overflow pool. The engine lives in
+// src/hlBalance.js and runs in the API's /hl/auto-balance service (the same
+// module runs here when the service is unreachable). The result is a
+// PROPOSAL: the planner reviews it, applies it to the scenario, then moves /
+// locks / cancels bars on the board — every change recomputes capacity.
+// ---------------------------------------------------------------------------
+const abOpen = ref(false);
+const abBusy = ref(false);
+const abResOpen = ref(false);
+const abResult = shallowRef(null);        // { imported, orders, lines, products, removedIds, reservations, results, summary, local? }
+const abErp = shallowRef(null);           // ERP active orders (for the filter choices)
+let abCtl = null;
+const ALL_UNITS = ['M', 'C', 'A'];
+const SCOPE_UNITS = ['M', 'C', 'A', 'G'];
+function defaultAbOpt(s) {
+    const b = balanceSettings(s);
+    return { importOrders : true, from : s?.from || '', to : s?.to || '', buyers : [], units : [...(b.units || SCOPE_UNITS)], months : [], products : [],
+        includeLive : b.includeLive !== false, allowTransfer : b.allowTransfer !== false, allowGsl : b.allowGsl !== false, deliveryLead : b.deliveryLead || 0, useOutstanding : b.useOutstanding !== false,
+        transfers : { M : (b.transfers.M || []).join(','), C : (b.transfers.C || []).join(','), A : (b.transfers.A || []).join(',') } };
+}
+const abOpt = ref(defaultAbOpt(null));
+async function openAutoBalance() {
+    if (!sc.value) return;
+    if (!canWrite.value) return denied();
+    abOpt.value = defaultAbOpt(sc.value);
+    abOpen.value = true;
+    if (!abErp.value) { try { abErp.value = await hlErpOrders(by()); } catch (e) { abErp.value = { error : e.message, rows : [] }; } }
+}
+const abChoices = computed(() => {
+    const rows = [...(abErp.value?.rows || []), ...(sc.value?.orders || []).map(o => ({ buyer : o.buyer, product : o.product, delivery : o.delivery }))];
+    const uniq = k => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
+    return { buyers : uniq('buyer'), products : uniq('product'), months : [...new Set(rows.map(r => ymOf(r.delivery)).filter(m => m !== 'none'))].sort() };
+});
+const parseUnits = s => String(s || '').split(/[,\s]+/).map(x => x.trim().toUpperCase()).filter(x => ALL_UNITS.includes(x));
+function abOptions() {
+    const o = abOpt.value;
+    return { importOrders : !!o.importOrders, from : o.from || undefined, to : o.to || undefined, buyers : o.buyers, units : o.units, months : o.months, products : o.products,
+        includeLive : !!o.includeLive, allowTransfer : !!o.allowTransfer, allowGsl : !!o.allowGsl, deliveryLead : Number(o.deliveryLead) || 0, useOutstanding : !!o.useOutstanding,
+        transfers : { M : parseUnits(o.transfers.M), C : parseUnits(o.transfers.C), A : parseUnits(o.transfers.A) }, productUnits : balanceSettings(sc.value).productUnits };
+}
+async function runAutoBalance() {
+    if (!sc.value || abBusy.value) return;
+    const options = abOptions();
+    if (!options.units.length) { props.toast('Pick at least one contract unit', 'warn'); return; }
+    abBusy.value = true;
+    abCtl = new AbortController();
+    const t0 = Date.now();
+    try {
+        let j;
+        try { j = await hlAutoBalance(by(), JSON.parse(snapshot()), options, abCtl.signal); }
+        catch (e) {
+            if (e.name === 'AbortError') throw e;
+            // service unreachable → the same engine runs here
+            const clone = JSON.parse(snapshot());
+            let imported = null;
+            if (options.importOrders) { const erp = abErp.value?.rows?.length ? abErp.value : await hlErpOrders(by()); imported = mergeErpOrders(clone, erp.rows || []); }
+            j = { imported, orders : clone.orders, lines : clone.lines, products : clone.products, ...autoBalance(clone, options), local : true, ms : Date.now() - t0 };
+        }
+        abResult.value = j;
+        abResOpen.value = true;
+    }
+    catch (e) { props.toast(e.name === 'AbortError' ? 'Auto Balance cancelled' : `Auto Balance failed: ${e.message}`, e.name === 'AbortError' ? 'warn' : 'error'); }
+    finally { abBusy.value = false; abCtl = null; }
+}
+function cancelAutoBalance() { abCtl?.abort(); }
+function abApply() {
+    const j = abResult.value; if (!j || !sc.value) return;
+    const options = abOptions();
+    mutate('auto balance', s => {
+        s.orders = j.orders; s.lines = j.lines; s.products = j.products;
+        const rm = new Set(j.removedIds);
+        s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(j.reservations);
+        s.balance = { ...balanceSettings(s), units : options.units, includeLive : options.includeLive, allowTransfer : options.allowTransfer, allowGsl : options.allowGsl,
+            deliveryLead : options.deliveryLead, useOutstanding : options.useOutstanding, transfers : options.transfers, lastRun : j.summary };
+    });
+    expandedUnits.add('G');
+    abResOpen.value = false; abOpen.value = false;
+    const s = j.summary;
+    props.toast(`Auto Balance applied (proposal): ${fmtQty(s.contract)} in contract units · ${fmtQty(s.transfer)} transferred · ${fmtQty(s.gsl)} to GSL · ${fmtQty(s.unallocated)} unallocated — review on the board, then Save`, s.unallocated ? 'warn' : 'ok');
+}
+const abResultRows = computed(() => (abResult.value?.results || []).slice().sort((a, b) => (b.risk ? 1 : 0) - (a.risk ? 1 : 0) || String(a.delivery || '').localeCompare(String(b.delivery || ''))));
+function resetProposed() {
+    if (!sc.value) return;
+    const n = sc.value.reservations.filter(r => r.status === 'proposed' && !r.locked).length;
+    if (!n) { props.toast('No unlocked proposed allocation to reset', 'warn'); return; }
+    if (!window.confirm(`Remove the ${n} unlocked proposed allocation(s)? Locked ones and manual reservations stay.`)) return;
+    mutate('reset proposed allocation', s => { s.reservations = s.reservations.filter(r => !(r.status === 'proposed' && !r.locked)); });
+    props.toast(`${n} proposed allocation(s) removed — Save to keep`, 'ok');
+}
+
+// live allocation report from the scenario's reservations (manual edits included)
+const capIndex = computed(() => { void tick.value; return sc.value ? buildCapIndex(sc.value, sc.value.from, sc.value.to) : null; });
+const allocRep = computed(() => { void tick.value; return sc.value ? allocationReport(sc.value, { capIndex : capIndex.value }) : null; });
+const allocBad = computed(() => (allocRep.value ? reconcileAllocation(allocRep.value) : []));
+const unitName = c => (c === 'G' ? 'GSL' : unitOf(sc.value, c)?.label || c);
+
+// ---- Product-Wise Allocation panel ----------------------------------------
+const pwOpen = ref(false);
+const pwF = ref({ buyer : '', unit : '', product : '', garment : '', month : '', order : '' });
+const pwMoveQty = ref({});          // orderId → qty
+const pwMoveTo = ref({});           // orderId → unit code
+const pwOrders = computed(() => {
+    const f = pwF.value, rows = allocRep.value?.orders || [];
+    const q = f.order.trim().toLowerCase();
+    return rows.filter(o => (!f.buyer || o.buyer === f.buyer) && (!f.unit || o.contractUnit === f.unit) && (!f.product || o.product === f.product)
+        && (!f.garment || o.garment === f.garment) && (!f.month || o.ym === f.month)
+        && (!q || `${o.code} ${o.style} ${o.buyer}`.toLowerCase().includes(q)));
+});
+const pwChoices = computed(() => {
+    const rows = allocRep.value?.orders || [];
+    const uniq = k => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
+    return { buyers : uniq('buyer'), products : uniq('product'), garments : uniq('garment'), months : uniq('ym') };
+});
+// product × unit: capacity of the unit for the product over the plan range
+// (free minutes of the lines that make it ÷ product SMV), what the filtered
+// orders propose there and the balance
+const pwProducts = computed(() => {
+    void tick.value;
+    const s = sc.value, ix = capIndex.value; if (!s || !ix) return [];
+    const settings = balanceSettings(s);
+    const load = loadMap.value;
+    const prods = [...new Set(pwOrders.value.map(o => o.product))].sort();
+    // minutes taken per line by reservations of OTHER products (the product's own proposals are what we compare)
+    const resById = new Map(s.reservations.map(r => [r.id, r]));
+    return prods.map(p => {
+        const smv = smvOf(p, pwF.value.unit || 'M');
+        const row = { product : p, smv, units : {} };
+        for (const u of [...ALL_UNITS, 'G']) {
+            const proposed = pwOrders.value.filter(o => o.product === p).reduce((a, o) => a + (u === 'G' ? o.gsl : u === o.contractUnit ? o.internal : (o.transfers[u] || 0)), 0);
+            if (u === 'G') { row.units.G = { pool : true, proposed, makes : true }; continue; }
+            const makes = unitMakes(settings, p, u);
+            let capMin = 0, otherMin = 0;
+            for (const l of s.lines) {
+                if (l.unitCode !== u || l.pool || !l.active || lineSmv(s, l, p) == null) continue;
+                const c = ix.cap.get(l.id); for (let i = 0; i < c.length; i++) capMin += c[i];
+                const m = load.get(l.id);
+                if (m) for (const [, cell] of m) for (const it of cell.items) { const r = resById.get(it.resId); if (r && (r.product || orderById(s, r.orderId)?.product) !== p) otherMin += it.min; }
+            }
+            const available = makes && smv > 0 ? Math.round(Math.max(0, capMin - otherMin) / smv) : 0;
+            row.units[u] = { makes, available, proposed, balance : available - proposed, lines : s.lines.filter(l => l.unitCode === u && !l.pool && l.active && lineSmv(s, l, p) != null).length };
+        }
+        return row;
+    });
+});
+function pwToggleMakes(product, u) {
+    mutate(`${unitName(u)} ${product}`, s => {
+        const b = balanceSettings(s);
+        const pu = { ...(b.productUnits[product] || {}) };
+        if (pu[u] === false) delete pu[u]; else pu[u] = false;
+        b.productUnits[product] = pu;
+        s.balance = b;
+    });
+}
+function pwLock(o, on) { pwLockAll([o], on); }
+function pwLockAll(rows, on) { const ids = new Set(rows.map(o => o.id)); if (!ids.size) return; mutate(on ? `lock ${ids.size} order(s)` : `unlock ${ids.size} order(s)`, s => { for (const r of s.reservations) if (ids.has(r.orderId) && r.status !== 'cancelled') r.locked = on; }); }
+// move pieces of an order from one unit's proposals to another unit (GSL = pool)
+function pwMove(o) {
+    const q = Math.floor(Number(pwMoveQty.value[o.id]) || 0), to = pwMoveTo.value[o.id];
+    if (!(q > 0) || !to) { props.toast('Give the quantity and the unit to move to', 'warn'); return; }
+    const s = sc.value, order = orderById(s, o.id); if (!order) return;
+    const lineUnit = new Map(s.lines.map(l => [l.id, l.unitCode]));
+    // take from the unlocked proposals NOT already in the target unit, latest first
+    const src = s.reservations.filter(r => r.orderId === o.id && !r.locked && r.status !== 'cancelled' && lineUnit.get(r.lineId) !== to).sort((a, b) => b.start.localeCompare(a.start));
+    const avail = src.reduce((a, r) => a + r.qty, 0) + o.unallocated;
+    if (q > avail) { props.toast(`Only ${fmtQty(avail)} pcs are movable (unlocked, not yet in ${unitName(to)})`, 'warn'); return; }
+    mutate(`move ${fmtQty(q)} → ${unitName(to)}`, scn => {
+        let need = Math.max(0, q - o.unallocated);           // unallocated pieces move first, no reservation to shrink
+        for (const r of src) {
+            if (need <= 0) break;
+            const x = scn.reservations.find(y => y.id === r.id);
+            const take = Math.min(need, x.qty);
+            x.qty -= take; need -= take;
+            if (x.qty <= 0) scn.reservations = scn.reservations.filter(y => y.id !== x.id);
+        }
+        const smv = orderSmv(scn, order);
+        const label = `${order.buyer || ''} ${order.style || ''}`.trim();
+        const start = [order.pcd, scn.from].filter(Boolean).sort().pop();
+        if (to === 'G') {
+            const pool = ensurePoolLine(scn);
+            scn.reservations.push({ id : uid('rs'), orderId : order.id, lineId : pool.id, product : order.product, smv, start, end : order.delivery && order.delivery > start ? order.delivery : start, qty : q, locked : false, status : 'proposed', source : 'balance', kind : 'gsl', fromUnit : order.unitCode, extStatus : 'pending', reason : 'moved to GSL by the planner', label });
+            return;
+        }
+        const placed = placeInUnit(scn, order, to, q, { kind : to === order.unitCode ? 'contract' : 'transfer', reason : `moved to ${unitName(to)} by the planner` });
+        for (const a of placed.allocations) scn.reservations.push({ ...a, start : a.start < start ? start : a.start });
+        if (placed.remaining > 0) props.toast(`${unitName(to)} had free compatible capacity for ${fmtQty(q - placed.remaining)} of ${fmtQty(q)} pcs — the rest is unallocated (${placed.reason || ''})`, 'warn');
+    });
+    pwMoveQty.value[o.id] = 0;
+}
+function pwRerun() {
+    const ids = pwOrders.value.filter(o => o.unallocated > 0).map(o => o.id);
+    if (!ids.length) { props.toast('No unallocated quantity in the filtered orders', 'warn'); return; }
+    let out = null;
+    mutate(`re-run ${ids.length} order(s)`, s => {
+        out = autoBalance(s, { orderIds : ids, importOrders : false });
+        const rm = new Set(out.removedIds);
+        s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(out.reservations);
+    });
+    if (out) props.toast(`${ids.length} order(s) re-balanced: ${fmtQty(out.summary.contract)} contract · ${fmtQty(out.summary.transfer)} transfer · ${fmtQty(out.summary.gsl)} GSL · ${fmtQty(out.summary.unallocated)} unallocated`, 'ok');
+}
+
+// ---- Excess / GSL pool ---------------------------------------------------
+const gpOpen = ref(false);
+const gpStatus = ref('');
+const gpRows = computed(() => {
+    void tick.value;
+    const s = sc.value; if (!s) return [];
+    const poolIds = new Set(s.lines.filter(l => l.pool).map(l => l.id));
+    return s.reservations.filter(r => poolIds.has(r.lineId) && r.status !== 'cancelled' && (!gpStatus.value || (r.extStatus || 'pending') === gpStatus.value)).map(r => {
+        const o = orderById(s, r.orderId) || {};
+        return { ...r, buyer : o.buyer, style : o.style, code : o.note || '', garment : o.garment || '', delivery : o.delivery, po : o.po || '', sah : r.qty * (Number(r.smv) > 0 ? r.smv : orderSmv(s, o)) / 60 };
+    }).sort((a, b) => String(a.delivery || '').localeCompare(String(b.delivery || '')));
+});
+const gpTotal = computed(() => gpRows.value.reduce((a, r) => ({ qty : a.qty + r.qty, sah : a.sah + r.sah }), { qty : 0, sah : 0 }));
+function gpSetStatus(r, v) { mutate(`GSL ${v}`, s => { const x = s.reservations.find(y => y.id === r.id); if (x) x.extStatus = v; }); }
+function gpRemove(r) { if (!window.confirm('Remove this GSL overflow allocation? The quantity becomes unallocated.')) return; mutate('remove GSL allocation', s => { s.reservations = s.reservations.filter(y => y.id !== r.id); }); }
+function gpLock(r) { mutate(r.locked ? 'unlock' : 'lock', s => { const x = s.reservations.find(y => y.id === r.id); if (x) x.locked = !x.locked; }); }
+
+// ---- Before & After balancing report ---------------------------------------
+const baOpen = ref(false);
+const baTab = ref('monthly');
+const baUnitRows = computed(() => {
+    const rep = allocRep.value; if (!rep) return [];
+    const by = {};
+    for (const m of rep.unitMonths) {
+        const u = by[m.unit] || (by[m.unit] = { unit : m.unit, originalQty : 0, originalSah : 0, capSah : 0, internalQty : 0, inQty : 0, outQty : 0, gslQty : 0, unallocated : 0, finalSah : 0, overMonths : 0 });
+        u.originalQty += m.originalQty; u.originalSah += m.originalSah; u.capSah += m.capSah; u.internalQty += m.internalQty; u.inQty += m.inQty; u.outQty += m.outQty; u.gslQty += m.gslQty; u.unallocated += m.unallocated; u.finalSah += m.finalSah;
+        if (m.capSah && m.originalSah > m.capSah) u.overMonths++;
+    }
+    return Object.values(by).sort((a, b) => a.unit.localeCompare(b.unit));
+});
+const baRisk = computed(() => (allocRep.value?.orders || []).filter(o => o.risk).sort((a, b) => String(a.delivery || '').localeCompare(String(b.delivery || ''))));
 // ---------------------------------------------------------------------------
 // Import reference data (one way: live board → this scenario)
 // ---------------------------------------------------------------------------
@@ -1042,7 +1307,13 @@ function close() {
             <span class="hl-sep"></span>
             <button class="cal-btn st-btn hl-btn" :disabled="!sc" @click="cfgOpen = true">⚙️ Configure units &amp; lines</button>
             <button class="cal-btn st-btn hl-btn" :disabled="!sc" @click="ordOpen = true">📦 Orders &amp; capacity test</button>
-            <button class="cal-btn st-btn hl-btn hl-primary" :disabled="!sc" @click="runAutoPlan">🤖 Test Auto Planning</button>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" @click="runAutoPlan">🤖 Test Auto Planning</button>
+            <span class="hl-sep"></span>
+            <button class="cal-btn st-btn hl-btn hl-primary" :disabled="!sc || abBusy" title="Contract unit first → other compatible internal units → all remaining excess to GSL (proposal in this scenario)" @click="openAutoBalance">⚖️ Auto Balance All Orders</button>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" title="Product × unit capacity, proposals, exclusions, manual moves and locks" @click="pwOpen = true">🧩 Product-Wise Allocation</button>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" title="Every quantity sent to the GSL overflow pool, with its external confirmation status" @click="gpOpen = true">🌐 Excess / GSL Pool</button>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" title="Original demand vs proposed allocation — monthly, unit, buyer and product views" @click="baOpen = true">📊 Before &amp; After</button>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" title="Remove the unlocked proposed allocations (locked ones and manual reservations stay)" @click="resetProposed">↩ Reset Proposed</button>
             <button class="cal-btn st-btn hl-btn" :disabled="!sc || busy" @click="impFetch">⬇ Import Planning Reference Data</button>
             <button class="cal-btn st-btn hl-btn" :disabled="!sc" @click="resetSimulation">♻ Reset simulation</button>
             <span class="hl-sep"></span>
@@ -1064,7 +1335,7 @@ function close() {
             </template>
             <span class="hl-legend">
                 <i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>holiday <i class="hl-lg hl-day-off"></i>off day <i class="hl-lg hl-day-inactive"></i>inactive
-                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
+                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
             </span>
             <span v-if="conflictList.length" class="hl-warn">⚠ {{ conflictList.length }} overloaded line-day(s)</span>
             <span v-if="reconcileIssues.length" class="hl-warn">⚠ {{ reconcileIssues.length }} reservation(s) do not reconcile</span>
@@ -1129,8 +1400,11 @@ function close() {
                         <tr><td>Quantity</td><td>{{ fmtQty(resRow.qty) }} pcs</td></tr>
                         <tr><td>PCD / delivery</td><td>{{ dmy(resOrder?.pcd) }} / {{ dmy(resOrder?.delivery) }}</td></tr>
                         <tr><td>Line</td><td>{{ unitOf(sc, resLine?.unitCode)?.name }} · {{ resLine?.name }}</td></tr>
-                        <tr><td>Span</td><td>{{ dmy(resRow.start) }} → {{ dmy(resRow.end) }} · {{ resDays?.days.length }} working day(s) · SMV {{ resDays?.smv }}</td></tr>
+                        <tr><td>Span</td><td>{{ dmy(resRow.start) }} → {{ dmy(resRow.end) }} · {{ resDays?.days.length }} working day(s) · SMV {{ Math.round((resDays?.smv || 0) * 100) / 100 }}</td></tr>
                         <tr><td>Status</td><td>{{ resRow.status }}{{ resRow.locked ? ' · 🔒 locked' : '' }}{{ resRow.source === 'live' ? ' · live load snapshot' : '' }}</td></tr>
+                        <tr v-if="resRow.kind"><td>Allocation</td><td><span :class="`hl-k-${resRow.kind}`">{{ KIND_LABEL[resRow.kind] || resRow.kind }}</span>{{ resRow.fromUnit && resLine && resRow.fromUnit !== resLine.unitCode ? ` · contract ${unitName(resRow.fromUnit)} → ${unitName(resLine.unitCode)}` : '' }}{{ resOrder?.garment ? ` · ${resOrder.garment}` : '' }}</td></tr>
+                        <tr v-if="resRow.reason"><td>Reason</td><td>{{ resRow.reason }}</td></tr>
+                        <tr v-if="resRow.kind === 'gsl' || resLine?.pool"><td>External capacity</td><td><select :value="resRow.extStatus || 'pending'" class="cal-in hl-sel-s" @change="gpSetStatus(resRow, $event.target.value)"><option v-for="(l, k) in EXT_STATUS" :key="k" :value="k">{{ l }}</option></select> <i class="hl-dim">GSL is an unlimited pool — this window is the required production window, not confirmed capacity</i></td></tr>
                     </table>
                     <div class="hl-daytable"><span v-for="d in resDays?.days || []" :key="d.date" :class="{ 'hl-dover' : isOver(usedMinutes(loadMap, resRow.lineId, d.date), lineDayMinutes(sc, resLine, d.date)) }">{{ dmy(d.date) }}: <b>{{ fmtQty(d.pcs) }}</b></span></div>
                     <div class="hl-actions">
@@ -1461,6 +1735,266 @@ function close() {
             </div>
         </div>
 
+        <!-- Auto Balance — options -->
+        <div v-if="abOpen && sc" class="cal-overlay" @click.self="!abBusy && (abOpen = false)">
+            <div class="cal-dialog pf-dialog hl-dialog hl-ab-dialog">
+                <div class="cal-title">⚖️ Auto Balance All Orders — {{ sc.name }} <span class="cal-title-btns"><span class="cal-x" @click="!abBusy && (abOpen = false)">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-result-row"><b>Rule:</b> contract unit first → other compatible internal units → all remaining excess to the GSL overflow pool (unlimited, pending external confirmation). MBM / CEIL / AQL are never loaded past their simulated capacity. The result is a <b>proposal</b> in this scenario only — the live ERP and the factory boards are never changed.</div>
+                    <div class="hl-ab-grid">
+                        <div class="hl-ab-box">
+                            <div class="hl-ab-h">Orders</div>
+                            <label class="hl-chk"><input v-model="abOpt.importOrders" type="checkbox"> Import / refresh the ERP active orders first <i class="hl-dim">(mr_order_entry Active, delivery after the cut-off, contract unit = production unit; {{ abErp?.rows ? fmtQty(abErp.rows.length) + ' orders' : abErp?.error ? 'ERP not available' : 'loading…' }})</i></label>
+                            <label class="hl-chk"><input v-model="abOpt.useOutstanding" type="checkbox"> Plan the outstanding quantity (PO qty − exported) instead of the order quantity</label>
+                            <div class="hl-ab-row">
+                                <label class="hl-lbl">Contract units <label v-for="u in SCOPE_UNITS" :key="u" class="hl-dow" :title="u === 'G' ? 'Orders whose ERP production unit is GSL go straight to the pool (outside production)' : ''"><input type="checkbox" :checked="abOpt.units.includes(u)" @change="abOpt.units = $event.target.checked ? [...abOpt.units, u] : abOpt.units.filter(x => x !== u)">{{ unitName(u) }}</label></label>
+                            </div>
+                            <div class="hl-ab-row hl-ab-sel">
+                                <label class="hl-lbl">Buyers <select v-model="abOpt.buyers" multiple class="cal-in hl-multi"><option v-for="b in abChoices.buyers" :key="b" :value="b">{{ b }}</option></select></label>
+                                <label class="hl-lbl">Delivery months <select v-model="abOpt.months" multiple class="cal-in hl-multi"><option v-for="m in abChoices.months" :key="m" :value="m">{{ ymLabel(m) }}</option></select></label>
+                                <label class="hl-lbl">Product types <select v-model="abOpt.products" multiple class="cal-in hl-multi"><option v-for="p in abChoices.products" :key="p" :value="p">{{ p }}</option></select></label>
+                            </div>
+                            <div class="hl-dim">Nothing selected = all. Ctrl / Cmd-click to pick several.</div>
+                        </div>
+                        <div class="hl-ab-box">
+                            <div class="hl-ab-h">Capacity &amp; rules</div>
+                            <div class="hl-ab-row"><label class="hl-lbl">Planning window <input v-model="abOpt.from" type="date" class="cal-in hl-date"> → <input v-model="abOpt.to" type="date" class="cal-in hl-date"></label> <i class="hl-dim">inside the scenario range {{ dmy(sc.from) }} → {{ dmy(sc.to) }}</i></div>
+                            <label class="hl-chk"><input v-model="abOpt.includeLive" type="checkbox"> Imported live-load snapshot bars count as taken capacity</label>
+                            <label class="hl-chk"><input v-model="abOpt.allowTransfer" type="checkbox"> Allow cross-unit transfer to other internal units</label>
+                            <div class="hl-ab-row hl-ab-tr"><span class="hl-dim">Transfer priority:</span>
+                                <label class="hl-lbl">MBM → <input v-model="abOpt.transfers.M" class="cal-in hl-tr-in" placeholder="C,A"></label>
+                                <label class="hl-lbl">CEIL → <input v-model="abOpt.transfers.C" class="cal-in hl-tr-in" placeholder="M,A"></label>
+                                <label class="hl-lbl">AQL → <input v-model="abOpt.transfers.A" class="cal-in hl-tr-in" placeholder="M,C"></label>
+                                <i class="hl-dim">unit codes in order (M = MBM, C = CEIL, A = AQL); empty = no transfer out of that unit</i>
+                            </div>
+                            <label class="hl-chk"><input v-model="abOpt.allowGsl" type="checkbox"> Allow GSL overflow (all remaining excess → GSL — Outside Production Pool, unlimited)</label>
+                            <div class="hl-ab-row"><label class="hl-lbl">Delivery lead <input v-model.number="abOpt.deliveryLead" type="number" min="0" max="60" class="cal-in hl-num"> days</label> <i class="hl-dim">sewing must finish this many days before the delivery date</i></div>
+                            <div class="hl-dim">Product ↔ unit capability (which unit makes which product) is set on the <b>Product-Wise Allocation</b> panel. Locked reservations are never touched; previous unlocked proposals of the orders in scope are replaced, so re-running never duplicates.</div>
+                        </div>
+                    </div>
+                    <div class="hl-actions hl-right">
+                        <span v-if="sc.balance?.lastRun" class="hl-dim hl-gap">Last run {{ sc.balance.lastRun.at }}: {{ fmtQty(sc.balance.lastRun.orders) }} orders · contract {{ fmtQty(sc.balance.lastRun.contract) }} · transfer {{ fmtQty(sc.balance.lastRun.transfer) }} · GSL {{ fmtQty(sc.balance.lastRun.gsl) }} · unallocated {{ fmtQty(sc.balance.lastRun.unallocated) }}</span>
+                        <button v-if="abBusy" class="cal-btn st-btn hl-btn hl-danger" @click="cancelAutoBalance">✖ Cancel</button>
+                        <button class="cal-btn st-btn hl-btn" :disabled="abBusy" @click="abOpen = false">Close</button>
+                        <button class="cal-btn cal-btn-primary st-btn hl-btn" :disabled="abBusy" @click="runAutoBalance">{{ abBusy ? '⏳ Balancing…' : '⚖️ Run Auto Balance' }}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto Balance — proposal -->
+        <div v-if="abResOpen && abResult && sc" class="cal-overlay" @click.self="abResOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-abr-dialog">
+                <div class="cal-title">⚖️ Auto Balance — proposal (not applied yet) <span class="cal-title-btns"><span class="cal-x" @click="abResOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-ab-sum">
+                        <span><b>{{ fmtQty(abResult.summary.orders) }}</b> orders · <b>{{ fmtQty(abResult.summary.qty) }}</b> pcs</span>
+                        <span class="hl-k-contract">Contract units <b>{{ fmtQty(abResult.summary.contract) }}</b></span>
+                        <span class="hl-k-transfer">Transferred <b>{{ fmtQty(abResult.summary.transfer) }}</b></span>
+                        <span class="hl-k-gsl">GSL overflow <b>{{ fmtQty(abResult.summary.gsl) }}</b></span>
+                        <span :class="{ 'hl-warn' : abResult.summary.unallocated }">Unallocated <b>{{ fmtQty(abResult.summary.unallocated) }}</b></span>
+                        <span v-if="abResult.summary.kept">already reserved (kept / locked) <b>{{ fmtQty(abResult.summary.kept) }}</b></span>
+                        <span :class="{ 'hl-warn' : abResult.summary.risk }">⚠ delivery-risk orders <b>{{ fmtQty(abResult.summary.risk) }}</b></span>
+                        <span class="hl-dim">{{ abResult.imported ? `ERP: ${abResult.imported.added} new, ${abResult.imported.updated} updated order(s) · ` : '' }}{{ abResult.summary.removed }} previous proposal(s) replaced · {{ abResult.local ? 'computed in the browser' : 'computed by the API service' }} in {{ abResult.ms }} ms</span>
+                    </div>
+                    <div class="hl-scroll hl-abr-scroll">
+                        <table class="hl-table hl-table-s hl-abr-tbl">
+                            <thead><tr><th>Order</th><th>Buyer</th><th>Product · garment</th><th>Contract</th><th>Delivery</th><th>Qty</th><th>Contract unit</th><th>Transfers</th><th>GSL</th><th>Unallocated</th><th>Completion</th><th>Rule / reason</th></tr></thead>
+                            <tbody>
+                                <tr v-for="r in abResultRows" :key="r.orderId" :class="{ 'hl-short' : r.risk }">
+                                    <td><b>{{ r.code || r.style }}</b></td><td>{{ r.buyer }}</td><td>{{ r.product }}<span v-if="r.garment" class="hl-dim"> · {{ r.garment }}</span></td><td>{{ unitName(r.contractUnit) }}</td><td>{{ dmy(r.delivery) }}</td>
+                                    <td class="hl-r">{{ fmtQty(r.qty) }}<span v-if="r.kept" class="hl-dim"> ({{ fmtQty(r.kept) }} kept)</span></td>
+                                    <td class="hl-r">{{ r.contract ? fmtQty(r.contract) : '—' }}</td>
+                                    <td class="hl-r">{{ r.transfers.length ? r.transfers.map(t => `${unitName(t.unit)} ${fmtQty(t.qty)}`).join(', ') : '—' }}</td>
+                                    <td class="hl-r hl-k-gsl">{{ r.gsl ? fmtQty(r.gsl) : '—' }}</td>
+                                    <td class="hl-r" :class="{ 'hl-warn' : r.unallocated }">{{ r.unallocated ? fmtQty(r.unallocated) : '—' }}</td>
+                                    <td :class="{ 'hl-late' : r.completion && r.delivery && r.completion > r.delivery }">{{ dmy(r.completion) }}</td>
+                                    <td class="hl-dim hl-reason">{{ r.rule }}<span v-if="r.notes.length"> · {{ r.notes.join('; ') }}</span></td>
+                                </tr>
+                                <tr v-if="!abResultRows.length"><td colspan="12" class="hl-dim">No order in scope — check the filters (buyers / months / products / contract units) or import the ERP orders.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">Priority: delivery date, then ERP high priority, then contract unit. Each order is tested on its contract unit's compatible lines first, then on the other allowed units, and whatever is left goes to GSL as <b>Pending External Capacity Confirmation</b>. Applying puts the proposal on the board (teal = contract, purple = transfer, orange = GSL); move, split, lock or cancel bars there — capacity and the reports follow every change. Save the scenario to keep it.</div>
+                    <div class="hl-actions hl-right">
+                        <button class="cal-btn st-btn hl-btn" @click="abResOpen = false">Discard</button>
+                        <button class="cal-btn cal-btn-primary st-btn hl-btn" @click="abApply">📌 Apply proposal to the scenario</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Product-Wise Allocation -->
+        <div v-if="pwOpen && sc && allocRep" class="cal-overlay" @click.self="pwOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-pw-dialog">
+                <div class="cal-title">🧩 Product-Wise Allocation — {{ sc.name }} <span class="cal-title-btns"><span class="cal-x" @click="pwOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-actions">
+                        <label class="hl-lbl">Buyer <select v-model="pwF.buyer" class="cal-in hl-sel-s"><option value="">all</option><option v-for="b in pwChoices.buyers" :key="b" :value="b">{{ b }}</option></select></label>
+                        <label class="hl-lbl">Contract unit <select v-model="pwF.unit" class="cal-in hl-sel-s"><option value="">all</option><option v-for="u in SCOPE_UNITS" :key="u" :value="u">{{ unitName(u) }}</option></select></label>
+                        <label class="hl-lbl">Product <select v-model="pwF.product" class="cal-in hl-sel-s"><option value="">all</option><option v-for="p in pwChoices.products" :key="p" :value="p">{{ p }}</option></select></label>
+                        <label class="hl-lbl">Garment <select v-model="pwF.garment" class="cal-in hl-sel-s"><option value="">all</option><option v-for="g in pwChoices.garments" :key="g" :value="g">{{ g }}</option></select></label>
+                        <label class="hl-lbl">Delivery month <select v-model="pwF.month" class="cal-in hl-sel-s"><option value="">all</option><option v-for="m in pwChoices.months" :key="m" :value="m">{{ ymLabel(m) }}</option></select></label>
+                        <label class="hl-lbl">Order <input v-model="pwF.order" class="cal-in hl-txt" placeholder="code / style / buyer"></label>
+                        <span class="hl-gap"></span>
+                        <span class="hl-dim">range {{ dmy(sc.from) }} → {{ dmy(sc.to) }} · {{ fmtQty(pwOrders.length) }} order(s)</span>
+                    </div>
+                    <table class="hl-table hl-table-s hl-pw-prod">
+                        <thead><tr><th>Product</th><th>SMV</th><th v-for="u in [...ALL_UNITS, 'G']" :key="u" colspan="3" class="hl-c">{{ unitName(u) }}</th></tr>
+                            <tr><th></th><th></th><template v-for="u in [...ALL_UNITS, 'G']" :key="u"><th title="Capacity of the unit's lines that make the product over the plan range, minus what other products already take, in pieces at the product SMV">Available</th><th title="Proposed / reserved quantity of the filtered orders in this unit">Proposed</th><th title="Available − proposed">Balance</th></template></tr></thead>
+                        <tbody>
+                            <tr v-for="p in pwProducts" :key="p.product" :class="{ 'hl-sel' : pwF.product === p.product }">
+                                <td><b>{{ p.product }}</b></td><td class="hl-r">{{ Math.round(p.smv * 10) / 10 }}</td>
+                                <template v-for="u in [...ALL_UNITS, 'G']" :key="u">
+                                    <td v-if="p.units[u].pool" class="hl-r hl-k-gsl">Unlimited pool</td>
+                                    <td v-else class="hl-r" :class="{ 'hl-dim' : !p.units[u].makes }">
+                                        <label class="hl-chk-s" :title="p.units[u].makes ? `${unitName(u)} makes ${p.product} (${p.units[u].lines} line(s)) — untick to exclude it from Auto Balance` : `${unitName(u)} excluded for ${p.product}`"><input type="checkbox" :checked="p.units[u].makes" @change="pwToggleMakes(p.product, u)"></label>
+                                        {{ p.units[u].makes ? (p.units[u].lines ? fmtQty(p.units[u].available) : 'no line') : 'excluded' }}
+                                    </td>
+                                    <td class="hl-r" :class="{ 'hl-k-gsl' : u === 'G' && p.units[u].proposed }">{{ p.units[u].proposed ? fmtQty(p.units[u].proposed) : '—' }}</td>
+                                    <td v-if="p.units[u].pool" class="hl-r hl-dim">{{ p.units[u].proposed ? 'pending' : '—' }}</td>
+                                    <td v-else class="hl-r" :class="{ 'hl-em-neg' : p.units[u].balance < 0 }">{{ p.units[u].makes ? fmtQty(p.units[u].balance) : '—' }}</td>
+                                </template>
+                            </tr>
+                            <tr v-if="!pwProducts.length"><td colspan="14" class="hl-dim">No orders match the filters.</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="hl-actions">
+                        <button class="cal-btn st-btn hl-btn" title="Auto Balance again only the filtered orders that still have unallocated quantity (locked allocations untouched)" @click="pwRerun">🔁 Re-run balancing for the remaining quantity</button>
+                        <button class="cal-btn st-btn hl-btn" title="Lock every allocation of the filtered orders — Auto Balance leaves them unchanged" @click="pwLockAll(pwOrders, true)">🔒 Lock filtered allocations</button>
+                        <button class="cal-btn st-btn hl-btn" @click="pwLockAll(pwOrders, false)">🔓 Unlock filtered</button>
+                        <span class="hl-gap"></span>
+                        <span v-if="allocBad.length" class="hl-warn">⚠ {{ allocBad.length }} order(s) do not reconcile</span>
+                    </div>
+                    <div class="hl-scroll hl-pw-scroll">
+                        <table class="hl-table hl-table-s hl-pw-orders">
+                            <thead><tr><th>Order</th><th>Buyer</th><th>Product · garment</th><th>Contract</th><th>Delivery</th><th>Qty</th><th v-for="u in [...ALL_UNITS, 'G']" :key="u" class="hl-r">{{ unitName(u) }}</th><th>Unallocated</th><th>Completion</th><th>Why</th><th>Move</th></tr></thead>
+                            <tbody>
+                                <tr v-for="o in pwOrders" :key="o.id" :class="{ 'hl-short' : o.risk }">
+                                    <td><b>{{ o.code || o.style }}</b>{{ o.locked ? ' 🔒' : '' }}</td><td>{{ o.buyer }}</td><td>{{ o.product }}<span v-if="o.garment" class="hl-dim"> · {{ o.garment }}</span></td><td>{{ unitName(o.contractUnit) }}</td><td>{{ dmy(o.delivery) }}</td>
+                                    <td class="hl-r">{{ fmtQty(o.qty) }}</td>
+                                    <td v-for="u in [...ALL_UNITS, 'G']" :key="u" class="hl-r" :class="{ 'hl-k-contract' : u === o.contractUnit, 'hl-k-transfer' : u !== o.contractUnit && u !== 'G', 'hl-k-gsl' : u === 'G' }">{{ (u === 'G' ? o.gsl : u === o.contractUnit ? o.internal : o.transfers[u]) ? fmtQty(u === 'G' ? o.gsl : u === o.contractUnit ? o.internal : o.transfers[u]) : '—' }}<span v-if="u === 'G' && o.gsl" class="hl-dim"> {{ o.gslStatus }}</span></td>
+                                    <td class="hl-r" :class="{ 'hl-warn' : o.unallocated }">{{ o.unallocated ? fmtQty(o.unallocated) : '—' }}</td>
+                                    <td :class="{ 'hl-late' : o.completion && o.delivery && o.completion > o.delivery }">{{ dmy(o.completion) }}</td>
+                                    <td class="hl-dim hl-reason" :title="o.reasons.join('\n')">{{ o.reasons[0] || '' }}</td>
+                                    <td class="hl-nowrap"><input v-model.number="pwMoveQty[o.id]" type="number" min="1" class="cal-in hl-num" placeholder="pcs"> → <select v-model="pwMoveTo[o.id]" class="cal-in hl-sel-xs"><option value="">unit…</option><option v-for="u in [...ALL_UNITS, 'G']" :key="u" :value="u">{{ unitName(u) }}</option></select> <button class="cal-btn st-btn hl-btn" title="Move this quantity from the order's unlocked allocations (and its unallocated quantity) to the chosen unit" @click="pwMove(o)">➡</button> <button class="cal-btn st-btn hl-btn" :title="o.locked ? 'Unlock the allocations of this order' : 'Lock the allocations of this order'" @click="pwLock(o, !o.locked)">{{ o.locked ? '🔓' : '🔒' }}</button></td>
+                                </tr>
+                                <tr v-if="!pwOrders.length"><td colspan="16" class="hl-dim">No orders match the filters — run Auto Balance or import orders first.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">Untick a unit for a product to exclude it from automatic allocation (lines are not changed). Move takes pieces out of the order's unlocked allocations (unallocated pieces first) and fits them on the chosen unit's free compatible capacity — GSL takes any quantity. Locked allocations survive Auto Balance and re-runs.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Excess / GSL pool -->
+        <div v-if="gpOpen && sc" class="cal-overlay" @click.self="gpOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-gp-dialog">
+                <div class="cal-title">🌐 Excess / GSL Pool — GSL — Outside Production Pool <span class="cal-title-btns"><span class="cal-x" @click="gpOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-actions">
+                        <label class="hl-lbl">Status <select v-model="gpStatus" class="cal-in hl-sel-s"><option value="">all</option><option v-for="(l, k) in EXT_STATUS" :key="k" :value="k">{{ l }}</option></select></label>
+                        <span class="hl-gap"></span>
+                        <span><b>{{ fmtQty(gpRows.length) }}</b> overflow allocation(s) · <b>{{ fmtQty(gpTotal.qty) }}</b> pcs · <b>{{ fmtQty(Math.round(gpTotal.sah)) }}</b> SAH required</span>
+                    </div>
+                    <div class="hl-scroll hl-gp-scroll">
+                        <table class="hl-table hl-table-s hl-gp-tbl">
+                            <thead><tr><th>Contract unit</th><th>Buyer</th><th>Order</th><th>PO</th><th>Style</th><th>Product</th><th>Garment</th><th>Delivery</th><th>Window</th><th>Overflow qty</th><th>Req. SAH</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                            <tbody>
+                                <tr v-for="r in gpRows" :key="r.id" :class="`hl-ext-row-${r.extStatus || 'pending'}`">
+                                    <td>{{ unitName(r.fromUnit) }}</td><td>{{ r.buyer }}</td><td><b>{{ r.code || r.label }}</b></td><td class="hl-dim hl-po" :title="r.po">{{ r.po }}</td><td>{{ r.style }}</td><td>{{ r.product }}</td><td>{{ r.garment }}</td><td>{{ dmy(r.delivery) }}</td><td>{{ dmy(r.start) }} → {{ dmy(r.end) }}</td>
+                                    <td class="hl-r"><b>{{ fmtQty(r.qty) }}</b></td><td class="hl-r">{{ fmtQty(Math.round(r.sah)) }}</td>
+                                    <td class="hl-dim hl-reason" :title="r.reason">{{ r.reason }}</td>
+                                    <td><select :value="r.extStatus || 'pending'" class="cal-in hl-sel-s" @change="gpSetStatus(r, $event.target.value)"><option v-for="(l, k) in EXT_STATUS" :key="k" :value="k">{{ l }}</option></select></td>
+                                    <td class="hl-nowrap"><button class="cal-btn st-btn hl-btn" @click="gpLock(r)">{{ r.locked ? '🔓' : '🔒' }}</button> <span class="hl-x-small" title="Remove — the quantity becomes unallocated" @click="gpRemove(r)">✖</span></td>
+                                </tr>
+                                <tr v-if="!gpRows.length"><td colspan="14" class="hl-dim">No GSL overflow allocation{{ gpStatus ? ' with this status' : '' }} — run Auto Balance, or move quantities to GSL on the Product-Wise panel.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">GSL is an unlimited overflow pool, not a capacity-constrained factory: its bars claim no MBM / CEIL / AQL capacity and the window shown is the required production window (PCD → delivery), not a confirmed production date. Every automatic allocation starts as <b>Pending External Capacity Confirmation</b>; set it to Confirmed once the external capacity is agreed, or Rejected to replan it.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Before & After balancing -->
+        <div v-if="baOpen && sc && allocRep" class="cal-overlay" @click.self="baOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-ba-dialog">
+                <div class="cal-title">📊 Before &amp; After balancing — {{ sc.name }} <span class="cal-title-btns"><span class="cal-x" @click="baOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-ab-sum">
+                        <span><b>{{ fmtQty(allocRep.totals.orders) }}</b> orders · <b>{{ fmtQty(allocRep.totals.qty) }}</b> pcs</span>
+                        <span class="hl-k-contract">contract units <b>{{ fmtQty(allocRep.totals.internal) }}</b></span>
+                        <span class="hl-k-transfer">transferred <b>{{ fmtQty(allocRep.totals.transfer) }}</b></span>
+                        <span class="hl-k-gsl">GSL <b>{{ fmtQty(allocRep.totals.gsl) }}</b></span>
+                        <span :class="{ 'hl-warn' : allocRep.totals.unallocated }">unallocated <b>{{ fmtQty(allocRep.totals.unallocated) }}</b></span>
+                        <span>locked <b>{{ fmtQty(allocRep.totals.locked) }}</b></span>
+                        <span :class="{ 'hl-warn' : allocRep.totals.risk }">⚠ delivery risk <b>{{ fmtQty(allocRep.totals.risk) }}</b> order(s)</span>
+                        <span v-if="sc.balance?.lastRun" class="hl-dim">last Auto Balance {{ sc.balance.lastRun.at }}</span>
+                        <span v-if="allocBad.length" class="hl-warn">⚠ {{ allocBad.length }} order(s) do not reconcile</span>
+                    </div>
+                    <div class="hl-tabs">
+                        <button v-for="t in [['monthly','Monthly (delivery month)'],['production','Production months'],['units','Unit-wise'],['buyers','Buyer-wise'],['products','Product-wise'],['risk','Delivery-risk orders']]" :key="t[0]" class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : baTab === t[0] }" @click="baTab = t[0]">{{ t[1] }}</button>
+                    </div>
+                    <div class="hl-scroll hl-ba-scroll">
+                        <table v-if="baTab === 'monthly'" class="hl-table hl-table-s">
+                            <thead><tr><th rowspan="2">Unit</th><th rowspan="2">Delivery month</th><th colspan="5" class="hl-c hl-ba-before">Before — original demand</th><th colspan="7" class="hl-c hl-ba-after">After — proposed allocation</th></tr>
+                                <tr><th>Orders</th><th>Original qty</th><th>Original SAH</th><th>Available cap SAH</th><th>Shortage SAH</th><th>Internal qty</th><th>Transferred out</th><th>Transferred in</th><th>GSL overflow</th><th>Unallocated</th><th>Final SAH</th><th>Final load</th></tr></thead>
+                            <tbody>
+                                <tr v-for="m in allocRep.unitMonths" :key="m.unit + m.ym" :class="{ 'hl-short' : m.unallocated }">
+                                    <td><b>{{ unitName(m.unit) }}</b></td><td>{{ ymLabel(m.ym) }}</td>
+                                    <td class="hl-r">{{ fmtQty(m.orders) }}</td><td class="hl-r">{{ fmtQty(m.originalQty) }}</td><td class="hl-r">{{ fmtQty(Math.round(m.originalSah)) }}</td><td class="hl-r">{{ fmtQty(Math.round(m.capSah)) }}</td>
+                                    <td class="hl-r" :class="{ 'hl-em-neg' : m.shortageSah > 0 }">{{ m.shortageSah > 0 ? fmtQty(Math.round(m.shortageSah)) : '—' }}</td>
+                                    <td class="hl-r hl-k-contract">{{ fmtQty(m.internalQty) }}</td><td class="hl-r hl-k-transfer">{{ m.outQty ? fmtQty(m.outQty) : '—' }}</td><td class="hl-r hl-k-transfer">{{ m.inQty ? fmtQty(m.inQty) : '—' }}</td>
+                                    <td class="hl-r hl-k-gsl">{{ m.gslQty ? fmtQty(m.gslQty) : '—' }}</td><td class="hl-r" :class="{ 'hl-warn' : m.unallocated }">{{ m.unallocated ? fmtQty(m.unallocated) : '—' }}</td>
+                                    <td class="hl-r">{{ fmtQty(Math.round(m.finalSah)) }}</td><td class="hl-r" :class="{ 'hl-em-neg' : (m.finalLoad || 0) > 1 }">{{ m.finalLoad != null ? fmtPct(m.finalLoad) : '—' }}</td>
+                                </tr>
+                                <tr v-if="!allocRep.unitMonths.length"><td colspan="14" class="hl-dim">No orders with a contract unit in the scenario.</td></tr>
+                            </tbody>
+                        </table>
+                        <table v-else-if="baTab === 'production'" class="hl-table hl-table-s">
+                            <thead><tr><th>Unit</th><th>Production month</th><th>Planned pcs</th><th>Planned SAH</th><th>Capacity SAH</th><th>Load</th></tr></thead>
+                            <tbody>
+                                <tr v-for="p in allocRep.production" :key="p.unit + p.ym"><td><b>{{ unitName(p.unit) }}</b></td><td>{{ ymLabel(p.ym) }}</td><td class="hl-r">{{ fmtQty(Math.round(p.pcs)) }}</td><td class="hl-r">{{ fmtQty(Math.round(p.sah)) }}</td><td class="hl-r">{{ fmtQty(Math.round(p.capSah)) }}</td><td class="hl-r" :class="{ 'hl-em-neg' : (p.load || 0) > 1 }">{{ p.load != null ? fmtPct(p.load) : '—' }}</td></tr>
+                                <tr v-if="!allocRep.production.length"><td colspan="6" class="hl-dim">No internal reservation yet.</td></tr>
+                            </tbody>
+                            <tfoot><tr><td colspan="6" class="hl-dim">Loading by the dates the reservations actually sew (a December delivery may load November) — the delivery-month view keeps the demand by delivery date.</td></tr></tfoot>
+                        </table>
+                        <table v-else-if="baTab === 'units'" class="hl-table hl-table-s">
+                            <thead><tr><th rowspan="2">Unit</th><th colspan="4" class="hl-c hl-ba-before">Before</th><th colspan="7" class="hl-c hl-ba-after">After</th></tr>
+                                <tr><th>Demand qty</th><th>Demand SAH</th><th>Capacity SAH</th><th>Overloaded months</th><th>Contract allocation</th><th>Transferred out</th><th>Transferred in</th><th>GSL overflow</th><th>Unallocated</th><th>Utilisation</th><th>Remaining capacity SAH</th></tr></thead>
+                            <tbody>
+                                <tr v-for="u in baUnitRows" :key="u.unit">
+                                    <td><b>{{ unitName(u.unit) }}</b></td>
+                                    <td class="hl-r">{{ fmtQty(u.originalQty) }}</td><td class="hl-r">{{ fmtQty(Math.round(u.originalSah)) }}</td><td class="hl-r">{{ fmtQty(Math.round(u.capSah)) }}</td><td class="hl-r" :class="{ 'hl-em-neg' : u.overMonths }">{{ u.overMonths || '—' }}</td>
+                                    <td class="hl-r hl-k-contract">{{ fmtQty(u.internalQty) }}</td><td class="hl-r hl-k-transfer">{{ u.outQty ? fmtQty(u.outQty) : '—' }}</td><td class="hl-r hl-k-transfer">{{ u.inQty ? fmtQty(u.inQty) : '—' }}</td><td class="hl-r hl-k-gsl">{{ u.gslQty ? fmtQty(u.gslQty) : '—' }}</td><td class="hl-r" :class="{ 'hl-warn' : u.unallocated }">{{ u.unallocated ? fmtQty(u.unallocated) : '—' }}</td>
+                                    <td class="hl-r">{{ u.capSah ? fmtPct(u.finalSah / u.capSah) : '—' }}</td><td class="hl-r">{{ fmtQty(Math.round(u.capSah - u.finalSah)) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <table v-else-if="baTab === 'buyers'" class="hl-table hl-table-s">
+                            <thead><tr><th>Buyer</th><th>Orders</th><th>Original qty</th><th>Contract units</th><th>Transferred</th><th>GSL overflow</th><th>Unallocated</th><th>Risk orders</th></tr></thead>
+                            <tbody><tr v-for="b in allocRep.buyers" :key="b.buyer"><td><b>{{ b.buyer }}</b></td><td class="hl-r">{{ fmtQty(b.orders) }}</td><td class="hl-r">{{ fmtQty(b.originalQty) }}</td><td class="hl-r hl-k-contract">{{ fmtQty(b.internalQty) }}</td><td class="hl-r hl-k-transfer">{{ b.transferQty ? fmtQty(b.transferQty) : '—' }}</td><td class="hl-r hl-k-gsl">{{ b.gslQty ? fmtQty(b.gslQty) : '—' }}</td><td class="hl-r" :class="{ 'hl-warn' : b.unallocated }">{{ b.unallocated ? fmtQty(b.unallocated) : '—' }}</td><td class="hl-r" :class="{ 'hl-warn' : b.risk }">{{ b.risk || '—' }}</td></tr></tbody>
+                        </table>
+                        <table v-else-if="baTab === 'products'" class="hl-table hl-table-s">
+                            <thead><tr><th>Product</th><th>Unit</th><th>Original (contract) qty</th><th>Proposed in the unit</th><th>Orders</th></tr></thead>
+                            <tbody><tr v-for="p in allocRep.products" :key="p.product + p.unit"><td><b>{{ p.product }}</b></td><td>{{ unitName(p.unit) }}</td><td class="hl-r">{{ p.originalQty ? fmtQty(p.originalQty) : '—' }}</td><td class="hl-r" :class="{ 'hl-k-gsl' : p.unit === 'G' }">{{ p.proposedQty ? fmtQty(p.proposedQty) : '—' }}</td><td class="hl-r">{{ p.orders || '—' }}</td></tr></tbody>
+                        </table>
+                        <table v-else class="hl-table hl-table-s">
+                            <thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Contract</th><th>Delivery</th><th>Qty</th><th>Internal</th><th>Transfers</th><th>GSL</th><th>Unallocated</th><th>Completion</th><th>Why at risk</th></tr></thead>
+                            <tbody>
+                                <tr v-for="o in baRisk" :key="o.id" class="hl-short"><td><b>{{ o.code || o.style }}</b></td><td>{{ o.buyer }}</td><td>{{ o.product }}</td><td>{{ unitName(o.contractUnit) }}</td><td>{{ dmy(o.delivery) }}</td><td class="hl-r">{{ fmtQty(o.qty) }}</td><td class="hl-r">{{ fmtQty(o.internal) }}</td><td class="hl-r">{{ Object.entries(o.transfers).map(([u, q]) => `${unitName(u)} ${fmtQty(q)}`).join(', ') || '—' }}</td><td class="hl-r hl-k-gsl">{{ o.gsl ? fmtQty(o.gsl) : '—' }}</td><td class="hl-r" :class="{ 'hl-warn' : o.unallocated }">{{ o.unallocated ? fmtQty(o.unallocated) : '—' }}</td><td :class="{ 'hl-late' : o.completion && o.delivery && o.completion > o.delivery }">{{ dmy(o.completion) }}</td>
+                                    <td class="hl-dim">{{ [o.unallocated ? 'unallocated quantity' : '', o.gsl && o.gslStatus !== 'confirmed' ? `GSL ${EXT_STATUS[o.gslStatus] || o.gslStatus}` : '', o.completion && o.delivery && o.completion > o.delivery ? 'finishes after delivery' : ''].filter(Boolean).join(' · ') }}</td></tr>
+                                <tr v-if="!baRisk.length"><td colspan="12" class="hl-dim">No delivery-risk order.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">Everything here is computed from this scenario's reservations, so moves, locks and cancellations on the board are reflected at once. Before = the orders' original demand (contract unit, delivery month) against the simulated capacity; After = where the pieces are now. Internal capacity is never exceeded; GSL quantities stay unconfirmed until reviewed.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Compare scenarios -->
         <div v-if="cmpOpen && sc" class="cal-overlay" @click.self="cmpOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog">
@@ -1528,7 +2062,7 @@ function close() {
 .hl-em-tbl tbody tr.hl-em-cur td { background : #fff8e1; font-weight : 700; }
 .hl-em-over td, tr.hl-em-over td { color : #b00020; }
 .hl-em-neg { color : #b00020; font-weight : 700; }
-.hl-em-dialog { width : 1200px; }
+.cal-overlay .cal-dialog.hl-em-dialog { width : 1200px; }
 .hl-em-list td { white-space : nowrap; }
 .hl-em-prods { margin-bottom : 8px; }
 .hl-em-prods tbody tr { cursor : pointer; }
@@ -1553,10 +2087,11 @@ function close() {
 .hl-sched .b-sch-event.hl-res-locked { opacity : .9; border-style : dashed; }
 .hl-res-txt { white-space : nowrap; overflow : hidden; text-overflow : ellipsis; padding : 0 4px; }
 .hl-tip table td { padding : 1px 6px; font-size : 11.5px; } .hl-tip table td:first-child { color : #666; }
-.hl-dialog { width : 900px; max-width : 96vw; }
-.hl-cfg-dialog { width : 1100px; }
-.hl-ord-dialog { width : 1300px; }
-.hl-res-dialog { width : 720px; }
+/* the global .cal-dialog / .pf-dialog widths (700 / 760px) must not win over the board's dialogs */
+.cal-overlay .cal-dialog.hl-dialog { width : 900px; max-width : 96vw; }
+.cal-overlay .cal-dialog.hl-cfg-dialog { width : 1100px; }
+.cal-overlay .cal-dialog.hl-ord-dialog { width : 1300px; }
+.cal-overlay .cal-dialog.hl-res-dialog { width : 720px; }
 .hl-kv td { padding : 2px 8px; } .hl-kv td:first-child { color : #666; font-weight : 600; }
 .hl-daytable { display : flex; flex-wrap : wrap; gap : 4px 10px; margin : 8px 0; font-size : 11.5px; }
 .hl-daytable .hl-dover { color : #b00020; font-weight : 700; }
@@ -1614,4 +2149,38 @@ function close() {
 .hl-result-row { margin : 6px 0; font-size : 12px; }
 .hl-alt { display : inline-block; margin : 2px 8px 2px 0; padding : 1px 6px; border-radius : 10px; background : #eee; }
 .hl-alt-ok { background : #e8f5e9; color : #2e7d32; }
+/* Central Auto Balance */
+.hl-lg-contract { background : #26a69a; } .hl-lg-transfer { background : #7e57c2; } .hl-lg-gsl { background : repeating-linear-gradient(45deg, #ff9800 0 4px, #ffcc80 4px 8px); } .hl-lg-pend { background : #fff; border : 2px dashed #e65100; } .hl-lg-lock { background : #4f7fcf; border-style : dashed; }
+.hl-sched .b-sch-event.hl-res-k-contract { background : #26a69a; border-color : #00796b; }
+.hl-sched .b-sch-event.hl-res-k-transfer { background : #7e57c2; border-color : #512da8; }
+.hl-sched .b-sch-event.hl-res-k-gsl { background : repeating-linear-gradient(45deg, #fb8c00 0 6px, #ffb74d 6px 12px); border-color : #e65100; color : #3e2723; }
+.hl-sched .b-sch-event.hl-res-ext-pending { border : 2px dashed #bf360c; }
+.hl-sched .b-sch-event.hl-res-ext-confirmed { background : #ef6c00; color : #fff; }
+.hl-sched .b-sch-event.hl-res-ext-rejected { background : repeating-linear-gradient(45deg, #9e9e9e 0 6px, #e0e0e0 6px 12px); color : #b00020; text-decoration : line-through; }
+.hl-sched .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
+.hl-line-pool { color : #e65100; }
+.hl-day-pool { background : #ffe0b2 !important; }
+.hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
+.cal-overlay .cal-dialog.hl-ab-dialog { width : 1180px; } .cal-overlay .cal-dialog.hl-abr-dialog { width : 1400px; } .cal-overlay .cal-dialog.hl-pw-dialog { width : 1500px; } .cal-overlay .cal-dialog.hl-gp-dialog { width : 1450px; } .cal-overlay .cal-dialog.hl-ba-dialog { width : 1450px; }
+.hl-ab-grid { display : grid; grid-template-columns : 1fr 1fr; gap : 12px; }
+.hl-ab-box { border : 1px solid #c9d2dc; border-radius : 4px; background : #f7f9fc; padding : 8px 12px; font-size : 12px; }
+.hl-ab-h { font-weight : 700; color : #1f3a5f; margin-bottom : 6px; }
+.hl-chk { display : flex; align-items : center; gap : 6px; margin : 4px 0; }
+.hl-chk-s { display : inline-flex; vertical-align : middle; margin-right : 2px; }
+.hl-ab-row { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; margin : 6px 0; }
+.hl-ab-sel .hl-lbl { align-items : flex-start; flex-direction : column; }
+.hl-multi { min-width : 170px; height : 96px; }
+.hl-tr-in { width : 60px; }
+.hl-ab-sum { display : flex; align-items : center; gap : 14px; flex-wrap : wrap; font-size : 12.5px; margin-bottom : 8px; }
+.hl-ab-sum b { font-size : 13.5px; }
+.hl-abr-scroll, .hl-pw-scroll, .hl-gp-scroll, .hl-ba-scroll { max-height : 58vh; }
+.hl-abr-tbl td, .hl-pw-orders td, .hl-gp-tbl td { white-space : nowrap; }
+.hl-reason { max-width : 320px; overflow : hidden; text-overflow : ellipsis; white-space : nowrap !important; }
+.hl-po { max-width : 160px; overflow : hidden; text-overflow : ellipsis; }
+.hl-pw-prod { margin-bottom : 6px; width : 100%; }
+.hl-pw-prod th.hl-c, .hl-ba-dialog th.hl-c { text-align : center; }
+.hl-ba-before { background : #fff3e0 !important; } .hl-ba-after { background : #e0f2f1 !important; }
+.hl-sel-xs { min-width : 70px; }
+.hl-nowrap { white-space : nowrap; }
+tr.hl-ext-row-confirmed td { background : #fff3e0; } tr.hl-ext-row-rejected td { background : #fbe9e7; color : #b00020; }
 </style>

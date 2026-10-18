@@ -124,8 +124,23 @@ export function lineDayMinutes(sc, line, day) {
     return mp * (hours + ot) * 60 * eff / 100;
 }
 
+// GSL — Outside Production Pool: ONE virtual line of UNIT-G with no capacity
+// ceiling. It makes every product (at the scenario product SMV), its days
+// never overload, and the board shows it as a single row.
+export const isPool = line => !!line?.pool;
+export function ensurePoolLine(sc) {
+    let l = sc.lines.find(x => x.unitCode === 'G' && x.pool);
+    if (l) return l;
+    const products = {};
+    for (const p of sc.products) products[p.name] = p.smv;
+    l = { id : `ln_pool_${sc.id || 'new'}`, unitCode : 'G', name : 'GSL — Outside Production Pool', pool : true, active : true, manpower : 0, hours : null, ot : null, eff : 0, products };
+    sc.lines.push(l);
+    return l;
+}
+
 export function lineSmv(sc, line, product) {
     if (!line || !product) return null;
+    if (line.pool) return productSmv(sc, product);          // the pool makes everything
     const v = line.products?.[product];
     if (v == null || v === '') return null;          // not compatible
     const n = Number(v);
@@ -161,7 +176,8 @@ export function reservationDays(sc, r) {
     const line  = lineById(sc, r.lineId);
     const order = orderById(sc, r.orderId);
     const product = r.product || order?.product || null;
-    const smv = (line && lineSmv(sc, line, product)) || productSmv(sc, product);
+    // the reservation's own SMV (ERP order SMV from Auto Balance) beats the line's product SMV
+    const smv = (Number(r.smv) > 0 ? Number(r.smv) : null) || (line && lineSmv(sc, line, product)) || productSmv(sc, product);
     const days = line ? workDaysIn(sc, line.unitCode, r.start, r.end) : [];
     const qty  = Number(r.qty) || 0;
     const out  = [];
@@ -217,7 +233,7 @@ export function lineSummary(sc, line, from, to, load) {
 
 export function unitSummary(sc, unitCode, from, to, load) {
     const lines = sc.lines.filter(l => l.unitCode === unitCode);
-    const s = { capMin : 0, usedMin : 0, availMin : 0, overDays : 0, activeLines : 0, lines : lines.length, idleMin : 0, util : 0, products : {}, workDays : 0 };
+    const s = { capMin : 0, usedMin : 0, availMin : 0, overDays : 0, activeLines : 0, lines : lines.filter(l => !l.pool).length, idleMin : 0, util : 0, products : {}, workDays : 0 };
     const overSet = new Set();
     // working days of the unit in the range and the average hours of a working
     // day (the month setup's figures, else the unit's hours) — the Lines tab
@@ -232,6 +248,7 @@ export function unitSummary(sc, unitCode, from, to, load) {
     }
     s.avgHours = s.workDays ? Math.round(hoursSum / s.workDays * 100) / 100 : 0;
     for (const l of lines) {
+        if (l.pool) { s.poolMin = (s.poolMin || 0) + lineSummary(sc, l, from, to, load).usedMin; continue; }   // overflow pool: reported apart, no capacity
         if (l.active) s.activeLines++;
         const ls = lineSummary(sc, l, from, to, load);
         s.capMin += ls.capMin; s.usedMin += ls.usedMin;
@@ -258,13 +275,14 @@ export function unitSummary(sc, unitCode, from, to, load) {
 export function unitDayStatus(sc, unitCode, day, load, thresholds = sc.thresholds || DEFAULT_THRESHOLDS) {
     if (holidayOn(sc, unitCode, day)) return holidayOn(sc, unitCode, day).kind === 'shutdown' ? 'shutdown' : 'holiday';
     if (!isWorkDay(sc, unitCode, day)) return 'off';
-    let cap = 0, used = 0;
+    let cap = 0, used = 0, poolUsed = 0;
     for (const l of sc.lines) {
         if (l.unitCode !== unitCode) continue;
+        if (l.pool) { poolUsed += usedMinutes(load, l.id, day); continue; }
         cap += lineDayMinutes(sc, l, day);
         used += usedMinutes(load, l.id, day);
     }
-    if (cap <= 0) return 'inactive';
+    if (cap <= 0) return poolUsed > 0 ? 'pool' : 'inactive';
     const u = used / cap;
     if (isOver(used, cap)) return 'overloaded';
     if (u >= (thresholds.full ?? 0.9)) return 'full';
@@ -272,6 +290,7 @@ export function unitDayStatus(sc, unitCode, day, load, thresholds = sc.threshold
     return used > 0 ? 'available' : 'idle';
 }
 export function lineDayStatus(sc, line, day, load, thresholds = sc.thresholds || DEFAULT_THRESHOLDS) {
+    if (line.pool) return usedMinutes(load, line.id, day) > 0 ? 'pool' : 'idle';
     if (!line.active) return 'inactive';
     if (holidayOn(sc, line.unitCode, day)) return 'holiday';
     if (!isWorkDay(sc, line.unitCode, day)) return 'off';
@@ -291,6 +310,11 @@ export function lineDayStatus(sc, line, day, load, thresholds = sc.thresholds ||
 export function fitOnLine(sc, line, product, qty, from, until, load) {
     const smv = lineSmv(sc, line, product);
     if (!smv) return { compatible : false, placed : 0, end : null, days : [], start : null };
+    if (line.pool) {
+        // unlimited pool: the whole quantity sits in the required window
+        const end = until && until >= from ? until : from;
+        return { compatible : true, placed : qty, start : from, end, days : [{ date : from, pcs : qty, min : qty * smv }], smv };
+    }
     const out = [];
     let placed = 0, start = null, end = null;
     for (let d = from, g = 0; placed < qty && g < 1500; d = addDays(d, 1), g++) {
@@ -318,7 +342,7 @@ export function planOrder(sc, order, { unitCode = order.unitCode, load = buildLo
     const tempLoad = cloneLoad(load);
     const allocations = [];
     let remaining = qty;
-    const lines = sc.lines.filter(l => l.unitCode === unitCode && l.active && lineCompatible(sc, l, order.product));
+    const lines = sc.lines.filter(l => l.unitCode === unitCode && l.active && !l.pool && lineCompatible(sc, l, order.product));
     let guard = 0;
     while (remaining > 0 && guard++ < 12) {
         let best = null;
@@ -350,7 +374,7 @@ export function planOrder(sc, order, { unitCode = order.unitCode, load = buildLo
     return { unitCode, qty, feasible, shortage : remaining, allocations, completion, requiredDays, lateBy : (completion && until && completion > until) ? daysBetween(until, completion) : 0, alternatives, linesConsidered : lines.length };
 }
 
-function cloneLoad(load) {
+export function cloneLoad(load) {
     const out = new Map();
     for (const [lid, m] of load) {
         const mm = new Map();
@@ -359,7 +383,7 @@ function cloneLoad(load) {
     }
     return out;
 }
-function addToLoad(sc, load, r) {
+export function addToLoad(sc, load, r) {
     const { days } = reservationDays(sc, r);
     let m = load.get(r.lineId);
     if (!m) { m = new Map(); load.set(r.lineId, m); }
@@ -409,6 +433,7 @@ export function endForQty(sc, lineId, product, qty, start, load) {
 export function conflicts(sc, load) {
     const out = [];
     for (const l of sc.lines) {
+        if (l.pool) continue;                                 // unlimited — never a conflict
         const m = load.get(l.id);
         if (!m) continue;
         for (const [d, cell] of m) {

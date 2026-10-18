@@ -9,6 +9,8 @@
 // server/highLevel.test.mjs).
 // ---------------------------------------------------------------------------
 
+import { autoBalance, mergeErpOrders } from '../src/hlBalance.js';
+
 export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '2026-10-09' }) {
     const HL = `${BASE}/hl`;
 
@@ -108,6 +110,19 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             // additive column (MariaDB: IF NOT EXISTS) — month-wise / day-wise unit hours
             await pool.query('ALTER TABLE hl_units ADD COLUMN IF NOT EXISTS day_hours TEXT NULL');
             await pool.query('ALTER TABLE hl_units ADD COLUMN IF NOT EXISTS avg_smv DECIMAL(8,3) NULL');
+            // Central Auto Balance (additive, simulation tables only)
+            await pool.query('ALTER TABLE hl_scenarios ADD COLUMN IF NOT EXISTS balance TEXT NULL');
+            await pool.query('ALTER TABLE hl_lines ADD COLUMN IF NOT EXISTS pool TINYINT(1) NOT NULL DEFAULT 0');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS garment VARCHAR(80) NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS smv DECIMAL(8,3) NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS outstanding INT NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS priority TINYINT(1) NOT NULL DEFAULT 0');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS po VARCHAR(400) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS kind VARCHAR(12) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS from_unit VARCHAR(4) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS reason VARCHAR(400) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS ext_status VARCHAR(16) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS smv DECIMAL(8,3) NULL');
             console.log('[hl] High Level Planning tables ready');
         })
         .catch(e => console.error('[hl] tables:', e.message));
@@ -168,20 +183,23 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         const [reservations] = await pool.query('SELECT * FROM hl_reservations WHERE scenario_id = ? ORDER BY start_date', [id]);
         const prodByLine = new Map();
         for (const x of lp) { if (!prodByLine.has(x.line_id)) prodByLine.set(x.line_id, {}); prodByLine.get(x.line_id)[x.product] = Number(x.smv); }
-        let thresholds = null;
+        let thresholds = null, balance = null;
         try { thresholds = JSON.parse(s.thresholds || 'null'); } catch { thresholds = null; }
+        try { balance = JSON.parse(s.balance || 'null'); } catch { balance = null; }
         return {
             id : s.id, name : s.name, version : s.version, createdBy : s.created_by, updatedAt : fmtDt(s.updated_at), updatedBy : s.updated_by,
-            from : ymd(s.plan_from), to : ymd(s.plan_to), thresholds : thresholds || { partial : 0.4, full : 0.9 },
+            from : ymd(s.plan_from), to : ymd(s.plan_to), thresholds : thresholds || { partial : 0.4, full : 0.9 }, balance : balance || null,
             source : s.source_note ? { note : s.source_note, at : fmtDt(s.source_at) } : null,
             units : units.map(u => { let wd = [0, 1, 2, 3, 4, 6], dh = {}; try { wd = JSON.parse(u.work_days); } catch { /* default */ } try { dh = JSON.parse(u.day_hours || '{}') || {}; } catch { dh = {}; }
                 return { code : u.code, name : u.name, label : u.label, hours : Number(u.hours), ot : Number(u.ot), workDays : wd, dayHours : dh, avgSmv : u.avg_smv == null ? null : Number(u.avg_smv), note : u.note || '' }; }),
-            lines : lines.map(l => ({ id : l.id, unitCode : l.unit_code, name : l.name, active : !!l.active, manpower : Number(l.manpower),
+            lines : lines.map(l => ({ id : l.id, unitCode : l.unit_code, name : l.name, active : !!l.active, manpower : Number(l.manpower), pool : !!l.pool,
                 hours : l.hours == null ? null : Number(l.hours), ot : l.ot == null ? null : Number(l.ot), eff : Number(l.eff), products : prodByLine.get(l.id) || {} })),
             products : products.map(p => ({ name : p.name, smv : Number(p.smv) })),
             holidays : holidays.map(h => ({ date : ymd(h.hol_date), unitCode : h.unit_code || null, label : h.label || '', kind : h.kind || 'holiday' })),
-            orders : orders.map(o => ({ id : o.id, buyer : o.buyer || '', style : o.style || '', product : o.product || '', qty : Number(o.qty), pcd : ymd(o.pcd), delivery : ymd(o.delivery), unitCode : o.unit_code || '', note : o.note || '', source : o.source || null })),
-            reservations : reservations.map(r => ({ id : r.id, orderId : r.order_id, lineId : r.line_id, product : r.product || null, start : ymd(r.start_date), end : ymd(r.end_date), qty : Number(r.qty), locked : !!r.locked, status : r.status, label : r.label || '', source : r.source || null }))
+            orders : orders.map(o => ({ id : o.id, buyer : o.buyer || '', style : o.style || '', product : o.product || '', qty : Number(o.qty), pcd : ymd(o.pcd), delivery : ymd(o.delivery), unitCode : o.unit_code || '', note : o.note || '', source : o.source || null,
+                garment : o.garment || '', smv : o.smv == null ? null : Number(o.smv), outstanding : o.outstanding == null ? null : Number(o.outstanding), priority : !!o.priority, po : o.po || '' })),
+            reservations : reservations.map(r => ({ id : r.id, orderId : r.order_id, lineId : r.line_id, product : r.product || null, start : ymd(r.start_date), end : ymd(r.end_date), qty : Number(r.qty), locked : !!r.locked, status : r.status, label : r.label || '', source : r.source || null,
+                kind : r.kind || null, fromUnit : r.from_unit || null, reason : r.reason || null, extStatus : r.ext_status || null, smv : r.smv == null ? null : Number(r.smv) }))
         };
     }
 
@@ -208,19 +226,21 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             (sc.units || []).map(u => [id, u.code, u.name, u.label || null, Number(u.hours) || 0, Number(u.ot) || 0, JSON.stringify(u.workDays || [0, 1, 2, 3, 4, 6]), u.note || null, JSON.stringify(u.dayHours || {}),
                 u.avgSmv == null || u.avgSmv === '' ? null : Number(u.avgSmv)]));
         const lines = sc.lines || [];
-        await bulk('INSERT INTO hl_lines (id, scenario_id, unit_code, name, active, manpower, hours, ot, eff, sort_order)', Array(10).fill(0),
-            lines.map((l, i) => [l.id, id, l.unitCode, l.name, l.active ? 1 : 0, Number(l.manpower) || 0, l.hours == null || l.hours === '' ? null : Number(l.hours), l.ot == null || l.ot === '' ? null : Number(l.ot), Number(l.eff) || 0, i]));
+        await bulk('INSERT INTO hl_lines (id, scenario_id, unit_code, name, active, manpower, hours, ot, eff, sort_order, pool)', Array(11).fill(0),
+            lines.map((l, i) => [l.id, id, l.unitCode, l.name, l.active ? 1 : 0, Number(l.manpower) || 0, l.hours == null || l.hours === '' ? null : Number(l.hours), l.ot == null || l.ot === '' ? null : Number(l.ot), Number(l.eff) || 0, i, l.pool ? 1 : 0]));
         const lp = [];
         for (const l of lines) for (const [p, smv] of Object.entries(l.products || {})) if (smv != null && smv !== '' && Number(smv) > 0) lp.push([l.id, p, Number(smv)]);
         await bulk('INSERT INTO hl_line_products (line_id, product, smv)', Array(3).fill(0), lp);
         await bulk('INSERT IGNORE INTO hl_products (scenario_id, name, smv)', Array(3).fill(0), (sc.products || []).map(p => [id, p.name, Number(p.smv) || 20]));
         await bulk('INSERT INTO hl_holidays (scenario_id, unit_code, hol_date, label, kind)', Array(5).fill(0), (sc.holidays || []).map(h => [id, h.unitCode || null, h.date, h.label || null, h.kind || 'holiday']));
-        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source)', Array(11).fill(0),
-            (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source || null]));
-        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source)', Array(12).fill(0),
-            (sc.reservations || []).map(r => [r.id, id, r.orderId || null, r.lineId, r.product || null, r.start, r.end, Number(r.qty) || 0, r.locked ? 1 : 0, r.status || 'reserved', r.label || null, r.source || null]));
-        await conn.query('UPDATE hl_scenarios SET plan_from = ?, plan_to = ?, thresholds = ?, source_note = ?, source_at = ?, updated_by = ?, version = version + 1 WHERE id = ?',
-            [sc.from || null, sc.to || null, JSON.stringify(sc.thresholds || null), sc.source?.note || null, sc.source?.at ? String(sc.source.at).slice(0, 19) : null, by, id]);
+        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source, garment, smv, outstanding, priority, po)', Array(16).fill(0),
+            (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source || null,
+                o.garment || null, o.smv == null || o.smv === '' ? null : Number(o.smv), o.outstanding == null ? null : Number(o.outstanding), o.priority ? 1 : 0, o.po ? String(o.po).slice(0, 400) : null]));
+        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv)', Array(17).fill(0),
+            (sc.reservations || []).map(r => [r.id, id, r.orderId || null, r.lineId, r.product || null, r.start, r.end, Number(r.qty) || 0, r.locked ? 1 : 0, r.status || 'reserved', r.label || null, r.source || null,
+                r.kind || null, r.fromUnit || null, r.reason ? String(r.reason).slice(0, 400) : null, r.extStatus || null, r.smv == null ? null : Number(r.smv)]));
+        await conn.query('UPDATE hl_scenarios SET plan_from = ?, plan_to = ?, thresholds = ?, balance = ?, source_note = ?, source_at = ?, updated_by = ?, version = version + 1 WHERE id = ?',
+            [sc.from || null, sc.to || null, JSON.stringify(sc.thresholds || null), sc.balance ? JSON.stringify(sc.balance) : null, sc.source?.note || null, sc.source?.at ? String(sc.source.at).slice(0, 19) : null, by, id]);
     }
 
     app.post(`${HL}/scenarios`, async (req, res) => {
@@ -560,6 +580,68 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                     qty : Number(r.qty) || 0, outstanding : Number(r.outstanding) || 0,
                     pcd : ymd(r.pcd), delivery : ymd(r.delivery), deliveryMax : ymd(r.delivery_max)
                 })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    // ---- ERP active orders for the Central Auto Balance (READ ONLY) -------
+    // One row per active production order from the plan cut-off on: contract
+    // unit (mr_order_entry.prod_unit), product type, garment type, order qty,
+    // outstanding (Σ valid PO qty − exported, the order qty when it has no
+    // PO), the style SMV, PCD, delivery and the ERP high-priority flag.
+    async function erpOrders() {
+        const [rows] = await pool.query(
+            `SELECT oe.order_id, oe.order_code, b.b_name AS buyer, s.stl_no AS style,
+                    COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product, gt.gmt_name AS garment,
+                    oe.order_qty AS qty, oe.order_delivery_date AS delivery, CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
+                    COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) AS smv,
+                    COALESCE(oe.prod_unit, -1) AS unit_id, oe.high_priority,
+                    (SELECT SUM(GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0)) FROM \`${ERP_DB}\`.mr_purchase_order po
+                      WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK}) AS outstanding,
+                    (SELECT SUBSTRING(GROUP_CONCAT(DISTINCT po.po_no ORDER BY po.po_no SEPARATOR ', '), 1, 400) FROM \`${ERP_DB}\`.mr_purchase_order po
+                      WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK}) AS po_list
+               FROM \`${ERP_DB}\`.mr_order_entry oe
+               JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+               LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+               LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+               LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+              WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ?
+              ORDER BY oe.order_delivery_date, oe.order_code LIMIT 5000`, [ERP_CUTOFF]);
+        return rows.map(r => ({
+            code : r.order_code, buyer : r.buyer || '', style : r.style || '', product : r.product || 'Other', garment : r.garment || '',
+            qty : Number(r.qty) || 0, outstanding : r.outstanding == null ? Number(r.qty) || 0 : Number(r.outstanding) || 0,
+            smv : Number(r.smv) || 0, pcd : ymd(r.pcd), delivery : ymd(r.delivery), unitId : Number(r.unit_id), priority : r.high_priority === 'Y', po : r.po_list || ''
+        }));
+    }
+    app.get(`${HL}/erp-orders`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const rows = await erpOrders();
+            res.json({ success : true, from : ERP_CUTOFF, takenAt : fmtDt(new Date()), rows });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    // ---- Central Auto Balance service ------------------------------------
+    // Runs the allocation engine (src/hlBalance.js) on the scenario the client
+    // sends — optionally merging the ERP active orders in first — and returns
+    // the proposal: the orders, the lines (the GSL pool row may be added), the
+    // proposed reservations, the ids of the previous proposals they replace,
+    // the per-order results and a summary. NOTHING is written: the client
+    // applies the proposal to its scenario and saves it with the usual
+    // optimistic-version save.
+    app.post(`${HL}/auto-balance`, async (req, res) => {
+        try {
+            if (!(await needWrite(req, res))) return;
+            const sc = req.body?.scenario;
+            const opts = req.body?.options || {};
+            if (!sc || !Array.isArray(sc.lines) || !Array.isArray(sc.orders)) return res.status(400).json({ success : false, error : 'No scenario data' });
+            let imported = null, takenAt = null;
+            if (opts.importOrders !== false) { imported = mergeErpOrders(sc, await erpOrders()); takenAt = fmtDt(new Date()); }
+            const t0 = Date.now();
+            const out = autoBalance(sc, opts);
+            console.log(`[hl] auto balance for ${sc.id || 'new'}: ${out.summary.orders} orders, ${out.reservations.length} proposals, ${Date.now() - t0} ms`);
+            res.json({ success : true, imported, takenAt, orders : sc.orders, lines : sc.lines, products : sc.products, ...out, ms : Date.now() - t0 });
         }
         catch (e) { dbFail(res, e); }
     });

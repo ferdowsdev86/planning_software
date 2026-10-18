@@ -499,10 +499,10 @@ export const deleteWhatIfDb  = (id, by) => whatIfCall(`/${id}`, 'DELETE', { by }
 // ---------------------------------------------------------------------------
 // High Level Planning Board (standalone simulation — hl_* tables only)
 // ---------------------------------------------------------------------------
-async function hlCall(path, method = 'GET', body) {
+async function hlCall(path, method = 'GET', body, signal) {
     const res = await fetch(`${API_BASE}/hl${path}`, {
         method, headers : { 'Content-Type' : 'application/json' },
-        body : body ? JSON.stringify(body) : undefined
+        body : body ? JSON.stringify(body) : undefined, signal
     });
     const j = await res.json().catch(() => ({}));
     if (!j.success) { const e = new Error(j.error || `${method} failed`); e.conflict = !!j.conflict; e.version = j.version; throw e; }
@@ -519,6 +519,8 @@ export const hlErpSmvOrders   = (by, unitId, product) => hlCall(`/erp-smv-orders
 export const hlErpMonthly     = by => hlCall(`/erp-monthly?by=${encodeURIComponent(by || '')}`);
 export const hlErpMonthOrders = (by, unitId, month) => hlCall(`/erp-month-orders?by=${encodeURIComponent(by || '')}&unit=${encodeURIComponent(unitId)}&month=${encodeURIComponent(month)}`);
 export const hlErpLoad        = (by, from) => hlCall(`/erp-load?by=${encodeURIComponent(by || '')}${from ? `&from=${from}` : ''}`);
+export const hlErpOrders      = by => hlCall(`/erp-orders?by=${encodeURIComponent(by || '')}`);
+export const hlAutoBalance    = (by, scenario, options, signal) => hlCall('/auto-balance', 'POST', { by, scenario, options }, signal);
 export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}&by=${encodeURIComponent(by || '')}`);
 
 // the board opens on a What-if copy (read only) while this is set
