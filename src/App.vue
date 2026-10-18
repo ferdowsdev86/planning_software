@@ -4,9 +4,9 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -154,7 +154,7 @@ function cacheHasLines(cache) {
 function markBoardDirty() {
     const uid = currentUnitId.value;
     if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = true;
-    syncOrdersListFromBoard();
+    prof.time('dirty:syncOrdersListFromBoard', () => syncOrdersListFromBoard());
     scheduleBoardSettle();
 }
 
@@ -176,7 +176,7 @@ function scheduleBoardSettle() {
         boardSettling = true;
         try {
             const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
-            const r = resizeBars(s, open, { dirty : true });
+            const r = prof.time('settle:resizeBars(all)', () => resizeBars(s, open, { dirty : true }));
             if (r.grown || r.pushed) {
                 toast(`${r.grown + r.shrunk} bar(s) re-fitted to the production schedule${r.pushed ? `, ${r.pushed} follower(s) shifted later` : ''}`, 'ok');
             }
@@ -1229,9 +1229,10 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
         // The learning-curve annotation can change when a follower is pushed,
         // so repeat until no end moves (normally 1–2 passes)
         for (let pass = 0; pass < 4; pass++) {
+            const lineIndex = buildLineIndex(s);
             const bars = s.eventStore.records
                 .filter(ev => { const r = ev.data?.raw; return r && !r.stage && r.status !== 'completed' && keep(ev); })
-                .map(ev => ({ ev, lid : lineIdOf(s, ev) }))
+                .map(ev => ({ ev, lid : lineIdOf(s, ev, lineIndex) }))
                 .filter(x => x.lid && (isHoldId(x.lid) ? holdCapacitySet(s) : isSewingRes(s.resourceStore.getById(x.lid))))
                 .sort((a, b) => a.ev.startDate - b.ev.startDate);
             let moved = 0;
@@ -1245,7 +1246,7 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 raw.start = start;
                 // uses the bar's CURRENT curve annotation — the same one the
                 // schedule dialog prints
-                applyLineFormulaDuration(s, raw, lid);
+                prof.time('resize:applyLineFormulaDuration', () => applyLineFormulaDuration(s, raw, lid));
                 const end = endOfWork(start, raw.dur || 1);
                 if (Math.abs(end - oldEnd) < 60000) continue;
                 ev.set({ endDate : end, duration : elapsedDays(start, end) });
@@ -1259,13 +1260,13 @@ function resizeBars(s, keep = () => true, { dirty = true } = {}) {
                 touched.add(lid);
                 moved++;
             }
-            if (touched.size) applyLearningCurves(s, { lineIds : [...touched] });
+            if (touched.size) prof.time('resize:applyLearningCurves(touched)', () => applyLearningCurves(s, { lineIds : [...touched] }));
             if (!moved) break;
         }
     }
     finally { endBoardInteraction(s); }
-    recalcCapacity(s);
-    s.refreshWithTransition?.();
+    prof.time('resize:recalcCapacity', () => recalcCapacity(s));
+    prof.time('resize:refreshWithTransition', () => s.refreshWithTransition?.());
     if ((shrunk || grown) && dirty) { markBoardDirty(); touchBoardCache(s); }
     return { shrunk, grown, pushed, pulled, skipped };
 }
@@ -2838,12 +2839,13 @@ function computePullForward(opts = {}) {
     const inRange   = d => !rangeFrom || (d >= rangeFrom && (!rangeTo || d <= rangeTo));
     const changes = [];
     let unchanged = 0, skipped = 0;
+    const pfIndex = buildLineIndex(s);
     for (const res of s.resourceStore.records) {
         if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
         // Line scope: one chosen line, or every line
         if (lineSel !== 'all' && res.id !== lineSel) continue;
         const bars = s.eventStore.records
-            .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
+            .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev, pfIndex) === res.id)
             .sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
         let anchorEnd = null;   // end of the previous bar AFTER its move
         for (const ev of bars) {
@@ -10212,16 +10214,16 @@ async function placeCarried(date, resourceRecord) {
             // Forward collision resolution: overlapped bars (and their
             // followers) shift LATER only — never earlier, never off their
             // line; bars that already fit before a gap stay untouched
-            const pushedCnt = pushFollowers(s, targetId, rec);
+            const pushedCnt = prof.time('place:pushFollowers', () => pushFollowers(s, targetId, rec));
             if (pushedCnt) {
                 toast(`${pushedCnt} following order(s) shifted later to make room`, 'warn');
             }
-            tryMergeAdjacent(s, rec, targetId);
+            prof.time('place:tryMergeAdjacent', () => tryMergeAdjacent(s, rec, targetId));
             // Refresh ramp badges/tooltips on both lines (annotation only —
             // never resizes other bars)
             const lcLines = [targetId];
             if (sourceLid && sourceLid !== targetId && !isHoldId(sourceLid)) lcLines.push(sourceLid);
-            applyLearningCurves(s, { lineIds : lcLines });
+            prof.time('place:applyLearningCurves(lines)', () => applyLearningCurves(s, { lineIds : lcLines }));
         }
         finally {
             endBoardInteraction(s);
@@ -10241,7 +10243,7 @@ async function placeCarried(date, resourceRecord) {
 
     if (parkHold) placeGroupMembers(s, rec, targetId, true);   // the group parks together
     clearMultiSelect();                                         // the selection has been moved
-    const util = computeLineUtil(s.eventStore.records);
+    const util = prof.time('place:computeLineUtil', () => computeLineUtil(s.eventStore.records));
     raw.risk = calcRisk({
         start, end,
         ship     : raw.ship,
@@ -10253,11 +10255,11 @@ async function placeCarried(date, resourceRecord) {
     // the real bar appears at the drop point in the same paint the ghost
     // leaves — no frame without a bar, no slide from the old place
     restoreCarriedCls();
-    s.refresh?.();
+    prof.time('place:scheduler.refresh', () => s.refresh?.());
     cancelCarry();
     lastPlacedRec = rec;    // D right after this placement acts on this bar
-    markBoardDirty();
-    touchBoardCache(s);
+    prof.time('place:markBoardDirty', () => markBoardDirty());
+    prof.time('place:touchBoardCache', () => touchBoardCache(s));
 }
 
 function assignmentEventId(a) {
@@ -10599,7 +10601,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -10725,10 +10727,11 @@ function enforceNoOverlapBeforeSave(s) {
     let nudged = 0;
     for (let pass = 0; pass < 5; pass++) {
         let fixedThisPass = 0;
+        const ovIndex = buildLineIndex(s);
         for (const res of s.resourceStore.records) {
             if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
             const bars = s.eventStore.records
-                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === res.id)
+                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev, ovIndex) === res.id)
                 .map(ev => ({ id : String(ev.id), name : ev.name, start : ev.startDate, end : ev.endDate, rec : ev }));
             for (const [a, b] of findLineOverlaps(bars)) {
                 // Move the changed one; if both changed, the later-starting one

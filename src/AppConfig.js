@@ -338,6 +338,26 @@ const hashColor = s => PALETTE[
 
 export const colorState = { mode : 'delivery', buyerColors : {}, productColors : {} };
 
+// Board move profiler (off by default): window.__mbm.prof.on = true, move a
+// bar, then window.__mbm.prof.report() → ms per step of the move path
+export const prof = {
+    on : false, rows : [],
+    time(label, fn) {
+        if (!prof.on) return fn();
+        const t0 = performance.now();
+        try { return fn(); }
+        finally { prof.rows.push({ label, ms : Math.round((performance.now() - t0) * 10) / 10 }); }
+    },
+    report() {
+        const sum = {};
+        for (const r of prof.rows) { sum[r.label] = sum[r.label] || { n : 0, ms : 0 }; sum[r.label].n++; sum[r.label].ms += r.ms; }
+        const out = Object.entries(sum).map(([label, v]) => ({ label, calls : v.n, ms : Math.round(v.ms * 10) / 10 })).sort((a, b) => b.ms - a.ms);
+        console.table(out);
+        return out;
+    },
+    reset() { prof.rows = []; }
+};
+
 // Day-wise plan chips of the clicked / hovered bar, mirrored on the date
 // header: App.vue fills the map (ymd → { text, cls }) when the chips show on
 // the Holding Row; the day header renderer draws them and CSS shows them
@@ -538,10 +558,11 @@ function invalidateBarsCache() {
 
 function rebuildBarsCache(scheduler) {
     const byLine = {};
+    const index = buildLineIndex(scheduler);
     for (const ev of scheduler.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
-        const lid = lineIdOf(scheduler, ev);
+        const lid = lineIdOf(scheduler, ev, index);
         (byLine[lid] ||= []).push(ev);
     }
     barsByLineCache = byLine;
@@ -724,8 +745,8 @@ export function recalcCapacity(scheduler) {
     // Keep every bar's learning-curve state current (annotation only — no
     // geometry change): insert/move/delete of a predecessor re-derives the
     // ramp for the whole line, so badges and tooltips never go stale
-    try { applyLearningCurves(scheduler); } catch { /* board mid-batch */ }
-    const util = computeLineUtil(scheduler.eventStore.records);
+    try { prof.time('recalc:applyLearningCurves(all)', () => applyLearningCurves(scheduler)); } catch { /* board mid-batch */ }
+    const util = prof.time('recalc:computeLineUtil', () => computeLineUtil(scheduler.eventStore.records));
     for (const res of scheduler.resourceStore.records) {
         if (util.hasOwnProperty(res.id) && res.data.utilization !== util[res.id]) {
             res.set('utilization', util[res.id]);
@@ -816,7 +837,22 @@ export function assignEventLine(scheduler, rec, lineId) {
     rec.data.resourceId = lineId;   // plain data mirror for the fallback readers
 }
 
-export function lineIdOf(scheduler, ev) {
+// event id → line id, built ONCE for a whole-board pass: lineIdOf scans the
+// assignment store (O(bars)) — calling it per bar inside a loop over bars
+// was O(bars²) and dominated every move on a 450-bar board
+export function buildLineIndex(scheduler) {
+    const map = new Map();
+    for (const x of scheduler?.assignmentStore?.records || []) {
+        const eid = x.eventId ?? x.data.eventId ?? x.data.event;
+        if (!map.has(eid)) map.set(eid, x.data.resourceId ?? x.resourceId);
+    }
+    return map;
+}
+export function lineIdOf(scheduler, ev, index = null) {
+    if (index) {
+        const v = index.get(ev.id);
+        return v !== undefined ? v : (ev.resourceId ?? ev.data.resourceId);
+    }
     const a = scheduler.assignmentStore?.records.find(x =>
         (x.eventId ?? x.data.eventId ?? x.data.event) === ev.id);
     return a
@@ -952,10 +988,11 @@ export async function enforceSequentialLines(scheduler) {
     for (let pass = 0; pass < 3; pass++) {
         try { await scheduler.project?.commitAsync?.(); } catch { /* engine busy */ }
         let moved = 0;
+        const index = buildLineIndex(scheduler);
         for (const res of scheduler.resourceStore.records) {
             if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
             const bars = scheduler.eventStore.records
-                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === res.id)
+                .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev, index) === res.id)
                 .sort((a, b) => a.startDate - b.startDate);
             let prevEnd = null;
             for (const ev of bars) {
@@ -1082,12 +1119,21 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
     const curve = configuredLearningCurve();
     const wanted = lineIds ? new Set(lineIds) : null;
     let resized = 0;
+    // one pass over the bars, grouped by line (not a filter per line)
+    const index = buildLineIndex(scheduler);
+    const byLine = new Map();
+    for (const ev of scheduler.eventStore.records) {
+        if (!ev.data?.raw || ev.data.raw.stage) continue;
+        const lid = lineIdOf(scheduler, ev, index);
+        if (wanted && !wanted.has(lid)) continue;
+        let arr = byLine.get(lid);
+        if (!arr) { arr = []; byLine.set(lid, arr); }
+        arr.push(ev);
+    }
     for (const res of scheduler.resourceStore.records) {
         if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
         if (wanted && !wanted.has(res.id)) continue;
-        const bars = scheduler.eventStore.records
-            .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(scheduler, ev) === res.id)
-            .sort((a, b) => a.startDate - b.startDate);
+        const bars = (byLine.get(res.id) || []).sort((a, b) => a.startDate - b.startDate);
         if (!bars.length) continue;
         const seq = bars.map(ev => ({
             id           : ev.id,
