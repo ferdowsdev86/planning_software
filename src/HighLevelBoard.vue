@@ -1090,7 +1090,7 @@ function close() {
                                 </div>
                             </div>
                             <table class="hl-table">
-                                <thead><tr><th>Line</th><th>Active</th><th>Manpower</th><th title="Hours per working day — follows the unit's month setup unless the line has its own figure">Hours</th><th>OT</th><th>Eff %</th><th title="The unit's order-average SMV (ERP) — click Product-wise SMV for the detail">Avg SMV</th><th title="Available hours of the line in the plan range (manpower × hours × efficiency)">Capacity (range)</th><th title="Capacity ÷ average SMV">Capacity pcs</th><th></th></tr></thead>
+                                <thead><tr><th>Line</th><th>Active</th><th>Manpower</th><th title="Hours per working day — follows the unit's month setup unless the line has its own figure">Hours</th><th>OT</th><th>Eff %</th><th title="The unit's order-average SMV (ERP) — click Product-wise SMV for the detail">Avg SMV</th><th title="Line SAH in the plan range = Σ working days manpower × hours × efficiency (standard hours) · per working day in the tooltip of the cell">Line SAH</th><th title="Line SAH × 60 ÷ average SMV = pieces the line can make in the plan range">Capacity pcs</th><th></th></tr></thead>
                                 <tbody>
                                     <tr v-for="l in cfgLines()" :key="l.id">
                                         <td><input v-model="l.name" class="cal-in hl-txt" @change="cfgChange('line name')"></td>
@@ -1100,8 +1100,8 @@ function close() {
                                         <td><input v-model="l.ot" type="number" step="0.5" min="0" class="cal-in hl-num" placeholder="unit" @change="cfgChange('line OT')"></td>
                                         <td><input v-model.number="l.eff" type="number" min="0" max="150" class="cal-in hl-num" @change="cfgChange('efficiency')"></td>
                                         <td class="hl-r"><a class="hl-link" :title="`Unit average SMV (${unitSmvSource(l.unitCode)}) — click for the product-wise detail`" @click="lpOpen = true">{{ unitAvgSmv(l.unitCode) }}</a></td>
-                                        <td class="hl-dim">{{ fmtMin(lineStats[l.id]?.capMin) }}</td>
-                                        <td class="hl-r">{{ fmtQty(lineCapPcs(l)) }}</td>
+                                        <td class="hl-r" :title="`${fmtQty(Math.round((lineStats[l.id]?.capMin || 0) / 60))} SAH over ${lineStats[l.id]?.workDays || 0} working days · ${lineStats[l.id]?.workDays ? fmtQty(Math.round((lineStats[l.id].capMin / 60) / lineStats[l.id].workDays * 10) / 10) : 0} SAH per day`"><b>{{ fmtQty(Math.round((lineStats[l.id]?.capMin || 0) / 60)) }}</b> <i class="hl-dim">({{ lineStats[l.id]?.workDays ? fmtQty(Math.round((lineStats[l.id].capMin / 60) / lineStats[l.id].workDays * 10) / 10) : 0 }}/day)</i></td>
+                                        <td class="hl-r" :title="`${fmtQty(lineCapPcs(l))} pcs over the range · ${lineStats[l.id]?.workDays ? fmtQty(Math.round(lineCapPcs(l) / lineStats[l.id].workDays)) : 0} pcs per day at SMV ${unitAvgSmv(l.unitCode)}`"><b>{{ fmtQty(lineCapPcs(l)) }}</b> <i class="hl-dim">({{ lineStats[l.id]?.workDays ? fmtQty(Math.round(lineCapPcs(l) / lineStats[l.id].workDays)) : 0 }}/day)</i></td>
                                         <td><span class="hl-x-small" title="Remove line" @click="removeLine(l.id)">✖</span></td>
                                     </tr>
                                 </tbody>
