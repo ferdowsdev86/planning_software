@@ -514,6 +514,7 @@ export const hlLoadScenario   = (id, by) => hlCall(`/scenarios/${encodeURICompon
 export const hlSaveScenario   = (id, by, scenario) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'PUT', { by, scenario });
 export const hlRenameScenario = (id, by, name) => hlCall(`/scenarios/${encodeURIComponent(id)}/rename`, 'PUT', { by, name });
 export const hlDeleteScenario = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'DELETE', { by });
+export const hlErpLoad        = (by, from) => hlCall(`/erp-load?by=${encodeURIComponent(by || '')}${from ? `&from=${from}` : ''}`);
 export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}&by=${encodeURIComponent(by || '')}`);
 
 // the board opens on a What-if copy (read only) while this is set

@@ -3801,7 +3801,7 @@ app.post(`${BASE}/production-sync`, async (req, res) => {
 
 // High Level Planning Board — standalone simulation (hl_* tables only; the
 // live plan is read for the reference import and never written)
-mountHighLevel(app, { pool, BASE, dbFail, ERP_DB });
+mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF });
 
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);

@@ -19,7 +19,7 @@ import {
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver
 } from './hlEngine.js';
 import {
-    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference
+    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpLoad
 } from './api.js';
 
 const props = defineProps({
@@ -632,6 +632,32 @@ function impApply() {
 }
 
 // ---------------------------------------------------------------------------
+// ERP order load (read only): active mr_order_entry orders delivered from
+// the plan cut-off on, by production unit and product type — the demand each
+// unit faces, next to the simulated capacity on its card
+// ---------------------------------------------------------------------------
+const erpLoad = shallowRef(null);     // { from, takenAt, rows }
+async function loadErpLoad() {
+    try { erpLoad.value = await hlErpLoad(by()); }
+    catch (e) { erpLoad.value = { error : e.message, rows : [] }; }
+}
+const erpByUnit = computed(() => {
+    const out = {};
+    const rows = erpLoad.value?.rows || [];
+    for (const u of HL_UNITS) out[u.code] = { products : [], qty : 0, orders : 0 };
+    out.other = { products : [], qty : 0, orders : 0, name : 'Other units' };
+    for (const r of rows) {
+        const code = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code || 'other';
+        const g = out[code];
+        g.products.push({ product : r.product, qty : r.qty, orders : r.orders });
+        g.qty += r.qty; g.orders += r.orders;
+    }
+    for (const g of Object.values(out)) g.products.sort((a, b) => b.qty - a.qty);
+    return out;
+});
+const erpGrand = computed(() => (erpLoad.value?.rows || []).reduce((a, r) => ({ qty : a.qty + r.qty, orders : a.orders + r.orders }), { qty : 0, orders : 0 }));
+
+// ---------------------------------------------------------------------------
 // Scenario compare
 // ---------------------------------------------------------------------------
 const cmpOpen = ref(false);
@@ -659,6 +685,7 @@ function onKey(e) {
 onMounted(async () => {
     document.addEventListener('keydown', onKey);
     await refreshScenarios();
+    loadErpLoad();
     const remembered = localStorage.getItem('hl-scenario');
     const first = scenarios.value.find(s => s.id === remembered)?.id || scenarios.value[0]?.id;
     if (first) await openScenario(first);
@@ -733,7 +760,16 @@ function close() {
                 <div class="hl-uc-head"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span></div>
                 <div class="hl-uc-row"><span>Capacity</span><b>{{ fmtMin(unitStats[u.code]?.capMin) }}</b><span>Reserved</span><b>{{ fmtMin(unitStats[u.code]?.usedMin) }}</b><span>Available</span><b>{{ fmtMin(unitStats[u.code]?.availMin) }}</b><span>Util</span><b>{{ fmtPct(unitStats[u.code]?.util) }}</b><span>Overloaded days</span><b>{{ unitStats[u.code]?.overDays }}</b><span>Idle</span><b>{{ fmtMin(unitStats[u.code]?.idleMin) }}</b></div>
                 <div class="hl-uc-prod"><span v-for="(v, p) in unitStats[u.code]?.products || {}" :key="p" :title="`${v.lines} line(s) can make it`">{{ p }}: <b>{{ fmtQty(v.pcsPerDay) }}</b>/day</span></div>
+                <div v-if="erpLoad" class="hl-uc-erp" :title="`ERP mr_order_entry: order_status Active, delivery from ${dmy(erpLoad.from)} on, production unit ${u.label} — order quantity by product type (snapshot ${erpLoad.takenAt || ''})`">
+                    <span class="hl-uc-erp-t">ERP active orders · delivery after {{ dmy(addDays(erpLoad.from || '', -1)) }}:</span>
+                    <span v-for="p in erpByUnit[u.code].products" :key="p.product">{{ p.product }} <b>{{ fmtQty(p.qty) }}</b> <i class="hl-dim">({{ p.orders }})</i></span>
+                    <span class="hl-uc-erp-total">Unit total <b>{{ fmtQty(erpByUnit[u.code].qty) }}</b> pcs · {{ erpByUnit[u.code].orders }} orders</span>
+                </div>
             </div>
+        </div>
+        <div v-if="erpLoad && (erpByUnit.other.qty || erpLoad.error)" class="hl-erp-other">
+            <template v-if="erpLoad.error">ERP order load not available: {{ erpLoad.error }}</template>
+            <template v-else>Other production units (not on this board): <span v-for="p in erpByUnit.other.products" :key="p.product">{{ p.product }} <b>{{ fmtQty(p.qty) }}</b> </span> · total <b>{{ fmtQty(erpByUnit.other.qty) }}</b> pcs · all units together <b>{{ fmtQty(erpGrand.qty) }}</b> pcs / {{ erpGrand.orders }} active orders</template>
         </div>
 
         <div class="hl-sched-wrap" :class="{ 'hl-busy' : busy }">
@@ -1023,6 +1059,10 @@ function close() {
 .hl-uc-row { display : grid; grid-template-columns : auto 1fr auto 1fr auto 1fr; gap : 2px 8px; font-size : 11.5px; }
 .hl-uc-row span { color : #555; } .hl-uc-row b { text-align : right; }
 .hl-uc-prod { margin-top : 4px; font-size : 11px; color : #333; display : flex; flex-wrap : wrap; gap : 4px 10px; }
+.hl-uc-erp { margin-top : 6px; padding-top : 5px; border-top : 1px dashed #d5dbe3; font-size : 11px; color : #333; display : flex; flex-wrap : wrap; gap : 3px 10px; align-items : baseline; }
+.hl-uc-erp-t { flex : 0 0 100%; font-weight : 700; color : #1f3a5f; }
+.hl-uc-erp-total { flex : 0 0 100%; color : #1f3a5f; }
+.hl-erp-other { padding : 0 10px 8px; font-size : 11px; color : #444; }
 .hl-sched-wrap { flex : 1 1 auto; min-height : 300px; position : relative; display : flex; flex-direction : column; }
 .hl-sched { flex : 1 1 auto; height : 100%; min-height : 300px; }
 .hl-busy { opacity : .6; pointer-events : none; }

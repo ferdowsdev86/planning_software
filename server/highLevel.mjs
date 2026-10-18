@@ -9,7 +9,7 @@
 // server/highLevel.test.mjs).
 // ---------------------------------------------------------------------------
 
-export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
+export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '2026-10-09' }) {
     const HL = `${BASE}/hl`;
 
     async function ensureTables() {
@@ -304,6 +304,29 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
             await pool.query('UPDATE hl_scenarios SET deleted_at = NOW(), updated_by = ? WHERE id = ?', [u.username, String(req.params.id)]);
             console.log(`[hl] scenario ${req.params.id} deleted by ${u.username}`);
             res.json({ success : true });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    // ---- ERP order load (READ ONLY): active orders delivered from the
+    // plan cut-off on, by production unit and product type — the demand the
+    // units face, shown on the unit cards next to the simulated capacity
+    app.get(`${HL}/erp-load`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? String(req.query.from) : ERP_CUTOFF;
+            const [rows] = await pool.query(
+                `SELECT oe.prod_unit AS unit_id,
+                        COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product,
+                        COUNT(*) AS orders, SUM(oe.order_qty) AS qty
+                   FROM \`${ERP_DB}\`.mr_order_entry oe
+                   JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                  WHERE oe.order_status = 'Active' AND oe.order_delivery_date >= ?
+                  GROUP BY oe.prod_unit, product
+                  ORDER BY oe.prod_unit, qty DESC`, [from]);
+            res.json({ success : true, from, takenAt : fmtDt(new Date()),
+                rows : rows.map(r => ({ unitId : r.unit_id == null ? null : Number(r.unit_id), product : r.product, orders : Number(r.orders), qty : Number(r.qty) || 0 })) });
         }
         catch (e) { dbFail(res, e); }
     });
