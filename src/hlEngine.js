@@ -63,6 +63,7 @@ export function newScenario(name = 'Scenario A', by = '') {
             hours : 10, ot : 0,
             workDays : [0, 1, 2, 3, 4, 6],   // Friday off (0 = Sunday) — the weekly pattern
             dayHours : {},                   // date → hours for THAT day (0 = off): month-wise setup, beats the pattern
+            avgSmv   : null,                 // the unit's average SMV for capacity in pieces (null = ERP order mix)
             note : ''
         })),
         products : DEFAULT_PRODUCTS.map(p => ({ ...p })),
@@ -218,7 +219,18 @@ export function unitSummary(sc, unitCode, from, to, load) {
     const lines = sc.lines.filter(l => l.unitCode === unitCode);
     const s = { capMin : 0, usedMin : 0, availMin : 0, overDays : 0, activeLines : 0, lines : lines.length, idleMin : 0, util : 0, products : {}, workDays : 0 };
     const overSet = new Set();
-    for (let d = from, g = 0; d <= to && g < 2000; d = addDays(d, 1), g++) if (isWorkDay(sc, unitCode, d)) s.workDays++;
+    // working days of the unit in the range and the average hours of a working
+    // day (the month setup's figures, else the unit's hours) — the Lines tab
+    // shows this as the hours a line follows
+    let hoursSum = 0;
+    const unit = unitOf(sc, unitCode);
+    for (let d = from, g = 0; d <= to && g < 2000; d = addDays(d, 1), g++) {
+        if (!isWorkDay(sc, unitCode, d)) continue;
+        s.workDays++;
+        const dh = unitDayHours(sc, unitCode, d);
+        hoursSum += dh != null ? dh : (Number(unit?.hours) || 0);
+    }
+    s.avgHours = s.workDays ? Math.round(hoursSum / s.workDays * 100) / 100 : 0;
     for (const l of lines) {
         if (l.active) s.activeLines++;
         const ls = lineSummary(sc, l, from, to, load);

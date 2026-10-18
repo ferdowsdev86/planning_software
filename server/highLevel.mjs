@@ -107,6 +107,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         .then(async () => {
             // additive column (MariaDB: IF NOT EXISTS) — month-wise / day-wise unit hours
             await pool.query('ALTER TABLE hl_units ADD COLUMN IF NOT EXISTS day_hours TEXT NULL');
+            await pool.query('ALTER TABLE hl_units ADD COLUMN IF NOT EXISTS avg_smv DECIMAL(8,3) NULL');
             console.log('[hl] High Level Planning tables ready');
         })
         .catch(e => console.error('[hl] tables:', e.message));
@@ -174,7 +175,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             from : ymd(s.plan_from), to : ymd(s.plan_to), thresholds : thresholds || { partial : 0.4, full : 0.9 },
             source : s.source_note ? { note : s.source_note, at : fmtDt(s.source_at) } : null,
             units : units.map(u => { let wd = [0, 1, 2, 3, 4, 6], dh = {}; try { wd = JSON.parse(u.work_days); } catch { /* default */ } try { dh = JSON.parse(u.day_hours || '{}') || {}; } catch { dh = {}; }
-                return { code : u.code, name : u.name, label : u.label, hours : Number(u.hours), ot : Number(u.ot), workDays : wd, dayHours : dh, note : u.note || '' }; }),
+                return { code : u.code, name : u.name, label : u.label, hours : Number(u.hours), ot : Number(u.ot), workDays : wd, dayHours : dh, avgSmv : u.avg_smv == null ? null : Number(u.avg_smv), note : u.note || '' }; }),
             lines : lines.map(l => ({ id : l.id, unitCode : l.unit_code, name : l.name, active : !!l.active, manpower : Number(l.manpower),
                 hours : l.hours == null ? null : Number(l.hours), ot : l.ot == null ? null : Number(l.ot), eff : Number(l.eff), products : prodByLine.get(l.id) || {} })),
             products : products.map(p => ({ name : p.name, smv : Number(p.smv) })),
@@ -203,8 +204,9 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                 await conn.query(`${sql} VALUES ${ph}`, chunk.flat());
             }
         };
-        await bulk('INSERT INTO hl_units (scenario_id, code, name, label, hours, ot, work_days, note, day_hours)', Array(9).fill(0),
-            (sc.units || []).map(u => [id, u.code, u.name, u.label || null, Number(u.hours) || 0, Number(u.ot) || 0, JSON.stringify(u.workDays || [0, 1, 2, 3, 4, 6]), u.note || null, JSON.stringify(u.dayHours || {})]));
+        await bulk('INSERT INTO hl_units (scenario_id, code, name, label, hours, ot, work_days, note, day_hours, avg_smv)', Array(10).fill(0),
+            (sc.units || []).map(u => [id, u.code, u.name, u.label || null, Number(u.hours) || 0, Number(u.ot) || 0, JSON.stringify(u.workDays || [0, 1, 2, 3, 4, 6]), u.note || null, JSON.stringify(u.dayHours || {}),
+                u.avgSmv == null || u.avgSmv === '' ? null : Number(u.avgSmv)]));
         const lines = sc.lines || [];
         await bulk('INSERT INTO hl_lines (id, scenario_id, unit_code, name, active, manpower, hours, ot, eff, sort_order)', Array(10).fill(0),
             lines.map((l, i) => [l.id, id, l.unitCode, l.name, l.active ? 1 : 0, Number(l.manpower) || 0, l.hours == null || l.hours === '' ? null : Number(l.hours), l.ot == null || l.ot === '' ? null : Number(l.ot), Number(l.eff) || 0, i]));
@@ -333,6 +335,58 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                   ORDER BY oe.prod_unit, qty DESC`, [from]);
             res.json({ success : true, from, takenAt : fmtDt(new Date()),
                 rows : rows.map(r => ({ unitId : r.unit_id == null ? null : Number(r.unit_id), product : r.product, orders : Number(r.orders), qty : Number(r.qty) || 0 })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+
+    // ---- ERP SMV by production unit and product type (READ ONLY) ---------
+    // Active production orders from the plan cut-off on: order count, order
+    // quantity and the quantity-weighted average SMV of the styles
+    // (mr_style.stl_smv, production_smv fallback) — the unit-wise "order
+    // average SMV" the Lines tab shows, with the product-wise detail
+    const ERP_ACTIVE = `oe.order_status = 'Active' AND oe.order_qty > 0 AND COALESCE(oe.order_type, 1) NOT IN (2,5,6,7)`;
+    app.get(`${HL}/erp-smv`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const [rows] = await pool.query(
+                `SELECT COALESCE(oe.prod_unit, -1) AS unit_id,
+                        COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product,
+                        COUNT(*) AS orders, SUM(oe.order_qty) AS qty,
+                        SUM(oe.order_qty * COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)) AS smv_qty,
+                        SUM(CASE WHEN COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) > 0 THEN oe.order_qty ELSE 0 END) AS qty_with_smv
+                   FROM \`${ERP_DB}\`.mr_order_entry oe
+                   JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                  WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ?
+                  GROUP BY unit_id, product ORDER BY unit_id, qty DESC`, [ERP_CUTOFF]);
+            res.json({ success : true, from : ERP_CUTOFF, takenAt : fmtDt(new Date()),
+                rows : rows.map(r => ({ unitId : Number(r.unit_id), product : r.product, orders : Number(r.orders), qty : Number(r.qty) || 0,
+                    avgSmv : Number(r.qty_with_smv) > 0 ? Math.round(Number(r.smv_qty) / Number(r.qty_with_smv) * 100) / 100 : null,
+                    qtyWithSmv : Number(r.qty_with_smv) || 0 })) });
+        }
+        catch (e) { dbFail(res, e); }
+    });
+    // the orders behind one unit × product type, each with its own SMV
+    app.get(`${HL}/erp-smv-orders`, async (req, res) => {
+        try {
+            if (!(await needRead(req, res))) return;
+            const unitId = Number(req.query.unit);
+            const product = String(req.query.product || '');
+            if (!Number.isFinite(unitId)) return res.status(400).json({ success : false, error : 'unit missing' });
+            const [rows] = await pool.query(
+                `SELECT oe.order_code, b.b_name AS buyer, s.stl_no AS style, gt.gmt_name AS garment,
+                        oe.order_qty AS qty, oe.order_delivery_date AS delivery, CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
+                        COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) AS smv
+                   FROM \`${ERP_DB}\`.mr_order_entry oe
+                   JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+                   LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+                  WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ? AND COALESCE(oe.prod_unit, -1) = ?
+                    AND COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') = ?
+                  ORDER BY oe.order_delivery_date, oe.order_code LIMIT 1000`, [ERP_CUTOFF, unitId, product]);
+            res.json({ success : true, rows : rows.map(r => ({ order : r.order_code, buyer : r.buyer || '', style : r.style || '', garment : r.garment || '',
+                qty : Number(r.qty) || 0, delivery : ymd(r.delivery), pcd : ymd(r.pcd), smv : Number(r.smv) || 0 })) });
         }
         catch (e) { dbFail(res, e); }
     });

@@ -19,7 +19,7 @@ import {
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver
 } from './hlEngine.js';
 import {
-    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpLoad
+    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpLoad, hlErpSmv, hlErpSmvOrders
 } from './api.js';
 
 const props = defineProps({
@@ -571,6 +571,93 @@ function addProduct() {
     newProduct.value = { name : '', smv : 20 };
 }
 function removeProduct(name) { mutate('remove product', s => { s.products = s.products.filter(p => p.name !== name); for (const l of s.lines) delete l.products[name]; }); }
+
+// ---- Lines tab: hours follow the unit's month setup, SMV follows the ERP ---
+// A line without its own hours uses the unit's figure of each day (month
+// setup) — the Lines tab shows the unit's average hours per working day as
+// the value the line follows. The unit's order-average SMV (ERP active
+// orders, quantity-weighted) is the line's SMV; the product-wise detail
+// shows (and lets you edit) the SMV per product type that the lines use.
+const erpSmv = shallowRef(null);          // { from, takenAt, rows } | { error }
+async function loadErpSmv() {
+    try { erpSmv.value = await hlErpSmv(by()); }
+    catch (e) { erpSmv.value = { error : e.message, rows : [] }; }
+}
+const erpSmvByUnit = computed(() => {
+    const out = {};
+    for (const u of HL_UNITS) out[u.code] = { products : [], qty : 0, orders : 0, smvQty : 0, qtyWithSmv : 0, avgSmv : null };
+    for (const r of erpSmv.value?.rows || []) {
+        const code = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code;
+        if (!code) continue;
+        const g = out[code];
+        g.products.push(r);
+        g.qty += r.qty; g.orders += r.orders;
+        if (r.avgSmv != null) { g.smvQty += r.avgSmv * r.qtyWithSmv; g.qtyWithSmv += r.qtyWithSmv; }
+    }
+    for (const g of Object.values(out)) { g.avgSmv = g.qtyWithSmv > 0 ? Math.round(g.smvQty / g.qtyWithSmv * 100) / 100 : null; g.products.sort((a, b) => b.qty - a.qty); }
+    return out;
+});
+// the unit's average SMV: the planner's own figure → the ERP order mix → the scenario products
+function unitAvgSmv(code) {
+    void tick.value;
+    const u = unitOf(sc.value, code);
+    if (u && Number(u.avgSmv) > 0) return Number(u.avgSmv);
+    const e = erpSmvByUnit.value[code]?.avgSmv;
+    if (e > 0) return e;
+    const list = sc.value?.products || [];
+    const avg = list.reduce((a, x) => a + (Number(x.smv) || 0), 0) / (list.length || 1);
+    return avg > 0 ? Math.round(avg * 100) / 100 : 20;
+}
+const unitSmvSource = code => (Number(unitOf(sc.value, code)?.avgSmv) > 0 ? 'own' : (erpSmvByUnit.value[code]?.avgSmv > 0 ? 'ERP order mix' : 'products'));
+function setUnitAvgSmv(code, v) { mutate('unit average SMV', s => { s.units.find(x => x.code === code).avgSmv = v === '' || v == null ? null : Number(v); }); }
+// capacity of a line in pieces at the unit's average SMV
+const lineCapPcs = l => { void tick.value; const st = lineStats.value[l.id]; const smv = unitAvgSmv(l.unitCode); return st && smv > 0 ? Math.round(st.capMin / smv) : 0; };
+
+// product-wise detail of the unit on the Lines tab
+const lpOpen = ref(false);
+const lpProd = ref('');
+const lpOrders = shallowRef(null);
+const lpBusy = ref(false);
+const lpRows = computed(() => {
+    void tick.value;
+    const code = cfgUnit.value;
+    if (!code || !sc.value) return [];
+    const lines = sc.value.lines.filter(l => l.unitCode === code && l.active);
+    const erpRows = erpSmvByUnit.value[code]?.products || [];
+    const names = new Set([...erpRows.map(r => r.product), ...sc.value.products.map(p => p.name)]);
+    return [...names].map(name => {
+        const e = erpRows.find(r => r.product === name);
+        const p = sc.value.products.find(x => x.name.toLowerCase() === name.toLowerCase());
+        const lineSmvs = lines.map(l => Number(l.products?.[p?.name || name])).filter(v => v > 0);
+        const simSmv = lineSmvs.length ? Math.round(lineSmvs.reduce((a, b) => a + b, 0) / lineSmvs.length * 100) / 100 : null;
+        return { name, inScenario : !!p, orders : e?.orders || 0, qty : e?.qty || 0, erpSmv : e?.avgSmv ?? null, simSmv, lines : lineSmvs.length, total : lines.length };
+    }).sort((a, b) => b.qty - a.qty);
+});
+// SMV of a product on this unit's lines (a product new to the scenario is added to every line)
+function setUnitProductSmv(code, name, v) {
+    const smv = Number(v);
+    if (!(smv > 0)) return;
+    mutate(`SMV ${name}`, s => {
+        let p = s.products.find(x => x.name.toLowerCase() === name.toLowerCase());
+        if (!p) { p = { name, smv }; s.products.push(p); for (const l of s.lines) if (l.products[name] == null) l.products[name] = smv; }
+        for (const l of s.lines) if (l.unitCode === code) l.products[p.name] = smv;
+    });
+}
+function lpToggleMake(code, name, on) {
+    mutate(`${name} on ${code}`, s => {
+        let p = s.products.find(x => x.name.toLowerCase() === name.toLowerCase());
+        if (!p) { p = { name, smv : 20 }; s.products.push(p); }
+        for (const l of s.lines) if (l.unitCode === code) { if (on) l.products[p.name] = l.products[p.name] || (erpSmvByUnit.value[code]?.products.find(r => r.product === name)?.avgSmv) || p.smv || 20; else delete l.products[p.name]; }
+    });
+}
+function useErpSmvAll(code) { for (const r of lpRows.value) if (r.erpSmv > 0 && r.lines) setUnitProductSmv(code, r.name, r.erpSmv); }
+async function lpShowOrders(code, name) {
+    const unit = HL_UNITS.find(u => u.code === code);
+    lpProd.value = name; lpOrders.value = null; lpBusy.value = true;
+    try { lpOrders.value = await hlErpSmvOrders(by(), unit.liveUnitId, name); }
+    catch (e) { lpOrders.value = { error : e.message, rows : [] }; }
+    finally { lpBusy.value = false; }
+}
 function setLineProduct(line, product, on) { mutate('line product', s => { const l = s.lines.find(x => x.id === line.id); if (on) l.products[product] = l.products[product] || s.products.find(p => p.name === product)?.smv || 20; else delete l.products[product]; }); }
 function addHoliday() {
     const h = newHoliday.value;
@@ -783,6 +870,7 @@ onMounted(async () => {
     document.addEventListener('keydown', onKey);
     await refreshScenarios();
     loadErpLoad();
+    loadErpSmv();
     const remembered = localStorage.getItem('hl-scenario');
     const first = scenarios.value.find(s => s.id === remembered)?.id || scenarios.value[0]?.id;
     if (first) await openScenario(first);
@@ -962,26 +1050,64 @@ function close() {
                             <button class="cal-btn st-btn hl-btn" @click="addLines(5)">➕ Add 5 lines</button>
                         </div>
                         <div class="hl-scroll">
+                            <div class="hl-lines-unit">
+                                <span>Unit hours: <b>{{ unitStats[cfgUnit]?.avgHours }}</b> h/day avg over <b>{{ unitStats[cfgUnit]?.workDays }}</b> working days <i class="hl-dim">(Units & calendar month setup — a line follows it unless it has its own figure)</i></span>
+                                <span class="hl-gap"></span>
+                                <label class="hl-lbl">Unit avg SMV <input :value="unitOf(sc, cfgUnit)?.avgSmv ?? ''" type="number" step="0.01" min="0.1" class="cal-in hl-num" :placeholder="String(unitAvgSmv(cfgUnit))" :title="unitSmvSource(cfgUnit) === 'own' ? 'Your own figure — clear it to follow the ERP order mix' : 'ERP order-mix average (active orders, delivery after the cut-off) — type a figure to override'" @change="setUnitAvgSmv(cfgUnit, $event.target.value)"> <i class="hl-dim">{{ unitSmvSource(cfgUnit) }}</i></label>
+                                <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : lpOpen }" title="Product-wise average SMV of this unit's orders and the SMV the lines use" @click="lpOpen = !lpOpen">📋 Product-wise SMV</button>
+                            </div>
+                            <div v-if="lpOpen" class="hl-lp-box">
+                                <div class="hl-detail-head"><b>{{ unitOf(sc, cfgUnit)?.name }} · {{ unitOf(sc, cfgUnit)?.label }}</b> — ERP active orders (delivery after {{ dmy(addDays(erpSmv?.from || sc.from, -1)) }}) by product type · unit average <b>{{ unitAvgSmv(cfgUnit) }}</b>
+                                    <button class="cal-btn st-btn hl-btn" title="Copy every ERP product average SMV into this unit's lines" @click="useErpSmvAll(cfgUnit)">⬇ Use ERP SMVs on the lines</button>
+                                    <span v-if="erpSmv?.error" class="hl-warn">ERP not available: {{ erpSmv.error }}</span>
+                                </div>
+                                <table class="hl-table hl-table-s">
+                                    <thead><tr><th>Product type</th><th>Orders</th><th>Order qty</th><th title="Quantity-weighted average SMV of the styles in ERP">ERP avg SMV</th><th title="SMV this unit's lines use for the product — edit to set every line of the unit">Line SMV</th><th title="Can this unit's lines make it?">Lines make it</th><th></th></tr></thead>
+                                    <tbody>
+                                        <tr v-for="r in lpRows" :key="r.name" :class="{ 'hl-sel' : lpProd === r.name }">
+                                            <td><a class="hl-link" @click="lpShowOrders(cfgUnit, r.name)">{{ r.name }}</a></td>
+                                            <td class="hl-r">{{ r.orders ? fmtQty(r.orders) : '—' }}</td>
+                                            <td class="hl-r">{{ r.qty ? fmtQty(r.qty) : '—' }}</td>
+                                            <td class="hl-r">{{ r.erpSmv ?? '—' }}</td>
+                                            <td><input :value="r.simSmv ?? ''" :disabled="!r.lines" type="number" step="0.1" min="0.1" class="cal-in hl-num" @change="setUnitProductSmv(cfgUnit, r.name, $event.target.value)"></td>
+                                            <td><label><input type="checkbox" :checked="r.lines > 0" @change="lpToggleMake(cfgUnit, r.name, $event.target.checked)"> {{ r.lines }}/{{ r.total }}</label></td>
+                                            <td><button v-if="r.erpSmv > 0 && r.lines && r.erpSmv !== r.simSmv" class="cal-btn st-btn hl-btn" title="Use the ERP average SMV on this unit's lines" @click="setUnitProductSmv(cfgUnit, r.name, r.erpSmv)">⬇ ERP</button></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div v-if="lpProd" class="hl-orders-box">
+                                    <div class="hl-detail-head"><b>{{ lpProd }}</b> — orders with their own SMV {{ lpBusy ? '· loading…' : '' }} <span class="hl-x-small" @click="lpProd = ''">✖</span></div>
+                                    <div v-if="lpOrders?.error" class="hl-warn">{{ lpOrders.error }}</div>
+                                    <div v-else-if="lpOrders" class="hl-scroll hl-orders-scroll">
+                                        <table class="hl-table hl-table-s">
+                                            <thead><tr><th>Order</th><th>Buyer</th><th>Style</th><th>Garment</th><th>Qty</th><th>PCD</th><th>Delivery</th><th>SMV</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="o in lpOrders.rows" :key="o.order"><td>{{ o.order }}</td><td>{{ o.buyer }}</td><td>{{ o.style }}</td><td>{{ o.garment }}</td><td class="hl-r">{{ fmtQty(o.qty) }}</td><td>{{ dmy(o.pcd) }}</td><td>{{ dmy(o.delivery) }}</td><td class="hl-r" :class="{ 'hl-warn' : !(o.smv > 0) }">{{ o.smv > 0 ? o.smv : 'no SMV' }}</td></tr>
+                                                <tr v-if="!lpOrders.rows.length"><td colspan="8" class="hl-dim">No active orders</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                             <table class="hl-table">
-                                <thead><tr><th>Line</th><th>Active</th><th>Manpower</th><th>Hours</th><th>OT</th><th>Eff %</th><th v-for="p in sc.products" :key="p.name" :title="`SMV on this line (blank = cannot make)`">{{ p.name }}</th><th>Capacity (range)</th><th></th></tr></thead>
+                                <thead><tr><th>Line</th><th>Active</th><th>Manpower</th><th title="Hours per working day — follows the unit's month setup unless the line has its own figure">Hours</th><th>OT</th><th>Eff %</th><th title="The unit's order-average SMV (ERP) — click Product-wise SMV for the detail">Avg SMV</th><th title="Available hours of the line in the plan range (manpower × hours × efficiency)">Capacity (range)</th><th title="Capacity ÷ average SMV">Capacity pcs</th><th></th></tr></thead>
                                 <tbody>
                                     <tr v-for="l in cfgLines()" :key="l.id">
                                         <td><input v-model="l.name" class="cal-in hl-txt" @change="cfgChange('line name')"></td>
                                         <td><input v-model="l.active" type="checkbox" @change="cfgChange('line active')"></td>
                                         <td><input v-model.number="l.manpower" type="number" min="0" class="cal-in hl-num" @change="cfgChange('manpower')"></td>
-                                        <td><input v-model="l.hours" type="number" step="0.5" min="0" class="cal-in hl-num" placeholder="unit" @change="cfgChange('line hours')"></td>
+                                        <td><input v-model="l.hours" type="number" step="0.5" min="0" class="cal-in hl-num" :placeholder="String(unitStats[cfgUnit]?.avgHours ?? '')" :title="l.hours == null || l.hours === '' ? `Follows the unit: ${unitStats[cfgUnit]?.avgHours} h/day average (month setup) — type a figure for this line only` : 'This line\'s own hours — clear to follow the unit'" @change="cfgChange('line hours')"></td>
                                         <td><input v-model="l.ot" type="number" step="0.5" min="0" class="cal-in hl-num" placeholder="unit" @change="cfgChange('line OT')"></td>
                                         <td><input v-model.number="l.eff" type="number" min="0" max="150" class="cal-in hl-num" @change="cfgChange('efficiency')"></td>
-                                        <td v-for="p in sc.products" :key="p.name" class="hl-pcell">
-                                            <input type="checkbox" :checked="l.products[p.name] != null" @change="setLineProduct(l, p.name, $event.target.checked)">
-                                            <input v-if="l.products[p.name] != null" v-model.number="l.products[p.name]" type="number" step="0.1" min="0.1" class="cal-in hl-num hl-smv" @change="cfgChange('line SMV')">
-                                        </td>
+                                        <td class="hl-r"><a class="hl-link" :title="`Unit average SMV (${unitSmvSource(l.unitCode)}) — click for the product-wise detail`" @click="lpOpen = true">{{ unitAvgSmv(l.unitCode) }}</a></td>
                                         <td class="hl-dim">{{ fmtMin(lineStats[l.id]?.capMin) }}</td>
+                                        <td class="hl-r">{{ fmtQty(lineCapPcs(l)) }}</td>
                                         <td><span class="hl-x-small" title="Remove line" @click="removeLine(l.id)">✖</span></td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
+                        <div class="st-hint">Hours: a line follows the unit's month setup (Units & calendar → Details) day by day; the figure shown is the unit's average per working day. Type hours on a line only when that line differs. Avg SMV: the unit's ERP order-average SMV (or your own figure above) — product-wise SMVs and which products the unit's lines make are under <b>📋 Product-wise SMV</b>; the simulation plans each order with the SMV of its product type on the line.</div>
                     </div>
                     <div v-else-if="cfgTab === 'products'">
                         <table class="hl-table hl-table-s">
@@ -1231,6 +1357,12 @@ function close() {
 .hl-dow { margin-right : 6px; font-weight : 400; }
 .hl-scroll { max-height : 55vh; overflow : auto; }
 .hl-detail-row > td { background : #f7f9fc; padding : 8px 12px; }
+.hl-lines-unit { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; font-size : 12px; margin : 4px 0 8px; }
+.hl-lp-box { border : 1px solid #c9d2dc; border-radius : 4px; background : #f7f9fc; padding : 8px 12px; margin-bottom : 10px; }
+.hl-detail-head { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; margin-bottom : 6px; font-size : 12px; }
+.hl-link { color : #1b52ad; text-decoration : underline; cursor : pointer; }
+.hl-orders-box { margin-top : 8px; }
+.hl-orders-scroll { max-height : 260px; }
 .hl-md-head { display : flex; align-items : center; gap : 14px; flex-wrap : wrap; margin-bottom : 8px; font-size : 12px; }
 .hl-md-nav { display : inline-flex; align-items : center; gap : 6px; font-size : 13px; }
 .hl-md-grid { display : grid; grid-template-columns : repeat(7, 1fr); gap : 4px; max-width : 760px; }
