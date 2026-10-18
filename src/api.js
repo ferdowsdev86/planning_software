@@ -515,10 +515,6 @@ export const hlSaveScenario   = (id, by, scenario) => hlCall(`/scenarios/${encod
 export const hlRenameScenario = (id, by, name) => hlCall(`/scenarios/${encodeURIComponent(id)}/rename`, 'PUT', { by, name });
 export const hlDeleteScenario = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'DELETE', { by });
 export const hlErpLoad        = (by, from) => hlCall(`/erp-load?by=${encodeURIComponent(by || '')}${from ? `&from=${from}` : ''}`);
-export const hlErpMonthly     = by => hlCall(`/erp-monthly?by=${encodeURIComponent(by || '')}`);
-export const hlErpSmv         = by => hlCall(`/erp-smv?by=${encodeURIComponent(by || '')}`);
-export const hlErpSmvOrders   = (by, unitId, product) => hlCall(`/erp-smv-orders?by=${encodeURIComponent(by || '')}&unit=${encodeURIComponent(unitId)}&product=${encodeURIComponent(product)}`);
-export const hlErpMonthOrders = (by, unitId, month) => hlCall(`/erp-month-orders?by=${encodeURIComponent(by || '')}&unit=${encodeURIComponent(unitId)}&month=${encodeURIComponent(month)}`);
 export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}&by=${encodeURIComponent(by || '')}`);
 
 // the board opens on a What-if copy (read only) while this is set

@@ -19,7 +19,7 @@ import {
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver
 } from './hlEngine.js';
 import {
-    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders
+    hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpLoad
 } from './api.js';
 
 const props = defineProps({
@@ -103,38 +103,13 @@ async function openScenario(id) {
     catch (e) { props.toast(`Could not open the scenario: ${e.message}`, 'error'); }
     finally { busy.value = false; }
 }
-// A blank scenario starts with the LIVE board's sewing lines for MBM / CEIL /
-// AQL (name, manpower, efficiency, active — read only snapshot). Line hours
-// stay BLANK so every line follows its unit's "Hours / day": editing the
-// unit's hours in the configuration reflects straight in the unit capacity
-// (a line can still get its own hours manually to override the unit).
-// GSL has no lines on the live board: it keeps its single manual line whose
-// capacity (manpower, working hours, efficiency) is set in the configuration.
-async function liveLinesIntoBundle(bundle) {
-    try {
-        const d = await hlReference(bundle.from, bundle.to, by());
-        for (const u of HL_UNITS) {
-            if (u.code === 'G') continue;                    // GSL: single manual line stays
-            const live = (d.lines || []).filter(l => Number(l.unitId) === u.liveUnitId);
-            if (!live.length) continue;
-            bundle.lines = bundle.lines.filter(l => l.unitCode !== u.code);
-            for (const l of live) bundle.lines.push(newLine(bundle, u.code, l.name || l.code, { manpower : l.manpower || 40, eff : l.eff || 60, hours : null, active : !!l.active }));
-        }
-        // keep the unit order M / C / A / G like everywhere else on the board
-        const rank = Object.fromEntries(HL_UNITS.map((u, i) => [u.code, i]));
-        bundle.lines.sort((a, b) => (rank[a.unitCode] ?? 9) - (rank[b.unitCode] ?? 9));
-        bundle.source = { note : `Live board lines (M/C/A) at creation by ${by()}`, at : d.takenAt };
-    }
-    catch { /* live board unreachable — the default lines stay */ }
-    return bundle;
-}
 async function createScenario(fromId = null) {
     if (!canWrite.value) return denied();
     const name = window.prompt(fromId ? 'Name of the copy:' : 'Name of the new scenario:', fromId ? `${sc.value?.name || 'Scenario'} (copy)` : `Scenario ${String.fromCharCode(65 + (scenarios.value.length % 26))}`);
     if (!name) return;
     busy.value = true;
     try {
-        const j = await hlCreateScenario(by(), name, fromId ? { fromId } : { bundle : await liveLinesIntoBundle(newScenario(name, by())) });
+        const j = await hlCreateScenario(by(), name, fromId ? { fromId } : { bundle : newScenario(name, by()) });
         await refreshScenarios();
         dirty.value = false;
         await openScenario(j.id);
@@ -484,130 +459,7 @@ const newHoliday = ref({ date : '', unitCode : '', label : '', kind : 'holiday' 
 const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 function cfgLines() { return (sc.value?.lines || []).filter(l => l.unitCode === cfgUnit.value); }
 function cfgChange(label = 'configuration') { mutate(label, () => { /* edited in place by v-model */ }); }
-// Hours / OT of a line SHOW the unit's figures (copied into the field) and
-// the capacity is calculated from them; typing a different number gives the
-// line its own value, clearing the field follows the unit again.
-const cfgUnitObj = computed(() => { void tick.value; return unitOf(sc.value, cfgUnit.value); });
-function setLineHours(l, v, key = 'hours') {
-    mutate(`line ${key}`, s => {
-        const x = s.lines.find(y => y.id === l.id);
-        x[key] = v === '' || v == null ? null : Number(v);
-    });
-}
 function toggleWorkDay(u, d) { mutate('working days', s => { const x = s.units.find(y => y.code === u.code); x.workDays = x.workDays.includes(d) ? x.workDays.filter(v => v !== d) : [...x.workDays, d].sort(); }); }
-
-// ---- Units & calendar: capacity from the configuration -------------------
-// Capacity SAH = Σ active lines Σ working days  manpower × hours × efficiency
-// (standard hours); Capacity pcs = Capacity SAH × 60 ÷ average SMV. The
-// average SMV comes from the ERP active orders of the unit (quantity-weighted
-// over its product types) unless the planner types their own figure.
-const erpSmv = shallowRef(null);          // { from, takenAt, rows } | { error }
-async function loadErpSmv() {
-    try { erpSmv.value = await hlErpSmv(by()); }
-    catch (e) { erpSmv.value = { error : e.message, rows : [] }; }
-}
-const erpSmvByUnit = computed(() => {
-    const out = {};
-    for (const u of HL_UNITS) out[u.code] = { products : [], qty : 0, orders : 0, smvQty : 0, qtyWithSmv : 0, avgSmv : null };
-    for (const r of erpSmv.value?.rows || []) {
-        const code = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code;
-        if (!code) continue;
-        const g = out[code];
-        g.products.push(r);
-        g.qty += r.qty; g.orders += r.orders;
-        if (r.avgSmv != null) { g.smvQty += r.avgSmv * r.qtyWithSmv; g.qtyWithSmv += r.qtyWithSmv; }
-    }
-    for (const g of Object.values(out)) { g.avgSmv = g.qtyWithSmv > 0 ? Math.round(g.smvQty / g.qtyWithSmv * 100) / 100 : null; g.products.sort((a, b) => b.qty - a.qty); }
-    return out;
-});
-// the average SMV capacity is turned into pieces with: the planner's own
-// figure → ERP order mix of the unit → the scenario's product SMVs
-function unitAvgSmv(code) {
-    const u = unitOf(sc.value, code);
-    if (u && Number(u.avgSmv) > 0) return Number(u.avgSmv);
-    const e = erpSmvByUnit.value[code]?.avgSmv;
-    if (e > 0) return e;
-    const list = sc.value?.products || [];
-    const avg = list.reduce((a, x) => a + (Number(x.smv) || 0), 0) / (list.length || 1);
-    return avg > 0 ? Math.round(avg * 100) / 100 : 20;
-}
-const unitSmvSource = code => (Number(unitOf(sc.value, code)?.avgSmv) > 0 ? 'own' : (erpSmvByUnit.value[code]?.avgSmv > 0 ? 'ERP' : 'products'));
-const unitCapPcs = code => { void tick.value; const st = unitStats.value[code]; const smv = unitAvgSmv(code); return st && smv > 0 ? Math.round(st.capMin / smv) : 0; };
-function setUnitAvgSmv(u, v) { mutate('unit average SMV', s => { s.units.find(x => x.code === u.code).avgSmv = v === '' || v == null ? null : Number(v); }); }
-
-// detail panel of one unit: ERP product types with their quantity / SMV, the
-// scenario SMV per product (editable, copied into the unit's lines), and the
-// orders behind a product type with each one's SMV
-const cfgDetailUnit = ref('');
-const cfgProd = ref('');
-const cfgOrders = shallowRef(null);        // { rows } | { error } | null
-const cfgOrdersBusy = ref(false);
-function cfgToggleDetail(code) { cfgDetailUnit.value = cfgDetailUnit.value === code ? '' : code; cfgProd.value = ''; cfgOrders.value = null; }
-const cfgDetailRows = computed(() => {
-    void tick.value;
-    const code = cfgDetailUnit.value;
-    if (!code || !sc.value) return [];
-    const st = unitStats.value[code];
-    const lines = sc.value.lines.filter(l => l.unitCode === code && l.active);
-    const erpRows = erpSmvByUnit.value[code]?.products || [];
-    const names = new Set([...erpRows.map(r => r.product), ...sc.value.products.map(p => p.name)]);
-    return [...names].map(name => {
-        const e = erpRows.find(r => r.product === name);
-        const p = sc.value.products.find(x => x.name.toLowerCase() === name.toLowerCase());
-        const lineSmvs = lines.map(l => Number(l.products?.[p?.name || name])).filter(v => v > 0);
-        const scenSmv = lineSmvs.length ? Math.round(lineSmvs.reduce((a, b) => a + b, 0) / lineSmvs.length * 100) / 100 : (p ? Number(p.smv) : null);
-        return { name, inScenario : !!p, orders : e?.orders || 0, qty : e?.qty || 0, erpSmv : e?.avgSmv ?? null, scenSmv, lines : lineSmvs.length,
-            capPcs : st && scenSmv > 0 ? Math.round(st.capMin / scenSmv) : null };
-    }).sort((a, b) => b.qty - a.qty);
-});
-// set a product's SMV for the unit: the scenario product (when new, added to
-// every line) and the unit's lines that make it
-function setUnitProductSmv(code, name, v) {
-    const smv = Number(v);
-    if (!(smv > 0)) return;
-    mutate(`SMV ${name}`, s => {
-        let p = s.products.find(x => x.name.toLowerCase() === name.toLowerCase());
-        if (!p) { p = { name, smv }; s.products.push(p); for (const l of s.lines) if (l.products[name] == null) l.products[name] = smv; }
-        else if (code === '*') p.smv = smv;
-        for (const l of s.lines) if ((code === '*' || l.unitCode === code) && l.products[p.name] != null) l.products[p.name] = smv;
-    });
-}
-function useErpSmv(code, row) { if (row.erpSmv > 0) setUnitProductSmv(code, row.name, row.erpSmv); }
-function useErpSmvAll(code) { for (const r of cfgDetailRows.value) if (r.erpSmv > 0) setUnitProductSmv(code, r.name, r.erpSmv); }
-async function cfgShowOrders(code, name) {
-    const unit = HL_UNITS.find(u => u.code === code);
-    cfgProd.value = name; cfgOrders.value = null; cfgOrdersBusy.value = true;
-    try { cfgOrders.value = await hlErpSmvOrders(by(), unit.liveUnitId, name); }
-    catch (e) { cfgOrders.value = { error : e.message, rows : [] }; }
-    finally { cfgOrdersBusy.value = false; }
-}
-
-// day-wise hours of a unit (a date's own hours: 0 = off, > 0 = working with
-// those hours, even on a weekly off day or a holiday)
-const dhUnit = ref('');
-const dhNew = ref({ date : '', hours : 8 });
-function dhToggle(code) { dhUnit.value = dhUnit.value === code ? '' : code; }
-const dhRows = computed(() => { void tick.value; const u = unitOf(sc.value, dhUnit.value); return Object.entries(u?.dayHours || {}).sort((a, b) => a[0].localeCompare(b[0])).map(([date, hours]) => ({ date, hours })); });
-function dhAdd() {
-    const d = dhNew.value.date, h = Number(dhNew.value.hours);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) { props.toast('Pick a date', 'warn'); return; }
-    if (!(h >= 0)) { props.toast('Hours must be 0 (off) or more', 'warn'); return; }
-    mutate(`day hours ${d}`, s => { const u = s.units.find(x => x.code === dhUnit.value); u.dayHours = { ...(u.dayHours || {}), [d] : h }; });
-    dhNew.value = { date : addDays(d, 1), hours : h };
-}
-function dhSet(date, v) { const h = Number(v); if (!(h >= 0)) return; mutate(`day hours ${date}`, s => { const u = s.units.find(x => x.code === dhUnit.value); u.dayHours = { ...(u.dayHours || {}), [date] : h }; }); }
-function dhRemove(date) { mutate(`day hours ${date}`, s => { const u = s.units.find(x => x.code === dhUnit.value); const o = { ...(u.dayHours || {}) }; delete o[date]; u.dayHours = o; }); }
-function dhFillRange(hours) {
-    const from = window.prompt('From date (YYYY-MM-DD):', sc.value?.from || ''), to = from && window.prompt('To date (YYYY-MM-DD):', from);
-    if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from) return;
-    mutate(`day hours ${from}→${to}`, s => {
-        const u = s.units.find(x => x.code === dhUnit.value);
-        const o = { ...(u.dayHours || {}) };
-        for (let d = from, g = 0; d <= to && g < 400; d = addDays(d, 1), g++) o[d] = hours;
-        u.dayHours = o;
-    });
-}
-
 function addLine() { mutate('add line', s => { const n = s.lines.filter(l => l.unitCode === cfgUnit.value).length + 1; s.lines.push(newLine(s, cfgUnit.value, `Line ${String(n).padStart(2, '0')}`)); }); }
 function addLines(n) { mutate(`add ${n} lines`, s => { let k = s.lines.filter(l => l.unitCode === cfgUnit.value).length; for (let i = 0; i < n; i++) s.lines.push(newLine(s, cfgUnit.value, `Line ${String(++k).padStart(2, '0')}`)); }); }
 function removeLine(id) {
@@ -734,16 +586,13 @@ function impApply() {
         const lineByLive = new Map();
         if (o.lines) {
             for (const u of s.units) {
-                if (u.code === 'G') continue;    // GSL: the single manual line is never replaced by the import
                 const unitInfo = HL_UNITS.find(x => x.code === u.code);
                 const live = d.lines.filter(l => Number(l.unitId) === unitInfo.liveUnitId);
                 if (!live.length) continue;
                 s.reservations = s.reservations.filter(r => !s.lines.some(l => l.id === r.lineId && l.unitCode === u.code));
                 s.lines = s.lines.filter(l => l.unitCode !== u.code);
                 for (const l of live) {
-                    // hours stay blank → the line follows its unit's "Hours / day",
-                    // so unit-level hour changes reflect in the unit capacity
-                    const nl = newLine(s, u.code, l.name || l.code, { manpower : l.manpower || 40, eff : l.eff || 60, hours : null, active : !!l.active });
+                    const nl = newLine(s, u.code, l.name || l.code, { manpower : l.manpower || 40, eff : l.eff || 60, hours : l.hours || null, active : !!l.active });
                     s.lines.push(nl);
                     lineByLive.set(l.liveId, nl.id);
                 }
@@ -783,151 +632,30 @@ function impApply() {
 }
 
 // ---------------------------------------------------------------------------
-// ERP monthly active orders by delivery date (read only): every Active order
-// grouped by the delivery month of its POs (po_ex_fty, order date fallback)
-// per production unit — months before the current one are overdue, orders
-// without a delivery date show as their own row. Clicking a month opens the
-// detailed order list for that unit and month.
+// ERP order load (read only): active mr_order_entry orders delivered from
+// the plan cut-off on, by production unit and product type — the demand each
+// unit faces, next to the simulated capacity on its card
 // ---------------------------------------------------------------------------
-const erpMonthly = shallowRef(null);     // { takenAt, months, unitTotals, grand } | { error }
-async function loadErpMonthly() {
-    try { erpMonthly.value = await hlErpMonthly(by()); }
-    catch (e) { erpMonthly.value = { error : e.message, months : [], unitTotals : {}, grand : { orders : 0, qty : 0, outstanding : 0 } }; }
+const erpLoad = shallowRef(null);     // { from, takenAt, rows }
+async function loadErpLoad() {
+    try { erpLoad.value = await hlErpLoad(by()); }
+    catch (e) { erpLoad.value = { error : e.message, rows : [] }; }
 }
-const thisYm = ymd(new Date()).slice(0, 7);
-const ymLabel = ym => {
-    if (!ym || ym === 'none') return 'No delivery date';
-    const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1);
-    return d.toLocaleDateString('en-US', { month : 'long', year : 'numeric' });
-};
-const erpMonthByUnit = computed(() => {
-    const m = erpMonthly.value;
+const erpByUnit = computed(() => {
     const out = {};
-    for (const u of HL_UNITS) out[u.code] = { months : [], total : { orders : 0, qty : 0, outstanding : 0 } };
-    out.other = { months : [], total : { orders : 0, qty : 0, outstanding : 0 } };
-    if (!m) return out;
-    for (const r of m.months || []) {
+    const rows = erpLoad.value?.rows || [];
+    for (const u of HL_UNITS) out[u.code] = { products : [], qty : 0, orders : 0 };
+    out.other = { products : [], qty : 0, orders : 0, name : 'Other units' };
+    for (const r of rows) {
         const code = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code || 'other';
-        const products = (m.products || []).filter(p => Number(p.unitId) === Number(r.unitId) && p.ym === r.ym)
-            .sort((a, b) => b.qty - a.qty);
-        out[code].months.push({ ...r, products, label : ymLabel(r.ym), overdue : r.ym !== 'none' && r.ym < thisYm });
+        const g = out[code];
+        g.products.push({ product : r.product, qty : r.qty, orders : r.orders });
+        g.qty += r.qty; g.orders += r.orders;
     }
-    for (const [uid, t] of Object.entries(m.unitTotals || {})) {
-        const code = HL_UNITS.find(u => u.liveUnitId === Number(uid))?.code || 'other';
-        out[code].total.orders += t.orders; out[code].total.qty += t.qty; out[code].total.outstanding += t.outstanding;
-    }
-    // other: several units share the bucket — months of the same ym merge
-    const merged = new Map();
-    for (const r of out.other.months) {
-        const g = merged.get(r.ym) || { ym : r.ym, label : r.label, overdue : r.overdue, orders : 0, qty : 0, outstanding : 0 };
-        g.orders += r.orders; g.qty += r.qty; g.outstanding += r.outstanding;
-        merged.set(r.ym, g);
-    }
-    out.other.months = [...merged.values()].sort((a, b) => a.ym.localeCompare(b.ym));
+    for (const g of Object.values(out)) g.products.sort((a, b) => b.qty - a.qty);
     return out;
 });
-
-// month-wise capacity of each unit against the ERP order load: the month's
-// available minutes (lines inside the plan range) are turned into PIECES with
-// the month's order product mix (scenario SMV per product type), so capacity,
-// order quantity, the gap quantity and the load percentage sit side by side
-function smvOf(product) {
-    const list = sc.value?.products || [];
-    const p = list.find(x => x.name.toLowerCase() === String(product || '').toLowerCase());
-    if (p) return Number(p.smv) || 20;
-    const avg = list.reduce((a, x) => a + (Number(x.smv) || 0), 0) / (list.length || 1);
-    return avg > 0 ? avg : 20;
-}
-const monthCapRes = computed(() => {
-    void tick.value;
-    const s = sc.value;
-    const out = {};
-    if (!s) return out;
-    const load = loadMap.value;
-    for (const u of HL_UNITS) {
-        const per = {};
-        const total = { cap : 0, used : 0, capPcs : 0, qty : 0, reqMin : 0 };
-        for (const row of erpMonthByUnit.value[u.code]?.months || []) {
-            const [y, m] = row.ym.split('-').map(Number);
-            const first = `${row.ym}-01`;
-            const last  = `${row.ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
-            const mFrom = first > s.from ? first : s.from;
-            const mTo   = last  < s.to   ? last  : s.to;
-            const st = mFrom > mTo ? { capMin : 0, usedMin : 0 } : unitSummary(s, u.code, mFrom, mTo, load);
-            // weighted average SMV of the month's order mix → capacity in pcs
-            const reqMin = row.products.reduce((a, p) => a + p.qty * smvOf(p.product), 0);
-            const avgSmv = row.qty > 0 ? reqMin / row.qty : smvOf(null);
-            const capPcs = avgSmv > 0 ? Math.round(st.capMin / avgSmv) : 0;
-            per[row.ym] = { cap : st.capMin, used : st.usedMin, capPcs, capSah : st.capMin / 60, reqSah : reqMin / 60,
-                gapQty : capPcs - row.qty, pct : capPcs > 0 ? row.qty / capPcs : null };
-            total.cap += st.capMin; total.used += st.usedMin; total.capPcs += capPcs; total.qty += row.qty; total.reqMin += reqMin;
-        }
-        per.total = { ...total, capSah : total.cap / 60, reqSah : total.reqMin / 60,
-            gapQty : total.capPcs - total.qty, pct : total.capPcs > 0 ? total.qty / total.capPcs : null };
-        out[u.code] = per;
-    }
-    return out;
-});
-
-// detailed order list of one unit + delivery month
-const emOpen   = ref(false);
-const emBusy   = ref(false);
-const emUnit   = ref(null);              // HL_UNITS entry
-const emMonth  = ref('');                // 'YYYY-MM' | 'none'
-const emData   = shallowRef(null);       // { takenAt, rows } | { error }
-const emBuyer  = ref('');
-const emProd   = ref('');
-const emGarment = ref('');
-async function openErpMonth(u, ym) {
-    const unit = HL_UNITS.find(x => x.code === u.code);
-    if (!unit) return;
-    emUnit.value = unit; emMonth.value = ym;
-    emBuyer.value = ''; emProd.value = ''; emGarment.value = '';
-    emData.value = null; emOpen.value = true; emBusy.value = true;
-    try { emData.value = await hlErpMonthOrders(by(), unit.liveUnitId, ym); }
-    catch (e) { emData.value = { error : e.message, rows : [] }; }
-    finally { emBusy.value = false; }
-}
-const emOptions = computed(() => {
-    const rows = emData.value?.rows || [];
-    const uniq = k => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
-    return { buyers : uniq('buyer'), products : uniq('product'), garments : uniq('garment') };
-});
-const emRows = computed(() => (emData.value?.rows || []).filter(r =>
-    (!emBuyer.value || r.buyer === emBuyer.value) &&
-    (!emProd.value || r.product === emProd.value) &&
-    (!emGarment.value || r.garment === emGarment.value)));
-const emTotal = computed(() => emRows.value.reduce((a, r) => ({ qty : a.qty + r.qty, outstanding : a.outstanding + r.outstanding }), { qty : 0, outstanding : 0 }));
-// product-wise view of the clicked month: order load per product type against
-// the month's capacity (scenario SMV; capacity pcs = month minutes / SMV)
-const emProducts = computed(() => {
-    void tick.value;
-    const u = emUnit.value;
-    if (!u) return [];
-    const month = erpMonthByUnit.value[u.code]?.months.find(m => m.ym === emMonth.value);
-    const capMin = monthCapRes.value[u.code]?.[emMonth.value]?.cap || 0;
-    return (month?.products || []).map(p => {
-        const smv = smvOf(p.product);
-        const reqMin = p.qty * smv;
-        return { ...p, smv : Math.round(smv * 10) / 10, reqH : reqMin / 60,
-            capAlone : smv > 0 ? Math.round(capMin / smv) : 0,
-            share : capMin > 0 ? reqMin / capMin : null };
-    });
-});
-// reservation status in the OPEN scenario: the ERP order matched by code
-// (reference import stores it as source 'live:CODE' / note CODE)
-function emResStatus(r) {
-    void tick.value;
-    const s = sc.value;
-    if (!s) return '—';
-    const o = s.orders.find(x => x.source === `live:${r.order}` || x.note === r.order);
-    if (!o) return '—';
-    const rs = s.reservations.filter(x => x.orderId === o.id && x.status !== 'cancelled');
-    if (!rs.length) return 'in scenario · not reserved';
-    const q = rs.reduce((a, x) => a + (Number(x.qty) || 0), 0);
-    return `reserved ${fmtQty(q)} pcs · ${rs.length} line(s)${rs.some(x => x.locked) ? ' · 🔒' : ''}`;
-}
-const emOverdueToday = ymd(new Date());
+const erpGrand = computed(() => (erpLoad.value?.rows || []).reduce((a, r) => ({ qty : a.qty + r.qty, orders : a.orders + r.orders }), { qty : 0, orders : 0 }));
 
 // ---------------------------------------------------------------------------
 // Scenario compare
@@ -957,8 +685,7 @@ function onKey(e) {
 onMounted(async () => {
     document.addEventListener('keydown', onKey);
     await refreshScenarios();
-    loadErpMonthly();
-    loadErpSmv();
+    loadErpLoad();
     const remembered = localStorage.getItem('hl-scenario');
     const first = scenarios.value.find(s => s.id === remembered)?.id || scenarios.value[0]?.id;
     if (first) await openScenario(first);
@@ -1030,45 +757,19 @@ function close() {
 
         <div v-if="sc" class="hl-units">
             <div v-for="u in sc.units" :key="u.code" class="hl-unit-card" :class="`hl-uc-${(unitStats[u.code]?.util || 0) > 1 ? 'over' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.full || 0.9) ? 'full' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.partial || 0.4) ? 'partial' : 'ok'}`">
-                <div class="hl-uc-head"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span>
-                    <span v-if="erpMonthByUnit[u.code]?.total.orders" class="hl-uc-oq" :title="`Total active ERP order quantity of production unit ${u.label} (all delivery months) · ${fmtQty(erpMonthByUnit[u.code].total.orders)} orders · outstanding ${fmtQty(erpMonthByUnit[u.code].total.outstanding)} pcs`">Order qty <b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b> pcs <i class="hl-dim">· {{ fmtQty(erpMonthByUnit[u.code].total.orders) }} orders</i></span>
-                </div>
-                <div v-if="erpMonthly" class="hl-uc-erp" :title="`ERP active production orders with delivery from ${dmy(erpMonthly.from)} on, by PO delivery month, production unit ${u.label}. Capacity = the unit's available hours of the month (inside the plan range) in pieces, using the month's order product mix and the scenario SMVs. Click a month for the product-wise breakdown (snapshot ${erpMonthly.takenAt || ''})`">
-                    <span class="hl-uc-erp-t">Month wise capacity vs active orders <i class="hl-dim">· delivery after {{ dmy(addDays(erpMonthly.from || '', -1)) }}</i></span>
-                    <div class="hl-em-scroll">
-                        <table class="hl-em-tbl">
-                            <thead><tr><th>Delivery month</th><th title="Available capacity of the month in pieces (order product mix) — lines' manpower × hours × efficiency ÷ average SMV">Capacity (pcs)</th><th title="Capacity SAH — lines' manpower × (hours + OT) × efficiency, in standard hours">Cap SAH</th><th title="Active ERP order quantity of the month">Order qty</th><th title="Order SAH — Σ order qty × SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity">Gap qty</th><th title="Order quantity as % of capacity">%</th></tr></thead>
-                            <tbody>
-                                <tr v-for="m in erpMonthByUnit[u.code].months" :key="m.ym" :class="{ 'hl-em-over' : m.overdue, 'hl-em-cur' : m.ym === thisYm }"
-                                    :title="m.overdue ? 'Overdue — delivery month already past, order still Active in ERP' : `${m.orders} order(s), outstanding ${fmtQty(m.outstanding)} pcs — click for the product-wise breakdown`"
-                                    @click="openErpMonth(u, m.ym)">
-                                    <td>{{ m.overdue ? '⚠ ' : '' }}{{ m.label }}</td>
-                                    <td class="hl-r">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.capPcs) }}</td>
-                                    <td class="hl-r">{{ fmtQty(Math.round(monthCapRes[u.code]?.[m.ym]?.capSah || 0)) }}</td>
-                                    <td class="hl-r">{{ fmtQty(m.qty) }}</td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.reqSah || 0) > (monthCapRes[u.code]?.[m.ym]?.capSah || 0) }">{{ fmtQty(Math.round(monthCapRes[u.code]?.[m.ym]?.reqSah || 0)) }}</td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.gapQty || 0) < 0 }">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.gapQty) }}</td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.pct || 0) > 1 }">{{ monthCapRes[u.code]?.[m.ym]?.pct != null ? fmtPct(monthCapRes[u.code][m.ym].pct) : '—' }}</td>
-                                </tr>
-                                <tr v-if="!erpMonthByUnit[u.code].months.length"><td colspan="7" class="hl-dim">No active ERP orders for this unit.</td></tr>
-                            </tbody>
-                            <tfoot v-if="erpMonthByUnit[u.code].months.length">
-                                <tr><td><b>Total</b></td>
-                                    <td class="hl-r"><b>{{ fmtQty(monthCapRes[u.code]?.total?.capPcs) }}</b></td>
-                                    <td class="hl-r"><b>{{ fmtQty(Math.round(monthCapRes[u.code]?.total?.capSah || 0)) }}</b></td>
-                                    <td class="hl-r"><b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b></td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.reqSah || 0) > (monthCapRes[u.code]?.total?.capSah || 0) }"><b>{{ fmtQty(Math.round(monthCapRes[u.code]?.total?.reqSah || 0)) }}</b></td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.gapQty || 0) < 0 }"><b>{{ fmtQty(monthCapRes[u.code]?.total?.gapQty) }}</b></td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.pct || 0) > 1 }"><b>{{ monthCapRes[u.code]?.total?.pct != null ? fmtPct(monthCapRes[u.code].total.pct) : '—' }}</b></td></tr>
-                            </tfoot>
-                        </table>
-                    </div>
+                <div class="hl-uc-head"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span></div>
+                <div class="hl-uc-row"><span>Capacity</span><b>{{ fmtMin(unitStats[u.code]?.capMin) }}</b><span>Reserved</span><b>{{ fmtMin(unitStats[u.code]?.usedMin) }}</b><span>Available</span><b>{{ fmtMin(unitStats[u.code]?.availMin) }}</b><span>Util</span><b>{{ fmtPct(unitStats[u.code]?.util) }}</b><span>Overloaded days</span><b>{{ unitStats[u.code]?.overDays }}</b><span>Idle</span><b>{{ fmtMin(unitStats[u.code]?.idleMin) }}</b></div>
+                <div class="hl-uc-prod"><span v-for="(v, p) in unitStats[u.code]?.products || {}" :key="p" :title="`${v.lines} line(s) can make it`">{{ p }}: <b>{{ fmtQty(v.pcsPerDay) }}</b>/day</span></div>
+                <div v-if="erpLoad" class="hl-uc-erp" :title="`ERP mr_order_entry: order_status Active, delivery from ${dmy(erpLoad.from)} on, production unit ${u.label} — order quantity by product type (snapshot ${erpLoad.takenAt || ''})`">
+                    <span class="hl-uc-erp-t">ERP active orders · delivery after {{ dmy(addDays(erpLoad.from || '', -1)) }}:</span>
+                    <span v-for="p in erpByUnit[u.code].products" :key="p.product">{{ p.product }} <b>{{ fmtQty(p.qty) }}</b> <i class="hl-dim">({{ p.orders }})</i></span>
+                    <span class="hl-uc-erp-total">Unit total <b>{{ fmtQty(erpByUnit[u.code].qty) }}</b> pcs · {{ erpByUnit[u.code].orders }} orders</span>
                 </div>
             </div>
         </div>
-        <div v-if="erpMonthly && (erpMonthByUnit.other.total.qty || erpMonthly.error)" class="hl-erp-other">
-            <template v-if="erpMonthly.error">ERP order load not available: {{ erpMonthly.error }}</template>
-            <template v-else>Other production units (not on this board): <b>{{ fmtQty(erpMonthByUnit.other.total.qty) }}</b> pcs / {{ fmtQty(erpMonthByUnit.other.total.orders) }} active orders · all units together <b>{{ fmtQty(erpMonthly.grand.qty) }}</b> pcs / {{ fmtQty(erpMonthly.grand.orders) }} active orders · outstanding <b>{{ fmtQty(erpMonthly.grand.outstanding) }}</b> pcs</template>
+        <div v-if="erpLoad && (erpByUnit.other.qty || erpLoad.error)" class="hl-erp-other">
+            <template v-if="erpLoad.error">ERP order load not available: {{ erpLoad.error }}</template>
+            <template v-else>Other production units (not on this board): <span v-for="p in erpByUnit.other.products" :key="p.product">{{ p.product }} <b>{{ fmtQty(p.qty) }}</b> </span> · total <b>{{ fmtQty(erpByUnit.other.qty) }}</b> pcs · all units together <b>{{ fmtQty(erpGrand.qty) }}</b> pcs / {{ erpGrand.orders }} active orders</template>
         </div>
 
         <div class="hl-sched-wrap" :class="{ 'hl-busy' : busy }">
@@ -1117,92 +818,19 @@ function close() {
                         <button v-for="t in [['units','Units & calendar'],['lines','Lines'],['products','Products'],['holidays','Holidays & shutdowns'],['thresholds','Thresholds']]" :key="t[0]" class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : cfgTab === t[0] }" @click="cfgTab = t[0]">{{ t[1] }}</button>
                     </div>
                     <div v-if="cfgTab === 'units'" class="hl-cfg-units">
-                        <div class="hl-scroll hl-cfg-scroll">
-                        <table class="hl-table hl-units-tbl">
-                            <thead><tr>
-                                <th>Unit</th><th>Hours / day</th><th>OT</th><th>Working days</th>
-                                <th title="Working days of the unit inside the plan range (weekly off days, holidays, shutdowns and day-wise 0-hour days excluded)">Work days<br><i class="hl-dim">{{ dmy(sc.from) }} → {{ dmy(sc.to) }}</i></th>
-                                <th title="Manpower of the active lines">Manpower</th>
-                                <th title="Average working hours per line and working day (day-wise and line figures included)">Avg hrs / day</th>
-                                <th title="Average SMV used to turn capacity into pieces — ERP active orders of the unit (quantity-weighted) unless you type your own">Avg SMV</th>
-                                <th title="Capacity SAH = Σ active lines Σ working days manpower × hours × efficiency (standard hours)">Capacity SAH</th>
-                                <th title="Capacity SAH × 60 ÷ average SMV">Capacity pcs</th>
-                                <th title="ERP active orders of the unit, delivery after the cut-off">ERP orders</th>
-                                <th></th>
-                            </tr></thead>
+                        <table class="hl-table">
+                            <thead><tr><th>Unit</th><th>Label</th><th>Hours / day</th><th>OT / day</th><th>Working days</th><th>Lines (active)</th></tr></thead>
                             <tbody>
-                                <template v-for="u in sc.units" :key="u.code">
-                                <tr :class="{ 'hl-sel' : cfgDetailUnit === u.code || dhUnit === u.code }">
-                                    <td><b>{{ u.name }}</b><br><i class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines</i></td>
+                                <tr v-for="u in sc.units" :key="u.code">
+                                    <td><b>{{ u.name }}</b></td><td>{{ u.label }}</td>
                                     <td><input v-model.number="u.hours" type="number" step="0.5" min="0" max="24" class="cal-in hl-num" @change="cfgChange('unit hours')"></td>
                                     <td><input v-model.number="u.ot" type="number" step="0.5" min="0" max="12" class="cal-in hl-num" @change="cfgChange('unit OT')"></td>
-                                    <td class="hl-nowrap"><label v-for="(d, i) in DOW" :key="i" class="hl-dow"><input type="checkbox" :checked="u.workDays.includes(i)" @change="toggleWorkDay(u, i)">{{ d }}</label></td>
-                                    <td class="hl-r"><b>{{ unitStats[u.code]?.workDays }}</b></td>
-                                    <td class="hl-r">{{ fmtQty(unitStats[u.code]?.manpower) }}</td>
-                                    <td class="hl-r">{{ (unitStats[u.code]?.avgHours || 0).toFixed(2) }}</td>
-                                    <td class="hl-nowrap">
-                                        <input :value="u.avgSmv ?? ''" type="number" step="0.01" min="0.1" class="cal-in hl-num" :placeholder="String(unitAvgSmv(u.code))" :title="unitSmvSource(u.code) === 'own' ? 'Your own average SMV (clear to use the ERP order mix)' : 'ERP order-mix average — type a figure to override'" @change="setUnitAvgSmv(u, $event.target.value)">
-                                        <i class="hl-dim">{{ unitSmvSource(u.code) === 'own' ? 'own' : unitSmvSource(u.code) === 'ERP' ? 'ERP mix' : 'products' }}</i>
-                                    </td>
-                                    <td class="hl-r"><b>{{ fmtQty(Math.round(unitStats[u.code]?.capSah || 0)) }}</b> h</td>
-                                    <td class="hl-r"><b>{{ fmtQty(unitCapPcs(u.code)) }}</b></td>
-                                    <td class="hl-r">{{ fmtQty(erpSmvByUnit[u.code]?.qty) }} pcs<br><i class="hl-dim">{{ erpSmvByUnit[u.code]?.orders }} orders</i></td>
-                                    <td class="hl-nowrap">
-                                        <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : cfgDetailUnit === u.code }" title="Products and orders of this unit with their SMV" @click="cfgToggleDetail(u.code)">📋 Details</button>
-                                        <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : dhUnit === u.code }" title="Hours of specific dates (0 = off day)" @click="dhToggle(u.code)">📅 Day-wise{{ Object.keys(u.dayHours || {}).length ? ` (${Object.keys(u.dayHours).length})` : '' }}</button>
-                                    </td>
+                                    <td><label v-for="(d, i) in DOW" :key="i" class="hl-dow"><input type="checkbox" :checked="u.workDays.includes(i)" @change="toggleWorkDay(u, i)">{{ d }}</label></td>
+                                    <td>{{ unitStats[u.code]?.lines }} ({{ unitStats[u.code]?.activeLines }})</td>
                                 </tr>
-                                <tr v-if="cfgDetailUnit === u.code" class="hl-detail-row"><td colspan="12">
-                                    <div class="hl-detail-head"><b>{{ u.name }} · {{ u.label }}</b> — ERP active orders (delivery after {{ dmy(addDays(erpSmv?.from || sc.from, -1)) }}) by product type, with the SMV the simulation uses
-                                        <button class="cal-btn st-btn hl-btn" title="Copy every ERP average SMV into this unit's lines" @click="useErpSmvAll(u.code)">⬇ Use all ERP SMVs</button>
-                                        <span v-if="erpSmv?.error" class="hl-warn">ERP not available: {{ erpSmv.error }}</span>
-                                    </div>
-                                    <table class="hl-table hl-table-s">
-                                        <thead><tr><th>Product type</th><th>Orders</th><th>Order qty</th><th title="Quantity-weighted average SMV of the styles in ERP">ERP avg SMV</th><th title="SMV the simulation uses on this unit's lines — edit to change every line of the unit">Simulation SMV</th><th>Lines able</th><th title="Capacity of the unit in pieces if it made only this product">Capacity pcs</th><th></th></tr></thead>
-                                        <tbody>
-                                            <tr v-for="r in cfgDetailRows" :key="r.name" :class="{ 'hl-sel' : cfgProd === r.name }">
-                                                <td><a class="hl-link" @click="cfgShowOrders(u.code, r.name)">{{ r.name }}</a><i v-if="!r.inScenario" class="hl-dim"> (not in products)</i></td>
-                                                <td class="hl-r">{{ r.orders ? fmtQty(r.orders) : '—' }}</td>
-                                                <td class="hl-r">{{ r.qty ? fmtQty(r.qty) : '—' }}</td>
-                                                <td class="hl-r">{{ r.erpSmv ?? '—' }}</td>
-                                                <td><input :value="r.scenSmv ?? ''" type="number" step="0.1" min="0.1" class="cal-in hl-num" @change="setUnitProductSmv(u.code, r.name, $event.target.value)"></td>
-                                                <td class="hl-r">{{ r.lines }}</td>
-                                                <td class="hl-r">{{ r.capPcs != null ? fmtQty(r.capPcs) : '—' }}</td>
-                                                <td><button v-if="r.erpSmv > 0 && r.erpSmv !== r.scenSmv" class="cal-btn st-btn hl-btn" title="Use the ERP average SMV on this unit's lines" @click="useErpSmv(u.code, r)">⬇ ERP</button></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                    <div v-if="cfgProd" class="hl-orders-box">
-                                        <div class="hl-detail-head"><b>{{ cfgProd }}</b> — orders of {{ u.label }} with their own SMV {{ cfgOrdersBusy ? '· loading…' : '' }}</div>
-                                        <div v-if="cfgOrders?.error" class="hl-warn">{{ cfgOrders.error }}</div>
-                                        <div v-else-if="cfgOrders" class="hl-scroll hl-orders-scroll">
-                                            <table class="hl-table hl-table-s">
-                                                <thead><tr><th>Order</th><th>Buyer</th><th>Style</th><th>Garment</th><th>Qty</th><th>PCD</th><th>Delivery</th><th>SMV</th></tr></thead>
-                                                <tbody>
-                                                    <tr v-for="o in cfgOrders.rows" :key="o.order"><td>{{ o.order }}</td><td>{{ o.buyer }}</td><td>{{ o.style }}</td><td>{{ o.garment }}</td><td class="hl-r">{{ fmtQty(o.qty) }}</td><td>{{ dmy(o.pcd) }}</td><td>{{ dmy(o.delivery) }}</td><td class="hl-r" :class="{ 'hl-warn' : !(o.smv > 0) }">{{ o.smv > 0 ? o.smv : 'no SMV' }}</td></tr>
-                                                    <tr v-if="!cfgOrders.rows.length"><td colspan="8" class="hl-dim">No active orders</td></tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </td></tr>
-                                <tr v-if="dhUnit === u.code" class="hl-detail-row"><td colspan="12">
-                                    <div class="hl-detail-head"><b>{{ u.name }} — day-wise working hours</b> <i class="hl-dim">a date set here decides that day: 0 = off, more = working with those hours (beats the weekly off day, holidays and the lines' hours)</i></div>
-                                    <div class="hl-actions">
-                                        <input v-model="dhNew.date" type="date" class="cal-in hl-date"><input v-model.number="dhNew.hours" type="number" step="0.5" min="0" max="24" class="cal-in hl-num"><span>hours</span>
-                                        <button class="cal-btn st-btn hl-btn" @click="dhAdd">➕ Add day</button>
-                                        <button class="cal-btn st-btn hl-btn" title="Set one figure for every day of a date range" @click="dhFillRange(Number(dhNew.hours) || 0)">📆 Fill a range with {{ dhNew.hours }} h</button>
-                                    </div>
-                                    <div class="hl-dh-list">
-                                        <span v-for="r in dhRows" :key="r.date" class="hl-dh" :class="{ 'hl-dh-off' : !(r.hours > 0) }">{{ dmy(r.date) }} <input :value="r.hours" type="number" step="0.5" min="0" max="24" class="cal-in hl-num hl-smv" @change="dhSet(r.date, $event.target.value)"> h <span class="hl-x-small" @click="dhRemove(r.date)">✖</span></span>
-                                        <span v-if="!dhRows.length" class="hl-dim">No day-wise figure yet — every working day uses {{ u.hours }}h{{ u.ot ? ` + ${u.ot} OT` : '' }}.</span>
-                                    </div>
-                                </td></tr>
-                                </template>
                             </tbody>
                         </table>
-                        </div>
-                        <div class="st-hint">Capacity SAH = Σ active lines Σ working days  manpower × (hours + OT) × efficiency; Capacity pcs = SAH × 60 ÷ average SMV. Hours / OT of the unit are followed by every line until a line gets its own figure (Lines tab); a day-wise figure for a date beats both. Working days and holidays are per unit; a holiday without a unit applies to all four. The ERP figures are read only (active orders, delivery after the cut-off) — the SMV you set here lives in this scenario only.</div>
+                        <div class="st-hint">Line-level hours / OT override the unit's figures (leave blank to follow the unit). Working days and holidays are per unit; a holiday without a unit applies to all four.</div>
                     </div>
                     <div v-else-if="cfgTab === 'lines'">
                         <div class="hl-actions">
@@ -1218,12 +846,8 @@ function close() {
                                         <td><input v-model="l.name" class="cal-in hl-txt" @change="cfgChange('line name')"></td>
                                         <td><input v-model="l.active" type="checkbox" @change="cfgChange('line active')"></td>
                                         <td><input v-model.number="l.manpower" type="number" min="0" class="cal-in hl-num" @change="cfgChange('manpower')"></td>
-                                        <td><input :value="l.hours ?? cfgUnitObj?.hours" type="number" step="0.5" min="0" class="cal-in hl-num" :class="{ 'hl-own' : l.hours != null }"
-                                                   :title="l.hours != null ? 'This line has its own hours — clear the field to follow the unit again' : `Unit hours (${cfgUnitObj?.hours}h) — type a different value to give this line its own`"
-                                                   @change="setLineHours(l, $event.target.value, 'hours')"></td>
-                                        <td><input :value="l.ot ?? cfgUnitObj?.ot" type="number" step="0.5" min="0" class="cal-in hl-num" :class="{ 'hl-own' : l.ot != null }"
-                                                   :title="l.ot != null ? 'This line has its own OT — clear the field to follow the unit again' : `Unit OT (${cfgUnitObj?.ot}h) — type a different value to give this line its own`"
-                                                   @change="setLineHours(l, $event.target.value, 'ot')"></td>
+                                        <td><input v-model="l.hours" type="number" step="0.5" min="0" class="cal-in hl-num" placeholder="unit" @change="cfgChange('line hours')"></td>
+                                        <td><input v-model="l.ot" type="number" step="0.5" min="0" class="cal-in hl-num" placeholder="unit" @change="cfgChange('line OT')"></td>
                                         <td><input v-model.number="l.eff" type="number" min="0" max="150" class="cal-in hl-num" @change="cfgChange('efficiency')"></td>
                                         <td v-for="p in sc.products" :key="p.name" class="hl-pcell">
                                             <input type="checkbox" :checked="l.products[p.name] != null" @change="setLineProduct(l, p.name, $event.target.checked)">
@@ -1274,11 +898,7 @@ function close() {
                             <tr><td>Overloaded</td><td>reserved minutes above the available minutes of the day</td></tr>
                         </table>
                     </div>
-                    <div class="hl-actions hl-right">
-                        <span v-if="dirty" class="hl-dim">unsaved simulation changes</span>
-                        <button class="cal-btn cal-btn-primary st-btn hl-btn" :disabled="!dirty || busy || !canWrite" @click="saveScenario">💾 Save scenario</button>
-                        <button class="cal-btn st-btn hl-btn" @click="cfgOpen = false">Close</button>
-                    </div>
+                    <div class="hl-actions hl-right"><button class="cal-btn st-btn hl-btn" @click="cfgOpen = false">Close</button></div>
                 </div>
             </div>
         </div>
@@ -1371,7 +991,7 @@ function close() {
                 <div class="st-body">
                     <div class="hl-result-row">Source: live planning board (read only) · window {{ dmy(impData.from) }} → {{ impData.to ? dmy(impData.to) : 'open' }} · one way into <b>{{ sc.name }}</b>; nothing ever flows back.</div>
                     <table class="hl-table hl-table-s">
-                        <tr><td><label><input v-model="impOpt.lines" type="checkbox"> Sewing lines</label></td><td>{{ impData.lines.length }} lines (manpower, efficiency, active — hours follow the unit) — replaces this scenario's MBM / CEIL / AQL lines; GSL keeps its single manually configured line</td></tr>
+                        <tr><td><label><input v-model="impOpt.lines" type="checkbox"> Sewing lines</label></td><td>{{ impData.lines.length }} lines (manpower, efficiency, hours, active) — replaces this scenario's lines of each live unit</td></tr>
                         <tr><td><label><input v-model="impOpt.products" type="checkbox"> Product types</label></td><td>{{ impData.products.length }} types from the live order list (with their average SMV)</td></tr>
                         <tr><td><label><input v-model="impOpt.orders" type="checkbox"> Orders</label></td><td>{{ impData.orders.length }} orders in the window (code, buyer, style, product, qty, PCD, delivery, production unit)</td></tr>
                         <tr><td><label><input v-model="impOpt.load" type="checkbox"> Existing planning load</label></td><td>{{ impData.load.length }} live bars become LOCKED reservations (needs lines)</td></tr>
@@ -1380,58 +1000,6 @@ function close() {
                         <button class="cal-btn st-btn hl-btn" @click="impOpen = false">Cancel</button>
                         <button class="cal-btn cal-btn-primary st-btn hl-btn" @click="impApply">Import into scenario</button>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ERP monthly order details (read only) -->
-        <div v-if="emOpen" class="cal-overlay" @click.self="emOpen = false">
-            <div class="cal-dialog pf-dialog hl-dialog hl-em-dialog">
-                <div class="cal-title">📅 {{ emUnit?.name }} · {{ emUnit?.label }} — active orders, delivery {{ ymLabel(emMonth) }}
-                    <span class="cal-title-btns"><span class="cal-x" @click="emOpen = false">✕</span></span></div>
-                <div class="st-body">
-                    <table v-if="emProducts.length" class="hl-table hl-table-s hl-em-prods">
-                        <thead><tr><th>Product wise</th><th>Orders</th><th>Order qty</th><th>Outstanding</th><th title="Scenario SMV of the product">SMV</th><th title="Hours this quantity needs (qty × SMV)">Required</th><th title="Month capacity if the unit made only this product">Capacity (pcs)</th><th title="Required hours as % of the month's capacity">Load %</th></tr></thead>
-                        <tbody>
-                            <tr v-for="p in emProducts" :key="p.product" :class="{ 'hl-sel' : emProd === p.product }" title="Click to filter the order list below by this product" @click="emProd = emProd === p.product ? '' : p.product">
-                                <td><b>{{ p.product }}</b></td>
-                                <td class="hl-r">{{ fmtQty(p.orders) }}</td>
-                                <td class="hl-r">{{ fmtQty(p.qty) }}</td>
-                                <td class="hl-r">{{ fmtQty(p.outstanding) }}</td>
-                                <td class="hl-r">{{ p.smv }}</td>
-                                <td class="hl-r">{{ fmtQty(Math.round(p.reqH)) }} h</td>
-                                <td class="hl-r">{{ fmtQty(p.capAlone) }}</td>
-                                <td class="hl-r" :class="{ 'hl-em-neg' : (p.share || 0) > 1 }">{{ p.share != null ? fmtPct(p.share) : '—' }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div class="hl-actions">
-                        <label class="hl-lbl">Buyer <select v-model="emBuyer" class="cal-in hl-sel-s"><option value="">all</option><option v-for="b in emOptions.buyers" :key="b" :value="b">{{ b }}</option></select></label>
-                        <label class="hl-lbl">Product <select v-model="emProd" class="cal-in hl-sel-s"><option value="">all</option><option v-for="p in emOptions.products" :key="p" :value="p">{{ p }}</option></select></label>
-                        <label class="hl-lbl">Garment type <select v-model="emGarment" class="cal-in hl-sel-s"><option value="">all</option><option v-for="g in emOptions.garments" :key="g" :value="g">{{ g }}</option></select></label>
-                        <span class="hl-gap"></span>
-                        <span class="hl-dim">{{ fmtQty(emRows.length) }} order(s) · {{ fmtQty(emTotal.qty) }} pcs · outstanding {{ fmtQty(emTotal.outstanding) }} pcs · ERP read only{{ emData?.takenAt ? ` · snapshot ${emData.takenAt}` : '' }}</span>
-                    </div>
-                    <div v-if="emBusy" class="hl-dim">Loading the ERP order list…</div>
-                    <div v-else-if="emData?.error" class="hl-warn">ERP order list not available: {{ emData.error }}</div>
-                    <div v-else class="hl-scroll">
-                        <table class="hl-table hl-table-s hl-em-list">
-                            <thead><tr><th>Buyer</th><th>Order / PO</th><th>Style</th><th>Product type</th><th>Garment type</th><th>Order qty</th><th>Outstanding</th><th>PCD</th><th>Delivery</th><th>Reservation status</th></tr></thead>
-                            <tbody>
-                                <tr v-for="r in emRows" :key="r.order" :class="{ 'hl-em-over' : r.deliveryMax && r.deliveryMax < emOverdueToday }">
-                                    <td>{{ r.buyer }}</td>
-                                    <td><b>{{ r.order }}</b><span v-if="r.pos" class="hl-dim" :title="r.poList"> · {{ r.pos }} PO{{ r.pos > 1 ? 's' : '' }}</span></td>
-                                    <td>{{ r.style }}</td><td>{{ r.product || '—' }}</td><td>{{ r.garment || '—' }}</td>
-                                    <td class="hl-r">{{ fmtQty(r.qty) }}</td><td class="hl-r">{{ fmtQty(r.outstanding) }}</td>
-                                    <td>{{ dmy(r.pcd) }}</td>
-                                    <td :title="r.deliveryMax && r.deliveryMax !== r.delivery ? `POs of this month deliver ${dmy(r.delivery)} → ${dmy(r.deliveryMax)}` : ''">{{ dmy(r.delivery) }}{{ r.deliveryMax && r.deliveryMax !== r.delivery ? ` → ${dmy(r.deliveryMax)}` : '' }}{{ r.deliveryMax && r.deliveryMax < emOverdueToday ? ' ⚠' : '' }}</td>
-                                    <td class="hl-dim">{{ emResStatus(r) }}</td>
-                                </tr>
-                                <tr v-if="!emRows.length"><td colspan="10" class="hl-dim">No active orders match the filters.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="st-hint">Quantities are PO quantities of this delivery month (an order whose POs deliver in other months shows there too, without double counting). Outstanding = PO quantity − exported quantity from ERP. ⚠ = delivery date already past while the order is still Active. Nothing here changes ERP or the live plan.</div>
                 </div>
             </div>
         </div>
@@ -1487,29 +1055,13 @@ function close() {
 .hl-units { display : grid; grid-template-columns : repeat(4, 1fr); gap : 8px; padding : 8px 10px; background : #eceff3; }
 .hl-unit-card { background : #fff; border : 1px solid #c9d2dc; border-left : 6px solid #8bc34a; border-radius : 4px; padding : 6px 10px; }
 .hl-unit-card.hl-uc-partial { border-left-color : #ffb300; } .hl-unit-card.hl-uc-full { border-left-color : #f4511e; } .hl-unit-card.hl-uc-over { border-left-color : #c62828; }
-.hl-uc-head { font-size : 13px; margin-bottom : 4px; display : flex; align-items : baseline; gap : 6px; flex-wrap : wrap; }
-.hl-uc-oq { margin-left : auto; font-size : 11.5px; background : #e8f0fe; border : 1px solid #c3d4f0; border-radius : 3px; padding : 1px 6px; white-space : nowrap; }
-.hl-uc-oq b { color : #1646a0; }
+.hl-uc-head { font-size : 13px; margin-bottom : 4px; }
 .hl-uc-row { display : grid; grid-template-columns : auto 1fr auto 1fr auto 1fr; gap : 2px 8px; font-size : 11.5px; }
 .hl-uc-row span { color : #555; } .hl-uc-row b { text-align : right; }
 .hl-uc-prod { margin-top : 4px; font-size : 11px; color : #333; display : flex; flex-wrap : wrap; gap : 4px 10px; }
-.hl-uc-erp { margin-top : 6px; padding-top : 5px; border-top : 1px dashed #d5dbe3; font-size : 11px; color : #333; }
-.hl-uc-erp-t { display : block; font-weight : 700; color : #1f3a5f; margin-bottom : 3px; }
-.hl-em-scroll { max-height : 150px; overflow : auto; border : 1px solid #e3e6ea; border-radius : 3px; }
-.hl-em-tbl { border-collapse : collapse; width : 100%; font-size : 10.5px; }
-.hl-em-tbl th, .hl-em-tbl td { padding : 1px 6px; text-align : right; border-bottom : 1px solid #eef1f4; white-space : nowrap; }
-.hl-em-tbl th:first-child, .hl-em-tbl td:first-child { text-align : left; }
-.hl-em-tbl thead th { position : sticky; top : 0; background : #eef2f6; font-weight : 700; z-index : 1; }
-.hl-em-tbl tfoot td { position : sticky; bottom : 0; background : #f6f7f9; border-top : 1px solid #c9d2dc; }
-.hl-em-tbl tbody tr { cursor : pointer; }
-.hl-em-tbl tbody tr:hover td { background : #e9f1fd; }
-.hl-em-tbl tbody tr.hl-em-cur td { background : #fff8e1; font-weight : 700; }
-.hl-em-over td, tr.hl-em-over td { color : #b00020; }
-.hl-em-neg { color : #b00020; font-weight : 700; }
-.hl-em-dialog { width : 1200px; }
-.hl-em-list td { white-space : nowrap; }
-.hl-em-prods { margin-bottom : 8px; }
-.hl-em-prods tbody tr { cursor : pointer; }
+.hl-uc-erp { margin-top : 6px; padding-top : 5px; border-top : 1px dashed #d5dbe3; font-size : 11px; color : #333; display : flex; flex-wrap : wrap; gap : 3px 10px; align-items : baseline; }
+.hl-uc-erp-t { flex : 0 0 100%; font-weight : 700; color : #1f3a5f; }
+.hl-uc-erp-total { flex : 0 0 100%; color : #1f3a5f; }
 .hl-erp-other { padding : 0 10px 8px; font-size : 11px; color : #444; }
 .hl-sched-wrap { flex : 1 1 auto; min-height : 300px; position : relative; display : flex; flex-direction : column; }
 .hl-sched { flex : 1 1 auto; height : 100%; min-height : 300px; }
@@ -1532,7 +1084,7 @@ function close() {
 .hl-res-txt { white-space : nowrap; overflow : hidden; text-overflow : ellipsis; padding : 0 4px; }
 .hl-tip table td { padding : 1px 6px; font-size : 11.5px; } .hl-tip table td:first-child { color : #666; }
 .hl-dialog { width : 900px; max-width : 96vw; }
-.hl-cfg-dialog { width : 1380px; }
+.hl-cfg-dialog { width : 1100px; }
 .hl-ord-dialog { width : 1300px; }
 .hl-res-dialog { width : 720px; }
 .hl-kv td { padding : 2px 8px; } .hl-kv td:first-child { color : #666; font-weight : 600; }
@@ -1552,22 +1104,9 @@ function close() {
 .hl-r { text-align : right !important; }
 .hl-short { color : #b26a00; font-weight : 700; } .hl-ok { color : #2e7d32; font-weight : 700; } .hl-late { color : #b00020; font-weight : 700; }
 .hl-num { width : 64px; text-align : right; } .hl-smv { width : 56px; margin-left : 2px; } .hl-txt { width : 140px; }
-.hl-own { background : #fff8e1; box-shadow : inset 0 0 0 1px #e0b941; }   /* the line's OWN hours / OT (not following the unit) */
 .hl-pcell { white-space : nowrap; }
 .hl-dow { margin-right : 6px; font-weight : 400; }
 .hl-scroll { max-height : 55vh; overflow : auto; }
-.hl-cfg-scroll { max-height : 70vh; }
-.hl-units-tbl td, .hl-units-tbl th { vertical-align : middle; }
-.hl-nowrap { white-space : nowrap; }
-.hl-detail-row > td { background : #f7f9fc; padding : 8px 12px; }
-.hl-detail-head { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; margin-bottom : 6px; font-size : 12px; }
-.hl-link { color : #1b52ad; text-decoration : underline; cursor : pointer; }
-.hl-orders-box { margin-top : 8px; }
-.hl-orders-scroll { max-height : 260px; }
-.hl-dh-list { display : flex; flex-wrap : wrap; gap : 6px 12px; font-size : 12px; }
-.hl-dh { display : inline-flex; align-items : center; gap : 4px; background : #fff; border : 1px solid #cfd6df; border-radius : 3px; padding : 2px 6px; }
-.hl-dh.hl-dh-off { background : #fdecea; border-color : #e8a0a0; }
-
 .hl-x-small { cursor : pointer; color : #b00020; font-weight : 700; }
 .hl-ord-body { display : flex; gap : 14px; }
 .hl-ord-left { flex : 1 1 55%; min-width : 0; } .hl-ord-right { flex : 1 1 45%; min-width : 380px; }
