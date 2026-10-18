@@ -508,13 +508,13 @@ async function hlCall(path, method = 'GET', body) {
     if (!j.success) { const e = new Error(j.error || `${method} failed`); e.conflict = !!j.conflict; e.version = j.version; throw e; }
     return j;
 }
-export const hlListScenarios  = () => hlCall('/scenarios');
+export const hlListScenarios  = by => hlCall(`/scenarios?by=${encodeURIComponent(by || '')}`);
 export const hlCreateScenario = (by, name, { fromId = null, bundle = null } = {}) => hlCall('/scenarios', 'POST', { by, name, fromId, bundle });
-export const hlLoadScenario   = id => hlCall(`/scenarios/${encodeURIComponent(id)}`);
+export const hlLoadScenario   = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}?by=${encodeURIComponent(by || '')}`);
 export const hlSaveScenario   = (id, by, scenario) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'PUT', { by, scenario });
 export const hlRenameScenario = (id, by, name) => hlCall(`/scenarios/${encodeURIComponent(id)}/rename`, 'PUT', { by, name });
 export const hlDeleteScenario = (id, by) => hlCall(`/scenarios/${encodeURIComponent(id)}`, 'DELETE', { by });
-export const hlReference      = (from, to) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}`);
+export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from || ''}${to ? `&to=${to}` : ''}&by=${encodeURIComponent(by || '')}`);
 
 // the board opens on a What-if copy (read only) while this is set
 export const whatIfView = { id : null, by : null };

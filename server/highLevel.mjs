@@ -114,16 +114,27 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
     const uid = (p = 'hl') => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const who = req => String(req.query?.by || req.body?.by || '').trim();
 
+    // Access to the High Level board lives in planning_users.boards like a
+    // board's: 'hl' = write (simulate and save), 'hl:read' = look only.
+    // A Planning Manager always has write.
     async function user(req) {
         const u = who(req);
         if (!u) return null;
-        const [[row]] = await pool.query('SELECT username, role, display_name FROM planning_users WHERE username = ? AND active = 1', [u]);
-        return row || null;
+        const [[row]] = await pool.query('SELECT username, role, display_name, boards FROM planning_users WHERE username = ? AND active = 1', [u]);
+        if (!row) return null;
+        let b = [];
+        try { b = typeof row.boards === 'string' ? JSON.parse(row.boards) : (row.boards || []); } catch { b = []; }
+        const write = row.role === 'Planning Manager' || b.includes('hl');
+        return { ...row, hlAccess : write ? 'write' : (b.includes('hl:read') ? 'read' : null) };
     }
+    const deny = (res, u, need) => res.status(403).json({ success : false, error : !u ? 'Sign in first' : `No ${need} access to the High Level Planning Board (Setup → Settings — users & permissions)` });
+    async function needRead(req, res)  { const u = await user(req); if (!u?.hlAccess) { deny(res, u, 'read'); return null; } return u; }
+    async function needWrite(req, res) { const u = await user(req); if (u?.hlAccess !== 'write') { deny(res, u, 'write'); return null; } return u; }
 
     // ---- list / create / rename / delete ----------------------------------
     app.get(`${HL}/scenarios`, async (req, res) => {
         try {
+            if (!(await needRead(req, res))) return;
             const [rows] = await pool.query(
                 `SELECT s.*, (SELECT COUNT(*) FROM hl_orders o WHERE o.scenario_id = s.id) AS orders,
                         (SELECT COUNT(*) FROM hl_reservations r WHERE r.scenario_id = s.id AND r.status <> 'cancelled') AS reservations
@@ -206,8 +217,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
 
     app.post(`${HL}/scenarios`, async (req, res) => {
         try {
-            const u = await user(req);
-            if (!u) return res.status(403).json({ success : false, error : 'Sign in first' });
+            const u = await needWrite(req, res);
+            if (!u) return;
             const name = String(req.body?.name || '').trim().slice(0, 120) || 'Scenario';
             const id = uid('sc');
             const conn = await pool.getConnection();
@@ -236,6 +247,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
 
     app.get(`${HL}/scenarios/:id`, async (req, res) => {
         try {
+            if (!(await needRead(req, res))) return;
             const b = await readBundle(String(req.params.id));
             if (!b) return res.status(404).json({ success : false, error : 'Scenario not found' });
             res.json({ success : true, scenario : b });
@@ -248,8 +260,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
     // saved meanwhile → 409, nothing written
     app.put(`${HL}/scenarios/:id`, async (req, res) => {
         try {
-            const u = await user(req);
-            if (!u) return res.status(403).json({ success : false, error : 'Sign in first' });
+            const u = await needWrite(req, res);
+            if (!u) return;
             const id = String(req.params.id);
             const sc = req.body?.scenario;
             if (!sc) return res.status(400).json({ success : false, error : 'No scenario data' });
@@ -274,8 +286,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
 
     app.put(`${HL}/scenarios/:id/rename`, async (req, res) => {
         try {
-            const u = await user(req);
-            if (!u) return res.status(403).json({ success : false, error : 'Sign in first' });
+            const u = await needWrite(req, res);
+            if (!u) return;
             const name = String(req.body?.name || '').trim().slice(0, 120);
             if (!name) return res.status(400).json({ success : false, error : 'Name missing' });
             await pool.query('UPDATE hl_scenarios SET name = ?, updated_by = ? WHERE id = ? AND deleted_at IS NULL', [name, u.username, String(req.params.id)]);
@@ -287,8 +299,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
     // soft delete — simulation data only
     app.delete(`${HL}/scenarios/:id`, async (req, res) => {
         try {
-            const u = await user(req);
-            if (!u) return res.status(403).json({ success : false, error : 'Sign in first' });
+            const u = await needWrite(req, res);
+            if (!u) return;
             await pool.query('UPDATE hl_scenarios SET deleted_at = NOW(), updated_by = ? WHERE id = ?', [u.username, String(req.params.id)]);
             console.log(`[hl] scenario ${req.params.id} deleted by ${u.username}`);
             res.json({ success : true });
@@ -302,6 +314,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB }) {
     // one-way snapshot the client merges into a scenario. Nothing is written.
     app.get(`${HL}/reference`, async (req, res) => {
         try {
+            if (!(await needWrite(req, res))) return;
             const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? String(req.query.from) : ymd(new Date());
             const to   = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? String(req.query.to) : null;
             const [lines] = await pool.query(

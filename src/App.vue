@@ -3735,6 +3735,12 @@ const canReopenOrders = computed(() =>
     || userHasPerm(currentUser.value, PERM_REOPEN) || userHasPerm(authUser.value, PERM_REOPEN));
 // Board backup / restore (Tools menu): Planning Manager always, others only
 // when granted in Settings — the server checks the same permission
+// High Level Planning Board access (Settings column): stored like a board's
+// access — 'hl' = write, 'hl:read' = read; Planning Manager always write
+const HL_ID = 'hl';
+const hlAccess = computed(() =>
+    (authUser.value?.role || currentUser.value?.role) === 'Planning Manager' ? 'write'
+        : (boardAccessOf(authUser.value, HL_ID) || boardAccessOf(currentUser.value, HL_ID) || null));
 const PERM_BACKUP = 'perm:backup';
 const canBackupRestore = computed(() =>
     (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
@@ -4427,6 +4433,7 @@ async function openBoard(b, { ask = false, forceReload = false, whatIf = null } 
 // first so its edit lock is released while the planner simulates.
 function openHighLevel() {
     openMenu.value = null;
+    if (!hlAccess.value) { toast('🔒 No access to the High Level Planning Board (Setup → Settings — users & permissions)', 'warn'); return; }
     if (view.value === 'board' && currentBoard.value) minimizeBoard();
     view.value = 'hlboard';
 }
@@ -11807,7 +11814,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     >🗓 {{ b.name }}</div>
                     <div v-if="!menuBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
                     <div class="fr-dd-sep"></div>
-                    <div class="fr-dd-item" title="Standalone capacity & reservation simulation for UNIT-M / C / A / G — the live plans are never changed" @click="openHighLevel">📐 High Level Planning Board</div>
+                    <div v-if="hlAccess" class="fr-dd-item" :title="`Standalone capacity & reservation simulation for UNIT-M / C / A / G — the live plans are never changed (${hlAccess === 'write' ? 'simulate & save' : 'read only'})`" @click="openHighLevel">📐 High Level Planning Board<span v-if="hlAccess === 'read'" class="fr-dd-dim"> · read only</span></div>
                     <div class="fr-dd-sep"></div>
                     <div class="fr-dd-item" @click="addBoard">➕ Add planning board</div>
                 </div>
@@ -11832,7 +11839,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Empty home workspace (FastReact shell) -->
-        <HighLevelBoard v-if="view === 'hlboard'" :user="authUser || currentUser" :toast="toast" @close="closeHighLevel" />
+        <HighLevelBoard v-if="view === 'hlboard'" :user="authUser || currentUser" :access="hlAccess" :toast="toast" @close="closeHighLevel" />
         <div v-if="view === 'home'" class="fr-home">
             <div class="fr-home-empty" @click="openMenu = null"></div>
             <div class="fr-statusbar">
@@ -14099,6 +14106,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <th>Set password</th>
                                 <th>Role</th>
                                 <th v-for="b in boards" :key="b.id" class="st-board-h">{{ b.name }}</th>
+                                <th class="st-board-h" title="Planning → High Level Planning Board (standalone simulation): Read = look at scenarios, Write = simulate, import and save scenarios">High Level Board</th>
                                 <th class="st-board-h" title="May send a completed order back to the projection / confirm stage">Re-open completed</th>
                                 <th class="st-board-h" title="Reports → Board backup & compare: back the board up and restore it from a dated backup">Backup / Restore</th>
                             </tr>
@@ -14132,6 +14140,18 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     </select>
                                 </td>
                                 <td class="st-check">
+                                    <select class="cal-in st-select st-access" :class="'st-access-' + (u.role === 'Planning Manager' ? 'write' : (boardAccessOf(u, HL_ID) || 'none'))"
+                                        :value="u.role === 'Planning Manager' ? 'write' : (boardAccessOf(u, HL_ID) || '')"
+                                        :disabled="u.role === 'Planning Manager'"
+                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'High Level Planning Board access'"
+                                        @change="setBoardPerm(u, HL_ID, $event.target.value)"
+                                    >
+                                        <option value="">— no access</option>
+                                        <option value="read">Read</option>
+                                        <option value="write">Write</option>
+                                    </select>
+                                </td>
+                                <td class="st-check">
                                     <input type="checkbox"
                                         :checked="u.role === 'Planning Manager' || userHasPerm(u, PERM_REOPEN)"
                                         :disabled="u.role === 'Planning Manager'"
@@ -14151,7 +14171,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint"><b>Backup / Restore</b> = Reports → Board backup & compare-এ "Backup now" আর "Restore this backup" চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17)</div>
+                    <div class="st-hint"><b>Backup / Restore</b> = Reports → Board backup & compare-এ "Backup now" আর "Restore this backup" চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17) · <b>High Level Board</b> = Planning → High Level Planning Board (simulation): Read = scenario দেখতে পারবে, Write = simulate / import / save করতে পারবে — Planning Manager সবসময় Write; live plan-এ এর কোনো প্রভাব নেই</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>

@@ -23,9 +23,12 @@ import {
 } from './api.js';
 
 const props = defineProps({
-    user  : { type : Object, default : null },     // { username, name, role }
-    toast : { type : Function, default : () => {} }
+    user   : { type : Object, default : null },     // { username, name, role }
+    access : { type : String, default : 'write' },  // 'write' | 'read' (Settings → High Level Board)
+    toast  : { type : Function, default : () => {} }
 });
+const canWrite = computed(() => props.access === 'write');
+const denied = () => { props.toast('🔒 Read-only access to the High Level Planning Board — ask a Planning Manager for Write (Setup → Settings)', 'warn'); return false; };
 const emit = defineEmits(['close']);
 
 const by = () => props.user?.username || '';
@@ -51,6 +54,7 @@ const loadMap    = shallowRef(new Map());
 function snapshot() { return JSON.stringify(sc.value); }
 function mutate(label, fn) {
     if (!sc.value) return;
+    if (!canWrite.value) { denied(); return; }
     undoStack.push({ label, snap : snapshot() });
     if (undoStack.length > 60) undoStack.shift();
     redoStack.length = 0;
@@ -81,7 +85,7 @@ function redo() {
 }
 
 async function refreshScenarios() {
-    try { scenarios.value = (await hlListScenarios()).rows || []; }
+    try { scenarios.value = (await hlListScenarios(by())).rows || []; }
     catch (e) { props.toast(`Scenario list failed: ${e.message}`, 'error'); }
 }
 async function openScenario(id) {
@@ -89,7 +93,7 @@ async function openScenario(id) {
     if (dirty.value && !window.confirm('Unsaved simulation changes will be lost — open the other scenario anyway?')) return;
     busy.value = true;
     try {
-        const j = await hlLoadScenario(id);
+        const j = await hlLoadScenario(id, by());
         sc.value = j.scenario;
         undoStack.length = 0; redoStack.length = 0;
         dirty.value = false;
@@ -100,6 +104,7 @@ async function openScenario(id) {
     finally { busy.value = false; }
 }
 async function createScenario(fromId = null) {
+    if (!canWrite.value) return denied();
     const name = window.prompt(fromId ? 'Name of the copy:' : 'Name of the new scenario:', fromId ? `${sc.value?.name || 'Scenario'} (copy)` : `Scenario ${String.fromCharCode(65 + (scenarios.value.length % 26))}`);
     if (!name) return;
     busy.value = true;
@@ -114,14 +119,14 @@ async function createScenario(fromId = null) {
     finally { busy.value = false; }
 }
 async function renameScenario() {
-    if (!sc.value) return;
+    if (!sc.value || !canWrite.value) { if (sc.value) denied(); return; }
     const name = window.prompt('Scenario name:', sc.value.name);
     if (!name || name === sc.value.name) return;
     try { await hlRenameScenario(sc.value.id, by(), name); sc.value.name = name; tick.value++; await refreshScenarios(); }
     catch (e) { props.toast(`Rename failed: ${e.message}`, 'error'); }
 }
 async function deleteScenario() {
-    if (!sc.value) return;
+    if (!sc.value || !canWrite.value) { if (sc.value) denied(); return; }
     if (!window.confirm(`Delete the scenario "${sc.value.name}"?\n\nOnly this simulation workspace goes — the live plan is not involved.`)) return;
     try {
         await hlDeleteScenario(sc.value.id, by());
@@ -133,7 +138,7 @@ async function deleteScenario() {
     catch (e) { props.toast(`Delete failed: ${e.message}`, 'error'); }
 }
 async function saveScenario() {
-    if (!sc.value) return;
+    if (!sc.value || !canWrite.value) { if (sc.value) denied(); return; }
     busy.value = true;
     try {
         const j = await hlSaveScenario(sc.value.id, by(), sc.value);
@@ -246,8 +251,8 @@ const config = {
     ],
     project : { resourceStore : { tree : true }, resources : [], events : [], resourceTimeRanges : [] },
     listeners : {
-        beforeEventDrag({ eventRecord }) { return !eventRecord.data.locked; },
-        beforeEventResize({ eventRecord }) { return !eventRecord.data.locked; },
+        beforeEventDrag({ eventRecord }) { return canWrite.value && !eventRecord.data.locked; },
+        beforeEventResize({ eventRecord }) { return canWrite.value && !eventRecord.data.locked; },
         eventDrop({ eventRecords, context }) {
             if (!context?.valid) return;
             for (const ev of eventRecords) {
@@ -568,8 +573,9 @@ const impOpen = ref(false);
 const impData = shallowRef(null);
 const impOpt = ref({ lines : true, products : true, orders : true, load : true });
 async function impFetch() {
+    if (!canWrite.value) return denied();
     busy.value = true;
-    try { impData.value = await hlReference(sc.value.from, sc.value.to); impOpen.value = true; }
+    try { impData.value = await hlReference(sc.value.from, sc.value.to, by()); impOpen.value = true; }
     catch (e) { props.toast(`Reference snapshot failed: ${e.message}`, 'error'); }
     finally { busy.value = false; }
 }
@@ -634,7 +640,7 @@ const cmpData = shallowRef(null);
 async function cmpRun() {
     if (!cmpId.value) return;
     try {
-        const other = (await hlLoadScenario(cmpId.value)).scenario;
+        const other = (await hlLoadScenario(cmpId.value, by())).scenario;
         const load = buildLoad(other);
         const rows = other.units.map(u => ({ code : u.code, name : u.name, a : unitStats.value[u.code], b : unitSummary(other, u.code, other.from, other.to, load) }));
         cmpData.value = { other, rows };
@@ -675,6 +681,7 @@ function close() {
     <div class="hl-root">
         <div class="hl-banner">
             <span class="hl-banner-title">📐 High Level Planning Board <span class="hl-banner-sub">— standalone simulation · the live MBM / CEIL / AQL plans are never changed</span></span>
+            <span v-if="!canWrite" class="hl-banner-ro">🔒 read only</span>
             <span v-if="sc" class="hl-banner-sc">Scenario: <b>{{ sc.name }}</b> <span class="hl-dim">v{{ sc.version }}{{ dirty ? ' · unsaved' : '' }}{{ sc.source ? ` · ${sc.source.note} @ ${sc.source.at}` : '' }}</span></span>
             <span class="hl-banner-btns"><span class="hl-x" title="Close the High Level Planning Board" @click="close">✕</span></span>
         </div>
@@ -989,6 +996,7 @@ function close() {
 .hl-banner-title { font-weight : 700; }
 .hl-banner-sub { font-weight : 400; opacity : .85; font-size : 12px; }
 .hl-banner-sc { margin-left : auto; }
+.hl-banner-ro { background : #ffe082; color : #5a3a00; padding : 1px 8px; border-radius : 10px; font-weight : 700; font-size : 11.5px; }
 .hl-banner-btns .hl-x { cursor : pointer; font-weight : 700; padding : 0 6px; }
 .hl-dim { opacity : .7; font-weight : 400; }
 .hl-toolbar { display : flex; align-items : center; gap : 6px; flex-wrap : wrap; padding : 6px 10px; background : #f6f7f9; border-bottom : 1px solid #d5dbe3; }
