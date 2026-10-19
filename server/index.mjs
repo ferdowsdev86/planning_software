@@ -3797,18 +3797,37 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
         const codes  = new Set(plan.map(r => String(r.order_code || '')));
         // board bars planned from PROD_BOARD_FROM: PO → confirm bar, order code →
         // projection bar (with line / floor). ONLY production of these is kept.
+        // An order planned on SEVERAL bars (split over lines / dates): the
+        // ERP output of the PO is spread over those bars in their planned
+        // order, each bar taking at most what is planned on its line — the
+        // board shows production per line exactly as it was planned there,
+        // whichever ERP line booked the output (the last bar takes any rest).
         const [bars] = await pool.query(`
-            SELECT pe.id, pe.event_code, o.po_number, o.order_code, pr.resource_name AS line, pr.resource_code AS line_code, pr.floor_id, pr.unit_id AS line_unit
+            SELECT pe.id, pe.event_code, pe.start_date, pe.planned_quantity, o.po_number, o.order_code, pr.resource_name AS line, pr.resource_code AS line_code, pr.floor_id, pr.unit_id AS line_unit
             FROM planning_events pe JOIN planning_assignments pa ON pa.event_id = pe.id
             JOIN planning_resources pr ON pr.id = pa.resource_id
             LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
-            WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line' AND pe.start_date >= ?`, [PROD_BOARD_FROM]);
-        const barByPo = new Map(), barByCode = new Map();
+            WHERE pe.event_status <> 'cancelled' AND pr.resource_type = 'sewing_line' AND pe.start_date >= ?
+            ORDER BY pe.start_date, pe.id`, [PROD_BOARD_FROM]);
+        const barsByPo = new Map(), barsByCode = new Map();
+        const push = (m, k, b) => { if (!k) return; if (!m.has(k)) m.set(k, []); m.get(k).push(b); };
         for (const b of bars) {
-            if (b.po_number && !barByPo.has(String(b.po_number))) barByPo.set(String(b.po_number), b);
+            if (b.po_number) push(barsByPo, String(b.po_number), b);
             const code = b.order_code || (String(b.event_code || '').startsWith('ev-proj:') ? String(b.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
-            if (code && !barByCode.has(code)) barByCode.set(code, b);
+            push(barsByCode, code, b);
         }
+        // what each bar already holds from dates BEFORE this window (earlier
+        // syncs) — the allocation continues from there
+        const fill = new Map();
+        if (!summary && from) {
+            const [prior] = await pool.query(
+                `SELECT SUBSTRING_INDEX(event_ref, ':po', 1) AS base, SUM(prod_qty) AS q FROM day_production_update_plan
+                  WHERE save_date < ? AND event_ref LIKE '%:po%' AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')}) GROUP BY base`,
+                [from, ...PROD_AUTO_UNIT_NAMES]);
+            for (const r of prior) fill.set(String(r.base), Number(r.q) || 0);
+        }
+        // chronological: earlier output fills the earlier bars first
+        rows.sort((a, b) => String(a.prod_date).localeCompare(String(b.prod_date)) || String(a.erp_line || '').localeCompare(String(b.erp_line || '')));
         // The board plans OS orders under their OS code (GSL-250943) while the
         // ERP books production under the MR code (26SPJCP054) — map one to the other
         const osCodeByMr = new Map();
@@ -3825,8 +3844,24 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 const poNo = String(r.po_no || '').trim();
                 const code = String(r.order_code || '').trim();
                 const planRow = byPo.get(poNo);
-                const bar   = barByPo.get(poNo) || barByCode.get(code) || barByCode.get(osCodeByMr.get(code)) || null;
-                if (!bar) { skipped++; continue; }   // not planned on the board (from PROD_BOARD_FROM)
+                const list  = barsByPo.get(poNo) || barsByCode.get(code) || barsByCode.get(osCodeByMr.get(code)) || null;
+                if (!list) { skipped++; continue; }   // not planned on the board (from PROD_BOARD_FROM)
+                // spread this day's output over the PO's bars: planned order,
+                // each up to its planned quantity, the last bar takes the rest
+                const parts = [];
+                let left = Number(r.qty) || 0;
+                for (let i = 0; i < list.length && left > 0; i++) {
+                    const b = list[i], base = `db-${b.id}`;
+                    const used = fill.get(base) || 0;
+                    const room = i === list.length - 1 ? Infinity : Math.max(0, (Number(b.planned_quantity) || 0) - used);
+                    const take = Math.min(left, room);
+                    if (take <= 0) continue;
+                    parts.push({ bar : b, qty : take });
+                    fill.set(base, used + take);
+                    left -= take;
+                }
+                for (const part of parts) {
+                const bar = part.bar;
                 // Row key: ERP rows are always "db-<id>:po<po_id>" (one per PO);
                 // output booked on ANOTHER line than the bar's →
                 // ":po<po_id>:<ERP line>" so the line-wise report shows it under
@@ -3854,11 +3889,12 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                         style = COALESCE(VALUES(style), style), order_no = VALUES(order_no), po_number = VALUES(po_number),
                         color = COALESCE(VALUES(color), color), order_qty = VALUES(order_qty), prod_qty = VALUES(prod_qty), updated_at = NOW()`,
                     [bar?.id ?? null, ref, unit, floor, line, r.style || planRow?.style_no || null, code || planRow?.order_code || null, poNo || null,
-                     r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(r.qty) || 0, date]);
+                     r.color || planRow?.color || null, Number(r.po_qty ?? planRow?.order_quantity) || 0, Number(part.qty) || 0, date]);
                 written++;
                 const wk = `db-${bar.id}|${date}`;
                 if (!writtenRefs.has(wk)) writtenRefs.set(wk, new Set());
                 writtenRefs.get(wk).add(ref);
+                }
             }
             // ERP is authoritative for a bar/date it has output for — every
             // OTHER row of that bar on that date (old key form, OS lump figure,
@@ -3875,13 +3911,16 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
             // ERP no longer reports (deleted entry, OS lump figure of the past,
             // order dropped from the board) must not survive
             {
-                const all  = [...writtenRefs.values()].flatMap(set => [...set]);
+                // per (bar row, date): a day the ERP no longer books on that bar
+                // (output re-spread over the order's bars after a plan change,
+                // a deleted ERP entry, an OS lump figure of the past) goes
                 // (auto-synced units only — MBM / CEIL rows are the planners' own)
+                const pairs = [...writtenRefs.entries()].flatMap(([wk, refs]) => { const date = wk.split('|')[1]; return [...refs].map(ref => `${ref}|${date}`); });
                 const [gone] = await conn.query(
                     `DELETE FROM day_production_update_plan
                      WHERE save_date BETWEEN ? AND ? AND event_ref LIKE '%:po%'
-                       AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})${all.length ? ` AND event_ref NOT IN (${all.map(() => '?').join(',')})` : ''}`,
-                    [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...PROD_AUTO_UNIT_NAMES, ...all]);
+                       AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})${pairs.length ? ` AND CONCAT(event_ref, '|', DATE_FORMAT(save_date, '%Y-%m-%d')) NOT IN (${pairs.map(() => '?').join(',')})` : ''}`,
+                    [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...PROD_AUTO_UNIT_NAMES, ...pairs]);
                 if (gone.affectedRows) console.log(`[prod-sync] removed ${gone.affectedRows} row(s) no longer reported by the ERP`);
             }
             // The summary row (save_date = PROD_SUMMARY_TO) already contains
