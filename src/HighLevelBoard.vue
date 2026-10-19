@@ -324,7 +324,7 @@ function syncScheduler() {
         const load = loadMap.value;
         const us = unitStats.value, ls = lineStats.value;
         const utilCls = u => (u > 1 ? 'over' : u >= (scn.thresholds?.full ?? 0.9) ? 'full' : u >= (scn.thresholds?.partial ?? 0.4) ? 'partial' : 'ok');
-        const resources = scn.units.map(u => {
+        const resources = scn.units.filter(u => boardUnit.value === 'ALL' || !boardUnit.value || u.code === boardUnit.value).map(u => {
             const st = us[u.code] || {};
             return {
                 id : `U-${u.code}`, name : u.name, label : u.label, isUnit : true, expanded : expandedUnits.has(u.code),
@@ -391,6 +391,36 @@ function syncScheduler() {
 }
 const expandedUnits = new Set(JSON.parse(localStorage.getItem('hl-expanded') || '["M"]'));
 watch([tick, fBuyer, fProduct], () => nextTick(syncScheduler));
+
+// ---- the board below the unit cards -----------------------------------------
+// Hidden until a unit card is clicked: then that unit's ERP active orders
+// (loaded when the scenario holds none) are auto-planned on the unit's own
+// configured lines and the board shows ONLY that unit — bars grey / orange /
+// red by on time / PCD not met / delivery not met. 'ALL' shows every unit.
+const boardUnit = ref(null);
+const upBusy = ref(false);
+watch(boardUnit, () => nextTick(() => { syncScheduler(); const s = getS(); try { s?.refresh?.(); } catch { /* not painted yet */ } }));
+async function openUnitPlan(code) {
+    if (!sc.value || upBusy.value) return;
+    boardUnit.value = code;
+    expandedUnits.add(code); localStorage.setItem('hl-expanded', JSON.stringify([...expandedUnits]));
+    if (!canWrite.value) { props.toast(`${unitName(code)}: showing the plan on the board (read-only access — no new plan)`, 'ok'); return; }
+    upBusy.value = true;
+    try {
+        if (!sc.value.orders.some(o => /^erp:/.test(o.source || '') && o.unitCode === code)) await importErpUnits([code]);
+        const out = autoPlanUnits(sc.value, { units : [code], rules : apuRulesObj() });
+        if (!out.results.length) { props.toast(`${unitName(code)}: no ERP active order for this unit`, 'warn'); return; }
+        mutate(`auto plan ${unitName(code)}`, s => {
+            const rm = new Set(out.removedIds);
+            s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(out.reservations);
+            s.balance = { ...balanceSettings(s), planRules : apuRulesObj(), lastAutoPlan : out.summary };
+        });
+        const sm = out.summary;
+        props.toast(`${unitName(code)}: ${sm.orders} orders planned on its lines — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
+    }
+    catch (e) { props.toast(`${unitName(code)}: plan failed — ${e.message}`, 'error'); }
+    finally { upBusy.value = false; }
+}
 
 function onBarMoved(resId, lineId, startDate, endDate) {
     const s = sc.value; if (!s) return;
@@ -812,19 +842,23 @@ function apuRulesObj() {
         buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
         minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null };
 }
+// import the ERP active orders of these units only (ERP production unit) — the other units' imports stay
+async function importErpUnits(codes) {
+    const erp = await hlErpOrders(by());
+    const liveIds = new Set(codes.map(c => HL_UNITS.find(u => u.code === c)?.liveUnitId));
+    const rows = (erp.rows || []).filter(r => liveIds.has(Number(r.unitId)));
+    let m = null;
+    mutate('import ERP orders', s => { m = mergeErpOrders(s, rows, { units : codes }); });
+    props.toast(`${codes.map(unitName).join(' / ')}: ${rows.length} ERP order group(s) (buyer + unit + style + colour + PCD + delivery) — ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old row(s) removed` : ''} — one bar per group`, 'ok');
+    return { rows, m };
+}
 async function apuImport(auto = false) {
     if (!sc.value) return;
     if (!canWrite.value) return denied();
     apuBusy.value = true;
     try {
         if (!apuUnits.value.length) { props.toast('Tick at least one unit to import its orders', 'warn'); return; }
-        const erp = await hlErpOrders(by());
-        // only the ticked units' orders (ERP production unit); the other units' imports stay as they are
-        const liveIds = new Set(apuUnits.value.map(c => HL_UNITS.find(u => u.code === c)?.liveUnitId));
-        const rows = (erp.rows || []).filter(r => liveIds.has(Number(r.unitId)));
-        let m = null;
-        mutate('import ERP orders', s => { m = mergeErpOrders(s, rows, { units : apuUnits.value }); });
-        props.toast(`${apuUnits.value.map(unitName).join(' / ')}: ${rows.length} ERP order group(s) (buyer + unit + style + colour + PCD + delivery) — ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old row(s) removed` : ''} — one bar per group`, 'ok');
+        const { rows } = await importErpUnits(apuUnits.value);
         if (auto && rows.length) { apuBusy.value = false; apuRun(); }
     }
     catch (e) { props.toast(`ERP orders failed: ${e.message}`, 'error'); }
@@ -1564,8 +1598,9 @@ function close() {
         </div>
 
         <div v-if="sc" class="hl-units">
-            <div v-for="u in sc.units" :key="u.code" class="hl-unit-card" :class="`hl-uc-${(unitStats[u.code]?.util || 0) > 1 ? 'over' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.full || 0.9) ? 'full' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.partial || 0.4) ? 'partial' : 'ok'}`">
-                <div class="hl-uc-head"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span>
+            <div v-for="u in sc.units" :key="u.code" class="hl-unit-card" :class="[`hl-uc-${(unitStats[u.code]?.util || 0) > 1 ? 'over' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.full || 0.9) ? 'full' : (unitStats[u.code]?.util || 0) >= (sc.thresholds.partial || 0.4) ? 'partial' : 'ok'}`, { 'hl-uc-sel' : boardUnit === u.code }]">
+                <div class="hl-uc-head hl-uc-click" :title="`Click: plan this unit's ERP active orders on its configured lines (as soon as possible, delivery first) and show the plan on the board below — grey on time, orange PCD not met, red delivery not met`" @click="openUnitPlan(u.code)"><b>{{ u.name }}</b> <span class="hl-dim">{{ u.label }} · {{ unitStats[u.code]?.activeLines }}/{{ unitStats[u.code]?.lines }} lines · {{ u.hours }}h{{ u.ot ? `+${u.ot}` : '' }}</span>
+                    <button class="cal-btn st-btn hl-btn hl-uc-plan" :class="{ 'hl-on' : boardUnit === u.code }" :disabled="upBusy" @click.stop="openUnitPlan(u.code)">{{ upBusy && boardUnit === u.code ? '⏳ planning…' : '▶ Plan on lines' }}</button>
                     <span v-if="erpMonthByUnit[u.code]?.total.orders" class="hl-uc-oq" :title="`Total active ERP order quantity of production unit ${u.label} (all delivery months) · ${fmtQty(erpMonthByUnit[u.code].total.orders)} orders · outstanding ${fmtQty(erpMonthByUnit[u.code].total.outstanding)} pcs`">Order qty <b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b> pcs <i class="hl-dim">· {{ fmtQty(erpMonthByUnit[u.code].total.orders) }} orders</i></span>
                 </div>
                 <div v-if="erpMonthly" class="hl-uc-erp" :title="`ERP active production orders (mr_order_entry, status Active) with delivery from ${dmy(erpMonthly.from)} on, by PO delivery month, production unit ${u.label}. Capacity = the sum of the unit's lines for the month (Lines tab: Line SAH and Capacity pcs at the unit average SMV ${unitAvgSmv(u.code)}). Click a month for the product-wise breakdown (snapshot ${erpMonthly.takenAt || ''})`">
@@ -1608,7 +1643,16 @@ function close() {
             <template v-else>Other production units (not on this board): <b>{{ fmtQty(erpMonthByUnit.other.total.qty) }}</b> pcs / {{ fmtQty(erpMonthByUnit.other.total.orders) }} active orders · all units together <b>{{ fmtQty(erpMonthly.grand.qty) }}</b> pcs / {{ fmtQty(erpMonthly.grand.orders) }} active orders · outstanding <b>{{ fmtQty(erpMonthly.grand.outstanding) }}</b> pcs</template>
         </div>
 
-        <div class="hl-sched-wrap" :class="{ 'hl-busy' : busy }">
+        <div v-if="sc && !boardUnit" class="hl-board-hint">Click a unit card (or <b>▶ Plan on lines</b>) to plan its available orders on its lines and see the plan here · <a href="#" @click.prevent="boardUnit = 'ALL'">show the board for all units</a></div>
+        <div v-if="sc && boardUnit" class="hl-board-bar">
+            <b>{{ boardUnit === 'ALL' ? 'All units' : unitName(boardUnit) }}</b>
+            <span v-if="boardUnit !== 'ALL'" class="hl-dim">· {{ unitStats[boardUnit]?.activeLines }}/{{ unitStats[boardUnit]?.lines }} lines · reserved {{ fmtMin(unitStats[boardUnit]?.usedMin) }} of {{ fmtMin(unitStats[boardUnit]?.capMin) }} · {{ fmtPct(unitStats[boardUnit]?.util) }}</span>
+            <span v-if="sc.balance?.lastAutoPlan && boardUnit !== 'ALL'" class="hl-dim">· last plan {{ sc.balance.lastAutoPlan.at }}: <span class="hl-ps-chip hl-ps-ontime">{{ sc.balance.lastAutoPlan.ontime }}</span> <span class="hl-ps-chip hl-ps-pcd">{{ sc.balance.lastAutoPlan.pcd }}</span> <span class="hl-ps-chip hl-ps-late">{{ sc.balance.lastAutoPlan.late }}</span> <span class="hl-ps-chip hl-ps-unplaced">{{ sc.balance.lastAutoPlan.unplaced }}</span></span>
+            <span class="hl-gap"></span>
+            <button v-if="boardUnit !== 'ALL'" class="cal-btn st-btn hl-btn" @click="boardUnit = 'ALL'">All units</button>
+            <button class="cal-btn st-btn hl-btn" @click="boardUnit = null">✕ Hide board</button>
+        </div>
+        <div v-show="!sc || boardUnit" class="hl-sched-wrap" :class="{ 'hl-busy' : busy || upBusy }">
             <bryntum-scheduler-pro ref="schedRef" v-bind="config" class="hl-sched" />
             <div v-if="!sc && !busy" class="hl-empty">No scenario yet — click <b>➕ New</b> to start a simulation.</div>
         </div>
@@ -2373,6 +2417,12 @@ function close() {
 .hl-warn { color : #b00020; font-weight : 700; margin-left : 8px; }
 .hl-units { display : grid; grid-template-columns : repeat(4, 1fr); gap : 8px; padding : 8px 10px; background : #eceff3; }
 .hl-unit-card { background : #fff; border : 1px solid #c9d2dc; border-left : 6px solid #8bc34a; border-radius : 4px; padding : 6px 10px; }
+.hl-unit-card.hl-uc-sel { box-shadow : 0 0 0 2px #1646a0 inset; }
+.hl-uc-click { cursor : pointer; } .hl-uc-click:hover b { text-decoration : underline; }
+.hl-uc-plan { margin-left : 4px; font-size : 11px; padding : 1px 7px; }
+.hl-board-hint { padding : 10px 12px; font-size : 12.5px; color : #555; background : #f7f8fa; border-top : 1px solid #d5dbe3; }
+.hl-board-hint a { color : #1646a0; }
+.hl-board-bar { display : flex; align-items : center; gap : 8px; padding : 4px 10px; font-size : 12.5px; background : #e8eef6; border-top : 1px solid #c3d4f0; border-bottom : 1px solid #c3d4f0; }
 .hl-unit-card.hl-uc-partial { border-left-color : #ffb300; } .hl-unit-card.hl-uc-full { border-left-color : #f4511e; } .hl-unit-card.hl-uc-over { border-left-color : #c62828; }
 .hl-uc-head { font-size : 13px; margin-bottom : 4px; display : flex; align-items : baseline; gap : 6px; flex-wrap : wrap; }
 .hl-uc-oq { margin-left : auto; font-size : 11.5px; background : #e8f0fe; border : 1px solid #c3d4f0; border-radius : 3px; padding : 1px 6px; white-space : nowrap; }
