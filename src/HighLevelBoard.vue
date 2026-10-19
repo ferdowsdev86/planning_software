@@ -247,15 +247,16 @@ const config = {
     scheduleTooltipFeature    : false,
     timeRangesFeature         : { showCurrentTimeLine : true },
     columns : [
-        { type : 'tree', field : 'name', text : 'Unit / Line', width : 210, htmlEncode : false, renderer : ({ record, value }) => record.data.isUnit
+        { type : 'tree', field : 'name', text : 'Unit / Line', width : 200, htmlEncode : false, renderer : ({ record, value }) => record.data.isUnit
             ? `<b class="hl-unit-name">${StringHelper.encodeHtml(value)}</b><span class="hl-unit-sub">${StringHelper.encodeHtml(record.data.label || '')} · ${record.data.activeLines}/${record.data.lineCount} lines</span>`
             : record.data.pool
                 ? `<span class="hl-line-name hl-line-pool">🌐 ${StringHelper.encodeHtml(value)}</span><span class="hl-line-sub">${record.data.hoursLbl}</span>`
                 : `<span class="hl-line-name${record.data.active ? '' : ' hl-line-off'}">${StringHelper.encodeHtml(value)}</span><span class="hl-line-sub">${record.data.manpower} mp · ${record.data.eff}% · ${record.data.hoursLbl}</span>` },
-        { field : 'capLbl',   text : 'Capacity', width : 78, align : 'right', tooltip : 'Available production hours in the planning range' },
-        { field : 'resLbl',   text : 'Reserved', width : 78, align : 'right' },
-        { field : 'availLbl', text : 'Available', width : 80, align : 'right' },
-        { field : 'utilLbl',  text : 'Util', width : 60, align : 'right', htmlEncode : false, renderer : ({ record, value }) => `<span class="hl-util hl-util-${record.data.utilCls}">${value}</span>` }
+        // month-wise, one row per month of the plan range: capacity pcs (line SAH × 60 ÷ unit average SMV), reserved
+        // order pcs on the line, and load % = reserved minutes ÷ capacity minutes
+        { field : 'capHtml',  text : 'Capacity (pcs)', width : 112, align : 'right', htmlEncode : false, tooltip : 'Month-wise capacity in pieces — manpower × (hours + OT) × 60 × efficiency over the month\'s working days ÷ the unit average SMV', renderer : ({ record }) => record.data.capHtml || '' },
+        { field : 'resHtml',  text : 'Reserved (pcs)', width : 112, align : 'right', htmlEncode : false, tooltip : 'Month-wise order pieces reserved on the line (bars of the scenario)', renderer : ({ record }) => record.data.resHtml || '' },
+        { field : 'loadHtml', text : 'Load %', width : 74, align : 'right', htmlEncode : false, tooltip : 'Month-wise reserved ÷ capacity', renderer : ({ record }) => record.data.loadHtml || '' }
     ],
     project : { resourceStore : { tree : true }, resources : [], events : [], resourceTimeRanges : [] },
     listeners : {
@@ -324,6 +325,25 @@ function syncScheduler() {
         const load = loadMap.value;
         const us = unitStats.value, ls = lineStats.value;
         const utilCls = u => (u > 1 ? 'over' : u >= (scn.thresholds?.full ?? 0.9) ? 'full' : u >= (scn.thresholds?.partial ?? 0.4) ? 'partial' : 'ok');
+        // month-wise capacity · reserved · load % of a line / unit inside the plan range — shown under the name
+        const months = [];
+        for (let ym = scn.from.slice(0, 7); ym <= scn.to.slice(0, 7); ) {
+            const [y, m] = ym.split('-').map(Number);
+            const first = `${ym}-01`, last = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+            months.push({ ym, from : first > scn.from ? first : scn.from, to : last < scn.to ? last : scn.to, label : `${MON[m - 1]} ${String(y).slice(2)}` });
+            ym = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`;
+            if (months.length > 24) break;
+        }
+        // capacity / reserved minutes and reserved pieces of a line in a month
+        const lineMonth = (l, mo) => { let capMin = 0, usedMin = 0, pcs = 0; const lm = load.get(l.id); for (let d = mo.from, g = 0; d <= mo.to && g < 40; d = addDays(d, 1), g++) { capMin += lineDayMinutes(scn, l, d); const c = lm?.get(d); if (c) { usedMin += c.min || 0; pcs += c.pcs || 0; } } return { capMin, usedMin, pcs }; };
+        const monthCells = (fn, smv) => {
+            const rows = months.map(mo => ({ mo, ...fn(mo) }));
+            const cap = rows.map(r => `<div class="hl-mc"><i>${r.mo.label}</i><b>${r.capMin > 0 ? fmtQty(Math.round(r.capMin / (smv || 1))) : '—'}</b></div>`).join('');
+            const res = rows.map(r => `<div class="hl-mc"><i>${r.mo.label}</i><b>${r.pcs ? fmtQty(Math.round(r.pcs)) : '—'}</b></div>`).join('');
+            const ld  = rows.map(r => { const p = r.capMin > 0 ? r.usedMin / r.capMin : null; return `<div class="hl-mc"><span class="hl-util hl-util-${p == null ? 'ok' : utilCls(p)}">${p == null ? '—' : fmtPct(p)}</span></div>`; }).join('');
+            return { capHtml : `<div class="hl-mcs">${cap}</div>`, resHtml : `<div class="hl-mcs">${res}</div>`, loadHtml : `<div class="hl-mcs">${ld}</div>` };
+        };
+        const rowH = Math.max(40, 12 + 15 * months.length);
         // one unit chosen: that unit plus the GSL / outside pool row (its 'plan elsewhere' bars)
         const resources = scn.units.filter(u => boardUnit.value === 'ALL' || !boardUnit.value || u.code === boardUnit.value || (u.code === 'G' && scn.reservations.some(r => r.planStatus === 'elsewhere' && r.fromUnit === boardUnit.value))).map(u => {
             const st = us[u.code] || {};
@@ -331,16 +351,21 @@ function syncScheduler() {
                 id : `U-${u.code}`, name : u.name, label : u.label, isUnit : true, expanded : expandedUnits.has(u.code),
                 activeLines : st.activeLines || 0, lineCount : st.lines || 0,
                 capLbl : fmtMin(st.capMin), resLbl : fmtMin(st.usedMin), availLbl : fmtMin(st.availMin), utilLbl : fmtPct(st.util), utilCls : utilCls(st.util || 0),
+                ...monthCells(mo => { const t = { capMin : 0, usedMin : 0, pcs : 0 }; for (const l of scn.lines) if (l.unitCode === u.code && !l.pool) { const x = lineMonth(l, mo); t.capMin += x.capMin; t.usedMin += x.usedMin; t.pcs += x.pcs; } return t; }, unitAvgSmv(u.code)),
+                rowHeight : rowH,
                 // UNIT-G with an overflow pool shows exactly ONE row: the pool
                 children : scn.lines.filter(l => l.unitCode === u.code && (u.code !== 'G' || !scn.lines.some(x => x.pool) || l.pool)).map(l => {
                     const t = ls[l.id] || {};
                     const unit = unitOf(scn, l.unitCode);
                     if (l.pool) return { id : l.id, name : l.name, isUnit : false, active : true, pool : true, manpower : '∞', eff : '—', hoursLbl : 'unlimited overflow pool',
-                        capLbl : '∞', resLbl : fmtMin(t.usedMin), availLbl : '∞', utilLbl : '—', utilCls : 'ok' };
+                        capLbl : '∞', resLbl : fmtMin(t.usedMin), availLbl : '∞', utilLbl : '—', utilCls : 'ok', rowHeight : rowH,
+                        capHtml : '<div class="hl-mcs"><div class="hl-mc"><b>∞</b></div></div>', resHtml : `<div class="hl-mcs">${months.map(mo => { const x = lineMonth(l, mo); return `<div class="hl-mc"><i>${mo.label}</i><b>${x.pcs ? fmtQty(Math.round(x.pcs)) : '—'}</b></div>`; }).join('')}</div>`, loadHtml : '' };
                     return {
                         id : l.id, name : l.name, isUnit : false, active : l.active, manpower : l.manpower, eff : l.eff,
                         hoursLbl : `${(l.hours ?? unit.hours)}h${(l.ot ?? unit.ot) ? `+${l.ot ?? unit.ot}` : ''}`,
-                        capLbl : fmtMin(t.capMin), resLbl : fmtMin(t.usedMin), availLbl : fmtMin(t.availMin), utilLbl : fmtPct(t.util), utilCls : utilCls(t.util || 0)
+                        capLbl : fmtMin(t.capMin), resLbl : fmtMin(t.usedMin), availLbl : fmtMin(t.availMin), utilLbl : fmtPct(t.util), utilCls : utilCls(t.util || 0),
+                        ...monthCells(mo => lineMonth(l, mo), unitAvgSmv(u.code)),
+                        rowHeight : rowH
                     };
                 })
             };
@@ -2535,6 +2560,10 @@ function close() {
 .hl-unit-name { font-size : 13px; } .hl-unit-sub, .hl-line-sub { display : block; font-size : 10.5px; color : #666; font-weight : 400; }
 .hl-line-off { text-decoration : line-through; color : #999; }
 .hl-util { font-weight : 700; padding : 1px 6px; border-radius : 10px; }
+.hl-mcs { display : flex; flex-direction : column; width : 100%; }
+.hl-mc { display : flex; justify-content : space-between; gap : 6px; font-size : 10.5px; line-height : 15px; white-space : nowrap; } .hl-mc i { font-style : normal; color : #1f3a5f; font-weight : 600; } .hl-mc b { font-weight : 600; color : #222; }
+.hl-mc .hl-util { font-size : 10px; padding : 0 5px; line-height : 13px; }
+.hl-root .b-grid-cell { align-items : flex-start; padding-top : 4px; } .hl-root .b-grid-cell .b-tree-cell-inner { align-items : flex-start; }
 .hl-util-ok { background : #e8f5e9; color : #2e7d32; } .hl-util-partial { background : #fff8e1; color : #b26a00; } .hl-util-full { background : #ffe0d6; color : #c43c00; } .hl-util-over { background : #ffcdd2; color : #b00020; }
 .hl-root .b-sch-resource-time-range.hl-day { border : none; opacity : 1; pointer-events : none; }
 .hl-day-idle { background : #f4f6f8 !important; } .hl-day-available { background : #dcedc8 !important; } .hl-day-partial { background : #ffe082 !important; }
