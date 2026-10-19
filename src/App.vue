@@ -11761,8 +11761,9 @@ const toolbar = [
     { sep : true },
     { fa : 'fa-magnifying-glass-minus', title : 'Horizontal zoom out — narrower days (up to 16 weeks on screen)', action : 'hZoomOut' },
     { fa : 'fa-magnifying-glass-plus',  title : 'Horizontal zoom in — wider days (the board opens at 8 weeks)', action : 'hZoomIn' },
-    { fa : 'fa-angles-up',   title : 'Vertical zoom in — taller rows', action : 'vZoomIn' },
-    { fa : 'fa-angles-down', title : 'Vertical zoom out — shorter rows', action : 'vZoomOut' },
+    // ⇈ squeezes the rows (more lines on screen), ⇊ stretches them
+    { fa : 'fa-angles-up',   title : 'Compress the board — shorter rows, more lines on screen', action : 'vZoomOut' },
+    { fa : 'fa-angles-down', title : 'Expand the board — taller rows', action : 'vZoomIn' },
     { sep : true },
     { fa : 'fa-palette', caret : true, title : 'Colour by', action : 'colorMenu', anchor : true },
     { fa : 'fa-print', title : 'Print', action : 'print' },
