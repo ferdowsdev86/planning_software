@@ -220,6 +220,17 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             // taken before carry no frozen data and read the live rows
             try { frozen = wrow.frozen ? JSON.parse(wrow.frozen) : null; } catch { frozen = null; }
             if (frozen && !Array.isArray(frozen.events)) frozen = null;
+            // an editable copy: its bars are the frozen events as they are NOW
+            // (moved / resized / cancelled / added inside the copy), on the
+            // line the copy remembers (the snapshot's line until it moved)
+            if (frozen) {
+                const snapLine = new Map((Array.isArray(bars) ? bars : []).map(b => [Number(b.id), b.lineId]));
+                const assign = frozen.assign || {};
+                bars = frozen.events.filter(e => e.event_status !== 'cancelled').map(e => ({
+                    id : e.id, lineId : assign[e.id] !== undefined ? assign[e.id] : (snapLine.get(Number(e.id)) ?? null),
+                    start : e.start_date, end : e.end_date, qty : e.planned_quantity, status : e.event_status
+                }));
+            }
             whatIf = { row : wrow, bars : Array.isArray(bars) ? bars : [], frozen };
         }
         const whatIfIds = whatIf ? whatIf.bars.map(b => Number(b.id)).filter(Boolean) : [];
@@ -3409,6 +3420,77 @@ app.put(`${BASE}/whatif/:id`, async (req, res) => {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return res.status(400).json({ success : false, error : 'Expiry date missing' });
         await pool.query('UPDATE planning_whatif_dbs SET name = ?, expires_after = ? WHERE id = ?', [name, exp, o.row.id]);
         res.json({ success : true });
+    }
+    catch (e) { dbFail(res, e); }
+});
+
+// ---- the copy's own board: moves / resizes / cancels / new bars made while
+// the What-if is on screen land HERE (planning_whatif_dbs.frozen) and
+// nowhere else — the live plan tables are never touched
+app.put(`${BASE}/whatif/:id/board`, async (req, res) => {
+    try {
+        const o = await whatIfOwned(req, res);
+        if (!o) return;
+        let frozen = null;
+        try { frozen = o.row.frozen ? JSON.parse(o.row.frozen) : null; } catch { frozen = null; }
+        if (!frozen || !Array.isArray(frozen.events)) return res.status(409).json({ success : false, error : 'This What-if copy was taken before copies became editable — create a new What-if database to plan in' });
+        const ev = req.body?.events || {};
+        const updated = Array.isArray(ev.updated) ? ev.updated : [];
+        const added   = Array.isArray(ev.added)   ? ev.added   : [];
+        const removed = Array.isArray(ev.removed) ? ev.removed : [];
+        if (!frozen.assign) {
+            // first edit: remember every bar's line from the snapshot
+            frozen.assign = {};
+            const [[snap]] = await pool.query('SELECT data FROM planning_board_snapshots WHERE id = ?', [o.row.snapshot_id]);
+            let bars = [];
+            try { bars = JSON.parse(snap?.data || '[]'); } catch { bars = []; }
+            for (const b of Array.isArray(bars) ? bars : []) if (b.id && b.lineId) frozen.assign[b.id] = b.lineId;
+        }
+        const byId = new Map(frozen.events.map(e => [Number(e.id), e]));
+        const notesStr = n => (n == null ? null : (typeof n === 'string' ? n : JSON.stringify(n)));
+        const apply = (e, u) => {
+            if (u.startDate) e.start_date = u.startDate;
+            if (u.endDate)   e.end_date   = u.endDate;
+            if (u.duration != null) e.duration = u.duration;
+            if (u.plannedQuantity != null) e.planned_quantity = Number(u.plannedQuantity) || 0;
+            if (u.percentDone != null) e.percent_done = u.percentDone;
+            if (u.status) e.event_status = u.status;
+            if (u.notes !== undefined) e.notes = notesStr(u.notes);
+            e.manually_scheduled = u.manuallyScheduled ? 1 : 0;
+            frozen.assign[e.id] = u.resourceId ?? null;
+        };
+        let changed = 0;
+        for (const u of updated) { const e = byId.get(Number(u.id)); if (e) { apply(e, u); changed++; } }
+        for (const r of removed) { const e = byId.get(Number(r.id)); if (e) { e.event_status = 'cancelled'; changed++; } }
+        // new bars placed inside the copy: a synthetic event row built from
+        // the order (read only) — ids far above the live range so they never
+        // collide with a planning_events id
+        const mapped = [];
+        let nextId = Math.max(900000000, ...frozen.events.map(e => Number(e.id) || 0)) + 1;
+        for (const a of added) {
+            let order = null;
+            if (a.orderId) { const [[row]] = await pool.query('SELECT * FROM planning_orders WHERE id = ?', [Number(a.orderId)]); order = row || null; }
+            const id = nextId++;
+            const e = {
+                id, planning_order_id : order?.id ?? null, event_code : a.eventCode || `wi-${id}`, event_name : a.name || order?.style_no || '', production_stage : 'sewing',
+                start_date : a.startDate, end_date : a.endDate, duration : a.duration ?? null, duration_unit : 'day', planned_quantity : Number(a.plannedQuantity) || 0,
+                percent_done : a.percentDone ?? 0, manually_scheduled : a.manuallyScheduled ? 1 : 0, event_status : a.status || 'draft', notes : notesStr(a.notes),
+                buyer_name : order?.buyer_name ?? null, style_no : order?.style_no ?? null, po_number : order?.po_number ?? null, order_code : order?.order_code ?? null,
+                order_quantity : order?.order_quantity ?? null, smv : order?.smv ?? null, product_category : order?.product_category ?? null, pcd : order?.pcd ?? null,
+                shipment_date : order?.shipment_date ?? null, material_ready_date : order?.material_ready_date ?? null, priority : order?.priority ?? null,
+                order_unit_id : order?.unit_id ?? null, color : order?.color ?? null, order_prod_unit : order?.prod_unit ?? order?.unit_id ?? null, proj_prod_unit : null,
+                order_total_qty : order?.order_quantity ?? null, made_at_save : 0
+            };
+            frozen.events.push(e);
+            frozen.assign[id] = a.resourceId ?? null;
+            mapped.push({ eventCode : e.event_code, eventId : id });
+            changed++;
+        }
+        frozen.editedAt = new Date().toISOString();
+        frozen.editedBy = o.user.username;
+        await pool.query('UPDATE planning_whatif_dbs SET frozen = ? WHERE id = ?', [JSON.stringify(frozen), o.row.id]);
+        console.log(`[whatif] "${o.row.name}" (id ${o.row.id}) board saved by ${o.user.username}: ${updated.length} updated, ${added.length} added, ${removed.length} removed`);
+        res.json({ success : true, changed, mapped, adjusted : [] });
     }
     catch (e) { dbFail(res, e); }
 });

@@ -3782,9 +3782,10 @@ const canBackupRestore = computed(() =>
     (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
     || userHasPerm(currentUser.value, PERM_BACKUP) || userHasPerm(authUser.value, PERM_BACKUP));
 // View-only session: Management role (§17) or read access to the open board
+// (a What-if copy is NOT view-only: it is planned like a board, and Save
+// keeps the changes in the copy — see syncToApi / syncBoardLock)
 const boardViewOnly = computed(() =>
-    !!whatIfActive.value                      // a What-if copy is looked at, never edited
-    || currentUser.value?.role === 'Management'
+    currentUser.value?.role === 'Management'
     || (!!currentBoard.value && boardAccessOf(currentUser.value, currentBoard.value.id) === 'read'));
 
 // Production update: a planner sees (and enters) only the lines of the
@@ -4293,6 +4294,16 @@ async function syncBoardLock() {
     const unitId = currentUnitId.value;
     const me = authUser.value;
     if (!unitId || !me?.username) return;
+    // A What-if copy needs no live edit lock: it is the planner's own copy,
+    // editable at once, saved into itself — the live board's lock stays free
+    if (whatIfActive.value) {
+        boardReadOnly.value   = false;
+        boardLockHolder.value = null;
+        planLock.value        = null;
+        const s = getInstance();
+        if (s) s.readOnly = false;
+        return;
+    }
     // Read access: never take the edit lock — the board stays view-only and
     // the editor's lock is left free for someone with write access
     if (boardViewOnly.value) {
@@ -9978,10 +9989,9 @@ function multiSelectMembers(s, rec) {
         .sort((a, b) => a.startDate - b.startDate);
 }
 
-const WI_VIEW_MSG = '🗄 What-if view only — the copy cannot be changed and nothing is written to the live plan. Open the normal plan to change it.';
+const WI_VIEW_MSG = '🗄 What-if copy — production updates and strip notes are not kept in a copy; open the normal plan for those. Bars can be moved here and Save keeps them in the copy.';
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
-    if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     if (planLockedByOther.value) { toast(planLockFrozenMsg(), 'warn'); return; }
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
@@ -10997,7 +11007,9 @@ async function saveToDbInner(s) {
             pendingRepairIds.clear();
             scheduleUnsavedRefresh();
             const synced = eventIds.length - userIds.length;
-            toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
+            toast(whatIfActive.value
+                ? `🗄 Saved into the What-if copy "${whatIfActive.value.name}" (${changes.length} change${changes.length === 1 ? '' : 's'}) — the live plan is untouched`
+                : `Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
             // The server moved something it found overlapping (another planner's
             // bar saved meanwhile) — show what is really stored
             if (res.adjusted?.length) {
@@ -12067,7 +12079,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan banner -->
         <div class="fr-banner">
             <span class="mb-banner-title" :class="{ 'mb-banner-ro' : boardReadOnly, 'mb-banner-wi' : whatIfActive }">
-                <template v-if="whatIfActive">🗄 {{ currentBoard?.unitName || 'AQL' }} — WHAT-IF "<b>{{ whatIfActive.name }}</b>" (copy of {{ whatIfActive.createdAt }}{{ whatIfActive.createdBy ? ` by ${whatIfActive.createdBy}` : '' }}) · view only · the live plan is untouched <a class="mb-banner-link" @click="exitWhatIf">← back to the normal plan</a></template>
+                <template v-if="whatIfActive">🗄 {{ currentBoard?.unitName || 'AQL' }} — WHAT-IF "<b>{{ whatIfActive.name }}</b>" (copy of {{ whatIfActive.createdAt }}{{ whatIfActive.createdBy ? ` by ${whatIfActive.createdBy}` : '' }}) · plan here freely — Save keeps the changes in this copy only · the live plan is untouched <a class="mb-banner-link" @click="exitWhatIf">← back to the normal plan</a></template>
                 <template v-else-if="planLockedByOther">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan LOCKED by <b class="mb-holder-name">{{ planLock?.name || planLock?.username }}</b> · nothing can be moved, planned or saved until they open it</template>
                 <template v-else-if="planLockedByMe && !boardReadOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — plan locked by you ({{ authUser?.name || currentUser?.name }}) · other users can only look</template>
                 <template v-else-if="boardReadOnly && boardViewOnly">🔒 {{ currentBoard?.unitName || 'AQL' }} — Read only access ({{ authUser?.name || currentUser?.name }}) · nothing can be changed or saved</template>
@@ -13828,7 +13840,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                     <div class="wi-pick-actions">
-                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Open the board on this What-if copy, exactly as the plan was that day — view only, the live plan is never touched" @click="wiPickExecute">🗄 What-if? database</button>
+                        <button class="cal-btn cal-btn-primary st-btn wi-btn" :disabled="wiPickBusy || !wiPickSel" title="Open the board on this What-if copy — plan on it freely, Save keeps the changes in the copy; the live plan is never touched" @click="wiPickExecute">🗄 What-if? database</button>
                         <button class="cal-btn st-btn wi-btn" :disabled="wiPickBusy" title="Open the board on the normal (live) plan" @click="wiPickNormal">🗃 Normal database</button>
                     </div>
                     <div class="st-hint">এই board-এর What-if copy আছে বলে আগে বেছে নিন: <b>What-if? database</b> = ওই দিনের plan যেমন ছিল তেমন board-এ দেখাবে (শুধু দেখা, live plan/database-এ কোনো change হয় না) · <b>Normal database</b> = live plan খুলবে · ✕ দিলে board খুলবে না</div>

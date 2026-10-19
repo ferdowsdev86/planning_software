@@ -1333,7 +1333,10 @@ export async function pingApi(timeoutMs = 10000) {
 export async function syncToApi(scheduler, { eventIds = null, unitId = null } = {}) {
     const updated = [];
     const added   = [];
-    const idFilter = eventIds ? new Set(eventIds.map(String)) : null;
+    // a What-if copy on screen: the WHOLE board goes into the copy (its own
+    // storage), never into the live plan
+    const toWhatIf = !!whatIfView.id;
+    const idFilter = eventIds && !toWhatIf ? new Set(eventIds.map(String)) : null;
     for (const ev of scheduler.eventStore.records) {
         if (idFilter && !idFilter.has(String(ev.id))) continue;
         const d = ev.data;
@@ -1408,6 +1411,18 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
     // A dead connection must fail fast with a clear error, not hang the save
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);
+    if (toWhatIf) {
+        const resW = await apiFetch(`${API_BASE}/whatif/${encodeURIComponent(whatIfView.id)}/board`, {
+            method  : 'PUT',
+            signal  : ctrl.signal,
+            headers : { 'Content-Type' : 'application/json' },
+            body    : JSON.stringify({ by : whatIfView.by, requestId : `whatif-save-${Math.random().toString(36).slice(2, 10)}`, events : { updated, added, removed } })
+        });
+        clearTimeout(timer);
+        const outW = await resW.json();
+        if (outW?.success) removedDbEventIds.clear();
+        return outW;
+    }
     const res = await apiFetch(`${API_BASE}/projects/1/scheduler-sync`, {
         method  : 'POST',
         signal  : ctrl.signal,
