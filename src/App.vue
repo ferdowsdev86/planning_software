@@ -9652,19 +9652,42 @@ async function applyEqualOrder() {
 let carryGroup = [];   // the other bars of the carried bar's group (in order)
 let carryRecStart0 = null;   // the carried bar's start when it was picked up (its place in the sequence)
 
+// The buyer's PO numbers a bar carries (a consolidated bar lists several);
+// projection placeholders are not PO numbers
+function poSetOf(raw) {
+    const set = new Set();
+    const add = p => { const v = String(p || '').trim().toLowerCase(); if (v && !/^proj/.test(v)) set.add(v); };
+    add(raw?.po);
+    if (Array.isArray(raw?.poList)) raw.poList.forEach(add);
+    return set;
+}
+// Same order for consolidation = the same MBM order (buyer + style + order
+// code: a projection and its confirm, one order split into bars) OR the same
+// buyer PO (one PO split by colour / style into several MBM order codes —
+// e.g. G-STAR 4500404602 = 2627G-S158 / S159 / S199 on one line)
+function sameConsolidateOrder(rawA, rawB) {
+    if (!rawA || !rawB) return false;
+    const ka = orderFamilyKey(rawA);
+    if (ka && ka === orderFamilyKey(rawB)) return true;
+    const pb = poSetOf(rawB);
+    if (!pb.size) return false;
+    for (const p of poSetOf(rawA)) if (pb.has(p)) return true;
+    return false;
+}
+
 function groupMembersOf(s, rec) {
     const raw = rec?.data?.raw;
     if (!raw || raw.stage) return [];
     const lid = lineIdOf(s, rec);
     if (!lid || isHoldId(lid)) return [];
-    const key = orderFamilyKey(raw);
-    if (!key) return [];
+    if (!orderFamilyKey(raw) && !poSetOf(raw).size) return [];
+    const index = buildLineIndex(s);
     const bars = s.eventStore.records
-        .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev) === lid)
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && lineIdOf(s, ev, index) === lid)
         .sort((a, b) => a.startDate - b.startDate);
     const i = bars.indexOf(rec);
     if (i < 0) return [];
-    const same = ev => ev.data.raw.status !== 'completed' && ev.draggable !== false && orderFamilyKey(ev.data.raw) === key;
+    const same = ev => ev.data.raw.status !== 'completed' && ev.draggable !== false && sameConsolidateOrder(raw, ev.data.raw);
     let lo = i, hi = i;
     while (lo > 0 && same(bars[lo - 1])) lo--;
     while (hi < bars.length - 1 && same(bars[hi + 1])) hi++;
@@ -10643,7 +10666,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock,
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -11742,7 +11765,7 @@ const toolbar = [
     // projection replaced by its confirm POs, splits of one order) move as
     // one group; OFF = every bar moves alone
     { fa : 'fa-object-group', cls : 'fr-tb-consol', toggle : 'consolidate',
-        title : 'Consolidate orders — একই order-এর পাশাপাশি bar গুলো এক group হয়ে একসাথে move করবে (আবার click = ungroup)', action : 'consolidate' },
+        title : 'Consolidate orders — একই order বা একই buyer PO-র পাশাপাশি bar গুলো এক group হয়ে একসাথে move করবে (আবার click = ungroup)', action : 'consolidate' },
     { fa : 'fa-scale-balanced', title : 'Equal Order — selected order-এর সব split line-এ একই দিনে শেষ হবে (line capacity অনুযায়ী remaining qty ভাগ)', action : 'equalOrder' }
 ];
 
@@ -11751,7 +11774,7 @@ function toggleConsolidate() {
     consolidate.value = !consolidate.value;
     localStorage.setItem('mbm-consolidate', consolidate.value ? '1' : '0');
     toast(consolidate.value
-        ? 'Consolidate orders ON — একই order-এর পাশাপাশি bar গুলো group হয়ে একসাথে move করবে'
+        ? 'Consolidate orders ON — একই order বা একই buyer PO-র পাশাপাশি bar গুলো group হয়ে একসাথে move করবে'
         : 'Consolidate orders OFF — প্রতিটি bar আলাদা move করবে', 'ok');
 }
 
