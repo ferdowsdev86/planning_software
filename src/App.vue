@@ -7993,6 +7993,7 @@ async function buildPuRows() {
 }
 
 function saveProdUpdate() {
+    if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     // Daily production writes to the DB — needs the board's edit lock
     if (boardReadOnly.value) {
         const h = boardLockHolder.value;
@@ -8148,6 +8149,7 @@ async function snAdd() {
     const raw = snRaw.value;
     const note = snText.value.trim();
     if (!raw?.po) return;
+    if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     if (!note) { toast('Type the note first', 'warn'); return; }
     snBusy.value = true;
     try {
@@ -8163,6 +8165,7 @@ async function snAdd() {
 }
 
 async function snDelete(n) {
+    if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     if (!window.confirm(`Delete this note?\n\n${n.note}`)) return;
     snBusy.value = true;
     try {
@@ -9959,8 +9962,10 @@ function multiSelectMembers(s, rec) {
         .sort((a, b) => a.startDate - b.startDate);
 }
 
+const WI_VIEW_MSG = '🗄 What-if view only — the copy cannot be changed and nothing is written to the live plan. Open the normal plan to change it.';
 function pickUp(rec, domEvent, { grab = false } = {}) {
     if (carried.value) return;
+    if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     if (planLockedByOther.value) { toast(planLockFrozenMsg(), 'warn'); return; }
     const raw = rec?.data?.raw;
     if (!raw || raw.stage || raw.status === 'completed') return;
@@ -10741,7 +10746,8 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate,
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive,
+        api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 

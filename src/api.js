@@ -379,7 +379,7 @@ async function get(path, timeoutMs = 4000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-        const res = await fetch(`${API_BASE}${path}`, { signal : ctrl.signal });
+        const res = await apiFetch(`${API_BASE}${path}`, { signal : ctrl.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     }
@@ -400,7 +400,7 @@ export async function loadProdUpdatesDb() {
 }
 
 export async function saveProdUpdatesDb(rows) {
-    const res = await fetch(`${API_BASE}/production-updates`, {
+    const res = await apiFetch(`${API_BASE}/production-updates`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ rows })
@@ -415,7 +415,7 @@ export async function saveProdUpdatesDb(rows) {
 // from the running board (see App.vue syncMasterData)
 // ---------------------------------------------------------------------------
 async function postRows(path, rows) {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await apiFetch(`${API_BASE}${path}`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ rows })
@@ -461,7 +461,7 @@ export async function loadBoardSnapshots(unitId) {
     return j.rows || [];
 }
 export async function createBoardSnapshot(unitId, by) {
-    const res = await fetch(`${API_BASE}/board-snapshots`, {
+    const res = await apiFetch(`${API_BASE}/board-snapshots`, {
         method : 'POST', headers : { 'Content-Type' : 'application/json' },
         body : JSON.stringify({ unit : unitId, by })
     });
@@ -472,7 +472,7 @@ export async function createBoardSnapshot(unitId, by) {
 // Restore the board to a backup (server checks the permission and takes a
 // 'pre-restore' backup of the current plan first)
 export async function restoreBoardSnapshot(id, by) {
-    const res = await fetch(`${API_BASE}/board-snapshots/${id}/restore`, {
+    const res = await apiFetch(`${API_BASE}/board-snapshots/${id}/restore`, {
         method : 'POST', headers : { 'Content-Type' : 'application/json' },
         body : JSON.stringify({ by })
     });
@@ -482,7 +482,7 @@ export async function restoreBoardSnapshot(id, by) {
 }
 // What-if? databases (Tools): the planner's own named copies of the plan
 async function whatIfCall(path, method, body) {
-    const res = await fetch(`${API_BASE}/whatif${path}`, {
+    const res = await apiFetch(`${API_BASE}/whatif${path}`, {
         method, headers : { 'Content-Type' : 'application/json' },
         body : body ? JSON.stringify(body) : undefined
     });
@@ -502,7 +502,7 @@ export const deleteWhatIfDb  = (id, by) => whatIfCall(`/${id}`, 'DELETE', { by }
 // High Level Planning Board (standalone simulation — hl_* tables only)
 // ---------------------------------------------------------------------------
 async function hlCall(path, method = 'GET', body, signal) {
-    const res = await fetch(`${API_BASE}/hl${path}`, {
+    const res = await apiFetch(`${API_BASE}/hl${path}`, {
         method, headers : { 'Content-Type' : 'application/json' },
         body : body ? JSON.stringify(body) : undefined, signal
     });
@@ -527,6 +527,19 @@ export const hlReference      = (from, to, by) => hlCall(`/reference?from=${from
 
 // the board opens on a What-if copy (read only) while this is set
 export const whatIfView = { id : null, by : null };
+// Every request to the planning API goes through here: while a What-if copy
+// is on screen NOTHING may be written to the live plan — any POST / PUT /
+// DELETE except sign-in, sessions, the What-if list itself, the board lock
+// and the High Level board is refused before it leaves the browser
+const WI_ALLOW = /^\/(auth|session|sessions|users|whatif|hl|board-lock|tooltip-bulk|erp-order-info)(\/|\?|$)/;
+function apiFetch(url, opts = {}) {
+    const method = String(opts.method || 'GET').toUpperCase();
+    const u = String(url);
+    if (whatIfView.id && method !== 'GET' && u.startsWith(API_BASE) && !WI_ALLOW.test(u.slice(API_BASE.length))) {
+        return Promise.reject(new Error('What-if view only — nothing is written to the live plan (open the normal plan to change it)'));
+    }
+    return fetch(url, opts);
+}
 
 export async function compareBoardSnapshot(id, unitId) {
     const j = await get(`/board-snapshots/${id}/compare${unitId ? `?unit=${unitId}` : ''}`, 15000);
@@ -543,7 +556,7 @@ export async function authLogin(username, password) {
     // base first — otherwise the POST lands on the web server, which answers
     // with an empty/HTML 404 and json() explodes.
     await resolveApiBase().catch(() => {});
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const res = await apiFetch(`${API_BASE}/auth/login`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ username, password })
@@ -564,7 +577,7 @@ export async function authLogin(username, password) {
 export async function loadUsersDb() {
     // Runs at app start (login chips) — repair a stale endpoint cache first
     await resolveApiBase().catch(() => {});
-    const res = await fetch(`${API_BASE}/users`);
+    const res = await apiFetch(`${API_BASE}/users`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'load failed');
     return data.users || [];
@@ -572,7 +585,7 @@ export async function loadUsersDb() {
 
 // Upsert users; entries carrying a `password` field rotate that user's hash
 export async function saveUsersDb(users) {
-    const res = await fetch(`${API_BASE}/users`, {
+    const res = await apiFetch(`${API_BASE}/users`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ users })
@@ -586,7 +599,7 @@ export async function saveUsersDb(users) {
 // Board edit lock — one editor per board; later users get read-only
 // ---------------------------------------------------------------------------
 export async function acquireBoardLock(unitId, username, name) {
-    const res = await fetch(`${API_BASE}/board-lock/acquire`, {
+    const res = await apiFetch(`${API_BASE}/board-lock/acquire`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ unitId, username, name })
@@ -609,7 +622,7 @@ export function releaseBoardLock(unitId, username) {
         }
     }
     catch { /* fall through */ }
-    return fetch(`${API_BASE}/board-lock/release`, {
+    return apiFetch(`${API_BASE}/board-lock/release`, {
         method : 'POST', headers : { 'Content-Type' : 'application/json' },
         body : payload, keepalive : true
     }).catch(() => {});
@@ -619,7 +632,7 @@ export function releaseBoardLock(unitId, username) {
 // Login sessions — presence heartbeat + Tools → Login status (admin kill)
 // ---------------------------------------------------------------------------
 export async function sessionHeartbeat(payload) {
-    const res = await fetch(`${API_BASE}/session/heartbeat`, {
+    const res = await apiFetch(`${API_BASE}/session/heartbeat`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify(payload)
@@ -637,21 +650,21 @@ export function endSession(sid) {
         }
     }
     catch { /* fall through */ }
-    return fetch(`${API_BASE}/session/end`, {
+    return apiFetch(`${API_BASE}/session/end`, {
         method : 'POST', headers : { 'Content-Type' : 'application/json' },
         body : payload, keepalive : true
     }).catch(() => {});
 }
 
 export async function loadSessions() {
-    const res = await fetch(`${API_BASE}/sessions`);
+    const res = await apiFetch(`${API_BASE}/sessions`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'load failed');
     return data; // { sessions, now }
 }
 
 export async function killSession(sid) {
-    const res = await fetch(`${API_BASE}/session/kill`, {
+    const res = await apiFetch(`${API_BASE}/session/kill`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ sid })
@@ -665,7 +678,7 @@ export async function killSession(sid) {
 // fire-and-forget, the board must never block on it
 export function linkAudit(entries) {
     if (!entries?.length) return Promise.resolve();
-    return fetch(`${API_BASE}/link-audit`, {
+    return apiFetch(`${API_BASE}/link-audit`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ entries })
@@ -675,7 +688,7 @@ export function linkAudit(entries) {
 // Mark orders complete — flags them completed server-side; the caller removes
 // their bars from the board and syncs the removals
 export async function completeOrdersDb(orderCodes) {
-    const res = await fetch(`${API_BASE}/orders/complete`, {
+    const res = await apiFetch(`${API_BASE}/orders/complete`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ orderCodes })
@@ -700,7 +713,7 @@ export async function loadCalendarOverridesFullDb(calId = 1) {
 }
 // lineOverrides omitted = the DB keeps its line rows untouched
 export async function saveCalendarOverridesDb(overrides, calId = 1, lineOverrides = undefined) {
-    const res = await fetch(`${API_BASE}/calendars/${calId}/overrides`, {
+    const res = await apiFetch(`${API_BASE}/calendars/${calId}/overrides`, {
         method  : 'PUT',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify(lineOverrides ? { overrides, lineOverrides } : { overrides })
@@ -711,7 +724,7 @@ export async function saveCalendarOverridesDb(overrides, calId = 1, lineOverride
 }
 
 export async function reopenOrdersDb(orderCodes, by) {
-    const res = await fetch(`${API_BASE}/orders/reopen`, {
+    const res = await apiFetch(`${API_BASE}/orders/reopen`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ orderCodes, by })
@@ -724,7 +737,7 @@ export async function reopenOrdersDb(orderCodes, by) {
 // Persist line efficiency (profile _Default) to planning_resources
 // Holding Row capacity (manpower / efficiency / hours) → hidden HOLD-<unit> row
 export async function saveHoldingCapacityDb(unitId, { manpower, eff, hours }) {
-    const res = await fetch(`${API_BASE}/resources/holding`, {
+    const res = await apiFetch(`${API_BASE}/resources/holding`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ unitId, manpower, eff, hours })
@@ -735,7 +748,7 @@ export async function saveHoldingCapacityDb(unitId, { manpower, eff, hours }) {
 }
 
 export async function saveLineEfficiencyDb(updates) {
-    const res = await fetch(`${API_BASE}/resources/efficiency`, {
+    const res = await apiFetch(`${API_BASE}/resources/efficiency`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ updates })
@@ -1395,7 +1408,7 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
     // A dead connection must fail fast with a clear error, not hang the save
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);
-    const res = await fetch(`${API_BASE}/projects/1/scheduler-sync`, {
+    const res = await apiFetch(`${API_BASE}/projects/1/scheduler-sync`, {
         method  : 'POST',
         signal  : ctrl.signal,
         headers : { 'Content-Type' : 'application/json' },
@@ -1424,14 +1437,14 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
 // Strip notes (FastReact Notes window): free text per PO with user + date
 // ---------------------------------------------------------------------------
 export async function loadStripNotesDb(po = null) {
-    const res = await fetch(`${API_BASE}/strip-notes${po ? `?po=${encodeURIComponent(po)}` : ''}`);
+    const res = await apiFetch(`${API_BASE}/strip-notes${po ? `?po=${encodeURIComponent(po)}` : ''}`);
     const out = await res.json();
     if (!out?.success) throw new Error(out?.error || 'strip notes failed');
     return out.notes || [];
 }
 
 export async function addStripNoteDb({ po, orderCode, eventId, note, user }) {
-    const res = await fetch(`${API_BASE}/strip-notes`, {
+    const res = await apiFetch(`${API_BASE}/strip-notes`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ po, orderCode, eventId, note, user })
@@ -1442,7 +1455,7 @@ export async function addStripNoteDb({ po, orderCode, eventId, note, user }) {
 }
 
 export async function deleteStripNoteDb(id, user) {
-    const res = await fetch(`${API_BASE}/strip-notes/${encodeURIComponent(id)}?user=${encodeURIComponent(user || '')}`, { method : 'DELETE' });
+    const res = await apiFetch(`${API_BASE}/strip-notes/${encodeURIComponent(id)}?user=${encodeURIComponent(user || '')}`, { method : 'DELETE' });
     const out = await res.json();
     if (!out?.success) throw new Error(out?.error || 'delete note failed');
     return true;
@@ -1451,7 +1464,7 @@ export async function deleteStripNoteDb(id, user) {
 // Tooltip data for a whole board in one request (board open): ERP detail per
 // PO + PO summary rows per bar — see server tooltip-bulk
 export async function tooltipBulkDb(pos, groups) {
-    const res = await fetch(`${API_BASE}/tooltip-bulk`, {
+    const res = await apiFetch(`${API_BASE}/tooltip-bulk`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ pos, groups })
@@ -1468,7 +1481,7 @@ export async function loadBuyerColorsDb() {
     return j.rows || [];
 }
 export async function saveBuyerColorsDb(colors, by) {
-    const res = await fetch(`${API_BASE}/buyer-colors`, {
+    const res = await apiFetch(`${API_BASE}/buyer-colors`, {
         method  : 'PUT',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ colors, by })
@@ -1480,7 +1493,7 @@ export async function saveBuyerColorsDb(colors, by) {
 
 // Explicit plan lock (toolbar key / padlock)
 export async function setPlanLockDb({ unitId, username, name, role, lock }) {
-    const res = await fetch(`${API_BASE}/plan-lock`, {
+    const res = await apiFetch(`${API_BASE}/plan-lock`, {
         method  : 'POST',
         headers : { 'Content-Type' : 'application/json' },
         body    : JSON.stringify({ unitId, username, name, role, lock })
