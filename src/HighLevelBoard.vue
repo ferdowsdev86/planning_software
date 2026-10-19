@@ -19,7 +19,8 @@ import {
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver, lineSmv, ensurePoolLine
 } from './hlEngine.js';
 import {
-    autoBalance, allocationReport, reconcileAllocation, balanceSettings, unitMakes, orderSmv, ymOf, buildCapIndex, mergeErpOrders, placeInUnit, EXT_STATUS, KIND_LABEL
+    autoBalance, allocationReport, reconcileAllocation, balanceSettings, unitMakes, orderSmv, ymOf, buildCapIndex, mergeErpOrders, placeInUnit, EXT_STATUS, KIND_LABEL,
+    autoPlanUnits, planRules, PLAN_STATUS
 } from './hlBalance.js';
 import {
     hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders,
@@ -278,6 +279,7 @@ const config = {
         if (r.late) renderData.cls.add('hl-res-late');
         if (r.source === 'live') renderData.cls.add('hl-res-live');
         if (r.kind) renderData.cls.add(`hl-res-k-${r.kind}`);
+        if (r.planStatus) renderData.cls.add(`hl-res-ps-${r.planStatus}`);
         if (r.extStatus) renderData.cls.add(`hl-res-ext-${r.extStatus}`);
         if (r.risk) renderData.cls.add('hl-res-risk');
         const pre = `${r.locked ? '🔒 ' : ''}${r.kind === 'transfer' ? `⇄${r.fromUnit || ''} ` : r.kind === 'gsl' ? `🌐${r.fromUnit || ''} ` : ''}${r.extStatus === 'pending' ? '⏳ ' : ''}`;
@@ -301,6 +303,7 @@ function tipHtml(ev) {
         ['Status', `${r.status}${r.locked ? ' · locked' : ''}${r.conflict ? ' · ⚠ overloaded day(s)' : ''}${r.late ? ' · after delivery' : ''}`]
     ];
     if (r.kind) rows.push(['Allocation', `${KIND_LABEL[r.kind] || r.kind}${r.fromUnit && line && r.fromUnit !== line.unitCode ? ` · contract ${unitName(r.fromUnit)} → ${unitName(line.unitCode)}` : ''}`]);
+    if (r.planStatus) rows.push(['Plan', `${PLAN_STATUS[r.planStatus] || r.planStatus}${r.lcDays ? ` · learning curve ${r.lcDays} days` : ''}${o?.repeat ? ' · repeat order' : ''}`]);
     if (res?.reason) rows.push(['Reason', res.reason]);
     if (r.extStatus) rows.push(['External capacity', EXT_STATUS[r.extStatus] || r.extStatus]);
     if (o?.garment) rows.splice(3, 0, ['Garment', o.garment]);
@@ -352,6 +355,7 @@ function syncScheduler() {
                 qty : r.qty, product : r.product || o?.product || '', status : r.status, locked : !!r.locked, orderId : r.orderId, lineId : r.lineId,
                 conflict : conflictRes.has(r.id), late : !!(o?.delivery && r.end > o.delivery), source : r.source || null,
                 kind : r.kind || null, fromUnit : r.fromUnit || null, extStatus : r.kind === 'gsl' ? (r.extStatus || 'pending') : null,
+                planStatus : r.planStatus || null, lcDays : r.lcDays || 0,
                 risk : !!(r.kind === 'gsl' && (r.extStatus || 'pending') !== 'confirmed'),
                 draggable : !r.locked, resizable : !r.locked
             };
@@ -754,6 +758,72 @@ const orderRows = computed(() => { void tick.value; return (sc.value?.orders || 
     const reserved = rs.reduce((a, r) => a + (Number(r.qty) || 0), 0);
     return { ...o, reserved, open : Math.max(0, o.qty - reserved), lines : rs.length, finish : rs.reduce((m, r) => (!m || r.end > m ? r.end : m), null) };
 }); });
+
+// ---------------------------------------------------------------------------
+// Orders & capacity test → unit-wise auto plan by the planning rules:
+// input date = PCD + 7 (new style) / + 3 (repeat / carry-over), learning
+// curve by SMV (none for repeats, buyer overrides), delivery must be met —
+// grey = on time, orange = PCD not met, red = delivery not met.
+// ---------------------------------------------------------------------------
+const APU_UNITS = ['M', 'C', 'A'];
+function apuDefaults(s) {
+    const r = planRules(s);
+    return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
+        gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false };
+}
+const apuRules = ref(apuDefaults(null));
+const apuUnits = ref([...APU_UNITS]);
+const apuResult = shallowRef(null);
+const apuBusy = ref(false);
+const apuFilter = ref('');
+watch(ordOpen, v => { if (v && sc.value) apuRules.value = apuDefaults(sc.value); });
+function apuRulesObj() {
+    const r = apuRules.value;
+    return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
+        lcSmvHigh : Number(r.lcSmvHigh) || 50, lcDaysMid : Number(r.lcDaysMid) || 0, lcDaysHigh : Number(r.lcDaysHigh) || 0,
+        buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc };
+}
+async function apuImport() {
+    if (!sc.value) return;
+    if (!canWrite.value) return denied();
+    apuBusy.value = true;
+    try {
+        const erp = await hlErpOrders(by());
+        let m = null;
+        mutate('import ERP orders', s => { m = mergeErpOrders(s, erp.rows || []); });
+        props.toast(`ERP active orders imported: ${m.added} new, ${m.updated} updated (contract unit = production unit, repeat orders marked)`, 'ok');
+    }
+    catch (e) { props.toast(`ERP orders failed: ${e.message}`, 'error'); }
+    finally { apuBusy.value = false; }
+}
+function apuRun() {
+    if (!sc.value) return;
+    if (!apuUnits.value.length) { props.toast('Pick at least one unit', 'warn'); return; }
+    const n = sc.value.orders.filter(o => apuUnits.value.includes(o.unitCode)).length;
+    if (!n) { props.toast('No orders for the chosen unit(s) in this scenario — import the ERP orders first', 'warn'); return; }
+    apuResult.value = autoPlanUnits(sc.value, { units : apuUnits.value, rules : apuRulesObj() });
+}
+function apuApply() {
+    const out = apuResult.value; if (!out || !sc.value) return;
+    const rules = apuRulesObj();
+    mutate('auto plan (unit-wise)', s => {
+        const rm = new Set(out.removedIds);
+        s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(out.reservations);
+        s.balance = { ...balanceSettings(s), planRules : rules, lastAutoPlan : out.summary };
+    });
+    for (const u of out.summary.units) expandedUnits.add(u);
+    const sm = out.summary;
+    props.toast(`Auto plan applied: ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity — review the bars (grey / orange / red), then Save`, sm.late || sm.unplaced ? 'warn' : 'ok');
+    apuResult.value = null;
+    ordOpen.value = false;
+}
+const apuRows = computed(() => {
+    const q = apuFilter.value.trim().toLowerCase();
+    const rows = apuResult.value?.results || [];
+    const order = { late : 0, unplaced : 1, pcd : 2, ontime : 3 };
+    return rows.filter(r => !q || `${r.code} ${r.buyer} ${r.style} ${r.product}`.toLowerCase().includes(q))
+        .slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || String(a.delivery || '').localeCompare(String(b.delivery || '')));
+});
 
 // ---------------------------------------------------------------------------
 // Auto planning
@@ -1335,7 +1405,7 @@ function close() {
             </template>
             <span class="hl-legend">
                 <i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>holiday <i class="hl-lg hl-day-off"></i>off day <i class="hl-lg hl-day-inactive"></i>inactive
-                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
+                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
             </span>
             <span v-if="conflictList.length" class="hl-warn">⚠ {{ conflictList.length }} overloaded line-day(s)</span>
             <span v-if="reconcileIssues.length" class="hl-warn">⚠ {{ reconcileIssues.length }} reservation(s) do not reconcile</span>
@@ -1586,6 +1656,58 @@ function close() {
         <div v-if="ordOpen && sc" class="cal-overlay" @click.self="ordOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog hl-ord-dialog">
                 <div class="cal-title">📦 Orders &amp; capacity test — {{ sc.name }} <span class="cal-title-btns"><span class="cal-x" @click="ordOpen = false">✕</span></span></div>
+                <div class="st-body hl-apu">
+                    <div class="hl-apu-head"><b>▶ Auto plan — unit-wise, by the planning rules</b> <span class="hl-dim">every order of the unit on the unit's own lines · delivery must be met</span>
+                        <span class="hl-gap"></span>
+                        <label v-for="u in APU_UNITS" :key="u" class="hl-dow"><input type="checkbox" :checked="apuUnits.includes(u)" @change="apuUnits = $event.target.checked ? [...apuUnits, u] : apuUnits.filter(x => x !== u)">{{ unitName(u) }}</label>
+                        <button class="cal-btn st-btn hl-btn" :disabled="apuBusy" title="Import / refresh the ERP active orders into this scenario (repeat orders are detected from the style's earlier orders)" @click="apuImport">⬇ Import ERP orders</button>
+                        <button class="cal-btn cal-btn-primary st-btn hl-btn" :disabled="apuBusy" @click="apuRun">▶ Auto plan</button>
+                        <button class="cal-btn st-btn hl-btn hl-primary" :disabled="!apuResult" title="Put the proposal on the board (grey / orange / red bars) — Save to keep" @click="apuApply">📌 Apply to board</button>
+                    </div>
+                    <div class="hl-apu-rules">
+                        <label class="hl-lbl">Input date: new style PCD + <input v-model.number="apuRules.newLead" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <label class="hl-lbl">repeat / carry-over PCD + <input v-model.number="apuRules.repeatLead" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <span class="hl-sep"></span>
+                        <label class="hl-lbl">Learning curve: SMV &lt; <input v-model.number="apuRules.lcSmvLow" type="number" class="cal-in hl-num hl-num-s"> → <input v-model.number="apuRules.lcDaysLow" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <label class="hl-lbl">to <input v-model.number="apuRules.lcSmvHigh" type="number" class="cal-in hl-num hl-num-s"> → <input v-model.number="apuRules.lcDaysMid" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <label class="hl-lbl">above → <input v-model.number="apuRules.lcDaysHigh" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <label class="hl-lbl">G-STAR <input v-model.number="apuRules.gstar" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
+                        <label class="hl-lbl">no curve for <input v-model="apuRules.noLc" class="cal-in hl-txt" placeholder="buyers, comma separated"></label>
+                        <label class="hl-chk"><input v-model="apuRules.repeatNoLc" type="checkbox"> repeat order: no learning curve</label>
+                    </div>
+                    <div v-if="apuResult" class="hl-apu-result">
+                        <div class="hl-ab-sum">
+                            <span><b>{{ fmtQty(apuResult.summary.orders) }}</b> orders · <b>{{ fmtQty(apuResult.summary.qty) }}</b> pcs · placed <b>{{ fmtQty(apuResult.summary.placed) }}</b></span>
+                            <span class="hl-ps-chip hl-ps-ontime">on time {{ apuResult.summary.ontime }}</span>
+                            <span class="hl-ps-chip hl-ps-pcd">PCD not met {{ apuResult.summary.pcd }}</span>
+                            <span class="hl-ps-chip hl-ps-late">delivery not met {{ apuResult.summary.late }}</span>
+                            <span class="hl-ps-chip hl-ps-unplaced">no capacity {{ apuResult.summary.unplaced }}</span>
+                            <span class="hl-dim">{{ apuResult.summary.removed }} previous proposal(s) replaced on apply</span>
+                            <span class="hl-gap"></span>
+                            <input v-model="apuFilter" class="cal-in hl-txt" placeholder="filter order / buyer / style">
+                        </div>
+                        <div class="hl-scroll hl-apu-scroll">
+                            <table class="hl-table hl-table-s hl-apu-tbl">
+                                <thead><tr><th>Status</th><th>Unit</th><th>Order</th><th>Buyer</th><th>Style · product</th><th>Qty</th><th>PCD</th><th>Input date</th><th>Delivery</th><th>Start</th><th>Finish</th><th>LC</th><th>Lines</th><th>How</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="r in apuRows" :key="r.orderId">
+                                        <td><span class="hl-ps-chip" :class="`hl-ps-${r.status}`">{{ PLAN_STATUS[r.status] }}</span></td>
+                                        <td>{{ unitName(r.unit) }}</td><td><b>{{ r.code || r.style }}</b></td><td>{{ r.buyer }}</td><td>{{ r.style }}<span class="hl-dim"> · {{ r.product }}</span></td>
+                                        <td class="hl-r">{{ fmtQty(r.qty) }}<span v-if="r.open !== r.qty" class="hl-dim"> ({{ fmtQty(r.open) }} open)</span></td>
+                                        <td>{{ dmy(r.pcd) }}</td><td :title="r.repeat ? `repeat order${r.repeatOf ? ' of ' + r.repeatOf : ''}: PCD + ${apuRules.repeatLead} d` : `new style: PCD + ${apuRules.newLead} d`">{{ dmy(r.inputDate) }}<span class="hl-dim"> {{ r.repeat ? '↻' : '✦' }}</span></td>
+                                        <td>{{ dmy(r.delivery) }}</td>
+                                        <td :class="{ 'hl-late' : r.inputDate && r.start && r.start < r.inputDate }">{{ dmy(r.start) }}</td>
+                                        <td :class="{ 'hl-late' : r.finish && r.deadline && r.finish > r.deadline }">{{ dmy(r.finish) }}</td>
+                                        <td class="hl-r">{{ r.lcDays ? r.lcDays + ' d' : '—' }}</td><td class="hl-r">{{ r.lines || '—' }}</td>
+                                        <td class="hl-dim hl-reason" :title="r.attempt + (r.note ? ' · ' + r.note : '')">{{ r.attempt }}{{ r.note ? ' · ' + r.note : '' }}</td>
+                                    </tr>
+                                    <tr v-if="!apuRows.length"><td colspan="14" class="hl-dim">No order in the chosen unit(s).</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="st-hint">↻ repeat order (PCD + {{ apuRules.repeatLead }} d, no learning curve) · ✦ new style (PCD + {{ apuRules.newLead }} d, learning curve by SMV / buyer). Grey = starts on the input date and finishes by delivery; orange = delivery met only by starting before the input date; red = delivery cannot be met (planned from the input date anyway so the overrun shows). Applying replaces this scenario's earlier auto-plan proposals of these orders (locked ones stay).</div>
+                    </div>
+                </div>
                 <div class="st-body hl-ord-body">
                     <div class="hl-ord-left">
                         <div class="hl-scroll hl-ord-scroll">
@@ -2160,6 +2282,18 @@ function close() {
 .hl-sched .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
 .hl-line-pool { color : #e65100; }
 .hl-day-pool { background : #ffe0b2 !important; }
+.hl-sched .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
+.hl-sched .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
+.hl-sched .b-sch-event.hl-res-ps-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
+.hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; }
+.hl-apu { border-bottom : 1px solid #d5dbe3; padding-bottom : 6px; }
+.hl-apu-head { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; font-size : 12.5px; }
+.hl-apu-rules { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; margin : 6px 0; font-size : 11.5px; }
+.hl-num-s { width : 48px; }
+.hl-apu-scroll { max-height : 40vh; }
+.hl-apu-tbl td { white-space : nowrap; }
+.hl-ps-chip { display : inline-block; padding : 0 7px; border-radius : 10px; font-size : 11px; font-weight : 700; color : #fff; }
+.hl-ps-ontime { background : #757575; } .hl-ps-pcd { background : #fb8c00; } .hl-ps-late { background : #d32f2f; } .hl-ps-unplaced { background : #455a64; }
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
 .cal-overlay .cal-dialog.hl-ab-dialog { width : 1180px; } .cal-overlay .cal-dialog.hl-abr-dialog { width : 1400px; } .cal-overlay .cal-dialog.hl-pw-dialog { width : 1500px; } .cal-overlay .cal-dialog.hl-gp-dialog { width : 1450px; } .cal-overlay .cal-dialog.hl-ba-dialog { width : 1450px; }
 .hl-ab-grid { display : grid; grid-template-columns : 1fr 1fr; gap : 12px; }

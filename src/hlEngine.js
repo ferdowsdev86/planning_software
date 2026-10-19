@@ -188,13 +188,18 @@ export function reservationDays(sc, r) {
         out.push({ date : r.start, pcs : qty, min : qty * smv });
         return { smv, days : out, product };
     }
+    // learning curve: the first lcDays working days of the span make a
+    // ramped share (1/(n+1), 2/(n+1) … of a full day) — the day's weight
+    const lc = Math.max(0, Math.round(Number(r.lcDays) || 0));
+    const weights = caps.map((c, i) => c * (lc && i < lc ? (i + 1) / (lc + 1) : 1));
+    const wTot = weights.reduce((a, b) => a + b, 0) || tot;
     let placed = 0;
     days.forEach((d, i) => {
-        const pcs = i === days.length - 1 ? qty - placed : Math.round(qty * caps[i] / tot);
+        const pcs = i === days.length - 1 ? qty - placed : Math.round(qty * weights[i] / wTot);
         placed += pcs;
         out.push({ date : d, pcs, min : pcs * smv });
     });
-    return { smv, days : out, product };
+    return { smv, days : out, product, lcDays : lc };
 }
 
 export function buildLoad(sc, extraReservations = []) {

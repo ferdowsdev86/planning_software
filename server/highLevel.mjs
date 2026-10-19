@@ -595,7 +595,10 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                     COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product, gt.gmt_name AS garment,
                     oe.order_qty AS qty, oe.order_delivery_date AS delivery, CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) AS smv,
-                    COALESCE(oe.prod_unit, -1) AS unit_id, oe.high_priority,
+                    COALESCE(oe.prod_unit, -1) AS unit_id, oe.high_priority, oe.mr_season_se_id AS season,
+                    /* repeat order: the same style was ordered before (earlier delivery) — PCD + 3 and no learning curve */
+                    (SELECT COUNT(*) FROM \`${ERP_DB}\`.mr_order_entry x WHERE x.mr_style_stl_id = oe.mr_style_stl_id AND x.order_id <> oe.order_id AND x.order_delivery_date < oe.order_delivery_date) AS prev_orders,
+                    (SELECT x.order_code FROM \`${ERP_DB}\`.mr_order_entry x WHERE x.mr_style_stl_id = oe.mr_style_stl_id AND x.order_id <> oe.order_id AND x.order_delivery_date < oe.order_delivery_date ORDER BY x.order_delivery_date DESC LIMIT 1) AS prev_code,
                     (SELECT SUM(GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0)) FROM \`${ERP_DB}\`.mr_purchase_order po
                       WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK}) AS outstanding,
                     (SELECT SUBSTRING(GROUP_CONCAT(DISTINCT po.po_no ORDER BY po.po_no SEPARATOR ', '), 1, 400) FROM \`${ERP_DB}\`.mr_purchase_order po
@@ -610,7 +613,8 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         return rows.map(r => ({
             code : r.order_code, buyer : r.buyer || '', style : r.style || '', product : r.product || 'Other', garment : r.garment || '',
             qty : Number(r.qty) || 0, outstanding : r.outstanding == null ? Number(r.qty) || 0 : Number(r.outstanding) || 0,
-            smv : Number(r.smv) || 0, pcd : ymd(r.pcd), delivery : ymd(r.delivery), unitId : Number(r.unit_id), priority : r.high_priority === 'Y', po : r.po_list || ''
+            smv : Number(r.smv) || 0, pcd : ymd(r.pcd), delivery : ymd(r.delivery), unitId : Number(r.unit_id), priority : r.high_priority === 'Y', po : r.po_list || '',
+            season : r.season == null ? null : Number(r.season), repeat : Number(r.prev_orders) > 0, repeatOf : r.prev_code || null
         }));
     }
     app.get(`${HL}/erp-orders`, async (req, res) => {

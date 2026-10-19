@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newScenario, newLine, buildLoad, conflicts, reconcile, lineDayMinutes, isOver, usedMinutes, reservationDays } from './hlEngine.js';
-import { autoBalance, allocationReport, reconcileAllocation, mergeErpOrders, buildCapIndex, planQty } from './hlBalance.js';
+import { autoBalance, allocationReport, reconcileAllocation, mergeErpOrders, buildCapIndex, planQty, autoPlanUnits, lcDaysFor, inputDateFor, DEFAULT_PLAN_RULES } from './hlBalance.js';
 
 // three internal units with a few lines each; AQL cannot make Denim Pants
 function scenario() {
@@ -175,4 +175,46 @@ test("GSL's own contract orders go straight to the pool as contract allocations,
     const rep = allocationReport(sc);
     assert.equal(rep.totals.internal, 4000);
     assert.equal(rep.totals.unallocated, 0);
+});
+
+test('unit-wise auto plan: input date = PCD + 7 (new) / + 3 (repeat), learning curve by SMV, none for repeats', () => {
+    const sc = scenario();
+    const rules = DEFAULT_PLAN_RULES;
+    const fresh = order('n1', 'M', 'Denim Pants', 2000, '2026-12-20', { pcd : '2026-11-01', smv : 25 });
+    const rep = order('r1', 'M', 'Shirt', 2000, '2026-12-20', { pcd : '2026-11-01', smv : 25, repeat : true });
+    const gstar = order('g1', 'M', 'Shirt', 2000, '2026-12-20', { pcd : '2026-11-01', smv : 25, buyer : 'G-STAR' });
+    const heavy = order('h1', 'C', 'Shorts', 2000, '2026-12-20', { pcd : '2026-11-01', smv : 55 });
+    assert.equal(inputDateFor(fresh, rules), '2026-11-08');
+    assert.equal(inputDateFor(rep, rules), '2026-11-04');
+    assert.equal(lcDaysFor(sc, fresh, rules), 3);
+    assert.equal(lcDaysFor(sc, rep, rules), 0);
+    assert.equal(lcDaysFor(sc, gstar, rules), 4);
+    assert.equal(lcDaysFor(sc, heavy, rules), 5);
+    sc.orders.push(fresh, rep, gstar, heavy);
+    const out = autoPlanUnits(sc);
+    const byId = Object.fromEntries(out.results.map(r => [r.orderId, r]));
+    assert.equal(byId.n1.status, 'ontime');
+    assert.equal(byId.n1.start >= '2026-11-08', true);                    // never before the input date
+    assert.equal(byId.r1.lcDays, 0);
+    assert.equal(out.reservations.find(r => r.orderId === 'n1').lcDays, 3);
+    assert.equal(out.reservations.every(r => r.source === 'autoplan' && r.planStatus), true);
+    apply(sc, out);
+    assert.equal(conflicts(sc, buildLoad(sc)).length, 0);
+    assert.equal(reconcile(sc).length, 0);
+});
+
+test('unit-wise auto plan status: orange when delivery needs a start before the input date, red when delivery is missed', () => {
+    const sc = scenario();
+    // tight: 6000 pcs on one C line (450/day) delivering 2026-11-18 with PCD 2026-11-01 → from the input date 11-04 only 13 working days (5,850) fit, from PCD it fits → orange
+    sc.orders.push(order('t1', 'C', 'Denim Pants', 6000, '2026-11-18', { pcd : '2026-11-01', smv : 20, repeat : true }));
+    // impossible: 100000 pcs by 2026-11-25 → red, but still placed so the overrun is visible
+    sc.orders.push(order('x1', 'M', 'Shirt', 100000, '2026-11-25', { pcd : '2026-11-01', smv : 18, repeat : true }));
+    const out = autoPlanUnits(sc);
+    const byId = Object.fromEntries(out.results.map(r => [r.orderId, r]));
+    assert.equal(byId.t1.status, 'pcd');
+    assert.equal(byId.t1.start < byId.t1.inputDate, true);
+    assert.equal(byId.x1.status, 'late');
+    assert.equal(byId.x1.placed > 0, true);
+    assert.equal(byId.x1.finish > '2026-11-25', true);
+    assert.equal(out.summary.late, 1);
 });

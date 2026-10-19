@@ -65,7 +65,7 @@ export function mergeErpOrders(sc, rows) {
         const unitCode = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code || '';
         const fields = { buyer : r.buyer || '', style : r.style || '', product : r.product || 'Other', garment : r.garment || '', qty : Number(r.qty) || 0,
             outstanding : Number(r.outstanding) || 0, smv : Number(r.smv) > 0 ? Math.round(Number(r.smv) * 100) / 100 : null, pcd : r.pcd || null, delivery : r.delivery || null,
-            unitCode, priority : !!r.priority, note : r.code, po : r.po || '' };
+            unitCode, priority : !!r.priority, note : r.code, po : r.po || '', season : r.season ?? null, repeat : !!r.repeat, repeatOf : r.repeatOf || null };
         const ex = byCode.get(r.code);
         if (ex) { Object.assign(ex, fields, { source : ex.source || `erp:${r.code}` }); updated++; }
         else { const o = { id : uid('or'), ...fields, source : `erp:${r.code}` }; sc.orders.push(o); byCode.set(r.code, o); added++; }
@@ -103,49 +103,64 @@ const tol = cap => Math.max(30, cap * 0.01);
 // the span is verified with the board's proportional spread (pieces ∝ the
 // day's capacity) — if that would overload a shared boundary day the start
 // moves to the next day. Returns the span and the minutes it takes per day.
-export function fitIndexed(cap, used, smv, qty, fromI, untilI) {
+// learning-curve ramp of the first n working days of a bar: 1/(n+1), 2/(n+1)…
+export const rampOf = n => { const k = Math.max(0, Math.round(Number(n) || 0)); return Array.from({ length : k }, (_, i) => (i + 1) / (k + 1)); };
+export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null) {
     const n = cap.length;
     const last = Math.min(untilI, n - 1);
     for (let s = fromI; s <= last; s++) {
         if (cap[s] - used[s] <= 0) continue;
-        let placed = 0, e = s;
+        // a ramped bar must start on a FREE day (its first days run below
+        // capacity, the line is still occupied) — a day already partly used
+        // cannot be its day 1
+        if (ramp?.length && used[s] > tol(cap[s])) continue;
+        let placed = 0, e = s, wd = 0;
         for (let i = s; i <= last && placed < qty; i++) {
-            const free = cap[i] - used[i];
+            if (cap[i] <= 0) continue;
+            const r = ramp?.length && wd < ramp.length ? ramp[wd] : 1;
+            wd++;
+            const free = (cap[i] - used[i]) * r;
             if (free <= 0) continue;
             const left = qty - placed;
             // crumbs: a day with under 5% of its capacity free is skipped unless
             // the rest of the order fits in it — no 2-piece bars spanning weeks
-            if (free < cap[i] * 0.05 && left * smv > free) continue;
+            if (r === 1 && free < cap[i] * 0.05 && left * smv > free) continue;
             const pcs = Math.min(left, Math.floor(free / smv));
             if (pcs <= 0) continue;
             placed += pcs; e = i;
         }
         if (placed <= 0) continue;
         // verify with the board's EXACT day spread (reservationDays): pieces per
-        // day = round(qty × cap ÷ Σcap), the last day takes the remainder
-        let tot = 0;
-        for (let i = s; i <= e; i++) tot += cap[i];
+        // day = round(qty × weight ÷ Σweight) — weight = capacity × ramp share —
+        // the last day takes the remainder
+        const w = new Float64Array(e - s + 1);
+        let tot = 0, k = 0;
+        for (let i = s; i <= e; i++) { const r = cap[i] > 0 && ramp?.length && k < ramp.length ? ramp[k] : 1; if (cap[i] > 0) k++; w[i - s] = cap[i] * r; tot += w[i - s]; }
         if (tot <= 0) continue;
         let ok = true, acc = 0;
         const take = new Float64Array(e - s + 1);
+        const occupy = new Float64Array(e - s + 1);
         for (let i = s; i <= e; i++) {
-            const pcs = i === e ? placed - acc : Math.round(placed * cap[i] / tot);
+            const pcs = i === e ? placed - acc : Math.round(placed * w[i - s] / tot);
             acc += pcs;
             take[i - s] = pcs * smv;
+            // a ramp day is the bar's whole day on the line even though it makes less
+            occupy[i - s] = ramp?.length && w[i - s] < cap[i] ? Math.max(take[i - s], cap[i] - used[i]) : take[i - s];
             if (used[i] + take[i - s] > cap[i] + tol(cap[i])) { ok = false; break; }
         }
         if (!ok) continue;
-        return { placed, startI : s, endI : e, take };
+        return { placed, startI : s, endI : e, take, occupy };
     }
     return null;
 }
-function commit(used, fit) { for (let i = 0; i < fit.take.length; i++) used[fit.startI + i] += fit.take[i]; }
+function commit(used, fit) { const src = fit.occupy || fit.take; for (let i = 0; i < src.length; i++) used[fit.startI + i] += src[i]; }
 
 // place `qty` of an order on the compatible lines of ONE unit, best line
 // first (most pieces by the deadline, then the earliest finish), the rest on
 // the next lines — returns the allocations and what stayed open
-function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind) {
+function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, lcDays = 0) {
     const out = [];
+    const ramp = lcDays > 0 ? rampOf(lcDays) : null;
     let remaining = qty;
     if (!unitMakes(settings, order.product, unitCode)) return { allocations : out, remaining, reason : `${unitCode}: does not make ${order.product}` };
     const lines = sc.lines.filter(l => l.unitCode === unitCode && l.active && !l.pool && lineSmv(sc, l, order.product) != null);
@@ -155,7 +170,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind) 
     while (remaining > 0 && guard++ < lines.length + 2) {
         let best = null;
         for (const l of lines) {
-            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI);
+            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp);
             if (!f || !f.placed) continue;
             if (!best || f.placed > best.f.placed || (f.placed === best.f.placed && f.endI < best.f.endI)) best = { l, f };
         }
@@ -165,6 +180,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind) 
             id : uid('rs'), orderId : order.id, lineId : best.l.id, product : order.product, smv,
             start : ix.days[best.f.startI], end : ix.days[best.f.endI], qty : best.f.placed,
             locked : false, status : 'proposed', source : 'balance', kind, fromUnit : order.unitCode,
+            lcDays : lcDays > 0 ? lcDays : 0,
             label : `${order.buyer || ''} ${order.style || ''}`.trim()
         });
         remaining -= best.f.placed;
@@ -398,4 +414,125 @@ export function reconcileAllocation(report) {
         if (placed + o.unallocated !== o.qty && !(o.over > 0 && placed === o.qty + o.over)) bad.push({ id : o.id, code : o.code, qty : o.qty, placed, unallocated : o.unallocated });
     }
     return bad;
+}
+
+// ---------------------------------------------------------------------------
+// Unit-wise auto plan (Orders & capacity test): every order of a unit on the
+// unit's own lines, by the planning rules —
+//   input (sewing start) date = PCD + 7 days for a new style, PCD + 3 days
+//   for a repeat order / season-style carry-over;
+//   learning curve: none for a repeat order; else by SMV (< 30 → 3 days,
+//   30–50 → 4 days, > 50 → 5 days), buyer overrides (G-STAR 4 days, …);
+//   delivery must be met: on time = grey, delivery met only by starting
+//   before the input date = orange (PCD not met), delivery missed = red.
+// ---------------------------------------------------------------------------
+export const DEFAULT_PLAN_RULES = {
+    newLead     : 7,          // days after PCD a new style starts sewing
+    repeatLead  : 3,          // days after PCD a repeat order / carry-over starts
+    lcSmvLow    : 30, lcDaysLow : 3,     // SMV < 30
+    lcSmvHigh   : 50, lcDaysMid : 4,     // SMV 30–50
+    lcDaysHigh  : 5,                     // SMV > 50
+    buyerLc     : { 'G-STAR' : 4 },      // buyer → learning-curve days
+    noLcBuyers  : ['BORK'],              // buyers without a learning curve
+    repeatNoLc  : true                   // a repeat order ramps no more
+};
+export function planRules(sc) { const r = sc?.balance?.planRules || {}; return { ...DEFAULT_PLAN_RULES, ...r, buyerLc : { ...DEFAULT_PLAN_RULES.buyerLc, ...(r.buyerLc || {}) } }; }
+const buyerKey = b => String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export function lcDaysFor(sc, o, rules = planRules(sc)) {
+    if (rules.repeatNoLc && o.repeat) return 0;
+    const bk = buyerKey(o.buyer);
+    if ((rules.noLcBuyers || []).some(b => bk.includes(buyerKey(b)))) return 0;
+    for (const [b, d] of Object.entries(rules.buyerLc || {})) if (bk.includes(buyerKey(b))) return Math.max(0, Number(d) || 0);
+    const smv = orderSmv(sc, o);
+    if (smv < Number(rules.lcSmvLow)) return Number(rules.lcDaysLow) || 0;
+    if (smv <= Number(rules.lcSmvHigh)) return Number(rules.lcDaysMid) || 0;
+    return Number(rules.lcDaysHigh) || 0;
+}
+export function inputDateFor(o, rules) {
+    if (!o.pcd) return null;
+    return addDays(o.pcd, Number(o.repeat ? rules.repeatLead : rules.newLead) || 0);
+}
+export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met', unplaced : 'No capacity' };
+
+export function autoPlanUnits(sc, opts = {}) {
+    const settings = balanceSettings(sc);
+    const rules = { ...planRules(sc), ...(opts.rules || {}) };
+    const from = opts.from && opts.from > sc.from ? opts.from : sc.from;
+    const to   = opts.to && opts.to < sc.to ? opts.to : sc.to;
+    const units = new Set(opts.units || INTERNAL);
+    const orders = sc.orders.filter(o => units.has(o.unitCode) && (!opts.orderIds || opts.orderIds.includes(o.id)) && planQty(o, settings) > 0);
+    const ids = new Set(orders.map(o => o.id));
+    const removedIds = sc.reservations.filter(r => ids.has(r.orderId) && r.status === 'proposed' && !r.locked && (r.source === 'autoplan' || r.source === 'balance')).map(r => r.id);
+    const removed = new Set(removedIds);
+    const kept = sc.reservations.filter(r => !removed.has(r.id) && r.status !== 'cancelled' && (settings.includeLive !== false || r.source !== 'live'));
+    const load = new Map();
+    for (const r of kept) {
+        const { days } = reservationDays(sc, r);
+        let m = load.get(r.lineId); if (!m) { m = new Map(); load.set(r.lineId, m); }
+        for (const d of days) { const c = m.get(d.date) || { min : 0 }; c.min += d.min; m.set(d.date, c); }
+    }
+    const ix = buildCapIndex(sc, from, to, load);
+    const lastI = ix.days.length - 1;
+    const keptQty = new Map();
+    for (const r of kept) if (r.orderId) keptQty.set(r.orderId, (keptQty.get(r.orderId) || 0) + (Number(r.qty) || 0));
+    orders.sort((a, b) => String(a.delivery || '9999').localeCompare(String(b.delivery || '9999')) || String(a.pcd || '').localeCompare(String(b.pcd || '')) || String(a.note || a.id).localeCompare(String(b.note || b.id)));
+    const idxOf = d => (d == null ? null : (ix.idx.get(d) ?? (d < from ? 0 : (d > to ? lastI + 1 : null))));
+    const snapshotUsed = () => { const m = new Map(); for (const [k, v] of ix.used) m.set(k, v.slice()); return m; };
+    const restoreUsed = snap => { for (const [k, v] of snap) ix.used.set(k, v); };
+    const reservations = [], results = [];
+    for (const o of orders) {
+        const total = planQty(o, settings);
+        const open = Math.max(0, total - (keptQty.get(o.id) || 0));
+        const lcDays = lcDaysFor(sc, o, rules);
+        const inputDate = inputDateFor(o, rules);
+        const deadline = o.delivery ? addDays(o.delivery, -(Number(settings.deliveryLead) || 0)) : to;
+        const res = { orderId : o.id, code : o.note || '', buyer : o.buyer, style : o.style, product : o.product, garment : o.garment || '', unit : o.unitCode, qty : total, open,
+            pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '' };
+        if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
+        const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
+        // attempts: the input date (grey) → PCD itself (orange) → the window start (orange) → late anyway (red)
+        const starts = [];
+        const push = (d, tag) => { const i = Math.max(0, Math.min(lastI + 1, idxOf(d) ?? 0)); if (!starts.some(x => x.i === i)) starts.push({ i, tag, date : ix.days[Math.min(i, lastI)] }); };
+        push(inputDate && inputDate > from ? inputDate : from, 'input');
+        if (o.pcd && o.pcd > from && o.pcd < (inputDate || o.pcd)) push(o.pcd, 'pcd');
+        push(from, 'window');
+        let chosen = null;
+        for (const st of starts) {
+            if (st.i > untilI) continue;
+            const snap = snapshotUsed();
+            const r = fitInUnit(sc, ix, o, o.unitCode, open, st.i, untilI, settings, 'contract', lcDays);
+            const finish = r.allocations.reduce((m, a) => (!m || a.end > m ? a.end : m), null);
+            if (r.remaining <= 0) { chosen = { r, st, finish, late : false }; break; }   // delivery met from this start
+            restoreUsed(snap);
+            if (!chosen) chosen = { r : null, st, finish : null, late : true };
+        }
+        if (!chosen || chosen.late) {
+            // delivery cannot be met: plan it anyway from the input date, open-ended, so the planner sees the overrun (red)
+            const st = starts[0];
+            const r = fitInUnit(sc, ix, o, o.unitCode, open, st.i, lastI, settings, 'contract', lcDays);
+            const finish = r.allocations.reduce((m, a) => (!m || a.end > m ? a.end : m), null);
+            chosen = { r, st, finish, late : true };
+        }
+        const { r, st, finish, late } = chosen;
+        res.placed = open - (r ? r.remaining : open);
+        res.start = r?.allocations.reduce((m, a) => (!m || a.start < m ? a.start : m), null) || null;
+        res.finish = finish;
+        res.lines = r ? r.allocations.length : 0;
+        res.attempt = st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
+        if (!r || !r.allocations.length) res.status = 'unplaced';
+        else if (late || (finish && finish > deadline)) res.status = 'late';
+        else if (st.tag !== 'input' || (inputDate && res.start && res.start < inputDate)) res.status = 'pcd';
+        else res.status = 'ontime';
+        if (r && r.remaining > 0 && res.status !== 'unplaced') res.note = `${r.remaining} pcs without capacity in the window`;
+        for (const a of r?.allocations || []) {
+            a.source = 'autoplan'; a.planStatus = res.status; a.lcDays = lcDays;
+            a.reason = `${PLAN_STATUS[res.status]} · ${res.attempt}${lcDays ? ` · learning curve ${lcDays} d` : ' · no learning curve'}${o.repeat ? ' · repeat order' : ' · new style'}`;
+            reservations.push(a);
+        }
+        results.push(res);
+    }
+    const count = k => results.filter(x => x.status === k).length;
+    const summary = { at : new Date().toISOString().slice(0, 16).replace('T', ' '), from, to, orders : results.length, ontime : count('ontime'), pcd : count('pcd'), late : count('late'), unplaced : count('unplaced'),
+        qty : results.reduce((a, x) => a + x.qty, 0), placed : results.reduce((a, x) => a + x.placed, 0), removed : removedIds.length, units : [...units] };
+    return { removedIds, reservations, results, summary, rules };
 }
