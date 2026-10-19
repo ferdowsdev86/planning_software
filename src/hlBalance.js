@@ -490,9 +490,10 @@ export function inputDateFor(o, rules) {
     if (!o.pcd) return null;
     return addDays(o.pcd, Number(o.repeat ? rules.repeatLead : rules.newLead) || 0);
 }
-export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met', unplaced : 'No capacity', noplan : 'No plan (expired)' };
-// an order whose PCD AND input date (PCD + lead) lie before the plan start is not planned — it is reported apart
-export function planExpired(o, rules, from) { const d = inputDateFor(o, rules); return !!(d && from && d < from && o.pcd && o.pcd < from); }
+export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met — plan elsewhere', unplaced : 'No capacity here — plan elsewhere', noplan : 'No plan (delivery expired)', elsewhere : 'Plan elsewhere (no capacity here)' };
+// an order whose DELIVERY date lies before the plan start can no longer be planned — it is reported apart;
+// an order whose PCD has passed is an available order and is planned from the plan start on
+export function planExpired(o, rules, from) { return !!(o.delivery && from && o.delivery < from); }
 
 export function autoPlanUnits(sc, opts = {}) {
     const rules = { ...planRules(sc), ...(opts.rules || {}) };
@@ -531,7 +532,7 @@ export function autoPlanUnits(sc, opts = {}) {
             pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '',
             barDays : 0, needDays : 0, fill : null, lateDays : 0, shortQty : 0, stretched : false, critical : [] };
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
-        if (planExpired(o, rules, from)) { res.status = 'noplan'; res.attempt = `PCD ${o.pcd} and input date ${inputDate} expired before the plan start ${from} — not planned`; res.note = 'no plan'; results.push(res); continue; }
+        if (planExpired(o, rules, from)) { res.status = 'noplan'; res.attempt = `delivery ${o.delivery} before the plan start ${from} — not planned`; res.note = 'no plan'; results.push(res); continue; }
         const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
         // attempts: the input date (grey) → PCD itself (orange) → the window start (orange) → late anyway (red)
         const starts = [];
@@ -571,12 +572,27 @@ export function autoPlanUnits(sc, opts = {}) {
             : st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
         if (res.status === 'unplaced') res.note = r?.reason || 'no free capacity in the plan range';
         else if (r && r.remaining > 0) res.note = `${r.remaining} pcs without capacity in the window`;
+        // no capacity on this unit's lines (whole order, or the rest of it): a violet 'plan elsewhere' bar on the
+        // GSL / outside pool row — input date → deadline — so the order is SEEN on the board and can be moved to
+        // another unit or GSL; it takes no line capacity
+        const shortQty = r ? r.remaining : open;
+        if (shortQty > 0) {
+            const pool = ensurePoolLine(sc);
+            const s0 = [inputDate, from].filter(Boolean).sort().pop();
+            const e0 = deadline && deadline > s0 ? deadline : s0;
+            (r || (r = { allocations : [], remaining : open })).allocations.push({
+                id : uid('rs'), orderId : o.id, lineId : pool.id, product : o.product, smv : orderSmv(sc, o), start : s0, end : e0, qty : shortQty,
+                locked : false, status : 'proposed', source : 'autoplan', kind : 'gsl', fromUnit : o.unitCode, extStatus : 'pending', elsewhere : true,
+                label : orderLabel(o)
+            });
+        }
         // day capacity check of the proposal: bar days (working days the bars
         // cover) against the days the quantity needs at the lines' full day
         // capacity, and the share of those days' capacity the order fills
         const smv = orderSmv(sc, o);
         let capSum = 0, barDays = 0;
         for (const a of r?.allocations || []) {
+            if (a.elsewhere) continue;
             const c = ix.cap.get(a.lineId); if (!c) continue;
             const s = ix.idx.get(a.start), e = ix.idx.get(a.end);
             if (s == null || e == null) continue;
@@ -597,7 +613,8 @@ export function autoPlanUnits(sc, opts = {}) {
         if (res.status === 'pcd' && inputDate && res.start) res.critical.push(`starts ${daysBetween(res.start, inputDate)} d before the input date`);
         if (res.stretched) res.critical.push(`stretched: ${barDays} bar days for ${res.needDays} d of work (fill ${Math.round((res.fill || 0) * 100)} %)`);
         for (const a of r?.allocations || []) {
-            a.source = 'autoplan'; a.planStatus = res.status; a.lcDays = lcDays;
+            a.source = 'autoplan'; a.planStatus = a.elsewhere ? 'elsewhere' : res.status; a.lcDays = a.elsewhere ? 0 : lcDays;
+            if (a.elsewhere) { delete a.elsewhere; a.reason = `No capacity on ${o.unitCode} lines for ${a.qty} pcs by ${deadline} — plan elsewhere (other unit / GSL)`; reservations.push(a); continue; }
             a.reason = `${PLAN_STATUS[res.status]}${res.lateDays ? ` (${res.lateDays} d late)` : ''} · ${res.attempt}${lcDays ? ` · learning curve ${lcDays} d` : ' · no learning curve'}${o.repeat ? ' · repeat order' : ' · new style'}`;
             reservations.push(a);
         }

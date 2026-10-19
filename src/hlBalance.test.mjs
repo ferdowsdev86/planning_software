@@ -277,9 +277,10 @@ test('day capacity rule: a small order takes one day at line capacity, never ten
     assert.equal(conflicts(sc2, buildLoad(sc2)).length, 0);
 });
 
-test('expired orders (PCD and input date before the plan start) are No plan, reported apart; one order per line per day', () => {
+test('orders whose delivery passed before the plan start are No plan, reported apart; one order per line per day; no capacity → violet pool bar', () => {
     const sc = scenario();
-    sc.orders.push(order('x1', 'M', 'Denim Pants', 500, '2026-11-20', { pcd : '2026-10-10', smv : 20, repeat : true }));     // input 10-13 < 11-01 → no plan
+    sc.orders.push(order('x1', 'M', 'Denim Pants', 500, '2026-10-25', { pcd : '2026-10-10', smv : 20, repeat : true }));     // delivery 10-25 < 11-01 → no plan
+    sc.orders.push(order('p1', 'M', 'Denim Pants', 500, '2026-12-20', { pcd : '2026-10-10', smv : 20, repeat : true }));     // PCD passed, delivery ahead → available, planned from the plan start
     sc.orders.push(order('u1', 'M', 'Denim Pants', 200, '2026-12-20', { pcd : '2026-11-02', smv : 20, repeat : true }));     // upcoming → planned
     sc.orders.push(order('u2', 'M', 'Denim Pants', 200, '2026-12-21', { pcd : '2026-11-02', smv : 20, repeat : true }));
     sc.orders.push(order('u3', 'M', 'Denim Pants', 200, '2026-12-22', { pcd : '2026-11-02', smv : 20, repeat : true }));
@@ -289,6 +290,13 @@ test('expired orders (PCD and input date before the plan start) are No plan, rep
     assert.equal(out.reservations.some(r => r.orderId === 'x1'), false);
     assert.equal(out.summary.noplan, 1); assert.equal(out.summary.noplanQty, 500);
     assert.equal(byId.u1.status, 'ontime'); assert.equal(byId.u2.status, 'ontime'); assert.equal(byId.u3.status, 'ontime');
+    assert.equal(byId.p1.status, 'ontime'); assert.equal(byId.p1.start, '2026-11-01');
+    // AQL cannot make Denim Pants → no capacity here → a 'plan elsewhere' bar on the pool row, no line capacity taken
+    sc.orders.push(order('a1', 'A', 'Denim Pants', 300, '2026-12-20', { pcd : '2026-11-02', smv : 20, repeat : true }));
+    const o2 = autoPlanUnits(sc, { units : ['A'] });
+    const a1 = o2.reservations.find(r => r.orderId === 'a1');
+    assert.equal(o2.results[0].status, 'unplaced');
+    assert.equal(a1.planStatus, 'elsewhere'); assert.equal(a1.kind, 'gsl'); assert.equal(sc.lines.find(l => l.id === a1.lineId).pool, true); assert.equal(a1.qty, 300);
     // three small orders never share a line-day: each has its own day(s)
     const key = new Set();
     for (const r of out.reservations) { const k = `${r.lineId}|${r.start}`; assert.equal(key.has(k), false, 'two orders on one line-day'); key.add(k); }

@@ -324,7 +324,8 @@ function syncScheduler() {
         const load = loadMap.value;
         const us = unitStats.value, ls = lineStats.value;
         const utilCls = u => (u > 1 ? 'over' : u >= (scn.thresholds?.full ?? 0.9) ? 'full' : u >= (scn.thresholds?.partial ?? 0.4) ? 'partial' : 'ok');
-        const resources = scn.units.filter(u => boardUnit.value === 'ALL' || !boardUnit.value || u.code === boardUnit.value).map(u => {
+        // one unit chosen: that unit plus the GSL / outside pool row (its 'plan elsewhere' bars)
+        const resources = scn.units.filter(u => boardUnit.value === 'ALL' || !boardUnit.value || u.code === boardUnit.value || (u.code === 'G' && scn.reservations.some(r => r.planStatus === 'elsewhere' && r.fromUnit === boardUnit.value))).map(u => {
             const st = us[u.code] || {};
             return {
                 id : `U-${u.code}`, name : u.name, label : u.label, isUnit : true, expanded : expandedUnits.has(u.code),
@@ -415,6 +416,7 @@ async function openUnitPlan(code) {
             s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(out.reservations);
             s.balance = { ...balanceSettings(s), planRules : apuRulesObj(), lastAutoPlan : out.summary };
         });
+        if (out.summary.unplaced) { expandedUnits.add('G'); localStorage.setItem('hl-expanded', JSON.stringify([...expandedUnits])); }   // the pool row with the 'plan elsewhere' bars
         const sm = out.summary;
         props.toast(`${unitName(code)}: ${sm.orders} orders — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.noplan ? ` · ${sm.noplan} no plan (expired, ${fmtQty(sm.noplanQty)} pcs)` : ''}${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
     }
@@ -804,10 +806,8 @@ function apuDefaults(s) {
     const r = planRules(s);
     return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
         gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100),
-        planFrom : r.planFrom || nextMonthStart(), exclusiveDay : r.exclusiveDay !== false };
+        planFrom : r.planFrom || ymd(new Date()), exclusiveDay : r.exclusiveDay !== false };
 }
-// default plan start: the first day of next month
-function nextMonthStart() { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth() + 1, 1)); }
 const apuRules = ref(apuDefaults(null));
 const apuUnits = ref([...APU_UNITS]);
 const apuResult = shallowRef(null);
@@ -882,6 +882,9 @@ function apuApply() {
         s.balance = { ...balanceSettings(s), planRules : rules, lastAutoPlan : out.summary };
     });
     for (const u of out.summary.units) expandedUnits.add(u);
+    if (out.summary.unplaced) expandedUnits.add('G');
+    localStorage.setItem('hl-expanded', JSON.stringify([...expandedUnits]));
+    if (!boardUnit.value) boardUnit.value = out.summary.units.length === 1 ? out.summary.units[0] : 'ALL';
     const sm = out.summary;
     props.toast(`Auto plan applied: ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.critical ? ` — ${sm.critical} critical (${sm.maxLate ? `up to ${sm.maxLate} d late` : ''}${sm.maxLate && sm.shortQty ? ', ' : ''}${sm.shortQty ? `${fmtQty(sm.shortQty)} pcs without capacity` : ''})` : ''} — review the bars (grey / orange / red), then Save`, sm.critical ? 'warn' : 'ok');
     apuResult.value = null;
@@ -1022,15 +1025,18 @@ const unitName = c => (c === 'G' ? 'GSL' : unitOf(sc.value, c)?.label || c);
 // quantity WITHOUT capacity per unit × delivery month (orders of the unit
 // the auto plan / balance could not place, fully or partly) — shown on the
 // unit card's month table; a click lists the orders
+// quantity of an order sitting on the pool row as an auto-plan 'plan elsewhere' bar (no capacity on its unit's lines)
+function elsewhereQty(orderId) { return (sc.value?.reservations || []).filter(r => r.orderId === orderId && r.planStatus === 'elsewhere' && r.status !== 'cancelled').reduce((a, r) => a + (Number(r.qty) || 0), 0); }
 const noCapByUnit = computed(() => {
     const out = {};
     for (const o of allocRep.value?.orders || []) {
-        if (!(o.unallocated > 0)) continue;
+        const nc = o.unallocated + elsewhereQty(o.id);                       // no line capacity: open + 'plan elsewhere' pool bars
+        if (!(nc > 0)) continue;
         if (isExpiredOrder(orderById(sc.value, o.id) || o)) continue;      // expired orders are 'No plan', reported apart
         const u = out[o.contractUnit] || (out[o.contractUnit] = { total : 0, orders : 0, months : {} });
-        u.total += o.unallocated; u.orders++;
+        u.total += nc; u.orders++;
         const m = u.months[o.ym] || (u.months[o.ym] = { qty : 0, orders : 0 });
-        m.qty += o.unallocated; m.orders++;
+        m.qty += nc; m.orders++;
     }
     return out;
 });
@@ -1052,7 +1058,7 @@ function openNoCap(u, ym) { ncUnit.value = u.code; ncMonth.value = ym; ncOpen.va
 const ncRows = computed(() => {
     void tick.value;
     const s = sc.value; if (!s) return [];
-    const rows = (allocRep.value?.orders || []).filter(o => o.contractUnit === ncUnit.value && (ncMonth.value === 'total' || o.ym === ncMonth.value) && o.unallocated > 0 && !isExpiredOrder(orderById(s, o.id) || o));
+    const rows = (allocRep.value?.orders || []).filter(o => o.contractUnit === ncUnit.value && (ncMonth.value === 'total' || o.ym === ncMonth.value) && (o.unallocated + elsewhereQty(o.id)) > 0 && !isExpiredOrder(orderById(s, o.id) || o)).map(o => ({ ...o, unallocated : o.unallocated + elsewhereQty(o.id) }));
     return rows.map(o => {
         const rs = s.reservations.filter(r => r.orderId === o.id && r.status !== 'cancelled');
         const ps = rs.find(r => r.planStatus)?.planStatus || null;
@@ -1605,7 +1611,7 @@ function close() {
             </template>
             <span class="hl-legend">
                 <i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>holiday <i class="hl-lg hl-day-off"></i>off day <i class="hl-lg hl-day-inactive"></i>inactive
-                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
+                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met → plan elsewhere <i class="hl-lg hl-lg-elsewhere"></i>no capacity here → plan elsewhere (pool row) <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
             </span>
             <span v-if="conflictList.length" class="hl-warn">⚠ {{ conflictList.length }} overloaded line-day(s)</span>
             <span v-if="reconcileIssues.length" class="hl-warn">⚠ {{ reconcileIssues.length }} reservation(s) do not reconcile</span>
@@ -1648,7 +1654,7 @@ function close() {
                                     <td class="hl-r hl-nc" :class="{ 'hl-em-neg' : noCapByUnit[u.code]?.total }" :title="noCapByUnit[u.code] ? `${noCapByUnit[u.code].orders} order(s) without capacity — click for the list` : ''" @click.stop="noCapByUnit[u.code] && openNoCap(u, 'total')"><b>{{ noCapByUnit[u.code] ? fmtQty(noCapByUnit[u.code].total) : '—' }}</b></td></tr>
                             </tfoot>
                         </table>
-                        <div v-if="noPlanByUnit[u.code]" class="hl-uc-noplan" title="Orders whose PCD and input date (PCD + lead) already expired before the plan start — kept apart, not planned on the lines">⏸ No plan (PCD / input date expired before {{ dmy(planRules(sc).planFrom || sc.from) }}): <b>{{ fmtQty(noPlanByUnit[u.code].total) }}</b> pcs · {{ noPlanByUnit[u.code].orders }} orders</div>
+                        <div v-if="noPlanByUnit[u.code]" class="hl-uc-noplan" title="Orders whose PCD and input date (PCD + lead) already expired before the plan start — kept apart, not planned on the lines">⏸ No plan (delivery before {{ dmy(planRules(sc).planFrom || sc.from) }}): <b>{{ fmtQty(noPlanByUnit[u.code].total) }}</b> pcs · {{ noPlanByUnit[u.code].orders }} orders</div>
                     </div>
                 </div>
             </div>
@@ -1890,7 +1896,7 @@ function close() {
                         <span class="hl-sep"></span>
                         <label class="hl-lbl" title="Day capacity rule: every day of a bar must give the order at least this share of the line's day capacity (the last day, which takes the remainder, excepted) — a busy line never gets a small order spread over many days of crumbs; the bar waits for a day it can really run on">Day capacity: bar day fills ≥ <input v-model.number="apuRules.minFillPct" type="number" min="5" max="100" class="cal-in hl-num hl-num-s"> % of line capacity</label>
                         <span class="hl-sep"></span>
-                        <label class="hl-lbl" title="Plan start: the orders are loaded on the lines from this date on (an input date before it moves to it); nothing is planned earlier. An order whose PCD and input date both lie before it is not planned (No plan)"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
+                        <label class="hl-lbl" title="Plan start (default today): the available orders are loaded on the lines from this date on — an order whose PCD has passed starts here, a later input date starts there; an order whose delivery date lies before it is not planned (No plan)"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
                         <label class="hl-chk" title="One order per line per day: a bar's days are free of any other bar — the next order starts on the line's next free day (off: a day's leftover capacity may take another order)"><input v-model="apuRules.exclusiveDay" type="checkbox"> one order per line per day</label>
                     </div>
                     <div v-if="apuResult" class="hl-apu-result">
@@ -1899,7 +1905,7 @@ function close() {
                             <span class="hl-ps-chip hl-ps-ontime">on time {{ apuResult.summary.ontime }}</span>
                             <span class="hl-ps-chip hl-ps-pcd">PCD not met {{ apuResult.summary.pcd }}</span>
                             <span class="hl-ps-chip hl-ps-late">delivery not met {{ apuResult.summary.late }}</span>
-                            <span class="hl-ps-chip hl-ps-unplaced">no capacity {{ apuResult.summary.unplaced }}</span>
+                            <span class="hl-ps-chip hl-ps-unplaced" title="no capacity on the unit's lines — violet bars on the pool row: plan elsewhere (other unit / GSL)">no capacity here → elsewhere {{ apuResult.summary.unplaced }}</span>
                             <span v-if="apuResult.summary.noplan" class="hl-ps-chip hl-ps-noplan" title="PCD and input date already expired before the plan start — kept apart, not planned">no plan {{ apuResult.summary.noplan }} · {{ fmtQty(apuResult.summary.noplanQty) }} pcs</span>
                             <span class="hl-ps-chip hl-ps-crit" :class="{ 'hl-ps-none' : !apuResult.summary.critical }" title="orders whose delivery is not met or whose quantity has no capacity — the real problems of this plan">⚠ critical {{ apuResult.summary.critical }}<template v-if="apuResult.summary.maxLate"> · up to {{ apuResult.summary.maxLate }} d late</template><template v-if="apuResult.summary.shortQty"> · {{ fmtQty(apuResult.summary.shortQty) }} pcs short</template></span>
                             <span v-if="apuResult.summary.stretched" class="hl-dim" title="bars running well under the line's day capacity (more bar days than the work needs)">{{ apuResult.summary.stretched }} stretched</span>
@@ -2563,7 +2569,9 @@ function close() {
 .hl-root .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
 .hl-root .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
 .hl-root .b-sch-event.hl-res-ps-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
-.hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; }
+.hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; } .hl-lg-elsewhere { background : #7b1fa2; }
+.hl-root .b-sch-event.hl-res-k-gsl.hl-res-ps-elsewhere, .hl-root .b-sch-event.hl-res-ps-elsewhere { background : #7b1fa2; border-color : #4a148c; color : #fff; }
+.hl-ps-elsewhere { background : #7b1fa2; }
 .hl-apu { border-bottom : 1px solid #d5dbe3; padding-bottom : 6px; }
 .hl-apu-head { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; font-size : 12.5px; }
 .hl-apu-rules { display : flex; align-items : center; gap : 10px; flex-wrap : wrap; margin : 6px 0; font-size : 11.5px; }
