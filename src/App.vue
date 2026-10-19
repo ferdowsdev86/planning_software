@@ -156,6 +156,22 @@ function markBoardDirty() {
     if (uid && boardUnitCache[uid]) boardUnitCache[uid].dirty = true;
     prof.time('dirty:syncOrdersListFromBoard', () => syncOrdersListFromBoard());
     scheduleBoardSettle();
+    scheduleUnsavedRefresh();
+}
+
+// Unsaved changes on the board = exactly what Save would write (the pending
+// changes against the baseline). The toolbar Save button is disabled while
+// this is 0 and lit (with the count) as soon as a bar moved — the planner
+// sees at a glance whether the board holds anything to save.
+const unsavedCount = ref(0);
+let unsavedTimer = null;
+function refreshUnsavedState() {
+    const s = getInstance();
+    unsavedCount.value = s ? collectPendingChanges(s).length : 0;
+}
+function scheduleUnsavedRefresh() {
+    clearTimeout(unsavedTimer);
+    unsavedTimer = setTimeout(() => prof.time('dirty:refreshUnsavedState', refreshUnsavedState), 250);
 }
 
 // After ANY edit the whole board is brought back to the production model
@@ -201,10 +217,11 @@ function lineLabel(s, lid) {
 function snapshotBoardState(s) {
     const out = {};
     if (!s) return out;
+    const index = buildLineIndex(s);
     for (const ev of s.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
-        const lid = lineIdOf(s, ev);
+        const lid = lineIdOf(s, ev, index);
         out[String(ev.id)] = {
             id       : ev.id,
             po       : raw.po || '',
@@ -224,6 +241,7 @@ function snapshotBoardState(s) {
 
 function setBoardBaseline(s) {
     boardBaseline = snapshotBoardState(s);
+    scheduleUnsavedRefresh();
 }
 
 // Positions exactly as the DB stores them (taken right after the raw board
@@ -10898,6 +10916,7 @@ async function saveToDbInner(s) {
             skippedDbEvents.length = 0;
             pendingSwapIds.clear();
             pendingRepairIds.clear();
+            scheduleUnsavedRefresh();
             const synced = eventIds.length - userIds.length;
             toast(`Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
             // The server moved something it found overlapping (another planner's
@@ -12005,8 +12024,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)), 'fr-tb-locked-me' : b.dyn === 'planLock' && planLockedByMe, 'fr-tb-locked-other' : b.dyn === 'planLock' && planLockedByOther }]" :title="b.dyn === 'planLock' ? (planLock ? `Plan locked by ${planLock.name || planLock.username}${planLockedByMe ? ' (you) — click to open it to other users' : ''}` : b.title) : b.title" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
+                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)), 'fr-tb-locked-me' : b.dyn === 'planLock' && planLockedByMe, 'fr-tb-locked-other' : b.dyn === 'planLock' && planLockedByOther, 'fr-tb-dirty' : b.action === 'save' && unsavedCount > 0 }]" :disabled="b.action === 'save' && !unsavedCount" :title="b.dyn === 'planLock' ? (planLock ? `Plan locked by ${planLock.name || planLock.username}${planLockedByMe ? ' (you) — click to open it to other users' : ''}` : b.title) : (b.action === 'save' ? (unsavedCount ? `Save plan to fastreact DB — ${unsavedCount} unsaved change(s) on the board` : 'Save plan — no change on the board yet') : b.title)" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
                     <i class="fa-solid fr-tb-fa" :class="b.dyn === 'planLock' ? (planLock ? 'fa-lock' : 'fa-key') : b.fa" aria-hidden="true"></i>
+                    <span v-if="b.action === 'save' && unsavedCount" class="fr-tb-badge" aria-hidden="true">{{ unsavedCount > 99 ? '99+' : unsavedCount }}</span>
                 </button>
             </template>
             <label class="fr-tb-search">
@@ -16137,6 +16157,12 @@ body {
 .fr-tb-locked-me    { color : #107e3e; background : #e3f4e8; border-color : #a8d5bb; }
 .fr-tb-locked-other { color : #bb0000; background : #fbeaea; border-color : #e8b3b3; }
 .fr-tb-save:hover { background : #ebf5ef; border-color : #a8d5bb; }
+/* Save: grey while the board holds nothing to save, lit with the count of unsaved changes otherwise */
+.fr-tb-btn.fr-tb-save:disabled { color : #9aa5ad; background : transparent; border-color : transparent; cursor : default; opacity : .55; }
+.fr-tb-btn.fr-tb-save.fr-tb-dirty { position : relative; color : #0b6b32; background : #dff3e6; border-color : #58b37a; box-shadow : 0 0 0 2px rgba(16, 126, 62, .22); animation : fr-tb-save-pulse 1.6s ease-in-out 3; }
+.fr-tb-btn.fr-tb-save.fr-tb-dirty:hover { background : #c9ebd6; }
+.fr-tb-badge { position : absolute; top : -6px; right : -7px; min-width : 15px; height : 15px; padding : 0 3px; border-radius : 8px; background : #d93025; color : #fff; font-size : 9.5px; font-weight : 700; line-height : 15px; text-align : center; box-shadow : 0 0 0 1.5px #fff; }
+@keyframes fr-tb-save-pulse { 0%, 100% { box-shadow : 0 0 0 2px rgba(16, 126, 62, .22); } 50% { box-shadow : 0 0 0 5px rgba(16, 126, 62, .08); } }
 .fr-tb-fa   { font-size : 13px; line-height : 1; }
 .fr-tb-caret { font-size : 8px; line-height : 1; color : inherit; }
 .fr-tb-anchor > .fr-tb-btn { width : auto; padding : 0 6px; }
