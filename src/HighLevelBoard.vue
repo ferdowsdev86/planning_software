@@ -374,7 +374,8 @@ function syncScheduler() {
         for (const l of scn.lines) {
             for (let d = scn.from, g = 0; d <= scn.to && g < 400; d = addDays(d, 1), g++) {
                 const st = lineDayStatus(scn, l, d, load);
-                if (st === 'overloaded' || st === 'holiday' || st === 'inactive') ranges.push({ id : `l-${l.id}-${d}`, resourceId : l.id, startDate : fromYmd(d), endDate : fromYmd(addDays(d, 1)), cls : `hl-day hl-day-${st}`, name : '' });
+                // off days / holidays are hatched on every line row too, so a no-production day is seen at once
+                if (st === 'overloaded' || st === 'holiday' || st === 'off' || st === 'inactive') ranges.push({ id : `l-${l.id}-${d}`, resourceId : l.id, startDate : fromYmd(d), endDate : fromYmd(addDays(d, 1)), cls : `hl-day hl-day-${st}`, name : '' });
             }
         }
         s.suspendRefresh?.();
@@ -2396,8 +2397,11 @@ function close() {
 .hl-util-ok { background : #e8f5e9; color : #2e7d32; } .hl-util-partial { background : #fff8e1; color : #b26a00; } .hl-util-full { background : #ffe0d6; color : #c43c00; } .hl-util-over { background : #ffcdd2; color : #b00020; }
 .hl-root .b-sch-resource-time-range.hl-day { border : none; opacity : 1; pointer-events : none; }
 .hl-day-idle { background : #f4f6f8 !important; } .hl-day-available { background : #dcedc8 !important; } .hl-day-partial { background : #ffe082 !important; }
-.hl-day-full { background : #ffab91 !important; } .hl-day-overloaded { background : #ef9a9a !important; } .hl-day-holiday { background : repeating-linear-gradient(45deg, #e0e0e0 0 4px, #f5f5f5 4px 8px) !important; }
-.hl-day-shutdown { background : repeating-linear-gradient(45deg, #bdbdbd 0 4px, #eeeeee 4px 8px) !important; } .hl-day-off { background : #ececec !important; } .hl-day-inactive { background : #e0e0e0 !important; }
+/* no-production days: light red cross-hatch (off day), darker red cross-hatch (holiday), grey hatch (factory shutdown) */
+.hl-day-full { background : #ffab91 !important; } .hl-day-overloaded { background : #ef9a9a !important; }
+.hl-day-off { background-color : #fff1f1 !important; background-image : repeating-linear-gradient(45deg, rgba(229,115,115,.5) 0 1.5px, transparent 1.5px 9px), repeating-linear-gradient(-45deg, rgba(229,115,115,.5) 0 1.5px, transparent 1.5px 9px) !important; }
+.hl-day-holiday { background-color : #ffe3e3 !important; background-image : repeating-linear-gradient(45deg, rgba(211,47,47,.6) 0 1.5px, transparent 1.5px 8px), repeating-linear-gradient(-45deg, rgba(211,47,47,.6) 0 1.5px, transparent 1.5px 8px) !important; }
+.hl-day-shutdown { background : repeating-linear-gradient(45deg, #bdbdbd 0 4px, #eeeeee 4px 8px) !important; } .hl-day-inactive { background : #e0e0e0 !important; }
 .hl-root .b-sch-event.hl-res { background : #4f7fcf; border : 1px solid #2d5aa3; color : #fff; font-size : 11px; border-radius : 3px; }
 .hl-root .b-sch-event.hl-res-live { background : #7a7a7a; border-color : #555; }
 .hl-root .b-sch-event.hl-res-proposed { background : #26a69a; }
