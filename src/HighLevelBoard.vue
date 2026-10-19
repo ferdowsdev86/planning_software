@@ -20,7 +20,7 @@ import {
 } from './hlEngine.js';
 import {
     autoBalance, allocationReport, reconcileAllocation, balanceSettings, unitMakes, orderSmv, ymOf, buildCapIndex, mergeErpOrders, placeInUnit, EXT_STATUS, KIND_LABEL,
-    autoPlanUnits, planRules, PLAN_STATUS, inputDateFor
+    autoPlanUnits, planRules, PLAN_STATUS, inputDateFor, planExpired
 } from './hlBalance.js';
 import {
     hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders,
@@ -416,7 +416,7 @@ async function openUnitPlan(code) {
             s.balance = { ...balanceSettings(s), planRules : apuRulesObj(), lastAutoPlan : out.summary };
         });
         const sm = out.summary;
-        props.toast(`${unitName(code)}: ${sm.orders} orders planned on its lines — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
+        props.toast(`${unitName(code)}: ${sm.orders} orders — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.noplan ? ` · ${sm.noplan} no plan (expired, ${fmtQty(sm.noplanQty)} pcs)` : ''}${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
     }
     catch (e) { props.toast(`${unitName(code)}: plan failed — ${e.message}`, 'error'); }
     finally { upBusy.value = false; }
@@ -804,7 +804,7 @@ function apuDefaults(s) {
     const r = planRules(s);
     return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
         gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100),
-        planFrom : r.planFrom || nextMonthStart() };
+        planFrom : r.planFrom || nextMonthStart(), exclusiveDay : r.exclusiveDay !== false };
 }
 // default plan start: the first day of next month
 function nextMonthStart() { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth() + 1, 1)); }
@@ -840,8 +840,10 @@ function apuRulesObj() {
     return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
         lcSmvHigh : Number(r.lcSmvHigh) || 50, lcDaysMid : Number(r.lcDaysMid) || 0, lcDaysHigh : Number(r.lcDaysHigh) || 0,
         buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
-        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null };
+        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null, exclusiveDay : !!r.exclusiveDay };
 }
+// expired for the plan: PCD and input date before the plan start (the rules' Plan from, else the plan range start)
+function isExpiredOrder(o, s = sc.value) { if (!s) return false; const r = planRules(s); const from = r.planFrom && r.planFrom > s.from ? r.planFrom : s.from; return planExpired(o, r, from); }
 // import the ERP active orders of these units only (ERP production unit) — the other units' imports stay
 async function importErpUnits(codes) {
     const erp = await hlErpOrders(by());
@@ -888,7 +890,7 @@ function apuApply() {
 const apuRows = computed(() => {
     const q = apuFilter.value.trim().toLowerCase();
     const rows = apuResult.value?.results || [];
-    const order = { late : 0, unplaced : 1, pcd : 2, ontime : 3 };
+    const order = { late : 0, unplaced : 1, pcd : 2, ontime : 3, noplan : 4 };
     return rows.filter(r => !q || `${r.code} ${r.buyer} ${r.style} ${r.product}`.toLowerCase().includes(q))
         .slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || String(a.delivery || '').localeCompare(String(b.delivery || '')));
 });
@@ -1024,10 +1026,22 @@ const noCapByUnit = computed(() => {
     const out = {};
     for (const o of allocRep.value?.orders || []) {
         if (!(o.unallocated > 0)) continue;
+        if (isExpiredOrder(orderById(sc.value, o.id) || o)) continue;      // expired orders are 'No plan', reported apart
         const u = out[o.contractUnit] || (out[o.contractUnit] = { total : 0, orders : 0, months : {} });
         u.total += o.unallocated; u.orders++;
         const m = u.months[o.ym] || (u.months[o.ym] = { qty : 0, orders : 0 });
         m.qty += o.unallocated; m.orders++;
+    }
+    return out;
+});
+// orders not planned because PCD and input date expired before the plan start, per unit (qty open)
+const noPlanByUnit = computed(() => {
+    void tick.value;
+    const out = {};
+    for (const o of allocRep.value?.orders || []) {
+        if (!(o.unallocated > 0) || !isExpiredOrder(orderById(sc.value, o.id) || o)) continue;
+        const u = out[o.contractUnit] || (out[o.contractUnit] = { total : 0, orders : 0 });
+        u.total += o.unallocated; u.orders++;
     }
     return out;
 });
@@ -1038,7 +1052,7 @@ function openNoCap(u, ym) { ncUnit.value = u.code; ncMonth.value = ym; ncOpen.va
 const ncRows = computed(() => {
     void tick.value;
     const s = sc.value; if (!s) return [];
-    const rows = (allocRep.value?.orders || []).filter(o => o.contractUnit === ncUnit.value && (ncMonth.value === 'total' || o.ym === ncMonth.value) && o.unallocated > 0);
+    const rows = (allocRep.value?.orders || []).filter(o => o.contractUnit === ncUnit.value && (ncMonth.value === 'total' || o.ym === ncMonth.value) && o.unallocated > 0 && !isExpiredOrder(orderById(s, o.id) || o));
     return rows.map(o => {
         const rs = s.reservations.filter(r => r.orderId === o.id && r.status !== 'cancelled');
         const ps = rs.find(r => r.planStatus)?.planStatus || null;
@@ -1634,6 +1648,7 @@ function close() {
                                     <td class="hl-r hl-nc" :class="{ 'hl-em-neg' : noCapByUnit[u.code]?.total }" :title="noCapByUnit[u.code] ? `${noCapByUnit[u.code].orders} order(s) without capacity — click for the list` : ''" @click.stop="noCapByUnit[u.code] && openNoCap(u, 'total')"><b>{{ noCapByUnit[u.code] ? fmtQty(noCapByUnit[u.code].total) : '—' }}</b></td></tr>
                             </tfoot>
                         </table>
+                        <div v-if="noPlanByUnit[u.code]" class="hl-uc-noplan" title="Orders whose PCD and input date (PCD + lead) already expired before the plan start — kept apart, not planned on the lines">⏸ No plan (PCD / input date expired before {{ dmy(planRules(sc).planFrom || sc.from) }}): <b>{{ fmtQty(noPlanByUnit[u.code].total) }}</b> pcs · {{ noPlanByUnit[u.code].orders }} orders</div>
                     </div>
                 </div>
             </div>
@@ -1875,7 +1890,8 @@ function close() {
                         <span class="hl-sep"></span>
                         <label class="hl-lbl" title="Day capacity rule: every day of a bar must give the order at least this share of the line's day capacity (the last day, which takes the remainder, excepted) — a busy line never gets a small order spread over many days of crumbs; the bar waits for a day it can really run on">Day capacity: bar day fills ≥ <input v-model.number="apuRules.minFillPct" type="number" min="5" max="100" class="cal-in hl-num hl-num-s"> % of line capacity</label>
                         <span class="hl-sep"></span>
-                        <label class="hl-lbl" title="Plan start: the orders are loaded on the lines from this date on (an input date before it moves to it); nothing is planned earlier"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
+                        <label class="hl-lbl" title="Plan start: the orders are loaded on the lines from this date on (an input date before it moves to it); nothing is planned earlier. An order whose PCD and input date both lie before it is not planned (No plan)"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
+                        <label class="hl-chk" title="One order per line per day: a bar's days are free of any other bar — the next order starts on the line's next free day (off: a day's leftover capacity may take another order)"><input v-model="apuRules.exclusiveDay" type="checkbox"> one order per line per day</label>
                     </div>
                     <div v-if="apuResult" class="hl-apu-result">
                         <div class="hl-ab-sum">
@@ -1884,6 +1900,7 @@ function close() {
                             <span class="hl-ps-chip hl-ps-pcd">PCD not met {{ apuResult.summary.pcd }}</span>
                             <span class="hl-ps-chip hl-ps-late">delivery not met {{ apuResult.summary.late }}</span>
                             <span class="hl-ps-chip hl-ps-unplaced">no capacity {{ apuResult.summary.unplaced }}</span>
+                            <span v-if="apuResult.summary.noplan" class="hl-ps-chip hl-ps-noplan" title="PCD and input date already expired before the plan start — kept apart, not planned">no plan {{ apuResult.summary.noplan }} · {{ fmtQty(apuResult.summary.noplanQty) }} pcs</span>
                             <span class="hl-ps-chip hl-ps-crit" :class="{ 'hl-ps-none' : !apuResult.summary.critical }" title="orders whose delivery is not met or whose quantity has no capacity — the real problems of this plan">⚠ critical {{ apuResult.summary.critical }}<template v-if="apuResult.summary.maxLate"> · up to {{ apuResult.summary.maxLate }} d late</template><template v-if="apuResult.summary.shortQty"> · {{ fmtQty(apuResult.summary.shortQty) }} pcs short</template></span>
                             <span v-if="apuResult.summary.stretched" class="hl-dim" title="bars running well under the line's day capacity (more bar days than the work needs)">{{ apuResult.summary.stretched }} stretched</span>
                             <span class="hl-dim">{{ apuResult.summary.removed }} previous proposal(s) replaced on apply</span>
@@ -2556,6 +2573,7 @@ function close() {
 .hl-ps-chip { display : inline-block; padding : 0 7px; border-radius : 10px; font-size : 11px; font-weight : 700; color : #fff; }
 .hl-nc { cursor : pointer; }
 .hl-ps-ontime { background : #757575; } .hl-ps-pcd { background : #fb8c00; } .hl-ps-late { background : #d32f2f; } .hl-ps-unplaced { background : #455a64; }
+.hl-ps-noplan { background : #5c6bc0; } .hl-uc-noplan { margin-top : 4px; font-size : 11px; color : #3949ab; }
 .hl-ps-crit { background : #b71c1c; } .hl-ps-crit.hl-ps-none { background : #2e7d32; }
 .hl-crit { max-width : 320px; white-space : normal !important; font-size : 11px; line-height : 1.25; }
 .hl-warn { color : #e65100; font-weight : 600; }

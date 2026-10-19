@@ -254,7 +254,7 @@ test('day capacity rule: a small order takes one day at line capacity, never ten
     const sc = scenario();
     // M1 and M2 92 % busy on each of November's 26 working days with a live bar each (810 denim / day → 65 free)
     for (const l of ['M1', 'M2']) sc.reservations.push({ id : `live_${l}`, orderId : null, lineId : l, product : 'Denim Pants', smv : 20, start : '2026-11-01', end : '2026-11-30', qty : 745 * 26, locked : true, status : 'reserved', source : 'live', kind : 'live' });
-    sc.orders.push(order('s1', 'M', 'Denim Pants', 300, '2026-12-20', { pcd : '2026-10-20', smv : 20, repeat : true }));
+    sc.orders.push(order('s1', 'M', 'Denim Pants', 300, '2026-12-20', { pcd : '2026-11-01', smv : 20, repeat : true }));
     const out = autoPlanUnits(sc);
     const s1 = out.results[0];
     assert.equal(s1.status, 'ontime');
@@ -264,15 +264,36 @@ test('day capacity rule: a small order takes one day at line capacity, never ten
     assert.equal(s1.stretched, false);
     assert.equal(s1.critical.length, 0);
     // the old crumb floor (5 %) spreads the same order over the busy days
-    const old = autoPlanUnits(sc, { rules : { minFill : 0.05 } });
+    const old = autoPlanUnits(sc, { rules : { minFill : 0.05, exclusiveDay : false } });
     assert.equal(old.results[0].barDays > 1, true);
     assert.equal(old.results[0].stretched, true);
     // a full-size order on a free line runs at full capacity: bar days = days needed
     const sc2 = scenario();
-    sc2.orders.push(order('b1', 'M', 'Denim Pants', 8100, '2026-12-31', { pcd : '2026-10-20', smv : 20, repeat : true }));
+    sc2.orders.push(order('b1', 'M', 'Denim Pants', 8100, '2026-12-31', { pcd : '2026-11-01', smv : 20, repeat : true }));
     const o2 = autoPlanUnits(sc2).results[0];
     assert.equal(o2.barDays, o2.needDays);
     assert.equal(Math.round(o2.fill * 100), 100);
     apply(sc2, autoPlanUnits(sc2));
     assert.equal(conflicts(sc2, buildLoad(sc2)).length, 0);
+});
+
+test('expired orders (PCD and input date before the plan start) are No plan, reported apart; one order per line per day', () => {
+    const sc = scenario();
+    sc.orders.push(order('x1', 'M', 'Denim Pants', 500, '2026-11-20', { pcd : '2026-10-10', smv : 20, repeat : true }));     // input 10-13 < 11-01 → no plan
+    sc.orders.push(order('u1', 'M', 'Denim Pants', 200, '2026-12-20', { pcd : '2026-11-02', smv : 20, repeat : true }));     // upcoming → planned
+    sc.orders.push(order('u2', 'M', 'Denim Pants', 200, '2026-12-21', { pcd : '2026-11-02', smv : 20, repeat : true }));
+    sc.orders.push(order('u3', 'M', 'Denim Pants', 200, '2026-12-22', { pcd : '2026-11-02', smv : 20, repeat : true }));
+    const out = autoPlanUnits(sc);
+    const byId = Object.fromEntries(out.results.map(r => [r.orderId, r]));
+    assert.equal(byId.x1.status, 'noplan');
+    assert.equal(out.reservations.some(r => r.orderId === 'x1'), false);
+    assert.equal(out.summary.noplan, 1); assert.equal(out.summary.noplanQty, 500);
+    assert.equal(byId.u1.status, 'ontime'); assert.equal(byId.u2.status, 'ontime'); assert.equal(byId.u3.status, 'ontime');
+    // three small orders never share a line-day: each has its own day(s)
+    const key = new Set();
+    for (const r of out.reservations) { const k = `${r.lineId}|${r.start}`; assert.equal(key.has(k), false, 'two orders on one line-day'); key.add(k); }
+    // with the rule off the same three orders may share one day of one line
+    const shared = autoPlanUnits(sc, { rules : { exclusiveDay : false } });
+    const days = shared.reservations.map(r => `${r.lineId}|${r.start}`);
+    assert.equal(new Set(days).size < days.length, true);
 });

@@ -134,7 +134,9 @@ export const rampOf = n => { const k = Math.max(0, Math.round(Number(n) || 0)); 
 // run on, and the span breaks at a busy day (the rest is placed afterwards
 // as its own bar). The old 5 % crumb rule is the floor.
 export const DEFAULT_MIN_FILL = 0.5;
-export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minFill = DEFAULT_MIN_FILL) {
+// exclusive: ONE order per line per day — every day of the bar must be free of any other bar (the
+// bar's last day keeps its leftover; the next order starts on the next free day)
+export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minFill = DEFAULT_MIN_FILL, exclusive = false) {
     const n = cap.length;
     const last = Math.min(untilI, n - 1);
     const share = Math.min(1, Math.max(0.05, Number(minFill) || 0.05));
@@ -143,7 +145,7 @@ export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minF
         // a ramped bar must start on a FREE day (its first days run below
         // capacity, the line is still occupied) — a day already partly used
         // cannot be its day 1
-        if (ramp?.length && used[s] > tol(cap[s])) continue;
+        if ((ramp?.length || exclusive) && used[s] > tol(cap[s])) continue;
         let placed = 0, e = s, wd = 0;
         for (let i = s; i <= last && placed < qty; i++) {
             if (cap[i] <= 0) continue;
@@ -153,7 +155,7 @@ export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minF
             const left = qty - placed;
             // day capacity rule: the day must give the order ≥ share of the
             // line's capacity, unless the rest of the order fits in it
-            const thin = free <= 0 || ((cap[i] - used[i]) < cap[i] * share && left * smv > free);
+            const thin = free <= 0 || ((cap[i] - used[i]) < cap[i] * share && left * smv > free) || (exclusive && used[i] > tol(cap[i]));
             if (thin) break;        // a busy day ends the span (the rest goes after it) — and can never be a bar's first day
             const pcs = Math.min(left, Math.floor(free / smv));
             if (pcs <= 0) break;
@@ -192,6 +194,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, 
     const out = [];
     const ramp = lcDays > 0 ? rampOf(lcDays) : null;
     const minFill = settings?.minFill ?? planRules(sc).minFill;
+    const exclusive = settings?.exclusiveDay ?? planRules(sc).exclusiveDay;
     let remaining = qty;
     if (!unitMakes(settings, order.product, unitCode)) return { allocations : out, remaining, reason : `${unitCode}: does not make ${order.product}` };
     const lines = sc.lines.filter(l => l.unitCode === unitCode && l.active && !l.pool && lineSmv(sc, l, order.product) != null);
@@ -202,7 +205,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, 
     while (remaining > 0 && guard++ < lines.length * 4 + 8) {
         let best = null;
         for (const l of lines) {
-            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp, minFill);
+            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp, minFill, exclusive);
             if (!f || !f.placed) continue;
             if (!best || f.placed > best.f.placed || (f.placed === best.f.placed && f.endI < best.f.endI)) best = { l, f };
         }
@@ -468,7 +471,8 @@ export const DEFAULT_PLAN_RULES = {
     noLcBuyers  : ['BORK'],              // buyers without a learning curve
     repeatNoLc  : true,                  // a repeat order ramps no more
     minFill     : DEFAULT_MIN_FILL,      // day capacity rule: share of the line's day capacity a bar day must give the order
-    planFrom    : null                   // plan start: no bar before this date (null = the scenario's plan range start)
+    planFrom    : null,                  // plan start: no bar before this date (null = the scenario's plan range start)
+    exclusiveDay : true                  // one order per line per day: a bar's days are free of any other bar
 };
 export function planRules(sc) { const r = sc?.balance?.planRules || {}; return { ...DEFAULT_PLAN_RULES, ...r, buyerLc : { ...DEFAULT_PLAN_RULES.buyerLc, ...(r.buyerLc || {}) } }; }
 const buyerKey = b => String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -486,11 +490,13 @@ export function inputDateFor(o, rules) {
     if (!o.pcd) return null;
     return addDays(o.pcd, Number(o.repeat ? rules.repeatLead : rules.newLead) || 0);
 }
-export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met', unplaced : 'No capacity' };
+export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met', unplaced : 'No capacity', noplan : 'No plan (expired)' };
+// an order whose PCD AND input date (PCD + lead) lie before the plan start is not planned — it is reported apart
+export function planExpired(o, rules, from) { const d = inputDateFor(o, rules); return !!(d && from && d < from && o.pcd && o.pcd < from); }
 
 export function autoPlanUnits(sc, opts = {}) {
     const rules = { ...planRules(sc), ...(opts.rules || {}) };
-    const settings = { ...balanceSettings(sc), minFill : rules.minFill };
+    const settings = { ...balanceSettings(sc), minFill : rules.minFill, exclusiveDay : rules.exclusiveDay !== false };
     const start = opts.from || rules.planFrom || null;
     const from = start && start > sc.from ? start : sc.from;
     const to   = opts.to && opts.to < sc.to ? opts.to : sc.to;
@@ -525,6 +531,7 @@ export function autoPlanUnits(sc, opts = {}) {
             pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '',
             barDays : 0, needDays : 0, fill : null, lateDays : 0, shortQty : 0, stretched : false, critical : [] };
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
+        if (planExpired(o, rules, from)) { res.status = 'noplan'; res.attempt = `PCD ${o.pcd} and input date ${inputDate} expired before the plan start ${from} — not planned`; res.note = 'no plan'; results.push(res); continue; }
         const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
         // attempts: the input date (grey) → PCD itself (orange) → the window start (orange) → late anyway (red)
         const starts = [];
@@ -599,6 +606,7 @@ export function autoPlanUnits(sc, opts = {}) {
     const count = k => results.filter(x => x.status === k).length;
     const summary = { at : new Date().toISOString().slice(0, 16).replace('T', ' '), from, to, orders : results.length, ontime : count('ontime'), pcd : count('pcd'), late : count('late'), unplaced : count('unplaced'),
         critical : results.filter(x => x.status === 'late' || x.status === 'unplaced' || x.shortQty > 0).length,
+        noplan : count('noplan'), noplanQty : results.filter(x => x.status === 'noplan').reduce((a, x) => a + x.open, 0),
         stretched : results.filter(x => x.stretched).length, shortQty : results.reduce((a, x) => a + x.shortQty, 0),
         maxLate : results.reduce((a, x) => Math.max(a, x.lateDays), 0), minFill : rules.minFill,
         qty : results.reduce((a, x) => a + x.qty, 0), placed : results.reduce((a, x) => a + x.placed, 0), removed : removedIds.length, units : [...units] };
