@@ -304,7 +304,7 @@ function tipHtml(ev) {
         ['Status', `${r.status}${r.locked ? ' · locked' : ''}${r.conflict ? ' · ⚠ overloaded day(s)' : ''}${r.late ? ' · after delivery' : ''}`]
     ];
     if (r.kind) rows.push(['Allocation', `${KIND_LABEL[r.kind] || r.kind}${r.fromUnit && line && r.fromUnit !== line.unitCode ? ` · contract ${unitName(r.fromUnit)} → ${unitName(line.unitCode)}` : ''}`]);
-    if (r.planStatus) rows.push(['Plan', `${PLAN_STATUS[r.planStatus] || r.planStatus}${r.lcDays ? ` · learning curve ${r.lcDays} days` : ''}${o?.repeat ? ' · repeat order' : ''}`]);
+    if (r.planStatus) { const lateD = r.planStatus === 'late' && o?.delivery && res?.end > o.delivery ? daysBetween(o.delivery, res.end) : 0; rows.push(['Plan', `${PLAN_STATUS[r.planStatus] || r.planStatus}${lateD ? ` · ${lateD} d after delivery` : ''}${r.lcDays ? ` · learning curve ${r.lcDays} days` : ''}${o?.repeat ? ' · repeat order' : ''}`]); }
     if (res?.reason) rows.push(['Reason', res.reason]);
     if (r.extStatus) rows.push(['External capacity', EXT_STATUS[r.extStatus] || r.extStatus]);
     if (o?.garment) rows.splice(3, 0, ['Garment', o.garment]);
@@ -770,7 +770,7 @@ const APU_UNITS = ['M', 'C', 'A'];
 function apuDefaults(s) {
     const r = planRules(s);
     return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
-        gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false };
+        gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100) };
 }
 const apuRules = ref(apuDefaults(null));
 const apuUnits = ref([...APU_UNITS]);
@@ -782,7 +782,8 @@ function apuRulesObj() {
     const r = apuRules.value;
     return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
         lcSmvHigh : Number(r.lcSmvHigh) || 50, lcDaysMid : Number(r.lcDaysMid) || 0, lcDaysHigh : Number(r.lcDaysHigh) || 0,
-        buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc };
+        buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
+        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)) };
 }
 async function apuImport() {
     if (!sc.value) return;
@@ -814,7 +815,7 @@ function apuApply() {
     });
     for (const u of out.summary.units) expandedUnits.add(u);
     const sm = out.summary;
-    props.toast(`Auto plan applied: ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity — review the bars (grey / orange / red), then Save`, sm.late || sm.unplaced ? 'warn' : 'ok');
+    props.toast(`Auto plan applied: ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.critical ? ` — ${sm.critical} critical (${sm.maxLate ? `up to ${sm.maxLate} d late` : ''}${sm.maxLate && sm.shortQty ? ', ' : ''}${sm.shortQty ? `${fmtQty(sm.shortQty)} pcs without capacity` : ''})` : ''} — review the bars (grey / orange / red), then Save`, sm.critical ? 'warn' : 'ok');
     apuResult.value = null;
     ordOpen.value = false;
 }
@@ -1708,6 +1709,8 @@ function close() {
                         <label class="hl-lbl">G-STAR <input v-model.number="apuRules.gstar" type="number" min="0" class="cal-in hl-num hl-num-s"> d</label>
                         <label class="hl-lbl">no curve for <input v-model="apuRules.noLc" class="cal-in hl-txt" placeholder="buyers, comma separated"></label>
                         <label class="hl-chk"><input v-model="apuRules.repeatNoLc" type="checkbox"> repeat order: no learning curve</label>
+                        <span class="hl-sep"></span>
+                        <label class="hl-lbl" title="Day capacity rule: every day of a bar must give the order at least this share of the line's day capacity (the last day, which takes the remainder, excepted) — a busy line never gets a small order spread over many days of crumbs; the bar waits for a day it can really run on">Day capacity: bar day fills ≥ <input v-model.number="apuRules.minFillPct" type="number" min="5" max="100" class="cal-in hl-num hl-num-s"> % of line capacity</label>
                     </div>
                     <div v-if="apuResult" class="hl-apu-result">
                         <div class="hl-ab-sum">
@@ -1716,13 +1719,15 @@ function close() {
                             <span class="hl-ps-chip hl-ps-pcd">PCD not met {{ apuResult.summary.pcd }}</span>
                             <span class="hl-ps-chip hl-ps-late">delivery not met {{ apuResult.summary.late }}</span>
                             <span class="hl-ps-chip hl-ps-unplaced">no capacity {{ apuResult.summary.unplaced }}</span>
+                            <span class="hl-ps-chip hl-ps-crit" :class="{ 'hl-ps-none' : !apuResult.summary.critical }" title="orders whose delivery is not met or whose quantity has no capacity — the real problems of this plan">⚠ critical {{ apuResult.summary.critical }}<template v-if="apuResult.summary.maxLate"> · up to {{ apuResult.summary.maxLate }} d late</template><template v-if="apuResult.summary.shortQty"> · {{ fmtQty(apuResult.summary.shortQty) }} pcs short</template></span>
+                            <span v-if="apuResult.summary.stretched" class="hl-dim" title="bars running well under the line's day capacity (more bar days than the work needs)">{{ apuResult.summary.stretched }} stretched</span>
                             <span class="hl-dim">{{ apuResult.summary.removed }} previous proposal(s) replaced on apply</span>
                             <span class="hl-gap"></span>
                             <input v-model="apuFilter" class="cal-in hl-txt" placeholder="filter order / buyer / style">
                         </div>
                         <div class="hl-scroll hl-apu-scroll">
                             <table class="hl-table hl-table-s hl-apu-tbl">
-                                <thead><tr><th>Status</th><th>Unit</th><th>Order</th><th>Buyer</th><th>Style · product</th><th>Qty</th><th>PCD</th><th>Input date</th><th>Delivery</th><th>Start</th><th>Finish</th><th>LC</th><th>Lines</th><th>How</th></tr></thead>
+                                <thead><tr><th>Status</th><th>Unit</th><th>Order</th><th>Buyer</th><th>Style · product</th><th>Qty</th><th>PCD</th><th>Input date</th><th>Delivery</th><th>Start</th><th>Finish</th><th>LC</th><th>Lines</th><th title="bar days on the board / working days the quantity needs at the lines' full day capacity">Days</th><th title="share of the bar days' line capacity the order fills">Fill</th><th>Critical</th><th>How</th></tr></thead>
                                 <tbody>
                                     <tr v-for="r in apuRows" :key="r.orderId">
                                         <td><span class="hl-ps-chip" :class="`hl-ps-${r.status}`">{{ PLAN_STATUS[r.status] }}</span></td>
@@ -1733,13 +1738,16 @@ function close() {
                                         <td :class="{ 'hl-late' : r.inputDate && r.start && r.start < r.inputDate }">{{ dmy(r.start) }}</td>
                                         <td :class="{ 'hl-late' : r.finish && r.deadline && r.finish > r.deadline }">{{ dmy(r.finish) }}</td>
                                         <td class="hl-r">{{ r.lcDays ? r.lcDays + ' d' : '—' }}</td><td class="hl-r">{{ r.lines || '—' }}</td>
+                                        <td class="hl-r" :class="{ 'hl-warn' : r.stretched }">{{ r.barDays ? `${r.barDays} / ${r.needDays}` : '—' }}</td>
+                                        <td class="hl-r" :class="{ 'hl-warn' : r.stretched }">{{ r.fill != null ? Math.round(r.fill * 100) + ' %' : '—' }}</td>
+                                        <td class="hl-crit" :class="{ 'hl-late' : r.lateDays || r.status === 'unplaced' || r.shortQty > 0, 'hl-warn' : !(r.lateDays || r.status === 'unplaced' || r.shortQty > 0) && r.critical.length }" :title="r.critical.join(' · ')">{{ r.critical.length ? r.critical.join(' · ') : '—' }}</td>
                                         <td class="hl-dim hl-reason" :title="r.attempt + (r.note ? ' · ' + r.note : '')">{{ r.attempt }}{{ r.note ? ' · ' + r.note : '' }}</td>
                                     </tr>
-                                    <tr v-if="!apuRows.length"><td colspan="14" class="hl-dim">No order in the chosen unit(s).</td></tr>
+                                    <tr v-if="!apuRows.length"><td colspan="17" class="hl-dim">No order in the chosen unit(s).</td></tr>
                                 </tbody>
                             </table>
                         </div>
-                        <div class="st-hint">↻ repeat order (PCD + {{ apuRules.repeatLead }} d, no learning curve) · ✦ new style (PCD + {{ apuRules.newLead }} d, learning curve by SMV / buyer). Grey = starts on the input date and finishes by delivery; orange = delivery met only by starting before the input date; red = delivery cannot be met (planned from the input date anyway so the overrun shows). Applying replaces this scenario's earlier auto-plan proposals of these orders (locked ones stay).</div>
+                        <div class="st-hint">↻ repeat order (PCD + {{ apuRules.repeatLead }} d, no learning curve) · ✦ new style (PCD + {{ apuRules.newLead }} d, learning curve by SMV / buyer). Grey = starts on the input date and finishes by delivery; orange = delivery met only by starting before the input date; red = delivery cannot be met (planned from the input date anyway so the overrun shows). Day capacity: a bar runs at the line's day capacity (every bar day fills at least the set share), so <b>Days</b> = bar days / days the work needs and <b>Fill</b> = how full those days are; <b>Critical</b> names what really fails — days late, pieces without capacity, a start before the input date, or a stretched bar. Applying replaces this scenario's earlier auto-plan proposals of these orders (locked ones stay).</div>
                     </div>
                 </div>
                 <div class="st-body hl-ord-body">
@@ -2354,6 +2362,9 @@ function close() {
 .hl-ps-chip { display : inline-block; padding : 0 7px; border-radius : 10px; font-size : 11px; font-weight : 700; color : #fff; }
 .hl-nc { cursor : pointer; }
 .hl-ps-ontime { background : #757575; } .hl-ps-pcd { background : #fb8c00; } .hl-ps-late { background : #d32f2f; } .hl-ps-unplaced { background : #455a64; }
+.hl-ps-crit { background : #b71c1c; } .hl-ps-crit.hl-ps-none { background : #2e7d32; }
+.hl-crit { max-width : 320px; white-space : normal !important; font-size : 11px; line-height : 1.25; }
+.hl-warn { color : #e65100; font-weight : 600; }
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
 .cal-overlay .cal-dialog.hl-ab-dialog { width : 1180px; } .cal-overlay .cal-dialog.hl-abr-dialog { width : 1400px; } .cal-overlay .cal-dialog.hl-pw-dialog { width : 1500px; } .cal-overlay .cal-dialog.hl-gp-dialog { width : 1450px; } .cal-overlay .cal-dialog.hl-ba-dialog { width : 1450px; }
 .hl-ab-grid { display : grid; grid-template-columns : 1fr 1fr; gap : 12px; }

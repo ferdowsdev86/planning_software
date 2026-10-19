@@ -17,7 +17,7 @@
 // loaded past their capacity; the GSL pool has no ceiling and stays
 // "Pending External Capacity Confirmation" until the planner reviews it.
 // ---------------------------------------------------------------------------
-import { HL_UNITS, uid, addDays, lineDayMinutes, lineSmv, productSmv, ensurePoolLine, reservationDays, buildLoad } from './hlEngine.js';
+import { HL_UNITS, uid, addDays, daysBetween, lineDayMinutes, lineSmv, productSmv, ensurePoolLine, reservationDays, buildLoad } from './hlEngine.js';
 
 export const INTERNAL = ['M', 'C', 'A'];
 export const EXT_STATUS = {
@@ -105,9 +105,17 @@ const tol = cap => Math.max(30, cap * 0.01);
 // moves to the next day. Returns the span and the minutes it takes per day.
 // learning-curve ramp of the first n working days of a bar: 1/(n+1), 2/(n+1)…
 export const rampOf = n => { const k = Math.max(0, Math.round(Number(n) || 0)); return Array.from({ length : k }, (_, i) => (i + 1) / (k + 1)); };
-export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null) {
+// minFill: the DAY CAPACITY rule — every day of a bar must give the order at
+// least this share of the line's day capacity (the last day, which takes the
+// remainder, excepted). A line 90 % busy does not get a 96-piece bar spread
+// over ten days of 10-piece crumbs: the bar waits for a day it can really
+// run on, and the span breaks at a busy day (the rest is placed afterwards
+// as its own bar). The old 5 % crumb rule is the floor.
+export const DEFAULT_MIN_FILL = 0.5;
+export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minFill = DEFAULT_MIN_FILL) {
     const n = cap.length;
     const last = Math.min(untilI, n - 1);
+    const share = Math.min(1, Math.max(0.05, Number(minFill) || 0.05));
     for (let s = fromI; s <= last; s++) {
         if (cap[s] - used[s] <= 0) continue;
         // a ramped bar must start on a FREE day (its first days run below
@@ -120,13 +128,13 @@ export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null) {
             const r = ramp?.length && wd < ramp.length ? ramp[wd] : 1;
             wd++;
             const free = (cap[i] - used[i]) * r;
-            if (free <= 0) continue;
             const left = qty - placed;
-            // crumbs: a day with under 5% of its capacity free is skipped unless
-            // the rest of the order fits in it — no 2-piece bars spanning weeks
-            if (r === 1 && free < cap[i] * 0.05 && left * smv > free) continue;
+            // day capacity rule: the day must give the order ≥ share of the
+            // line's capacity, unless the rest of the order fits in it
+            const thin = free <= 0 || ((cap[i] - used[i]) < cap[i] * share && left * smv > free);
+            if (thin) break;        // a busy day ends the span (the rest goes after it) — and can never be a bar's first day
             const pcs = Math.min(left, Math.floor(free / smv));
-            if (pcs <= 0) continue;
+            if (pcs <= 0) break;
             placed += pcs; e = i;
         }
         if (placed <= 0) continue;
@@ -161,16 +169,18 @@ function commit(used, fit) { const src = fit.occupy || fit.take; for (let i = 0;
 function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, lcDays = 0) {
     const out = [];
     const ramp = lcDays > 0 ? rampOf(lcDays) : null;
+    const minFill = settings?.minFill ?? planRules(sc).minFill;
     let remaining = qty;
     if (!unitMakes(settings, order.product, unitCode)) return { allocations : out, remaining, reason : `${unitCode}: does not make ${order.product}` };
     const lines = sc.lines.filter(l => l.unitCode === unitCode && l.active && !l.pool && lineSmv(sc, l, order.product) != null);
     if (!lines.length) return { allocations : out, remaining, reason : `${unitCode}: no compatible line` };
     const smv = orderSmv(sc, order);
     let guard = 0;
-    while (remaining > 0 && guard++ < lines.length + 2) {
+    // a span breaks at a busy day, so one line can take several blocks of the same order
+    while (remaining > 0 && guard++ < lines.length * 4 + 8) {
         let best = null;
         for (const l of lines) {
-            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp);
+            const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp, minFill);
             if (!f || !f.placed) continue;
             if (!best || f.placed > best.f.placed || (f.placed === best.f.placed && f.endI < best.f.endI)) best = { l, f };
         }
@@ -434,7 +444,8 @@ export const DEFAULT_PLAN_RULES = {
     lcDaysHigh  : 5,                     // SMV > 50
     buyerLc     : { 'G-STAR' : 4 },      // buyer → learning-curve days
     noLcBuyers  : ['BORK'],              // buyers without a learning curve
-    repeatNoLc  : true                   // a repeat order ramps no more
+    repeatNoLc  : true,                  // a repeat order ramps no more
+    minFill     : DEFAULT_MIN_FILL       // day capacity rule: share of the line's day capacity a bar day must give the order
 };
 export function planRules(sc) { const r = sc?.balance?.planRules || {}; return { ...DEFAULT_PLAN_RULES, ...r, buyerLc : { ...DEFAULT_PLAN_RULES.buyerLc, ...(r.buyerLc || {}) } }; }
 const buyerKey = b => String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -455,8 +466,8 @@ export function inputDateFor(o, rules) {
 export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met', unplaced : 'No capacity' };
 
 export function autoPlanUnits(sc, opts = {}) {
-    const settings = balanceSettings(sc);
     const rules = { ...planRules(sc), ...(opts.rules || {}) };
+    const settings = { ...balanceSettings(sc), minFill : rules.minFill };
     const from = opts.from && opts.from > sc.from ? opts.from : sc.from;
     const to   = opts.to && opts.to < sc.to ? opts.to : sc.to;
     const units = new Set(opts.units || INTERNAL);
@@ -487,7 +498,8 @@ export function autoPlanUnits(sc, opts = {}) {
         const inputDate = inputDateFor(o, rules);
         const deadline = o.delivery ? addDays(o.delivery, -(Number(settings.deliveryLead) || 0)) : to;
         const res = { orderId : o.id, code : o.note || '', buyer : o.buyer, style : o.style, product : o.product, garment : o.garment || '', unit : o.unitCode, qty : total, open,
-            pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '' };
+            pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '',
+            barDays : 0, needDays : 0, fill : null, lateDays : 0, shortQty : 0, stretched : false, critical : [] };
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
         const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
         // attempts: the input date (grey) → PCD itself (orange) → the window start (orange) → late anyway (red)
@@ -524,15 +536,43 @@ export function autoPlanUnits(sc, opts = {}) {
         else if (st.tag !== 'input' || (inputDate && res.start && res.start < inputDate)) res.status = 'pcd';
         else res.status = 'ontime';
         if (r && r.remaining > 0 && res.status !== 'unplaced') res.note = `${r.remaining} pcs without capacity in the window`;
+        // day capacity check of the proposal: bar days (working days the bars
+        // cover) against the days the quantity needs at the lines' full day
+        // capacity, and the share of those days' capacity the order fills
+        const smv = orderSmv(sc, o);
+        let capSum = 0, barDays = 0;
+        for (const a of r?.allocations || []) {
+            const c = ix.cap.get(a.lineId); if (!c) continue;
+            const s = ix.idx.get(a.start), e = ix.idx.get(a.end);
+            if (s == null || e == null) continue;
+            for (let i = s; i <= e; i++) if (c[i] > 0) { capSum += c[i]; barDays++; }
+        }
+        res.barDays = barDays;
+        res.fill = capSum > 0 ? Math.min(1, res.placed * smv / capSum) : null;
+        res.needDays = capSum > 0 && barDays ? Math.max(1, Math.ceil(res.placed * smv / (capSum / barDays) - 1e-9)) : 0;
+        // stretched: the bars run well under the lines' day capacity — more bar days than the work (+ ramp) needs AND under 60 % full on average
+        res.stretched = barDays > res.needDays + lcDays + 1 && (res.fill ?? 1) < 0.6;
+        res.lateDays = res.status === 'late' && finish && deadline && finish > deadline ? daysBetween(deadline, finish) : 0;
+        res.shortQty = r ? r.remaining : open;
+        // what is really critical in the plan, plainest first
+        if (res.status === 'unplaced') res.critical.push(`no capacity for ${open} pcs`);
+        else if (res.shortQty > 0) res.critical.push(`${res.shortQty} pcs without capacity`);
+        if (res.lateDays > 0) res.critical.push(`finishes ${res.lateDays} d after delivery`);
+        else if (res.status === 'late' && res.placed > 0 && !finish) res.critical.push('delivery not met');
+        if (res.status === 'pcd' && inputDate && res.start) res.critical.push(`starts ${daysBetween(res.start, inputDate)} d before the input date`);
+        if (res.stretched) res.critical.push(`stretched: ${barDays} bar days for ${res.needDays} d of work (fill ${Math.round((res.fill || 0) * 100)} %)`);
         for (const a of r?.allocations || []) {
             a.source = 'autoplan'; a.planStatus = res.status; a.lcDays = lcDays;
-            a.reason = `${PLAN_STATUS[res.status]} · ${res.attempt}${lcDays ? ` · learning curve ${lcDays} d` : ' · no learning curve'}${o.repeat ? ' · repeat order' : ' · new style'}`;
+            a.reason = `${PLAN_STATUS[res.status]}${res.lateDays ? ` (${res.lateDays} d late)` : ''} · ${res.attempt}${lcDays ? ` · learning curve ${lcDays} d` : ' · no learning curve'}${o.repeat ? ' · repeat order' : ' · new style'}`;
             reservations.push(a);
         }
         results.push(res);
     }
     const count = k => results.filter(x => x.status === k).length;
     const summary = { at : new Date().toISOString().slice(0, 16).replace('T', ' '), from, to, orders : results.length, ontime : count('ontime'), pcd : count('pcd'), late : count('late'), unplaced : count('unplaced'),
+        critical : results.filter(x => x.status === 'late' || x.status === 'unplaced' || x.shortQty > 0).length,
+        stretched : results.filter(x => x.stretched).length, shortQty : results.reduce((a, x) => a + x.shortQty, 0),
+        maxLate : results.reduce((a, x) => Math.max(a, x.lateDays), 0), minFill : rules.minFill,
         qty : results.reduce((a, x) => a + x.qty, 0), placed : results.reduce((a, x) => a + x.placed, 0), removed : removedIds.length, units : [...units] };
     return { removedIds, reservations, results, summary, rules };
 }

@@ -217,4 +217,34 @@ test('unit-wise auto plan status: orange when delivery needs a start before the 
     assert.equal(byId.x1.placed > 0, true);
     assert.equal(byId.x1.finish > '2026-11-25', true);
     assert.equal(out.summary.late, 1);
+    assert.equal(byId.x1.lateDays > 0, true);
+    assert.equal(byId.x1.critical.some(c => /after delivery/.test(c)), true);
+    assert.equal(out.summary.critical, 1);
+});
+
+test('day capacity rule: a small order takes one day at line capacity, never ten days of crumbs on a busy line', () => {
+    const sc = scenario();
+    // M1 and M2 92 % busy on each of November's 26 working days with a live bar each (810 denim / day → 65 free)
+    for (const l of ['M1', 'M2']) sc.reservations.push({ id : `live_${l}`, orderId : null, lineId : l, product : 'Denim Pants', smv : 20, start : '2026-11-01', end : '2026-11-30', qty : 745 * 26, locked : true, status : 'reserved', source : 'live', kind : 'live' });
+    sc.orders.push(order('s1', 'M', 'Denim Pants', 300, '2026-12-20', { pcd : '2026-10-20', smv : 20, repeat : true }));
+    const out = autoPlanUnits(sc);
+    const s1 = out.results[0];
+    assert.equal(s1.status, 'ontime');
+    assert.equal(s1.placed, 300);
+    assert.equal(s1.barDays, 1);                                   // one bar day, not five 65-piece days
+    assert.equal(s1.start >= '2026-12-01', true);                  // waits for a day it can really run on
+    assert.equal(s1.stretched, false);
+    assert.equal(s1.critical.length, 0);
+    // the old crumb floor (5 %) spreads the same order over the busy days
+    const old = autoPlanUnits(sc, { rules : { minFill : 0.05 } });
+    assert.equal(old.results[0].barDays > 1, true);
+    assert.equal(old.results[0].stretched, true);
+    // a full-size order on a free line runs at full capacity: bar days = days needed
+    const sc2 = scenario();
+    sc2.orders.push(order('b1', 'M', 'Denim Pants', 8100, '2026-12-31', { pcd : '2026-10-20', smv : 20, repeat : true }));
+    const o2 = autoPlanUnits(sc2).results[0];
+    assert.equal(o2.barDays, o2.needDays);
+    assert.equal(Math.round(o2.fill * 100), 100);
+    apply(sc2, autoPlanUnits(sc2));
+    assert.equal(conflicts(sc2, buildLoad(sc2)).length, 0);
 });
