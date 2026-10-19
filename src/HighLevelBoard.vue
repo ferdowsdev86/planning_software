@@ -1106,6 +1106,92 @@ function gpSetStatus(r, v) { mutate(`GSL ${v}`, s => { const x = s.reservations.
 function gpRemove(r) { if (!window.confirm('Remove this GSL overflow allocation? The quantity becomes unallocated.')) return; mutate('remove GSL allocation', s => { s.reservations = s.reservations.filter(y => y.id !== r.id); }); }
 function gpLock(r) { mutate(r.locked ? 'unlock' : 'lock', s => { const x = s.reservations.find(y => y.id === r.id); if (x) x.locked = !x.locked; }); }
 
+// ---- Available capacity by date / week / month ------------------------------
+// From the line setup (manpower × hours × OT × efficiency per working day,
+// the unit's month calendar and holidays) minus the scenario's reservations:
+// capacity, reserved and available per line and per period, in SAH or in
+// pieces at the unit average SMV (as the Lines tab shows the line).
+const capOpen = ref(false);
+const capPeriod = ref(localStorage.getItem('hl-cap-period') || 'week');   // day | week | month
+const capShow = ref(localStorage.getItem('hl-cap-show') || 'pcs');        // pcs | sah
+const capWhat = ref('avail');                                             // avail | cap | used
+const capUnit = ref('');
+const capFrom = ref(''); const capTo = ref('');
+watch(capOpen, v => { if (v && sc.value) { capFrom.value = capFrom.value || sc.value.from; capTo.value = capTo.value || sc.value.to; if (!['day', 'week', 'month'].includes(capPeriod.value)) capPeriod.value = 'week'; } });
+watch(capPeriod, v => localStorage.setItem('hl-cap-period', v));
+watch(capShow, v => localStorage.setItem('hl-cap-show', v));
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function capKeyOf(d, period) {
+    if (period === 'day') return d;
+    if (period === 'month') return d.slice(0, 7);
+    return addDays(d, -fromYmd(d).getDay());          // week from Sunday, like the board header
+}
+function capLabelOf(key, period) {
+    if (period === 'day') return `${DOW[fromYmd(key).getDay()]} ${dmy(key)}`;
+    if (period === 'month') { const [y, m] = key.split('-').map(Number); return `${MON[m - 1]} ${y}`; }
+    return `w/c ${dmy(key)}`;
+}
+const capTable = computed(() => {
+    void tick.value;
+    const s = sc.value; if (!s || !capOpen.value) return null;
+    const from = capFrom.value || s.from, to = capTo.value || s.to;
+    const period = capPeriod.value;
+    const load = loadMap.value;
+    const keys = [];
+    const days = [];
+    for (let d = from, g = 0; d <= to && g < 2000; d = addDays(d, 1), g++) { days.push(d); const k = capKeyOf(d, period); if (keys[keys.length - 1] !== k) keys.push(k); }
+    const cols = keys.map(k => ({ key : k, label : capLabelOf(k, period) }));
+    const units = s.units.filter(u => !capUnit.value || u.code === capUnit.value);
+    const rows = [];
+    for (const u of units) {
+        const smv = unitAvgSmv(u.code);
+        const lines = s.lines.filter(l => l.unitCode === u.code && !l.pool);
+        const uCells = Object.fromEntries(keys.map(k => [k, { cap : 0, used : 0, wd : 0 }]));
+        const uTot = { cap : 0, used : 0, wd : 0 };
+        const lineRows = [];
+        for (const l of lines) {
+            const cells = Object.fromEntries(keys.map(k => [k, { cap : 0, used : 0, wd : 0 }]));
+            const tot = { cap : 0, used : 0, wd : 0 };
+            for (const d of days) {
+                const c = lineDayMinutes(s, l, d), x = usedMinutes(load, l.id, d);
+                const cell = cells[capKeyOf(d, period)];
+                cell.cap += c; cell.used += x; if (c > 0) cell.wd++;
+                tot.cap += c; tot.used += x; if (c > 0) tot.wd++;
+            }
+            for (const k of keys) { uCells[k].cap += cells[k].cap; uCells[k].used += cells[k].used; uCells[k].wd = Math.max(uCells[k].wd, cells[k].wd); }
+            uTot.cap += tot.cap; uTot.used += tot.used; uTot.wd = Math.max(uTot.wd, tot.wd);
+            lineRows.push({ id : l.id, name : l.name, unit : u.code, smv, active : l.active, setup : `${l.manpower} mp · ${l.hours ?? 'unit'} h${l.ot ? ` + ${l.ot} OT` : ''} · ${l.eff}%`, cells, tot });
+        }
+        rows.push({ id : `U-${u.code}`, name : u.name, unit : u.code, smv, isUnit : true, setup : `${lines.filter(l => l.active).length}/${lines.length} lines · avg SMV ${smv}`, cells : uCells, tot : uTot });
+        rows.push(...lineRows);
+    }
+    return { cols, rows, from, to, period };
+});
+const capVal = (cell, smv) => {
+    const min = capWhat.value === 'cap' ? cell.cap : capWhat.value === 'used' ? cell.used : Math.max(0, cell.cap - cell.used);
+    return capShow.value === 'sah' ? min / 60 : (smv > 0 ? min / smv : 0);
+};
+const capFmt = v => (capShow.value === 'sah' ? `${fmtQty(Math.round(v))} h` : fmtQty(Math.round(v)));
+const capCls = cell => {
+    if (cell.cap <= 0) return 'hl-day-holiday';
+    const u = cell.used / cell.cap;
+    const t = sc.value?.thresholds || { partial : 0.4, full : 0.9 };
+    return u > 1 ? 'hl-day-overloaded' : u >= (t.full ?? 0.9) ? 'hl-day-full' : u >= (t.partial ?? 0.4) ? 'hl-day-partial' : u > 0 ? 'hl-day-available' : 'hl-day-idle';
+};
+const capTip = (cell, smv) => {
+    const pcs = m => (smv > 0 ? fmtQty(Math.round(m / smv)) : '—');
+    return `capacity ${fmtQty(Math.round(cell.cap / 60))} h / ${pcs(cell.cap)} pcs · reserved ${fmtQty(Math.round(cell.used / 60))} h / ${pcs(cell.used)} pcs · available ${fmtQty(Math.round(Math.max(0, cell.cap - cell.used) / 60))} h / ${pcs(Math.max(0, cell.cap - cell.used))} pcs · ${cell.wd} working day(s) · load ${cell.cap > 0 ? Math.round(cell.used / cell.cap * 100) : 0} %`;
+};
+function capCsv() {
+    const t = capTable.value; if (!t) return;
+    const what = { avail : 'available', cap : 'capacity', used : 'reserved' }[capWhat.value];
+    const head = ['Unit', 'Line', 'Setup', ...t.cols.map(c => c.label), 'Total'];
+    const lines = [head.join(',')];
+    for (const r of t.rows) lines.push([unitName(r.unit), r.isUnit ? 'TOTAL' : r.name, `"${r.setup}"`, ...t.cols.map(c => Math.round(capVal(r.cells[c.key], r.smv))), Math.round(capVal(r.tot, r.smv))].join(','));
+    const blob = new Blob([lines.join('\n')], { type : 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `available-capacity-${what}-${capPeriod.value}-${t.from}_${t.to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
 // ---- Before & After balancing report ---------------------------------------
 const baOpen = ref(false);
 const baTab = ref('monthly');
@@ -1433,6 +1519,7 @@ function close() {
                 <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : viewMode === 'week' }" @click="setView('week')">Weekly</button>
                 <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : viewMode === 'month' }" @click="setView('month')">Monthly</button>
             </span>
+            <button class="cal-btn st-btn hl-btn" :disabled="!sc" title="Available capacity of every line by date / week / month from the line setup (manpower × hours × efficiency, unit calendar) minus the reservations — pieces at the unit average SMV or SAH" @click="capPeriod = viewMode; capOpen = true">📈 Available capacity</button>
             <label class="hl-lbl">Buyer <select v-model="fBuyer" class="cal-in hl-sel-s"><option value="">all</option><option v-for="b in buyers" :key="b" :value="b">{{ b }}</option></select></label>
             <label class="hl-lbl">Product <select v-model="fProduct" class="cal-in hl-sel-s"><option value="">all</option><option v-for="p in (sc?.products || [])" :key="p.name" :value="p.name">{{ p.name }}</option></select></label>
             <template v-if="sc">
@@ -2110,6 +2197,46 @@ function close() {
             </div>
         </div>
 
+        <!-- Available capacity by date / week / month -->
+        <div v-if="capOpen && sc && capTable" class="cal-overlay" @click.self="capOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-cap-dialog">
+                <div class="cal-title">📈 Available capacity — {{ sc.name }} <span class="cal-title-btns"><span class="cal-x" @click="capOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-ab-sum">
+                        <span class="hl-views">
+                            <button v-for="p in [['day','Date'],['week','Week'],['month','Month']]" :key="p[0]" class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : capPeriod === p[0] }" @click="capPeriod = p[0]">{{ p[1] }}</button>
+                        </span>
+                        <span class="hl-views">
+                            <button v-for="w in [['avail','Available'],['cap','Capacity'],['used','Reserved']]" :key="w[0]" class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : capWhat === w[0] }" @click="capWhat = w[0]">{{ w[1] }}</button>
+                        </span>
+                        <span class="hl-views">
+                            <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : capShow === 'pcs' }" title="pieces at the unit average SMV (Lines tab: Capacity pcs)" @click="capShow = 'pcs'">pcs</button>
+                            <button class="cal-btn st-btn hl-btn" :class="{ 'hl-on' : capShow === 'sah' }" title="standard hours (Lines tab: Line SAH)" @click="capShow = 'sah'">SAH</button>
+                        </span>
+                        <label class="hl-lbl">Unit <select v-model="capUnit" class="cal-in hl-sel-s"><option value="">all</option><option v-for="u in sc.units" :key="u.code" :value="u.code">{{ u.name }}</option></select></label>
+                        <label class="hl-lbl">From <input v-model="capFrom" type="date" class="cal-in hl-date"> to <input v-model="capTo" type="date" class="cal-in hl-date"></label>
+                        <span class="hl-gap"></span>
+                        <span class="hl-legend"><i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>no working day</span>
+                        <button class="cal-btn st-btn hl-btn" @click="capCsv">⬇ CSV</button>
+                    </div>
+                    <div class="hl-scroll hl-cap-scroll">
+                        <table class="hl-table hl-table-s hl-cap-tbl">
+                            <thead><tr><th class="hl-cap-sticky">Unit / line</th><th class="hl-cap-sticky2">Setup</th><th v-for="c in capTable.cols" :key="c.key">{{ c.label }}</th><th>Total</th></tr></thead>
+                            <tbody>
+                                <tr v-for="r in capTable.rows" :key="r.id" :class="{ 'hl-cap-unit' : r.isUnit, 'hl-cap-off' : !r.isUnit && !r.active }">
+                                    <td class="hl-cap-sticky" :class="{ 'hl-cap-line' : !r.isUnit }"><b v-if="r.isUnit">{{ r.name }}</b><template v-else>{{ r.name }}</template></td>
+                                    <td class="hl-cap-sticky2 hl-dim">{{ r.setup }}</td>
+                                    <td v-for="c in capTable.cols" :key="c.key" class="hl-r hl-cap-cell" :class="capCls(r.cells[c.key])" :title="capTip(r.cells[c.key], r.smv)">{{ r.cells[c.key].cap > 0 ? capFmt(capVal(r.cells[c.key], r.smv)) : '—' }}</td>
+                                    <td class="hl-r"><b>{{ capFmt(capVal(r.tot, r.smv)) }}</b></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint">Capacity of a line per working day = manpower × (hours + OT) × 60 × efficiency % (Configure units &amp; lines → Lines; hours follow the unit's month calendar unless the line has its own figure, holidays and off days give none). Reserved = the scenario's bars on the line (live load snapshot, proposals, manual reservations). Available = capacity − reserved. Pieces are at the unit average SMV ({{ sc.units.map(u => `${u.name} ${unitAvgSmv(u.code)}`).join(' · ') }}); SAH = standard hours. Hover a cell for capacity / reserved / available / working days.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Before & After balancing -->
         <div v-if="baOpen && sc && allocRep" class="cal-overlay" @click.self="baOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog hl-ba-dialog">
@@ -2369,6 +2496,15 @@ function close() {
 .hl-crit { max-width : 320px; white-space : normal !important; font-size : 11px; line-height : 1.25; }
 .hl-warn { color : #e65100; font-weight : 600; }
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
+.cal-overlay .cal-dialog.hl-cap-dialog { width : 1500px; max-width : 96vw; }
+.hl-cap-scroll { max-height : 68vh; overflow : auto; }
+.hl-cap-tbl th, .hl-cap-tbl td { white-space : nowrap; }
+.hl-cap-tbl thead th { position : sticky; top : 0; background : #f2f4f7; z-index : 2; }
+.hl-cap-sticky { position : sticky; left : 0; background : #fff; z-index : 1; min-width : 130px; } .hl-cap-sticky2 { position : sticky; left : 130px; background : #fff; z-index : 1; font-size : 10.5px; }
+.hl-cap-tbl thead .hl-cap-sticky, .hl-cap-tbl thead .hl-cap-sticky2 { z-index : 3; background : #f2f4f7; }
+.hl-cap-unit td { background : #e8eef6; font-weight : 700; } .hl-cap-unit .hl-cap-sticky, .hl-cap-unit .hl-cap-sticky2 { background : #e8eef6; }
+.hl-cap-line { padding-left : 16px !important; } .hl-cap-off td { color : #999; font-style : italic; }
+.hl-cap-cell { min-width : 64px; }
 .cal-overlay .cal-dialog.hl-ab-dialog { width : 1180px; } .cal-overlay .cal-dialog.hl-abr-dialog { width : 1400px; } .cal-overlay .cal-dialog.hl-pw-dialog { width : 1500px; } .cal-overlay .cal-dialog.hl-gp-dialog { width : 1450px; } .cal-overlay .cal-dialog.hl-ba-dialog { width : 1450px; }
 .hl-ab-grid { display : grid; grid-template-columns : 1fr 1fr; gap : 12px; }
 .hl-ab-box { border : 1px solid #c9d2dc; border-radius : 4px; background : #f7f9fc; padding : 8px 12px; font-size : 12px; }
