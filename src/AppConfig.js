@@ -2311,6 +2311,14 @@ export const schedulerProConfig = {
         },
     },
 
+    // No edge-drag resize: a bar's END follows the production schedule (it is
+    // re-fitted by the board, never set by hand), and Bryntum's resize handles
+    // covered a big part of short bars — a press near an edge started a
+    // zero-length resize on mouse-up: raw.dur was recomputed, the bar jumped,
+    // its followers were pushed ("N following order(s) shifted later") and
+    // the bar, already picked up by the mouse-down, then followed the pointer.
+    eventResizeFeature : { disabled : true },
+
     // Pick-and-place uses click, not native drag — drag caused blank flashes
     eventDragFeature : {
         disabled                : true,
