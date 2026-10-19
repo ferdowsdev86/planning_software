@@ -392,7 +392,9 @@ async function get(path, timeoutMs = 4000) {
 // Daily production updates (day_production_update_plan table)
 // ---------------------------------------------------------------------------
 export async function loadProdUpdatesDb() {
-    const data = await get('/production-updates');
+    // a What-if copy on screen reads the production figures frozen with it
+    const wiQ = whatIfView.id ? `?whatif=${whatIfView.id}&by=${encodeURIComponent(whatIfView.by || '')}` : '';
+    const data = await get(`/production-updates${wiQ}`);
     if (!data.success) throw new Error(data.error || 'load failed');
     return data.rows || [];
 }

@@ -213,9 +213,14 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             const [[wrow]] = await pool.query('SELECT * FROM planning_whatif_dbs WHERE id = ? AND deleted_at IS NULL', [Number(req.query.whatif)]);
             if (!user || !wrow || !whatIfSees(user, wrow)) return res.status(403).json({ success : false, error : 'What-if database not available' });
             const [[snap]] = await pool.query('SELECT data FROM planning_board_snapshots WHERE id = ?', [wrow.snapshot_id]);
-            let bars = [];
+            let bars = [], frozen = null;
             try { bars = JSON.parse(snap?.data || '[]'); } catch { bars = []; }
-            whatIf = { row : wrow, bars : Array.isArray(bars) ? bars : [] };
+            // frozen copy (What-ifs taken since 2026-10-19): the bars' order
+            // rows, production and ERP labels as they were that day — copies
+            // taken before carry no frozen data and read the live rows
+            try { frozen = wrow.frozen ? JSON.parse(wrow.frozen) : null; } catch { frozen = null; }
+            if (frozen && !Array.isArray(frozen.events)) frozen = null;
+            whatIf = { row : wrow, bars : Array.isArray(bars) ? bars : [], frozen };
         }
         const whatIfIds = whatIf ? whatIf.bars.map(b => Number(b.id)).filter(Boolean) : [];
 
@@ -235,9 +240,11 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         const [[resources0], [events0], [assignments], [dependencies], [calendars], [allRes], holdRes] = await Promise.all([
             pool.query(resourceSql, resourceParams),
             whatIf
-                ? (whatIfIds.length
-                    ? pool.query(EVENT_SQL_HEAD + ` WHERE e.id IN (${whatIfIds.map(() => '?').join(',')})`, whatIfIds)
-                    : Promise.resolve([[]]))
+                ? (whatIf.frozen
+                    ? Promise.resolve([whatIf.frozen.events])
+                    : (whatIfIds.length
+                        ? pool.query(EVENT_SQL_HEAD + ` WHERE e.id IN (${whatIfIds.map(() => '?').join(',')})`, whatIfIds)
+                        : Promise.resolve([[]])))
                 : pool.query(EVENT_SQL_HEAD + `
              WHERE e.project_id = ? AND e.event_status != 'cancelled'`, [projectId]),
             whatIf
@@ -361,7 +368,9 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         }
 
         // ERP labels for the bars on this board (Item / Buyer colour modes)
-        const [erpByOrder, buyerShort] = await Promise.all([erpOrderInfo(events.map(evOrderCode)), buyerShortNames()]);
+        const [erpByOrder, buyerShort] = whatIf?.frozen
+            ? [whatIf.frozen.erpByOrder || {}, whatIf.frozen.buyerShort || {}]
+            : await Promise.all([erpOrderInfo(events.map(evOrderCode)), buyerShortNames()]);
 
         // One factory calendar per production unit: the unit's own calendar,
         // else the first active one (its working hours never mix with another unit's)
@@ -391,7 +400,9 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             dependencies : { rows : dependencies },
             calendars    : { rows : unitCalendar },
             erpByOrder, buyerShort,
-            whatIf : whatIf ? { id : whatIf.row.id, name : whatIf.row.name, createdAt : snapFmt(whatIf.row.created_at), createdBy : whatIf.row.created_by, expiresAfter : ymdStr(whatIf.row.expires_after) } : null
+            whatIf : whatIf ? { id : whatIf.row.id, name : whatIf.row.name, createdAt : snapFmt(whatIf.row.created_at), createdBy : whatIf.row.created_by, expiresAfter : ymdStr(whatIf.row.expires_after), frozen : !!whatIf.frozen } : null,
+            // the copy's production figures of that day (the client takes them instead of the live table)
+            production : whatIf?.frozen ? (whatIf.frozen.production || []) : undefined
         });
     }
     catch (e) {
@@ -967,6 +978,16 @@ app.put(`${BASE}/calendars/:id`, async (req, res) => {
 // --------------------------------------------------------------------------
 app.get(`${BASE}/production-updates`, async (req, res) => {
     try {
+        // a What-if copy on screen: its frozen production rows, never the live table
+        if (req.query.whatif) {
+            const user = await whatIfUser(req.query.by);
+            const [[wrow]] = await pool.query('SELECT id, created_by, frozen FROM planning_whatif_dbs WHERE id = ? AND deleted_at IS NULL', [Number(req.query.whatif)]);
+            if (!user || !wrow || !whatIfSees(user, wrow)) return res.status(403).json({ success : false, error : 'What-if database not available' });
+            let frozen = null;
+            try { frozen = wrow.frozen ? JSON.parse(wrow.frozen) : null; } catch { frozen = null; }
+            if (frozen) return res.json({ success : true, rows : frozen.production || [], whatIf : wrow.id, frozen : true });
+            // a copy taken before freezing existed: live rows (as before)
+        }
         const [rows] = await pool.query(
             `SELECT id, event_id, event_ref, unit, floor, line, operation_type,
                     style, order_no, po_number, color, order_qty, day_plan_qty,
@@ -3284,6 +3305,37 @@ async function ensureWhatIfTable() {
         KEY idx_wi_user (created_by, deleted_at),
         KEY idx_wi_created (created_at)
     )`);
+    // the copy's own data (bars with their order rows, production figures,
+    // ERP labels) — a What-if is a frozen picture of that day: later order,
+    // production or ERP changes never reach it
+    await pool.query('ALTER TABLE planning_whatif_dbs ADD COLUMN IF NOT EXISTS frozen MEDIUMTEXT NULL');
+}
+
+// Everything the board needs to show the copy, taken NOW: the bars' event +
+// order rows (EVENT_SQL_HEAD), the production rows of those bars and the ERP
+// labels. Stored with the What-if, served from there — never re-read live.
+async function freezeWhatIfData(snapshotId) {
+    const [[snap]] = await pool.query('SELECT data FROM planning_board_snapshots WHERE id = ?', [snapshotId]);
+    let bars = [];
+    try { bars = JSON.parse(snap?.data || '[]'); } catch { bars = []; }
+    const ids = (Array.isArray(bars) ? bars : []).map(b => Number(b.id)).filter(Boolean);
+    if (!ids.length) return { events : [], production : [], erpByOrder : {}, buyerShort : await buyerShortNames(), takenAt : new Date().toISOString() };
+    const ph = ids.map(() => '?').join(',');
+    const refs = ids.map(id => `db-${id}`);
+    const [[events], [production]] = await Promise.all([
+        pool.query(EVENT_SQL_HEAD + ` WHERE e.id IN (${ph})`, ids),
+        pool.query(
+            `SELECT id, event_id, event_ref, unit, floor, line, operation_type,
+                    style, order_no, po_number, color, order_qty, day_plan_qty,
+                    prod_qty, save_date
+               FROM day_production_update_plan
+              WHERE event_id IN (${ph}) OR SUBSTRING_INDEX(event_ref, ':po', 1) IN (${refs.map(() => '?').join(',')})
+              ORDER BY save_date, line`, [...ids, ...refs])
+    ]);
+    const evOrderCode = e => e.order_code || (String(e.event_code || '').startsWith('ev-proj:') ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+    const [erpByOrder, buyerShort] = await Promise.all([erpOrderInfo(events.map(evOrderCode)), buyerShortNames()]);
+    // plain JSON (dates → ISO strings, exactly what the API would send)
+    return JSON.parse(JSON.stringify({ events, production, erpByOrder, buyerShort, takenAt : new Date().toISOString() }));
 }
 async function whatIfUser(username) {
     const u = String(username || '').trim();
@@ -3328,10 +3380,11 @@ app.post(`${BASE}/whatif`, async (req, res) => {
             'SELECT id FROM planning_whatif_dbs WHERE deleted_at IS NULL AND created_by = ? AND name = ?', [user.username, name]);
         if (dup) return res.status(409).json({ success : false, error : `You already have a What-if database named "${name}"` });
         const snap = await takeBoardSnapshot(unitId, 'whatif', user.username);
+        const frozen = await freezeWhatIfData(snap.id);
         const [ins] = await pool.query(
-            `INSERT INTO planning_whatif_dbs (name, snapshot_id, unit_id, bars, created_by, expires_after) VALUES (?, ?, ?, ?, ?, ?)`,
-            [name, snap.id, unitId, snap.bars, user.username, exp]);
-        console.log(`[whatif] "${name}" by ${user.username}: unit ${unitId ?? 'all'}, ${snap.bars} bars, expires ${exp} (id ${ins.insertId})`);
+            `INSERT INTO planning_whatif_dbs (name, snapshot_id, unit_id, bars, created_by, expires_after, frozen) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [name, snap.id, unitId, snap.bars, user.username, exp, JSON.stringify(frozen)]);
+        console.log(`[whatif] "${name}" by ${user.username}: unit ${unitId ?? 'all'}, ${snap.bars} bars, ${frozen.production.length} production rows frozen, expires ${exp} (id ${ins.insertId})`);
         res.json({ success : true, id : ins.insertId, bars : snap.bars });
     }
     catch (e) { dbFail(res, e); }
