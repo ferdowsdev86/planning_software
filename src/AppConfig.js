@@ -800,15 +800,13 @@ export function computeInsertStart(scheduler, lineId, desired, dur, excludeId) {
     for (let guard = 0; guard < 20; guard++) {
         const end  = endOfWork(start, dur);
         const obst = bars.find(ev =>
-            // the drop point sits within the snap window of a bar's END: the
-            // bar goes flush after it (no sliver push). A bar that runs
-            // ACROSS the drop point does not block: the dropped bar takes the
-            // exact point and that bar is pushed later by pushFollowers —
-            // FastReact insertion rule (before, such a bar stayed put and the
-            // drop landed after it, so moving a bar EARLIER on a busy line
-            // looked like it never moved)
-            (!isFixed(ev) && ev.startDate < start
-                && Math.abs(ev.endDate.getTime() - start.getTime()) <= NEAR_MS)
+            // a bar that started earlier and still runs across the drop point
+            // (or ends within the snap window of it) stays where it is: the
+            // dropped bar attaches flush after it. Dropping onto the tail of
+            // a bar is how planners put a bar "next to" another one — the
+            // earlier bar must never be pushed back for that (planner rule);
+            // only the bars that start at / after the drop point move later
+            (ev.startDate < start && ev.endDate.getTime() + NEAR_MS > start.getTime())
             // locked/completed bars block anywhere inside the span
             || (isFixed(ev) && ev.startDate < end && ev.endDate > start));
         if (!obst) return { start, end, snapped, blockedBy };
