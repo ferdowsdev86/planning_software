@@ -149,6 +149,34 @@ test('ERP orders merge once per order code and plan the outstanding quantity', (
     assert.equal(r.reservations[0].smv, 21.5);
 });
 
+test('ERP groups (buyer + unit + style + colour + PCD + delivery) are one order each, matched by key; stale imports go, locked ones stay', () => {
+    const sc = scenario();
+    const g = (key, code, color, qty, extra = {}) => ({ key, code, codes : code, color, pos : 2, buyer : 'LEVIS', style : '00514', product : 'Denim Pants', qty, outstanding : qty, smv : 21.5, pcd : '2026-11-01', delivery : '2026-12-01', unitId : 1, ...extra });
+    // the old one-row-per-order-code import
+    mergeErpOrders(sc, [{ code : '26H1LEV310', buyer : 'LEVIS', style : '00514', product : 'Denim Pants', qty : 9000, outstanding : 9000, smv : 21.5, pcd : '2026-11-01', delivery : '2026-12-01', unitId : 1 }]);
+    const oldId = sc.orders[0].id;
+    sc.reservations.push({ id : 'rs_old', orderId : oldId, lineId : 'M1', product : 'Denim Pants', start : '2026-11-10', end : '2026-11-12', qty : 500, locked : false, status : 'proposed', source : 'autoplan' });
+    // the grouped import: two colours of the same style / delivery = two orders, two bars
+    let m = mergeErpOrders(sc, [g('1|LEVIS|00514|00514-2270|2026-11-01|2026-12-01', '26H1LEV310, 26H1LEV373', '00514-2270', 4600), g('1|LEVIS|00514|00514-1920|2026-11-01|2026-12-01', '26H1LEV311', '00514-1920', 2000)]);
+    assert.equal(m.added, 2); assert.equal(m.removed, 1);
+    assert.equal(sc.orders.length, 2);
+    assert.equal(sc.orders.some(o => o.id === oldId), false);
+    assert.equal(sc.reservations.some(r => r.id === 'rs_old'), false);          // the stale order's unlocked bar went with it
+    assert.equal(sc.orders[0].color, '00514-2270');
+    assert.equal(sc.orders[0].note, '26H1LEV310, 26H1LEV373');
+    // re-import updates by key, never duplicates
+    m = mergeErpOrders(sc, [g('1|LEVIS|00514|00514-2270|2026-11-01|2026-12-01', '26H1LEV310, 26H1LEV373', '00514-2270', 4700), g('1|LEVIS|00514|00514-1920|2026-11-01|2026-12-01', '26H1LEV311', '00514-1920', 2000)]);
+    assert.equal(m.added, 0); assert.equal(m.updated, 2); assert.equal(m.removed, 0);
+    assert.equal(sc.orders[0].qty, 4700);
+    // a locked reservation keeps its order even when the import no longer returns it
+    sc.reservations.push({ id : 'rs_lock', orderId : sc.orders[1].id, lineId : 'M1', product : 'Denim Pants', start : '2026-11-10', end : '2026-11-12', qty : 500, locked : true, status : 'reserved', source : 'balance' });
+    m = mergeErpOrders(sc, [g('1|LEVIS|00514|00514-2270|2026-11-01|2026-12-01', '26H1LEV310, 26H1LEV373', '00514-2270', 4700)]);
+    assert.equal(m.removed, 0); assert.equal(sc.orders.length, 2);
+    // the bar label carries the colour
+    const r = autoBalance(sc);
+    assert.equal(r.reservations[0].label, 'LEVIS 00514 · 00514-2270');
+});
+
 test('the GSL pool is one row, accepts any quantity and consumes no internal capacity', () => {
     const sc = scenario();
     sc.orders.push(order('o1', 'C', 'Shorts', 5000000, '2026-11-05'));

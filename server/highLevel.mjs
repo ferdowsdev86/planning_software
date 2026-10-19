@@ -127,6 +127,11 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS lc_days INT NULL');
             await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS is_repeat TINYINT(1) NOT NULL DEFAULT 0');
             await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS repeat_of VARCHAR(60) NULL');
+            // ERP orders grouped by buyer + production unit + style + colour + PCD + delivery (one bar per group)
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS color VARCHAR(120) NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS codes VARCHAR(400) NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS pos INT NULL');
+            await pool.query('ALTER TABLE hl_orders MODIFY source VARCHAR(200) NULL');
             console.log('[hl] High Level Planning tables ready');
         })
         .catch(e => console.error('[hl] tables:', e.message));
@@ -202,7 +207,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             holidays : holidays.map(h => ({ date : ymd(h.hol_date), unitCode : h.unit_code || null, label : h.label || '', kind : h.kind || 'holiday' })),
             orders : orders.map(o => ({ id : o.id, buyer : o.buyer || '', style : o.style || '', product : o.product || '', qty : Number(o.qty), pcd : ymd(o.pcd), delivery : ymd(o.delivery), unitCode : o.unit_code || '', note : o.note || '', source : o.source || null,
                 garment : o.garment || '', smv : o.smv == null ? null : Number(o.smv), outstanding : o.outstanding == null ? null : Number(o.outstanding), priority : !!o.priority, po : o.po || '',
-                repeat : !!o.is_repeat, repeatOf : o.repeat_of || null })),
+                repeat : !!o.is_repeat, repeatOf : o.repeat_of || null, color : o.color || '', codes : o.codes || '', pos : o.pos == null ? null : Number(o.pos) })),
             reservations : reservations.map(r => ({ id : r.id, orderId : r.order_id, lineId : r.line_id, product : r.product || null, start : ymd(r.start_date), end : ymd(r.end_date), qty : Number(r.qty), locked : !!r.locked, status : r.status, label : r.label || '', source : r.source || null,
                 kind : r.kind || null, fromUnit : r.from_unit || null, reason : r.reason || null, extStatus : r.ext_status || null, smv : r.smv == null ? null : Number(r.smv),
                 planStatus : r.plan_status || null, lcDays : r.lc_days == null ? 0 : Number(r.lc_days) }))
@@ -239,10 +244,10 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         await bulk('INSERT INTO hl_line_products (line_id, product, smv)', Array(3).fill(0), lp);
         await bulk('INSERT IGNORE INTO hl_products (scenario_id, name, smv)', Array(3).fill(0), (sc.products || []).map(p => [id, p.name, Number(p.smv) || 20]));
         await bulk('INSERT INTO hl_holidays (scenario_id, unit_code, hol_date, label, kind)', Array(5).fill(0), (sc.holidays || []).map(h => [id, h.unitCode || null, h.date, h.label || null, h.kind || 'holiday']));
-        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source, garment, smv, outstanding, priority, po, is_repeat, repeat_of)', Array(18).fill(0),
-            (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source || null,
+        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source, garment, smv, outstanding, priority, po, is_repeat, repeat_of, color, codes, pos)', Array(21).fill(0),
+            (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source ? String(o.source).slice(0, 200) : null,
                 o.garment || null, o.smv == null || o.smv === '' ? null : Number(o.smv), o.outstanding == null ? null : Number(o.outstanding), o.priority ? 1 : 0, o.po ? String(o.po).slice(0, 400) : null,
-                o.repeat ? 1 : 0, o.repeatOf ? String(o.repeatOf).slice(0, 60) : null]));
+                o.repeat ? 1 : 0, o.repeatOf ? String(o.repeatOf).slice(0, 60) : null, o.color ? String(o.color).slice(0, 120) : null, o.codes ? String(o.codes).slice(0, 400) : null, o.pos == null ? null : Number(o.pos)]));
         await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv, plan_status, lc_days)', Array(19).fill(0),
             (sc.reservations || []).map(r => [r.id, id, r.orderId || null, r.lineId, r.product || null, r.start, r.end, Number(r.qty) || 0, r.locked ? 1 : 0, r.status || 'reserved', r.label || null, r.source || null,
                 r.kind || null, r.fromUnit || null, r.reason ? String(r.reason).slice(0, 400) : null, r.extStatus || null, r.smv == null ? null : Number(r.smv),
@@ -592,38 +597,78 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         catch (e) { dbFail(res, e); }
     });
 
-    // ---- ERP active orders for the Central Auto Balance (READ ONLY) -------
-    // One row per active production order from the plan cut-off on: contract
-    // unit (mr_order_entry.prod_unit), product type, garment type, order qty,
-    // outstanding (Σ valid PO qty − exported, the order qty when it has no
-    // PO), the style SMV, PCD, delivery and the ERP high-priority flag.
-    async function erpOrders() {
-        const [rows] = await pool.query(
-            `SELECT oe.order_id, oe.order_code, b.b_name AS buyer, s.stl_no AS style,
+    // ---- ERP active orders for the High Level board (READ ONLY) -----------
+    // The planning unit of the board is the GROUP buyer + production unit +
+    // style + colour + PCD + delivery date: every valid PO (mr_purchase_order,
+    // colour = its clr_id, delivery = its ex-factory date, the order delivery
+    // date when none) of an active order from the plan cut-off on is summed
+    // into that group — one scenario order, one bar. An order with no valid
+    // PO is its own group (no colour, the order delivery date). Each group
+    // carries its ERP order codes and PO numbers, the style product / garment
+    // / SMV, the outstanding quantity (PO qty − exported) and the repeat flag
+    // (the style was ordered before with an earlier delivery).
+    const GROUP_FIELDS = `b.b_name AS buyer, s.stl_no AS style,
                     COALESCE(pt.prd_type_name, NULLIF(s.stl_type, ''), 'Other') AS product, gt.gmt_name AS garment,
-                    oe.order_qty AS qty, oe.order_delivery_date AS delivery, CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
+                    CASE WHEN oe.pcd >= '2020-01-01' THEN oe.pcd END AS pcd,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0) AS smv,
-                    COALESCE(oe.prod_unit, -1) AS unit_id, oe.high_priority, oe.mr_season_se_id AS season,
+                    COALESCE(oe.prod_unit, -1) AS unit_id, oe.high_priority AS hp, oe.mr_season_se_id AS season, oe.order_code,
                     /* repeat order: the same style was ordered before (earlier delivery) — PCD + 3 and no learning curve */
                     (SELECT COUNT(*) FROM \`${ERP_DB}\`.mr_order_entry x WHERE x.mr_style_stl_id = oe.mr_style_stl_id AND x.order_id <> oe.order_id AND x.order_delivery_date < oe.order_delivery_date) AS prev_orders,
-                    (SELECT x.order_code FROM \`${ERP_DB}\`.mr_order_entry x WHERE x.mr_style_stl_id = oe.mr_style_stl_id AND x.order_id <> oe.order_id AND x.order_delivery_date < oe.order_delivery_date ORDER BY x.order_delivery_date DESC LIMIT 1) AS prev_code,
-                    (SELECT SUM(GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0)) FROM \`${ERP_DB}\`.mr_purchase_order po
-                      WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK}) AS outstanding,
-                    (SELECT SUBSTRING(GROUP_CONCAT(DISTINCT po.po_no ORDER BY po.po_no SEPARATOR ', '), 1, 400) FROM \`${ERP_DB}\`.mr_purchase_order po
-                      WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK}) AS po_list
-               FROM \`${ERP_DB}\`.mr_order_entry oe
-               JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+                    (SELECT x.order_code FROM \`${ERP_DB}\`.mr_order_entry x WHERE x.mr_style_stl_id = oe.mr_style_stl_id AND x.order_id <> oe.order_id AND x.order_delivery_date < oe.order_delivery_date ORDER BY x.order_delivery_date DESC LIMIT 1) AS prev_code`;
+    const GROUP_JOINS = `JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
-               LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+               LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id`;
+    async function erpOrders() {
+        const [poRows] = await pool.query(
+            `SELECT buyer, style, color, product, garment, pcd, delivery, smv, unit_id,
+                    MAX(hp = 'Y') AS priority, MIN(season) AS season,
+                    SUM(qty) AS qty, SUM(outstanding) AS outstanding, COUNT(*) AS pos,
+                    GROUP_CONCAT(DISTINCT order_code ORDER BY order_code SEPARATOR ', ') AS codes,
+                    SUBSTRING(GROUP_CONCAT(DISTINCT po_no ORDER BY po_no SEPARATOR ', '), 1, 400) AS po_list,
+                    MAX(prev_orders > 0) AS repeat_, MAX(prev_code) AS prev_code
+               FROM (
+                    SELECT ${GROUP_FIELDS}, COALESCE(mc.clr_name, '') AS color,
+                           COALESCE(po.po_ex_fty, oe.order_delivery_date) AS delivery, po.po_no, po.po_qty AS qty,
+                           GREATEST(po.po_qty - COALESCE(po.export_qty, 0), 0) AS outstanding
+                      FROM \`${ERP_DB}\`.mr_purchase_order po
+                      JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = po.mr_order_entry_order_id
+                      ${GROUP_JOINS}
+                      LEFT JOIN \`${ERP_DB}\`.mr_material_color mc ON mc.clr_id = po.clr_id
+                     WHERE ${ERP_ACTIVE} AND ${ERP_PO_OK} AND COALESCE(po.po_ex_fty, oe.order_delivery_date) >= ?
+               ) t
+              GROUP BY buyer, unit_id, style, color, pcd, delivery
+              ORDER BY delivery, style LIMIT 8000`, [ERP_CUTOFF]);
+        // orders without a valid PO: one group each (no colour, order delivery date)
+        const [oeRows] = await pool.query(
+            `SELECT ${GROUP_FIELDS}, '' AS color, oe.order_delivery_date AS delivery, oe.order_qty AS qty, oe.order_qty AS outstanding
+               FROM \`${ERP_DB}\`.mr_order_entry oe
+               ${GROUP_JOINS}
               WHERE ${ERP_ACTIVE} AND oe.order_delivery_date >= ?
+                AND NOT EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_purchase_order po WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_OK})
               ORDER BY oe.order_delivery_date, oe.order_code LIMIT 5000`, [ERP_CUTOFF]);
-        return rows.map(r => ({
-            code : r.order_code, buyer : r.buyer || '', style : r.style || '', product : r.product || 'Other', garment : r.garment || '',
-            qty : Number(r.qty) || 0, outstanding : r.outstanding == null ? Number(r.qty) || 0 : Number(r.outstanding) || 0,
-            smv : Number(r.smv) || 0, pcd : ymd(r.pcd), delivery : ymd(r.delivery), unitId : Number(r.unit_id), priority : r.high_priority === 'Y', po : r.po_list || '',
-            season : r.season == null ? null : Number(r.season), repeat : Number(r.prev_orders) > 0, repeatOf : r.prev_code || null
-        }));
+        const keyOf = r => [Number(r.unit_id), r.buyer || '', r.style || '', r.color || '', ymd(r.pcd) || '', ymd(r.delivery) || ''].join('|');
+        const out = new Map();
+        const add = (r, codes, pos, po) => {
+            const key = keyOf(r);
+            const ex = out.get(key);
+            if (ex) {   // a no-PO order falling into an existing group
+                ex.qty += Number(r.qty) || 0; ex.outstanding += Number(r.outstanding) || 0; ex.pos += pos;
+                ex.codes = [...new Set([...ex.codes.split(', '), ...codes.split(', ')].filter(Boolean))].sort().join(', ');
+                ex.code = ex.codes; ex.repeat = ex.repeat || Number(r.repeat_ ?? r.prev_orders) > 0; ex.priority = ex.priority || r.priority === 'Y' || Number(r.priority) > 0;
+                return;
+            }
+            out.set(key, {
+                key, code : codes, codes, pos, buyer : r.buyer || '', style : r.style || '', color : r.color || '', product : r.product || 'Other', garment : r.garment || '',
+                qty : Number(r.qty) || 0, outstanding : r.outstanding == null ? Number(r.qty) || 0 : Number(r.outstanding) || 0,
+                smv : Number(r.smv) || 0, pcd : ymd(r.pcd), delivery : ymd(r.delivery), unitId : Number(r.unit_id),
+                priority : r.priority === 'Y' || Number(r.priority) > 0, po : po || '',
+                season : r.season == null ? null : Number(r.season), repeat : Number(r.repeat_ ?? r.prev_orders) > 0, repeatOf : r.prev_code || null
+            });
+        };
+        for (const r of poRows) add(r, r.codes || '', Number(r.pos) || 0, r.po_list || '');
+        for (const r of oeRows) add({ ...r, priority : r.hp }, r.order_code || '', 0, '');
+        return [...out.values()];
     }
     app.get(`${HL}/erp-orders`, async (req, res) => {
         try {

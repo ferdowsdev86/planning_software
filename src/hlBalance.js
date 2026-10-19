@@ -17,7 +17,7 @@
 // loaded past their capacity; the GSL pool has no ceiling and stays
 // "Pending External Capacity Confirmation" until the planner reviews it.
 // ---------------------------------------------------------------------------
-import { HL_UNITS, uid, addDays, daysBetween, lineDayMinutes, lineSmv, productSmv, ensurePoolLine, reservationDays, buildLoad } from './hlEngine.js';
+import { HL_UNITS, uid, addDays, daysBetween, orderLabel, lineDayMinutes, lineSmv, productSmv, ensurePoolLine, reservationDays, buildLoad } from './hlEngine.js';
 
 export const INTERNAL = ['M', 'C', 'A'];
 export const EXT_STATUS = {
@@ -53,29 +53,49 @@ export const orderSmv = (sc, o) => (Number(o?.smv) > 0 ? Number(o.smv) : product
 export const ymOf = d => (d ? String(d).slice(0, 7) : 'none');
 
 // ---------------------------------------------------------------------------
-// ERP orders → scenario orders (one order = one scenario order, matched by
-// its ERP order code; re-importing updates, never duplicates)
+// ERP orders → scenario orders. One ERP row = one GROUP (buyer + production
+// unit + style + colour + PCD + delivery date, server-side) = one scenario
+// order = one bar; matched by the group key (r.key, kept in source
+// 'erp:<key>'), so re-importing updates, never duplicates. Rows without a
+// key (older callers, tests) match by the order code. ERP-imported orders
+// the import no longer returns (shipped, cancelled — or the old one-row-
+// per-order-code imports) are removed with their unlocked reservations;
+// an order with a locked reservation stays.
 // ---------------------------------------------------------------------------
 export function mergeErpOrders(sc, rows) {
     let added = 0, updated = 0, skipped = 0;
-    const byCode = new Map();
-    for (const o of sc.orders) { if (o.note) byCode.set(o.note, o); const m = /^(?:live|erp):(.+)$/.exec(o.source || ''); if (m) byCode.set(m[1], o); }
+    const byKey = new Map();
+    for (const o of sc.orders) { const m = /^erp:(.+)$/.exec(o.source || ''); if (m) byKey.set(m[1], o); else if (o.note && !o.source) byKey.set(o.note, o); }
+    const seen = new Set();
     for (const r of rows) {
-        if (!r.code || !(Number(r.qty) > 0)) { skipped++; continue; }
+        const key = r.key || r.code;
+        if (!key || !(Number(r.qty) > 0)) { skipped++; continue; }
         const unitCode = HL_UNITS.find(u => u.liveUnitId === Number(r.unitId))?.code || '';
-        const fields = { buyer : r.buyer || '', style : r.style || '', product : r.product || 'Other', garment : r.garment || '', qty : Number(r.qty) || 0,
+        const fields = { buyer : r.buyer || '', style : r.style || '', color : r.color || '', product : r.product || 'Other', garment : r.garment || '', qty : Number(r.qty) || 0,
             outstanding : Number(r.outstanding) || 0, smv : Number(r.smv) > 0 ? Math.round(Number(r.smv) * 100) / 100 : null, pcd : r.pcd || null, delivery : r.delivery || null,
-            unitCode, priority : !!r.priority, note : r.code, po : r.po || '', season : r.season ?? null, repeat : !!r.repeat, repeatOf : r.repeatOf || null };
-        const ex = byCode.get(r.code);
-        if (ex) { Object.assign(ex, fields, { source : ex.source || `erp:${r.code}` }); updated++; }
-        else { const o = { id : uid('or'), ...fields, source : `erp:${r.code}` }; sc.orders.push(o); byCode.set(r.code, o); added++; }
+            unitCode, priority : !!r.priority, note : r.code || '', codes : r.codes || r.code || '', pos : r.pos == null ? null : Number(r.pos), po : r.po || '',
+            season : r.season ?? null, repeat : !!r.repeat, repeatOf : r.repeatOf || null };
+        const ex = byKey.get(key);
+        if (ex) { Object.assign(ex, fields, { source : `erp:${key}` }); updated++; seen.add(ex.id); }
+        else { const o = { id : uid('or'), ...fields, source : `erp:${key}` }; sc.orders.push(o); byKey.set(key, o); seen.add(o.id); added++; }
         if (fields.product && !sc.products.some(p => p.name === fields.product)) {
             const smv = fields.smv || 20;
             sc.products.push({ name : fields.product, smv });
             for (const l of sc.lines) if (!l.pool && l.products[fields.product] == null) l.products[fields.product] = smv;
         }
     }
-    return { added, updated, skipped };
+    // stale ERP imports go (only on a full import)
+    let removed = 0;
+    if (rows.length) {
+        const lockedOrders = new Set(sc.reservations.filter(r => r.locked && r.orderId).map(r => r.orderId));
+        const stale = new Set(sc.orders.filter(o => /^erp:/.test(o.source || '') && !seen.has(o.id) && !lockedOrders.has(o.id)).map(o => o.id));
+        if (stale.size) {
+            sc.orders = sc.orders.filter(o => !stale.has(o.id));
+            sc.reservations = sc.reservations.filter(r => !(r.orderId && stale.has(r.orderId)));
+            removed = stale.size;
+        }
+    }
+    return { added, updated, skipped, removed };
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +211,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, 
             start : ix.days[best.f.startI], end : ix.days[best.f.endI], qty : best.f.placed,
             locked : false, status : 'proposed', source : 'balance', kind, fromUnit : order.unitCode,
             lcDays : lcDays > 0 ? lcDays : 0,
-            label : `${order.buyer || ''} ${order.style || ''}`.trim()
+            label : orderLabel(order)
         });
         remaining -= best.f.placed;
     }
@@ -273,7 +293,7 @@ export function autoBalance(sc, opts = {}) {
                 const s = fromI <= lastI ? ix.days[Math.min(fromI, lastI)] : from;
                 const e = untilI >= 0 ? ix.days[Math.max(0, Math.min(untilI, lastI))] : s;
                 reservations.push({ id : uid('rs'), orderId : o.id, lineId : pool.id, product : o.product, smv : orderSmv(sc, o), start : s, end : e < s ? s : e, qty : remaining,
-                    locked : false, status : 'proposed', source : 'balance', kind : 'contract', fromUnit : 'G', extStatus : 'pending', reason : 'GSL contract order — outside production', label : `${o.buyer || ''} ${o.style || ''}`.trim() });
+                    locked : false, status : 'proposed', source : 'balance', kind : 'contract', fromUnit : 'G', extStatus : 'pending', reason : 'GSL contract order — outside production', label : orderLabel(o) });
                 res.contract = remaining; remaining = 0; res.rule = 'GSL contract order'; res.risk = true;
             }
             else if (fromI <= untilI) {
@@ -306,7 +326,7 @@ export function autoBalance(sc, opts = {}) {
                     id : uid('rs'), orderId : o.id, lineId : pool.id, product : o.product, smv : orderSmv(sc, o),
                     start : s, end : e < s ? s : e, qty : remaining, locked : false, status : 'proposed', source : 'balance', kind : 'gsl', fromUnit : o.unitCode,
                     extStatus : 'pending', reason : `${res.notes.join('; ') || 'internal capacity exhausted'} → GSL overflow`,
-                    label : `${o.buyer || ''} ${o.style || ''}`.trim()
+                    label : orderLabel(o)
                 });
                 res.gsl = remaining; remaining = 0;
                 res.rule += (res.rule ? ' → ' : '') + 'GSL overflow';
@@ -497,7 +517,7 @@ export function autoPlanUnits(sc, opts = {}) {
         const lcDays = lcDaysFor(sc, o, rules);
         const inputDate = inputDateFor(o, rules);
         const deadline = o.delivery ? addDays(o.delivery, -(Number(settings.deliveryLead) || 0)) : to;
-        const res = { orderId : o.id, code : o.note || '', buyer : o.buyer, style : o.style, product : o.product, garment : o.garment || '', unit : o.unitCode, qty : total, open,
+        const res = { orderId : o.id, code : o.note || '', buyer : o.buyer, style : o.style, color : o.color || '', product : o.product, garment : o.garment || '', unit : o.unitCode, qty : total, open,
             pcd : o.pcd, inputDate, repeat : !!o.repeat, repeatOf : o.repeatOf || null, lcDays, delivery : o.delivery, deadline, placed : 0, start : null, finish : null, status : 'ontime', attempt : '', lines : 0, note : '',
             barDays : 0, needDays : 0, fill : null, lateDays : 0, shortQty : 0, stretched : false, critical : [] };
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }

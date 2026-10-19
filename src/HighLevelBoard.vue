@@ -14,7 +14,7 @@ import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, nextTick 
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import { StringHelper } from '@bryntum/schedulerpro';
 import {
-    HL_UNITS, newScenario, newLine, uid, ymd, addDays, daysBetween, fromYmd,
+    HL_UNITS, newScenario, newLine, uid, ymd, addDays, daysBetween, fromYmd, orderLabel,
     lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary, isWorkDay, holidayOn,
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver, lineSmv, ensurePoolLine
 } from './hlEngine.js';
@@ -297,6 +297,8 @@ function tipHtml(ev) {
     const rd = res ? reservationDays(s, res) : null;
     const rows = [
         ['Buyer', o?.buyer || '—'], ['Order / style', o ? `${o.style || ''}${o.note ? ` (${o.note})` : ''}` : (r.name || '—')],
+        ...(o?.color ? [['Colour', o.color]] : []),
+        ...(o?.codes || o?.pos ? [['ERP group', `${o.codes || o.note || ''}${o.pos ? ` · ${o.pos} PO` : ''}${o.po ? ` (${o.po})` : ''}`]] : []),
         ['Product', r.product || o?.product || '—'], ['Quantity', `${fmtQty(r.qty)} pcs`],
         ['PCD', dmy(o?.pcd)], ['Delivery', dmy(o?.delivery)],
         ['Line', line ? `${unitOf(s, line.unitCode)?.name} · ${line.name}` : '—'],
@@ -351,7 +353,7 @@ function syncScheduler() {
         }).map(r => {
             const o = orderById(scn, r.orderId);
             return {
-                id : r.id, resourceId : r.lineId, name : r.label || `${o?.buyer || ''} ${o?.style || ''}`.trim() || r.product || 'reservation',
+                id : r.id, resourceId : r.lineId, name : r.label || orderLabel(o) || r.product || 'reservation',
                 startDate : fromYmd(r.start), endDate : fromYmd(addDays(r.end, 1)),
                 qty : r.qty, product : r.product || o?.product || '', status : r.status, locked : !!r.locked, orderId : r.orderId, lineId : r.lineId,
                 conflict : conflictRes.has(r.id), late : !!(o?.delivery && r.end > o.delivery), source : r.source || null,
@@ -710,7 +712,7 @@ const ordOpen = ref(false);
 const ordForm = ref(blankOrder());
 const testResult = shallowRef(null);
 const ordSel = ref(null);
-function blankOrder() { return { id : null, buyer : '', style : '', product : '', qty : 0, pcd : ymd(new Date()), delivery : addDays(ymd(new Date()), 30), unitCode : 'M', note : '' }; }
+function blankOrder() { return { id : null, buyer : '', style : '', color : '', product : '', qty : 0, pcd : ymd(new Date()), delivery : addDays(ymd(new Date()), 30), unitCode : 'M', note : '' }; }
 function ordEdit(o) { ordForm.value = { ...o }; testResult.value = null; ordSel.value = o.id; }
 function ordNew() { ordForm.value = blankOrder(); testResult.value = null; ordSel.value = null; }
 function ordValid() {
@@ -749,7 +751,7 @@ function ordReserve() {
     const oid = ordForm.value.id;
     mutate('reserve capacity', s => {
         s.reservations = s.reservations.filter(r => r.orderId !== oid);
-        for (const a of t.allocations) s.reservations.push({ ...a, orderId : oid, status : 'reserved', label : `${ordForm.value.buyer} ${ordForm.value.style}`.trim() });
+        for (const a of t.allocations) s.reservations.push({ ...a, orderId : oid, status : 'reserved', label : orderLabel(ordForm.value) });
     });
     props.toast(`${fmtQty(t.feasible)} pcs reserved on ${t.allocations.length} line(s)${t.shortage ? ` — ${fmtQty(t.shortage)} pcs short` : ''} (simulation only)`, t.shortage ? 'warn' : 'ok');
     testResult.value = null;
@@ -793,7 +795,7 @@ async function apuImport() {
         const erp = await hlErpOrders(by());
         let m = null;
         mutate('import ERP orders', s => { m = mergeErpOrders(s, erp.rows || []); });
-        props.toast(`ERP active orders imported: ${m.added} new, ${m.updated} updated (contract unit = production unit, repeat orders marked)`, 'ok');
+        props.toast(`ERP orders imported as groups (buyer + production unit + style + colour + PCD + delivery): ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old order row(s) removed` : ''} — one bar per group`, 'ok');
     }
     catch (e) { props.toast(`ERP orders failed: ${e.message}`, 'error'); }
     finally { apuBusy.value = false; }
@@ -1695,7 +1697,7 @@ function close() {
                     <div class="hl-apu-head"><b>▶ Auto plan — unit-wise, by the planning rules</b> <span class="hl-dim">every order of the unit on the unit's own lines · delivery must be met</span>
                         <span class="hl-gap"></span>
                         <label v-for="u in APU_UNITS" :key="u" class="hl-dow"><input type="checkbox" :checked="apuUnits.includes(u)" @change="apuUnits = $event.target.checked ? [...apuUnits, u] : apuUnits.filter(x => x !== u)">{{ unitName(u) }}</label>
-                        <button class="cal-btn st-btn hl-btn" :disabled="apuBusy" title="Import / refresh the ERP active orders into this scenario (repeat orders are detected from the style's earlier orders)" @click="apuImport">⬇ Import ERP orders</button>
+                        <button class="cal-btn st-btn hl-btn" :disabled="apuBusy" title="Import / refresh the ERP active orders into this scenario, grouped by buyer + production unit + style + colour + PCD + delivery date (one bar per group; repeat orders are detected from the style's earlier orders)" @click="apuImport">⬇ Import ERP orders</button>
                         <button class="cal-btn cal-btn-primary st-btn hl-btn" :disabled="apuBusy" @click="apuRun">▶ Auto plan</button>
                         <button class="cal-btn st-btn hl-btn hl-primary" :disabled="!apuResult" title="Put the proposal on the board (grey / orange / red bars) — Save to keep" @click="apuApply">📌 Apply to board</button>
                     </div>
@@ -1731,7 +1733,7 @@ function close() {
                                 <tbody>
                                     <tr v-for="r in apuRows" :key="r.orderId">
                                         <td><span class="hl-ps-chip" :class="`hl-ps-${r.status}`">{{ PLAN_STATUS[r.status] }}</span></td>
-                                        <td>{{ unitName(r.unit) }}</td><td><b>{{ r.code || r.style }}</b></td><td>{{ r.buyer }}</td><td>{{ r.style }}<span class="hl-dim"> · {{ r.product }}</span></td>
+                                        <td>{{ unitName(r.unit) }}</td><td><b>{{ r.code || r.style }}</b></td><td>{{ r.buyer }}</td><td>{{ r.style }}<span v-if="r.color"> · {{ r.color }}</span><span class="hl-dim"> · {{ r.product }}</span></td>
                                         <td class="hl-r">{{ fmtQty(r.qty) }}<span v-if="r.open !== r.qty" class="hl-dim"> ({{ fmtQty(r.open) }} open)</span></td>
                                         <td>{{ dmy(r.pcd) }}</td><td :title="r.repeat ? `repeat order${r.repeatOf ? ' of ' + r.repeatOf : ''}: PCD + ${apuRules.repeatLead} d` : `new style: PCD + ${apuRules.newLead} d`">{{ dmy(r.inputDate) }}<span class="hl-dim"> {{ r.repeat ? '↻' : '✦' }}</span></td>
                                         <td>{{ dmy(r.delivery) }}</td>
@@ -1754,15 +1756,15 @@ function close() {
                     <div class="hl-ord-left">
                         <div class="hl-scroll hl-ord-scroll">
                             <table class="hl-table hl-table-s">
-                                <thead><tr><th>Buyer</th><th>Style / order</th><th>Product</th><th>Qty</th><th>PCD</th><th>Delivery</th><th>Unit</th><th>Reserved</th><th>Finish</th><th></th></tr></thead>
+                                <thead><tr><th>Buyer</th><th>Style / order</th><th>Colour</th><th>Product</th><th>Qty</th><th>PCD</th><th>Delivery</th><th>Unit</th><th>Reserved</th><th>Finish</th><th></th></tr></thead>
                                 <tbody>
                                     <tr v-for="o in orderRows" :key="o.id" :class="{ 'hl-sel' : o.id === ordSel }" @click="ordEdit(o)">
-                                        <td>{{ o.buyer }}</td><td>{{ o.style }}<span v-if="o.note" class="hl-dim"> {{ o.note }}</span></td><td>{{ o.product }}</td><td class="hl-r">{{ fmtQty(o.qty) }}</td><td>{{ dmy(o.pcd) }}</td><td>{{ dmy(o.delivery) }}</td><td>{{ o.unitCode || '—' }}</td>
+                                        <td>{{ o.buyer }}</td><td>{{ o.style }}<span v-if="o.note" class="hl-dim" :title="o.pos ? `${o.pos} PO: ${o.po}` : ''"> {{ o.note }}</span></td><td>{{ o.color || '—' }}</td><td>{{ o.product }}</td><td class="hl-r">{{ fmtQty(o.qty) }}</td><td>{{ dmy(o.pcd) }}</td><td>{{ dmy(o.delivery) }}</td><td>{{ o.unitCode || '—' }}</td>
                                         <td class="hl-r" :class="{ 'hl-short' : o.open > 0 && o.reserved > 0, 'hl-ok' : o.open === 0 }">{{ fmtQty(o.reserved) }}<span v-if="o.lines"> / {{ o.lines }} ln</span></td>
                                         <td :class="{ 'hl-late' : o.finish && o.finish > o.delivery }">{{ dmy(o.finish) }}</td>
                                         <td><span class="hl-x-small" @click.stop="ordRemove(o)">✖</span></td>
                                     </tr>
-                                    <tr v-if="!orderRows.length"><td colspan="10" class="hl-dim">No orders in this scenario — add one on the right, or import reference data.</td></tr>
+                                    <tr v-if="!orderRows.length"><td colspan="11" class="hl-dim">No orders in this scenario — add one on the right, or import reference data.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1771,6 +1773,7 @@ function close() {
                         <div class="hl-form">
                             <label>Buyer <input v-model="ordForm.buyer" class="cal-in" list="hl-buyers"><datalist id="hl-buyers"><option v-for="b in buyers" :key="b" :value="b"></option></datalist></label>
                             <label>Style / order <input v-model="ordForm.style" class="cal-in"></label>
+                            <label>Colour <input v-model="ordForm.color" class="cal-in" placeholder="optional"></label>
                             <label>Product <select v-model="ordForm.product" class="cal-in"><option value="">—</option><option v-for="p in sc.products" :key="p.name" :value="p.name">{{ p.name }}</option></select></label>
                             <label>Quantity <input v-model.number="ordForm.qty" type="number" min="1" class="cal-in"></label>
                             <label>PCD <input v-model="ordForm.pcd" type="date" class="cal-in"></label>

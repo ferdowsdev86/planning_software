@@ -92,6 +92,8 @@ export function newLine(sc, unitCode, name, extra = {}) {
 export function unitOf(sc, code) { return sc.units.find(u => u.code === code) || null; }
 export function lineById(sc, id) { return sc.lines.find(l => l.id === id) || null; }
 export function orderById(sc, id) { return sc.orders.find(o => o.id === id) || null; }
+// bar / list label of an order: buyer, style and (ERP groups) the colour
+export const orderLabel = o => (o ? `${o.buyer || ''} ${o.style || ''}${o.color ? ` · ${o.color}` : ''}`.trim() : '');
 
 export function holidayOn(sc, unitCode, day) {
     return sc.holidays.find(h => h.date === day && (!h.unitCode || h.unitCode === unitCode)) || null;
@@ -360,7 +362,7 @@ export function planOrder(sc, order, { unitCode = order.unitCode, load = buildLo
         const r = {
             id : uid('rs'), orderId : order.id, lineId : best.line.id, product : order.product,
             start : best.fit.start, end : best.fit.end, qty : best.fit.placed, locked : false, status : 'proposed',
-            label : `${order.buyer || ''} ${order.style || ''}`.trim()
+            label : orderLabel(order)
         };
         allocations.push(r);
         remaining -= best.fit.placed;
