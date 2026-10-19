@@ -157,6 +157,7 @@ function markBoardDirty() {
     prof.time('dirty:syncOrdersListFromBoard', () => syncOrdersListFromBoard());
     scheduleBoardSettle();
     scheduleUnsavedRefresh();
+    scheduleConsolidation();
 }
 
 // Unsaved changes on the board = exactly what Save would write (the pending
@@ -1490,6 +1491,7 @@ function applyApiBoardData(s, data) {
         toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
     }
     syncOrdersListFromBoard();
+    scheduleConsolidation();
     // Engine-settled pass (async): bars must sit strictly one after another.
     // Runs after the caller has taken the load baseline (microtask), and what
     // it nudges is derived, not a planner change → absorbed into the baseline.
@@ -9712,6 +9714,61 @@ function groupMembersOf(s, rec) {
     return bars.slice(lo, hi + 1).filter(ev => ev !== rec);
 }
 
+// Consolidate orders ON: every run of side-by-side same-order bars on a line
+// becomes one GROUP — the first bar (head) is drawn over the whole run with
+// the summed quantity, the others are hidden. The plan data never changes:
+// switching the button off shows the separate bars again.
+let consolTimer = null, consolSig = '';
+function rebuildConsolidation(s = getInstance()) {
+    if (!s) return;
+    if (!consolidate.value) {
+        if (uiHooks.consol) { uiHooks.consol = null; consolSig = ''; s.refresh?.(); }
+        return;
+    }
+    const index = buildLineIndex(s);
+    const byLine = new Map();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;
+        if (!byLine.has(lid)) byLine.set(lid, []);
+        byLine.get(lid).push(ev);
+    }
+    const ok = ev => ev.data.raw.status !== 'completed' && ev.draggable !== false && !ev.data.raw._carryGroup && ev !== carried.value;
+    const map = new Map();
+    const sig = [];
+    for (const bars of byLine.values()) {
+        bars.sort((a, b) => a.startDate - b.startDate);
+        for (let i = 0; i < bars.length;) {
+            const head = bars[i];
+            let j = i + 1;
+            if (ok(head)) while (j < bars.length && ok(bars[j]) && sameConsolidateOrder(head.data.raw, bars[j].data.raw)) j++;
+            if (j - i > 1) {
+                const members = bars.slice(i, j);
+                const g = {
+                    headId : String(head.id), count : members.length,
+                    qty : members.reduce((a, m) => a + (Number(m.data.raw.qty) || 0), 0),
+                    start : head.startDate, lastEnd : members.reduce((m, x) => (x.endDate > m ? x.endDate : m), head.endDate),
+                    members : members.map(m => ({ id : String(m.id), po : m.data.raw.po || m.name, qty : Number(m.data.raw.qty) || 0, start : m.startDate, end : m.endDate }))
+                };
+                for (const m of members) map.set(String(m.id), { ...g, head : m === head });
+                sig.push(`${g.headId}:${members.length}:${+g.lastEnd}:${g.qty}`);
+            }
+            i = j;
+        }
+    }
+    const next = sig.sort().join('|');
+    uiHooks.consol = map;
+    if (next !== consolSig) { consolSig = next; s.refresh?.(); }
+}
+// coalesced: one rebuild per frame after a burst of edits
+function scheduleConsolidation() {
+    if (!consolidate.value && !uiHooks.consol) return;
+    cancelAnimationFrame(consolTimer);
+    consolTimer = requestAnimationFrame(() => rebuildConsolidation());
+}
+
 function releaseCarryGroup() {
     for (const m of carryGroup) {
         const r = m.data?.raw;
@@ -11821,6 +11878,7 @@ const consolidate = ref(localStorage.getItem('mbm-consolidate') === '1');
 function toggleConsolidate() {
     consolidate.value = !consolidate.value;
     localStorage.setItem('mbm-consolidate', consolidate.value ? '1' : '0');
+    rebuildConsolidation();
     toast(consolidate.value
         ? 'Consolidate orders ON — একই order বা একই buyer PO-র পাশাপাশি bar গুলো group হয়ে একসাথে move করবে'
         : 'Consolidate orders OFF — প্রতিটি bar আলাদা move করবে', 'ok');
@@ -18034,6 +18092,25 @@ body.mb-carry-active * { cursor : grabbing !important; }
 
 /* Picked-up bar leaves its old position while being carried */
 .b-sch-event.mb-carried-away { display : none !important; }
+/* Consolidate orders: the group's other bars are hidden, the head bar spans the group */
+.b-sch-event.mb-consol-member { display : none !important; }
+.b-sch-event-wrap:has(.mb-consol-member) { display : none !important; }
+.b-sch-event.mb-consol-head { box-shadow : inset 0 0 0 2px rgba(255, 255, 255, .45); }
+.mb-consol-badge {
+    position      : absolute;
+    top           : 1px;
+    right         : 3px;
+    z-index       : 2;
+    padding       : 0 4px;
+    border-radius : 2px;
+    background    : rgba(0, 0, 0, .6);
+    color         : #ffffff;
+    font-size     : 8.5px;
+    font-weight   : 700;
+    line-height   : 11px;
+    white-space   : nowrap;
+    pointer-events : none;
+}
 /* Ctrl+click multi-selection */
 .b-sch-event.mb-multi-sel {
     outline : 3px solid #1b52ad;

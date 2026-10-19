@@ -497,6 +497,7 @@ export const uiHooks = {
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
+    consol           : null,   // Consolidate orders ON: Map(eventId → group) — the head bar is drawn over the whole group, the others are hidden
     multiSelCount    : 0,      // bars in the Ctrl+click selection (menu shows "Merge" from 2)
     onSplitPieces    : null,   // (rec, n) → split one bar into n equal pieces
     onMergeSelected  : null,   // (rec) → merge the Ctrl+click selection (+ rec) into one bar
@@ -2353,6 +2354,20 @@ export const schedulerProConfig = {
         const r = e.data.raw;
         if (!r) return StringHelper.encodeHtml(e.name || '');
         flushWidth(this, e, renderData);   // consecutive bars touch (FastReact)
+        // Consolidate orders: the side-by-side bars of one order show as ONE
+        // bar — the first (head) stretches over the whole group with the
+        // summed quantity, the others are hidden (the data stays separate)
+        const cg = uiHooks.consol?.get(String(e.id));
+        if (cg && !cg.head) { renderData.cls.add('mb-consol-member'); return ''; }
+        let consolHtml = '';
+        if (cg?.head) {
+            let right = null;
+            try { right = this.getCoordinateFromDate(cg.lastEnd, true); } catch { right = null; }
+            if (right != null && right > renderData.left + renderData.width) renderData.width = right - renderData.left;
+            renderData.cls.add('mb-consol-head');
+            consolHtml = `<span class="mb-consol-badge" title="Consolidated — ${cg.count} bars of the same order · ${StringHelper.encodeHtml(fmtQty(cg.qty))} pcs">⧉${cg.count} · ${StringHelper.encodeHtml(fmtQty(cg.qty))}</span>`;
+        }
+        const rr = cg?.head ? { ...r, qty : cg.qty } : r;
 
         const pastDelivery = r.status !== 'completed'
             && isLateVsDelivery(e.endDate || r.end, r.ship);
@@ -2416,10 +2431,10 @@ export const schedulerProConfig = {
         // The colour mode decides the text too (barModeLine): position,
         // duration and colour coding stay exactly as-is.
         const line = (raw, c) => barModeLine(raw, colorState.mode, c);
-        const full = line(r);
+        const full = line(rr);
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
-        const text = compact ? line(r, true) : full;
+        const text = compact ? line(rr, true) : full;
         // Learning-curve ramp: hatched overlay on the bar's head — a shade on
         // top of (never replacing) the status/risk colour
         const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
@@ -2473,7 +2488,7 @@ export const schedulerProConfig = {
             }
         }
         return `
-            ${lateHtml}${lcHtml}${linkHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
+            ${lateHtml}${lcHtml}${linkHtml}${consolHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
                 <div class="mb-bar-l1">${inner}</div>
             </div>`;
     },
@@ -2887,6 +2902,24 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
             const consolidatedBadge = r.poCount > 1
                 ? `<span class="tip4-badge tip4-consol">${r.poCount} POs</span>`
                 : '';
+            // Consolidate orders ON: this bar stands for its whole group — the
+            // tooltip shows the group as one order (total qty, span, the bars)
+            const cg = uiHooks.consol?.get(String(e.id));
+            const consolGroupBadge = cg?.head ? `<span class="tip4-badge tip4-consol" title="Consolidate orders: ${cg.count} side-by-side bars of this order shown as one">⧉ ${cg.count} bars · ${enc(fmtQty(cg.qty))} pcs</span>` : '';
+            const consolCard = cg?.head ? `
+  <div class="tip4-card tip4-consol-card">
+    <div class="tip4-card-hd">⧉ Consolidated order — ${cg.count} bars as one</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows"><div class="tip4-2col">
+        <div class="t4r"><span class="t4l">Total qty</span><span class="t4v"><b>${enc(fmtQty(cg.qty))}</b> pcs</span></div>
+        <div class="t4r"><span class="t4l">Span</span><span class="t4v">${enc(ddMon(new Date(cg.start)))} → ${enc(ddMon(new Date(cg.lastEnd)))}</span></div>
+      </div></div>
+      <table class="tip4-po-tbl"><thead><tr><th>Bar / PO</th><th>Qty</th><th>From</th><th>To</th></tr></thead><tbody>
+        ${cg.members.map(m => `<tr><td class="tip4-po-no">${enc(String(m.po || '—'))}</td><td class="tip4-po-qty">${enc(fmtQty(m.qty))}</td><td>${enc(ddMon(new Date(m.start)))}</td><td>${enc(ddMon(new Date(m.end)))}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="t4dim">Off the Consolidate button they show as separate bars again — nothing is merged in the plan.</div>
+    </div>
+  </div>` : '';
 
             const mismatchBadge = r.confirmMismatch
                 ? `<span class="tip4-badge tip4-proj" title="Confirmed ${enc(fmtQty(r.confirmMismatch.confirmed))} of ${enc(fmtQty(r.confirmMismatch.full))} — the confirm quantity must equal the projection quantity before it replaces this bar">⚠ Confirm ${enc(fmtQty(r.confirmMismatch.confirmed))} / ${enc(fmtQty(r.confirmMismatch.full))}</span>`
@@ -2925,7 +2958,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
   <!-- HEADER -->
   <div class="tip4-hdr">
     <span class="tip4-hdr-name">${enc(e.name || r.buyer || '—')}</span>
-    <span class="tip4-hdr-badges">${orderTypeBadge}${consolidatedBadge}</span>
+    <span class="tip4-hdr-badges">${orderTypeBadge}${consolidatedBadge}${consolGroupBadge}</span>
   </div>
 
   <!-- TABS: first view = style + order only; the rest open on click -->
@@ -2938,6 +2971,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
   </div>
 
   <div class="tip4-panel tip4-panel-on" data-panel="info">
+  ${consolCard}
   <!-- STYLE CARD -->
   <div class="tip4-card">
     <div class="tip4-card-hd">🎨 Style</div>
