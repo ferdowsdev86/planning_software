@@ -123,6 +123,10 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS reason VARCHAR(400) NULL');
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS ext_status VARCHAR(16) NULL');
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS smv DECIMAL(8,3) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS plan_status VARCHAR(12) NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS lc_days INT NULL');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS is_repeat TINYINT(1) NOT NULL DEFAULT 0');
+            await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS repeat_of VARCHAR(60) NULL');
             console.log('[hl] High Level Planning tables ready');
         })
         .catch(e => console.error('[hl] tables:', e.message));
@@ -197,9 +201,11 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             products : products.map(p => ({ name : p.name, smv : Number(p.smv) })),
             holidays : holidays.map(h => ({ date : ymd(h.hol_date), unitCode : h.unit_code || null, label : h.label || '', kind : h.kind || 'holiday' })),
             orders : orders.map(o => ({ id : o.id, buyer : o.buyer || '', style : o.style || '', product : o.product || '', qty : Number(o.qty), pcd : ymd(o.pcd), delivery : ymd(o.delivery), unitCode : o.unit_code || '', note : o.note || '', source : o.source || null,
-                garment : o.garment || '', smv : o.smv == null ? null : Number(o.smv), outstanding : o.outstanding == null ? null : Number(o.outstanding), priority : !!o.priority, po : o.po || '' })),
+                garment : o.garment || '', smv : o.smv == null ? null : Number(o.smv), outstanding : o.outstanding == null ? null : Number(o.outstanding), priority : !!o.priority, po : o.po || '',
+                repeat : !!o.is_repeat, repeatOf : o.repeat_of || null })),
             reservations : reservations.map(r => ({ id : r.id, orderId : r.order_id, lineId : r.line_id, product : r.product || null, start : ymd(r.start_date), end : ymd(r.end_date), qty : Number(r.qty), locked : !!r.locked, status : r.status, label : r.label || '', source : r.source || null,
-                kind : r.kind || null, fromUnit : r.from_unit || null, reason : r.reason || null, extStatus : r.ext_status || null, smv : r.smv == null ? null : Number(r.smv) }))
+                kind : r.kind || null, fromUnit : r.from_unit || null, reason : r.reason || null, extStatus : r.ext_status || null, smv : r.smv == null ? null : Number(r.smv),
+                planStatus : r.plan_status || null, lcDays : r.lc_days == null ? 0 : Number(r.lc_days) }))
         };
     }
 
@@ -233,12 +239,14 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
         await bulk('INSERT INTO hl_line_products (line_id, product, smv)', Array(3).fill(0), lp);
         await bulk('INSERT IGNORE INTO hl_products (scenario_id, name, smv)', Array(3).fill(0), (sc.products || []).map(p => [id, p.name, Number(p.smv) || 20]));
         await bulk('INSERT INTO hl_holidays (scenario_id, unit_code, hol_date, label, kind)', Array(5).fill(0), (sc.holidays || []).map(h => [id, h.unitCode || null, h.date, h.label || null, h.kind || 'holiday']));
-        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source, garment, smv, outstanding, priority, po)', Array(16).fill(0),
+        await bulk('INSERT INTO hl_orders (id, scenario_id, buyer, style, product, qty, pcd, delivery, unit_code, note, source, garment, smv, outstanding, priority, po, is_repeat, repeat_of)', Array(18).fill(0),
             (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source || null,
-                o.garment || null, o.smv == null || o.smv === '' ? null : Number(o.smv), o.outstanding == null ? null : Number(o.outstanding), o.priority ? 1 : 0, o.po ? String(o.po).slice(0, 400) : null]));
-        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv)', Array(17).fill(0),
+                o.garment || null, o.smv == null || o.smv === '' ? null : Number(o.smv), o.outstanding == null ? null : Number(o.outstanding), o.priority ? 1 : 0, o.po ? String(o.po).slice(0, 400) : null,
+                o.repeat ? 1 : 0, o.repeatOf ? String(o.repeatOf).slice(0, 60) : null]));
+        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv, plan_status, lc_days)', Array(19).fill(0),
             (sc.reservations || []).map(r => [r.id, id, r.orderId || null, r.lineId, r.product || null, r.start, r.end, Number(r.qty) || 0, r.locked ? 1 : 0, r.status || 'reserved', r.label || null, r.source || null,
-                r.kind || null, r.fromUnit || null, r.reason ? String(r.reason).slice(0, 400) : null, r.extStatus || null, r.smv == null ? null : Number(r.smv)]));
+                r.kind || null, r.fromUnit || null, r.reason ? String(r.reason).slice(0, 400) : null, r.extStatus || null, r.smv == null ? null : Number(r.smv),
+                r.planStatus || null, r.lcDays ? Number(r.lcDays) : null]));
         await conn.query('UPDATE hl_scenarios SET plan_from = ?, plan_to = ?, thresholds = ?, balance = ?, source_note = ?, source_at = ?, updated_by = ?, version = version + 1 WHERE id = ?',
             [sc.from || null, sc.to || null, JSON.stringify(sc.thresholds || null), sc.balance ? JSON.stringify(sc.balance) : null, sc.source?.note || null, sc.source?.at ? String(sc.source.at).slice(0, 19) : null, by, id]);
     }

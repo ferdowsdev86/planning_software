@@ -20,7 +20,7 @@ import {
 } from './hlEngine.js';
 import {
     autoBalance, allocationReport, reconcileAllocation, balanceSettings, unitMakes, orderSmv, ymOf, buildCapIndex, mergeErpOrders, placeInUnit, EXT_STATUS, KIND_LABEL,
-    autoPlanUnits, planRules, PLAN_STATUS
+    autoPlanUnits, planRules, PLAN_STATUS, inputDateFor
 } from './hlBalance.js';
 import {
     hlListScenarios, hlCreateScenario, hlLoadScenario, hlSaveScenario, hlRenameScenario, hlDeleteScenario, hlReference, hlErpMonthly, hlErpMonthOrders, hlErpSmv, hlErpSmvOrders,
@@ -214,6 +214,7 @@ function setView(m) {
 }
 
 const config = {
+    cls           : 'hl-sched',   // the wrapper drops the class attribute — Bryntum's own cls lands on its element
     minHeight     : 380,
     rowHeight     : 40,
     barMargin     : 5,
@@ -949,6 +950,37 @@ const capIndex = computed(() => { void tick.value; return sc.value ? buildCapInd
 const allocRep = computed(() => { void tick.value; return sc.value ? allocationReport(sc.value, { capIndex : capIndex.value }) : null; });
 const allocBad = computed(() => (allocRep.value ? reconcileAllocation(allocRep.value) : []));
 const unitName = c => (c === 'G' ? 'GSL' : unitOf(sc.value, c)?.label || c);
+// quantity WITHOUT capacity per unit × delivery month (orders of the unit
+// the auto plan / balance could not place, fully or partly) — shown on the
+// unit card's month table; a click lists the orders
+const noCapByUnit = computed(() => {
+    const out = {};
+    for (const o of allocRep.value?.orders || []) {
+        if (!(o.unallocated > 0)) continue;
+        const u = out[o.contractUnit] || (out[o.contractUnit] = { total : 0, orders : 0, months : {} });
+        u.total += o.unallocated; u.orders++;
+        const m = u.months[o.ym] || (u.months[o.ym] = { qty : 0, orders : 0 });
+        m.qty += o.unallocated; m.orders++;
+    }
+    return out;
+});
+const ncOpen = ref(false);
+const ncUnit = ref('');
+const ncMonth = ref('');
+function openNoCap(u, ym) { ncUnit.value = u.code; ncMonth.value = ym; ncOpen.value = true; }
+const ncRows = computed(() => {
+    void tick.value;
+    const s = sc.value; if (!s) return [];
+    const rows = (allocRep.value?.orders || []).filter(o => o.contractUnit === ncUnit.value && (ncMonth.value === 'total' || o.ym === ncMonth.value) && o.unallocated > 0);
+    return rows.map(o => {
+        const rs = s.reservations.filter(r => r.orderId === o.id && r.status !== 'cancelled');
+        const ps = rs.find(r => r.planStatus)?.planStatus || null;
+        const reason = rs.find(r => r.reason)?.reason || '';
+        const ord = orderById(s, o.id) || {};
+        return { ...o, planStatus : ps, reason, placed : o.qty - o.unallocated, repeat : !!ord.repeat, inputDate : inputDateFor(ord, planRules(s)) };
+    }).sort((a, b) => String(a.delivery || '').localeCompare(String(b.delivery || '')));
+});
+const ncTotal = computed(() => ncRows.value.reduce((a, r) => ({ qty : a.qty + r.qty, open : a.open + r.unallocated }), { qty : 0, open : 0 }));
 
 // ---- Product-Wise Allocation panel ----------------------------------------
 const pwOpen = ref(false);
@@ -1420,7 +1452,7 @@ function close() {
                     <span class="hl-uc-erp-t">Month wise capacity vs active orders <i class="hl-dim">· delivery after {{ dmy(addDays(erpMonthly.from || '', -1)) }} · avg SMV {{ unitAvgSmv(u.code) }}</i></span>
                     <div class="hl-em-scroll">
                         <table class="hl-em-tbl">
-                            <thead><tr><th>Delivery month</th><th :title="`Σ of the lines' Capacity pcs for the month (Lines tab) — each line's SAH × 60 ÷ unit average SMV ${unitAvgSmv(u.code)}`">Capacity (pcs)</th><th title="Σ of the lines' Line SAH for the month (Lines tab) — manpower × (hours + OT) × efficiency, standard hours">Cap SAH</th><th title="Active ERP order quantity of the month (mr_order_entry, status Active, production unit of the order)">Order qty</th><th title="Order SAH — Σ order qty × ERP product SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th></tr></thead>
+                            <thead><tr><th>Delivery month</th><th :title="`Σ of the lines' Capacity pcs for the month (Lines tab) — each line's SAH × 60 ÷ unit average SMV ${unitAvgSmv(u.code)}`">Capacity (pcs)</th><th title="Σ of the lines' Line SAH for the month (Lines tab) — manpower × (hours + OT) × efficiency, standard hours">Cap SAH</th><th title="Active ERP order quantity of the month (mr_order_entry, status Active, production unit of the order)">Order qty</th><th title="Order SAH — Σ order qty × ERP product SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th><th title="Quantity of this month's orders the auto plan could not place on the unit's lines (no capacity) — click for the orders">No capacity</th></tr></thead>
                             <tbody>
                                 <tr v-for="m in erpMonthByUnit[u.code].months" :key="m.ym" :class="{ 'hl-em-over' : m.overdue, 'hl-em-cur' : m.ym === thisYm }"
                                     :title="m.overdue ? 'Overdue — delivery month already past, order still Active in ERP' : `${m.orders} order(s), outstanding ${fmtQty(m.outstanding)} pcs — click for the product-wise breakdown`"
@@ -1432,8 +1464,9 @@ function close() {
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.reqSah || 0) > (monthCapRes[u.code]?.[m.ym]?.capSah || 0) }">{{ fmtQty(Math.round(monthCapRes[u.code]?.[m.ym]?.reqSah || 0)) }}</td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.gapQty || 0) < 0 }">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.gapQty) }}</td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.pct || 0) > 1 }">{{ monthCapRes[u.code]?.[m.ym]?.pct != null ? fmtPct(monthCapRes[u.code][m.ym].pct) : '—' }}</td>
+                                    <td class="hl-r hl-nc" :class="{ 'hl-em-neg' : noCapByUnit[u.code]?.months[m.ym]?.qty }" :title="noCapByUnit[u.code]?.months[m.ym] ? `${noCapByUnit[u.code].months[m.ym].orders} order(s) without capacity — click for the list` : 'nothing without capacity'" @click.stop="noCapByUnit[u.code]?.months[m.ym] && openNoCap(u, m.ym)">{{ noCapByUnit[u.code]?.months[m.ym] ? fmtQty(noCapByUnit[u.code].months[m.ym].qty) : '—' }}</td>
                                 </tr>
-                                <tr v-if="!erpMonthByUnit[u.code].months.length"><td colspan="7" class="hl-dim">No active ERP orders for this unit.</td></tr>
+                                <tr v-if="!erpMonthByUnit[u.code].months.length"><td colspan="8" class="hl-dim">No active ERP orders for this unit.</td></tr>
                             </tbody>
                             <tfoot v-if="erpMonthByUnit[u.code].months.length">
                                 <tr><td><b>Total</b></td>
@@ -1442,7 +1475,8 @@ function close() {
                                     <td class="hl-r"><b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.reqSah || 0) > (monthCapRes[u.code]?.total?.capSah || 0) }"><b>{{ fmtQty(Math.round(monthCapRes[u.code]?.total?.reqSah || 0)) }}</b></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.gapQty || 0) < 0 }"><b>{{ fmtQty(monthCapRes[u.code]?.total?.gapQty) }}</b></td>
-                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.pct || 0) > 1 }"><b>{{ monthCapRes[u.code]?.total?.pct != null ? fmtPct(monthCapRes[u.code].total.pct) : '—' }}</b></td></tr>
+                                    <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.pct || 0) > 1 }"><b>{{ monthCapRes[u.code]?.total?.pct != null ? fmtPct(monthCapRes[u.code].total.pct) : '—' }}</b></td>
+                                    <td class="hl-r hl-nc" :class="{ 'hl-em-neg' : noCapByUnit[u.code]?.total }" :title="noCapByUnit[u.code] ? `${noCapByUnit[u.code].orders} order(s) without capacity — click for the list` : ''" @click.stop="noCapByUnit[u.code] && openNoCap(u, 'total')"><b>{{ noCapByUnit[u.code] ? fmtQty(noCapByUnit[u.code].total) : '—' }}</b></td></tr>
                             </tfoot>
                         </table>
                     </div>
@@ -2010,6 +2044,31 @@ function close() {
             </div>
         </div>
 
+        <!-- Orders without capacity (unit × delivery month) -->
+        <div v-if="ncOpen && sc" class="cal-overlay" @click.self="ncOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-gp-dialog">
+                <div class="cal-title">⛔ {{ unitName(ncUnit) }} — orders without capacity · {{ ncMonth === 'total' ? 'all delivery months' : ymLabel(ncMonth) }} <span class="cal-title-btns"><span class="cal-x" @click="ncOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-ab-sum"><span><b>{{ fmtQty(ncRows.length) }}</b> order(s) · order qty <b>{{ fmtQty(ncTotal.qty) }}</b> · without capacity <b class="hl-warn">{{ fmtQty(ncTotal.open) }}</b> pcs</span><span class="hl-dim">the quantity the auto plan could not place on the unit's own lines inside the plan range — give the unit more capacity (lines / hours), move it to another unit (Product-Wise Allocation) or send it to GSL (Auto Balance)</span></div>
+                    <div class="hl-scroll hl-gp-scroll">
+                        <table class="hl-table hl-table-s hl-gp-tbl">
+                            <thead><tr><th>Order</th><th>Buyer</th><th>Style · product</th><th>Garment</th><th>Qty</th><th>Placed</th><th>No capacity</th><th>PCD</th><th>Input date</th><th>Delivery</th><th>Status</th><th>Why</th></tr></thead>
+                            <tbody>
+                                <tr v-for="r in ncRows" :key="r.id">
+                                    <td><b>{{ r.code || r.style }}</b></td><td>{{ r.buyer }}</td><td>{{ r.style }}<span class="hl-dim"> · {{ r.product }}</span></td><td>{{ r.garment }}</td>
+                                    <td class="hl-r">{{ fmtQty(r.qty) }}</td><td class="hl-r">{{ r.placed ? fmtQty(r.placed) : '—' }}</td><td class="hl-r hl-warn">{{ fmtQty(r.unallocated) }}</td>
+                                    <td>{{ dmy(r.pcd) }}</td><td>{{ dmy(r.inputDate) }}<span class="hl-dim"> {{ r.repeat ? '↻' : '✦' }}</span></td><td>{{ dmy(r.delivery) }}</td>
+                                    <td><span class="hl-ps-chip" :class="`hl-ps-${r.planStatus || 'unplaced'}`">{{ r.planStatus ? PLAN_STATUS[r.planStatus] : 'No capacity' }}</span></td>
+                                    <td class="hl-dim hl-reason" :title="r.reason">{{ r.reason || 'no free compatible line capacity in the plan range' }}</td>
+                                </tr>
+                                <tr v-if="!ncRows.length"><td colspan="12" class="hl-dim">Nothing without capacity here.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Excess / GSL pool -->
         <div v-if="gpOpen && sc" class="cal-overlay" @click.self="gpOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog hl-gp-dialog">
@@ -2197,16 +2256,16 @@ function close() {
 .hl-line-off { text-decoration : line-through; color : #999; }
 .hl-util { font-weight : 700; padding : 1px 6px; border-radius : 10px; }
 .hl-util-ok { background : #e8f5e9; color : #2e7d32; } .hl-util-partial { background : #fff8e1; color : #b26a00; } .hl-util-full { background : #ffe0d6; color : #c43c00; } .hl-util-over { background : #ffcdd2; color : #b00020; }
-.hl-sched .b-sch-resource-time-range.hl-day { border : none; opacity : 1; pointer-events : none; }
+.hl-root .b-sch-resource-time-range.hl-day { border : none; opacity : 1; pointer-events : none; }
 .hl-day-idle { background : #f4f6f8 !important; } .hl-day-available { background : #dcedc8 !important; } .hl-day-partial { background : #ffe082 !important; }
 .hl-day-full { background : #ffab91 !important; } .hl-day-overloaded { background : #ef9a9a !important; } .hl-day-holiday { background : repeating-linear-gradient(45deg, #e0e0e0 0 4px, #f5f5f5 4px 8px) !important; }
 .hl-day-shutdown { background : repeating-linear-gradient(45deg, #bdbdbd 0 4px, #eeeeee 4px 8px) !important; } .hl-day-off { background : #ececec !important; } .hl-day-inactive { background : #e0e0e0 !important; }
-.hl-sched .b-sch-event.hl-res { background : #4f7fcf; border : 1px solid #2d5aa3; color : #fff; font-size : 11px; border-radius : 3px; }
-.hl-sched .b-sch-event.hl-res-live { background : #7a7a7a; border-color : #555; }
-.hl-sched .b-sch-event.hl-res-proposed { background : #26a69a; }
-.hl-sched .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
-.hl-sched .b-sch-event.hl-res-late { box-shadow : inset 0 -4px 0 #ff9800; }
-.hl-sched .b-sch-event.hl-res-locked { opacity : .9; border-style : dashed; }
+.hl-root .b-sch-event.hl-res { background : #4f7fcf; border : 1px solid #2d5aa3; color : #fff; font-size : 11px; border-radius : 3px; }
+.hl-root .b-sch-event.hl-res-live { background : #7a7a7a; border-color : #555; }
+.hl-root .b-sch-event.hl-res-proposed { background : #26a69a; }
+.hl-root .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
+.hl-root .b-sch-event.hl-res-late { box-shadow : inset 0 -4px 0 #ff9800; }
+.hl-root .b-sch-event.hl-res-locked { opacity : .9; border-style : dashed; }
 .hl-res-txt { white-space : nowrap; overflow : hidden; text-overflow : ellipsis; padding : 0 4px; }
 .hl-tip table td { padding : 1px 6px; font-size : 11.5px; } .hl-tip table td:first-child { color : #666; }
 /* the global .cal-dialog / .pf-dialog widths (700 / 760px) must not win over the board's dialogs */
@@ -2273,18 +2332,18 @@ function close() {
 .hl-alt-ok { background : #e8f5e9; color : #2e7d32; }
 /* Central Auto Balance */
 .hl-lg-contract { background : #26a69a; } .hl-lg-transfer { background : #7e57c2; } .hl-lg-gsl { background : repeating-linear-gradient(45deg, #ff9800 0 4px, #ffcc80 4px 8px); } .hl-lg-pend { background : #fff; border : 2px dashed #e65100; } .hl-lg-lock { background : #4f7fcf; border-style : dashed; }
-.hl-sched .b-sch-event.hl-res-k-contract { background : #26a69a; border-color : #00796b; }
-.hl-sched .b-sch-event.hl-res-k-transfer { background : #7e57c2; border-color : #512da8; }
-.hl-sched .b-sch-event.hl-res-k-gsl { background : repeating-linear-gradient(45deg, #fb8c00 0 6px, #ffb74d 6px 12px); border-color : #e65100; color : #3e2723; }
-.hl-sched .b-sch-event.hl-res-ext-pending { border : 2px dashed #bf360c; }
-.hl-sched .b-sch-event.hl-res-ext-confirmed { background : #ef6c00; color : #fff; }
-.hl-sched .b-sch-event.hl-res-ext-rejected { background : repeating-linear-gradient(45deg, #9e9e9e 0 6px, #e0e0e0 6px 12px); color : #b00020; text-decoration : line-through; }
-.hl-sched .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
+.hl-root .b-sch-event.hl-res-k-contract { background : #26a69a; border-color : #00796b; }
+.hl-root .b-sch-event.hl-res-k-transfer { background : #7e57c2; border-color : #512da8; }
+.hl-root .b-sch-event.hl-res-k-gsl { background : repeating-linear-gradient(45deg, #fb8c00 0 6px, #ffb74d 6px 12px); border-color : #e65100; color : #3e2723; }
+.hl-root .b-sch-event.hl-res-ext-pending { border : 2px dashed #bf360c; }
+.hl-root .b-sch-event.hl-res-ext-confirmed { background : #ef6c00; color : #fff; }
+.hl-root .b-sch-event.hl-res-ext-rejected { background : repeating-linear-gradient(45deg, #9e9e9e 0 6px, #e0e0e0 6px 12px); color : #b00020; text-decoration : line-through; }
+.hl-root .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
 .hl-line-pool { color : #e65100; }
 .hl-day-pool { background : #ffe0b2 !important; }
-.hl-sched .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
-.hl-sched .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
-.hl-sched .b-sch-event.hl-res-ps-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
+.hl-root .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
+.hl-root .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
+.hl-root .b-sch-event.hl-res-ps-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
 .hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; }
 .hl-apu { border-bottom : 1px solid #d5dbe3; padding-bottom : 6px; }
 .hl-apu-head { display : flex; align-items : center; gap : 8px; flex-wrap : wrap; font-size : 12.5px; }
@@ -2293,6 +2352,7 @@ function close() {
 .hl-apu-scroll { max-height : 40vh; }
 .hl-apu-tbl td { white-space : nowrap; }
 .hl-ps-chip { display : inline-block; padding : 0 7px; border-radius : 10px; font-size : 11px; font-weight : 700; color : #fff; }
+.hl-nc { cursor : pointer; }
 .hl-ps-ontime { background : #757575; } .hl-ps-pcd { background : #fb8c00; } .hl-ps-late { background : #d32f2f; } .hl-ps-unplaced { background : #455a64; }
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
 .cal-overlay .cal-dialog.hl-ab-dialog { width : 1180px; } .cal-overlay .cal-dialog.hl-abr-dialog { width : 1400px; } .cal-overlay .cal-dialog.hl-pw-dialog { width : 1500px; } .cal-overlay .cal-dialog.hl-gp-dialog { width : 1450px; } .cal-overlay .cal-dialog.hl-ba-dialog { width : 1450px; }
