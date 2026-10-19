@@ -783,7 +783,28 @@ const apuUnits = ref([...APU_UNITS]);
 const apuResult = shallowRef(null);
 const apuBusy = ref(false);
 const apuFilter = ref('');
-watch(ordOpen, v => { if (v && sc.value) apuRules.value = apuDefaults(sc.value); });
+watch(ordOpen, v => {
+    if (!v || !sc.value) return;
+    apuRules.value = apuDefaults(sc.value);
+    // the dialog opens with the data: the ticked units' ERP active orders (the unit cards' delivery-month load)
+    // load by themselves when none are in the scenario yet, and the plan runs
+    const has = sc.value.orders.some(o => /^erp:/.test(o.source || '') && apuUnits.value.includes(o.unitCode));
+    if (!has && canWrite.value && !apuBusy.value) apuImport(true);
+});
+// the loaded orders by delivery month (ticked units): what the plan works on — the same ERP load the unit cards show
+const apuMonths = computed(() => {
+    void tick.value;
+    const by = {};
+    for (const o of orderRows.value) {
+        if (!apuUnits.value.includes(o.unitCode)) continue;
+        const ym = ymOf(o.delivery);
+        const g = by[ym] || (by[ym] = { ym, label : ym === 'none' ? 'no date' : capLabelOf(ym, 'month'), orders : 0, qty : 0, reserved : 0, open : 0, late : 0 });
+        g.orders++; g.qty += o.qty; g.reserved += o.reserved; g.open += o.open; if (o.finish && o.delivery && o.finish > o.delivery) g.late++;
+    }
+    const rows = Object.values(by).sort((a, b) => a.ym.localeCompare(b.ym));
+    const total = rows.reduce((t, r) => ({ orders : t.orders + r.orders, qty : t.qty + r.qty, reserved : t.reserved + r.reserved, open : t.open + r.open, late : t.late + r.late }), { orders : 0, qty : 0, reserved : 0, open : 0, late : 0 });
+    return { rows, total };
+});
 function apuRulesObj() {
     const r = apuRules.value;
     return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
@@ -791,7 +812,7 @@ function apuRulesObj() {
         buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
         minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null };
 }
-async function apuImport() {
+async function apuImport(auto = false) {
     if (!sc.value) return;
     if (!canWrite.value) return denied();
     apuBusy.value = true;
@@ -804,6 +825,7 @@ async function apuImport() {
         let m = null;
         mutate('import ERP orders', s => { m = mergeErpOrders(s, rows, { units : apuUnits.value }); });
         props.toast(`${apuUnits.value.map(unitName).join(' / ')}: ${rows.length} ERP order group(s) (buyer + unit + style + colour + PCD + delivery) — ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old row(s) removed` : ''} — one bar per group`, 'ok');
+        if (auto && rows.length) { apuBusy.value = false; apuRun(); }
     }
     catch (e) { props.toast(`ERP orders failed: ${e.message}`, 'error'); }
     finally { apuBusy.value = false; }
@@ -1851,6 +1873,14 @@ function close() {
                 </div>
                 <div class="st-body hl-ord-body">
                     <div class="hl-ord-left">
+                        <div v-if="apuMonths.rows.length" class="hl-apu-months" title="The ticked units' orders by delivery month — the plan loads them earliest delivery first, as soon as the rules allow, to meet the delivery dates">
+                            <span class="hl-apu-mt"><b>Delivery month</b></span>
+                            <span v-for="m in apuMonths.rows" :key="m.ym" class="hl-apu-m" :class="{ 'hl-apu-m-late' : m.late }">
+                                <b>{{ m.label }}</b> {{ fmtQty(m.qty) }} pcs <i class="hl-dim">· {{ m.orders }} orders</i>
+                                <template v-if="m.reserved"> · planned {{ fmtQty(m.reserved) }}</template><template v-if="m.open && m.reserved"> · open {{ fmtQty(m.open) }}</template><template v-if="m.late"> · <span class="hl-late">{{ m.late }} late</span></template>
+                            </span>
+                            <span class="hl-apu-m hl-apu-m-tot"><b>Total</b> {{ fmtQty(apuMonths.total.qty) }} pcs <i class="hl-dim">· {{ apuMonths.total.orders }} orders</i><template v-if="apuMonths.total.reserved"> · planned {{ fmtQty(apuMonths.total.reserved) }} · open {{ fmtQty(apuMonths.total.open) }}</template></span>
+                        </div>
                         <div class="hl-scroll hl-ord-scroll">
                             <table class="hl-table hl-table-s">
                                 <thead><tr><th>Buyer</th><th>Style / order</th><th>Colour</th><th>Product</th><th>Qty</th><th>PCD</th><th>Delivery</th><th>Unit</th><th>Reserved</th><th>Finish</th><th></th></tr></thead>
@@ -1861,7 +1891,7 @@ function close() {
                                         <td :class="{ 'hl-late' : o.finish && o.finish > o.delivery }">{{ dmy(o.finish) }}</td>
                                         <td><span class="hl-x-small" @click.stop="ordRemove(o)">✖</span></td>
                                     </tr>
-                                    <tr v-if="!orderRows.length"><td colspan="11" class="hl-dim">No orders in this scenario — tick the unit(s) above and click ⬇ Import ERP orders.</td></tr>
+                                    <tr v-if="!orderRows.length"><td colspan="11" class="hl-dim">{{ apuBusy ? 'Loading the ERP active orders of the ticked unit(s)…' : 'No orders in this scenario — tick the unit(s) above and click ⬇ Import ERP orders.' }}</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -2440,6 +2470,8 @@ function close() {
 .hl-x-small { cursor : pointer; color : #b00020; font-weight : 700; }
 .hl-ord-body { display : flex; gap : 14px; }
 .hl-ord-left { flex : 1 1 100%; min-width : 0; }
+.hl-apu-months { display : flex; flex-wrap : wrap; gap : 6px 14px; align-items : baseline; font-size : 11.5px; padding : 4px 2px 6px; border-bottom : 1px dashed #d5dbe3; margin-bottom : 6px; }
+.hl-apu-mt { color : #1f3a5f; } .hl-apu-m { white-space : nowrap; } .hl-apu-m-late b { color : #b00020; } .hl-apu-m-tot { border-left : 1px solid #c8ced6; padding-left : 12px; }
 .hl-ord-scroll { max-height : 70vh; }
 .hl-ord-left tbody tr { cursor : pointer; }
 .hl-form { display : grid; grid-template-columns : 1fr 1fr; gap : 6px 10px; }

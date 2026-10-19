@@ -543,8 +543,9 @@ export function autoPlanUnits(sc, opts = {}) {
             if (!chosen) chosen = { r : null, st, finish : null, late : true };
         }
         if (!chosen || chosen.late) {
-            // delivery cannot be met: plan it anyway from the input date, open-ended, so the planner sees the overrun (red)
-            const st = starts[0];
+            // delivery cannot be met: plan it AS SOON AS POSSIBLE — from the earliest attempt start (the plan start /
+            // PCD), open-ended — so the overrun is the smallest it can be and the planner sees it (red)
+            const st = starts[starts.length - 1];
             const r = fitInUnit(sc, ix, o, o.unitCode, open, st.i, lastI, settings, 'contract', lcDays);
             const finish = r.allocations.reduce((m, a) => (!m || a.end > m ? a.end : m), null);
             chosen = { r, st, finish, late : true };
@@ -554,12 +555,15 @@ export function autoPlanUnits(sc, opts = {}) {
         res.start = r?.allocations.reduce((m, a) => (!m || a.start < m ? a.start : m), null) || null;
         res.finish = finish;
         res.lines = r ? r.allocations.length : 0;
-        res.attempt = st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
         if (!r || !r.allocations.length) res.status = 'unplaced';
         else if (late || (finish && finish > deadline)) res.status = 'late';
         else if (st.tag !== 'input' || (inputDate && res.start && res.start < inputDate)) res.status = 'pcd';
         else res.status = 'ontime';
-        if (r && r.remaining > 0 && res.status !== 'unplaced') res.note = `${r.remaining} pcs without capacity in the window`;
+        const asap = res.status === 'late' || res.status === 'unplaced';
+        res.attempt = asap ? `as soon as possible from ${st.date}${st.tag === 'input' ? ' (input date)' : st.tag === 'pcd' ? ' (PCD, before the input date)' : ' (plan start, before PCD)'}`
+            : st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
+        if (res.status === 'unplaced') res.note = r?.reason || 'no free capacity in the plan range';
+        else if (r && r.remaining > 0) res.note = `${r.remaining} pcs without capacity in the window`;
         // day capacity check of the proposal: bar days (working days the bars
         // cover) against the days the quantity needs at the lines' full day
         // capacity, and the share of those days' capacity the order fills
