@@ -11290,14 +11290,14 @@ function bindFrHScroll(s, bar) {
 }
 
 // Horizontal zoom is expressed in WEEKS on screen: the board opens showing
-// 6 weeks (day width = axis width / 42) and zooming out stops at 10 weeks.
+// 8 weeks (day width = axis width / 56) and zooming out stops at 16 weeks.
 // Zooming in has a fixed pixel ceiling.
-const VIEW_WEEKS_DEFAULT = 6;
-const VIEW_WEEKS_MAX     = 10;
+const VIEW_WEEKS_DEFAULT = 8;
+const VIEW_WEEKS_MAX     = 16;
 const TICK_MAX_PX        = 220;
 const axisWidthPx = s => Number(s?.timeAxisSubGrid?.scrollable?.clientWidth || s?.timeAxisSubGrid?.width) || 0;
 const tickForWeeks = (s, weeks, round = Math.floor) => { const w = axisWidthPx(s); return w ? Math.max(6, round(w / (weeks * 7))) : 0; };
-// ceil: at the bound the axis shows AT MOST 10 weeks, never a day more
+// ceil: at the bound the axis shows AT MOST 16 weeks, never a day more
 const minTickPx = s => tickForWeeks(s, VIEW_WEEKS_MAX, Math.ceil) || 40;
 
 function setTick(s, px, keep) {
@@ -11321,9 +11321,9 @@ function fitWeeks(s, weeks = VIEW_WEEKS_DEFAULT, keep) {
 
 let userZoomed  = false;   // the user pressed a zoom button — keep their zoom
 let lastFitWidth = 0;
-// Board visible / axis resized: until the user zooms, always show 6 weeks
+// Board visible / axis resized: until the user zooms, always show 8 weeks
 // for the current axis width (the width settles over a few layout passes
-// after opening); after a manual zoom only enforce the 10-week bound
+// after opening); after a manual zoom only enforce the 16-week bound
 function fitBoardView(s) {
     const w = axisWidthPx(s);
     if (!s || !w) return;
@@ -11341,7 +11341,7 @@ function hZoom(delta) {
     const keep = s.visibleDateRange?.startDate || currentBoardDate();
     const cur  = s.tickSize || 96;
     userZoomed = true;
-    // ~20% per step so a 6-week view reaches 10 weeks in three clicks
+    // ~20% per step so the 8-week view reaches 16 weeks in four clicks
     setTick(s, delta > 0 ? cur * 1.2 : cur / 1.2, keep);
 }
 
@@ -11759,8 +11759,8 @@ const toolbar = [
     { fa : 'fa-house', title : 'Go to current date', action : 'home' },
     { fa : 'fa-magnifying-glass', cls : 'fr-tb-find', toggle : 'find', title : 'Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)', action : 'find' },
     { sep : true },
-    { fa : 'fa-magnifying-glass-minus', title : 'Horizontal zoom out — narrower days', action : 'hZoomOut' },
-    { fa : 'fa-magnifying-glass-plus',  title : 'Horizontal zoom in — wider days', action : 'hZoomIn' },
+    { fa : 'fa-magnifying-glass-minus', title : 'Horizontal zoom out — narrower days (up to 16 weeks on screen)', action : 'hZoomOut' },
+    { fa : 'fa-magnifying-glass-plus',  title : 'Horizontal zoom in — wider days (the board opens at 8 weeks)', action : 'hZoomIn' },
     { fa : 'fa-angles-up',   title : 'Vertical zoom in — taller rows', action : 'vZoomIn' },
     { fa : 'fa-angles-down', title : 'Vertical zoom out — shorter rows', action : 'vZoomOut' },
     { sep : true },
