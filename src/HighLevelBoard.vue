@@ -501,20 +501,50 @@ function resSplit() {
     });
     props.toast(`${fmtQty(q)} pcs split onto another line`, 'ok');
 }
+// Move a reservation to another unit. The whole quantity always moves, so the
+// unit cards (order qty − out + in, no capacity) and the board change at once:
+//   · to GSL / UNIT-G → one bar on the outside-production pool row (pending external confirmation)
+//   · to an internal unit → fitted on its free compatible capacity by the delivery date; what does
+//     not fit is placed there OVERBOOKED (red) over the original span, so it is seen and can be
+//     moved on again — it takes no capacity
 function resMoveUnit() {
     const r = resRow.value; if (!r || !moveUnit.value) return;
+    const target = moveUnit.value;
     const o = orderById(sc.value, r.orderId);
     const product = r.product || o?.product;
+    const contract = r.fromUnit || o?.unitCode;
+    const base = { status : r.status === 'proposed' ? 'proposed' : 'reserved', label : r.label, locked : false, smv : r.smv || null, fromUnit : r.fromUnit || contract || null, lcDays : r.lcDays || 0 };
+    const kindFor = () => (target === contract ? 'contract' : 'transfer');
+    if (target === 'G') {
+        mutate('move to GSL', s => {
+            const pool = ensurePoolLine(s);
+            s.reservations = s.reservations.filter(y => y.id !== r.id);
+            s.reservations.push({ id : uid('rs'), orderId : r.orderId, lineId : pool.id, product, start : r.start, end : r.end < r.start ? r.start : r.end, qty : r.qty, ...base,
+                kind : 'gsl', extStatus : 'pending', planStatus : null, reason : `moved to GSL by the planner (from ${unitName(lineById(s, r.lineId)?.unitCode || contract)})` });
+        });
+        props.toast(`Moved to GSL: ${fmtQty(r.qty)} pcs on the outside-production pool — pending external confirmation`, 'ok');
+        resOpen.value = false;
+        return;
+    }
     const others = buildLoad({ ...sc.value, reservations : sc.value.reservations.filter(y => y.id !== r.id) });
-    const res = planOrder({ ...sc.value, reservations : sc.value.reservations.filter(y => y.id !== r.id) }, { id : r.orderId, product, qty : r.qty, pcd : r.start, delivery : o?.delivery, unitCode : moveUnit.value }, { unitCode : moveUnit.value, load : others, _noAlt : true });
-    if (!res.allocations.length) { props.toast(`${unitOf(sc.value, moveUnit.value)?.name} has no compatible free capacity for this reservation`, 'warn'); return; }
-    mutate(`move to ${moveUnit.value}`, s => {
+    const res = planOrder({ ...sc.value, reservations : sc.value.reservations.filter(y => y.id !== r.id) }, { id : r.orderId, product, qty : r.qty, pcd : r.start, delivery : o?.delivery, unitCode : target }, { unitCode : target, load : others, _noAlt : true });
+    const fitted = res.allocations.reduce((a, x) => a + x.qty, 0);
+    const rest = r.qty - fitted;
+    const lines = sc.value.lines.filter(l => l.unitCode === target && l.active && !l.pool && lineCompatible(sc.value, l, product));
+    if (rest > 0 && !lines.length) { props.toast(`${unitOf(sc.value, target)?.name} has no line that makes ${product}`, 'warn'); return; }
+    mutate(`move to ${target}`, s => {
         s.reservations = s.reservations.filter(y => y.id !== r.id);
-        const contract = r.fromUnit || o?.unitCode;
-        for (const a of res.allocations) s.reservations.push({ ...a, status : r.status === 'proposed' ? 'proposed' : 'reserved', label : r.label, locked : false, smv : r.smv || null,
-            kind : r.kind ? (moveUnit.value === contract ? 'contract' : 'transfer') : null, fromUnit : r.fromUnit || null, reason : r.kind ? `moved to ${unitName(moveUnit.value)} by the planner` : null });
+        for (const a of res.allocations) s.reservations.push({ ...a, ...base, kind : kindFor(), planStatus : o?.delivery && a.end > o.delivery ? 'late' : 'ontime', reason : `moved to ${unitName(target)} by the planner` });
+        if (rest > 0) {
+            // least loaded compatible line of the target unit over the original span
+            const load = buildLoad(s);
+            const score = l => { let u = 0, c = 0; for (let d = r.start, g = 0; d <= r.end && g < 400; d = addDays(d, 1), g++) { const cap = lineDayMinutes(s, l, d); if (cap > 0) { u += usedMinutes(load, l.id, d) / cap; c++; } } return c ? u / c : 9; };
+            const l = lines.slice().sort((x, y) => score(x) - score(y))[0];
+            s.reservations.push({ id : uid('rs'), orderId : r.orderId, lineId : l.id, product, start : r.start, end : r.end < r.start ? r.start : r.end, qty : rest, ...base, kind : kindFor(), planStatus : 'overbook',
+                reason : `moved to ${unitName(target)} by the planner — no free capacity by ${o?.delivery || 'delivery'} for ${fmtQty(rest)} pcs: overbooked on ${l.name}, move elsewhere to meet delivery` });
+        }
     });
-    props.toast(`Moved to ${unitOf(sc.value, moveUnit.value)?.name}: ${fmtQty(res.feasible)} of ${fmtQty(r.qty)} pcs${res.shortage ? ` — ${fmtQty(res.shortage)} could not be placed` : ''}`, res.shortage ? 'warn' : 'ok');
+    props.toast(`Moved to ${unitOf(sc.value, target)?.name}: ${fmtQty(fitted)} of ${fmtQty(r.qty)} pcs on free capacity${rest > 0 ? ` — ${fmtQty(rest)} pcs overbooked there (red: no free capacity by delivery)` : ''}`, rest > 0 ? 'warn' : 'ok');
     resOpen.value = false;
 }
 
@@ -1411,6 +1441,33 @@ function smvOf(product, code) {
     if (p && Number(p.smv) > 0) return Number(p.smv);
     return unitAvgSmv(code);
 }
+// what the simulation moved per unit × delivery month: quantity (and SAH) that LEFT the unit (transfers out,
+// GSL overflow) and that CAME IN (transfers in; for GSL every unit's overflow) — from the reservations, so a
+// move / split / cancel on the board changes the unit cards at once
+const simAdj = computed(() => {
+    const out = {};
+    const get = (u, ym) => { const a = out[u] || (out[u] = {}); return a[ym] || (a[ym] = { out : 0, in : 0, outSah : 0, inSah : 0 }); };
+    for (const m of allocRep.value?.unitMonths || []) {
+        if (m.outQty || m.gslQty) { const a = get(m.unit, m.ym); a.out += m.outQty + m.gslQty; a.outSah += m.outSah + m.gslSah; }
+        if (m.inQty) { const a = get(m.unit, m.ym); a.in += m.inQty; a.inSah += m.inSah; }
+        if (m.gslQty) { const g = get('G', m.ym); g.in += m.gslQty; g.inSah += m.gslSah; }
+    }
+    return out;
+});
+const cardMonths = computed(() => {
+    const out = {};
+    for (const u of HL_UNITS) {
+        const rows = (erpMonthByUnit.value[u.code]?.months || []).map(r => ({ ...r }));
+        const have = new Set(rows.map(r => r.ym));
+        for (const ym of Object.keys(simAdj.value[u.code] || {})) {
+            if (have.has(ym) || ym === 'none') continue;
+            rows.push({ ym, label : ymLabel(ym), overdue : ym < thisYm, orders : 0, qty : 0, outstanding : 0, products : [], sim : true });
+        }
+        rows.sort((a, b) => a.ym.localeCompare(b.ym));
+        out[u.code] = rows;
+    }
+    return out;
+});
 const monthCapRes = computed(() => {
     void tick.value;
     const s = sc.value;
@@ -1419,10 +1476,10 @@ const monthCapRes = computed(() => {
     const load = loadMap.value;
     for (const u of HL_UNITS) {
         const per = {};
-        const total = { cap : 0, used : 0, capPcs : 0, qty : 0, reqMin : 0 };
+        const total = { cap : 0, used : 0, capPcs : 0, qty : 0, reqMin : 0, qtyErp : 0, out : 0, in : 0 };
         const smv = unitAvgSmv(u.code);
         const lines = s.lines.filter(l => l.unitCode === u.code);
-        for (const row of erpMonthByUnit.value[u.code]?.months || []) {
+        for (const row of cardMonths.value[u.code] || []) {
             const [y, m] = row.ym.split('-').map(Number);
             const first = `${row.ym}-01`;
             const last  = `${row.ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
@@ -1435,10 +1492,13 @@ const monthCapRes = computed(() => {
                 capMin += ls.capMin; usedMin += ls.usedMin;
                 capPcs += smv > 0 ? Math.round(ls.capMin / smv) : 0;
             }
-            const reqMin = row.products.reduce((a, p) => a + p.qty * smvOf(p.product, u.code), 0);
-            per[row.ym] = { cap : capMin, used : usedMin, capPcs, capSah : capMin / 60, reqSah : reqMin / 60,
-                gapQty : capPcs - row.qty, pct : capPcs > 0 ? row.qty / capPcs : null };
-            total.cap += capMin; total.used += usedMin; total.capPcs += capPcs; total.qty += row.qty; total.reqMin += reqMin;
+            // the month's load = ERP order quantity − what the simulation moved out + what it moved in
+            const adj = simAdj.value[u.code]?.[row.ym] || { out : 0, in : 0, outSah : 0, inSah : 0 };
+            const qty = Math.max(0, row.qty - adj.out + adj.in);
+            const reqMin = Math.max(0, row.products.reduce((a, p) => a + p.qty * smvOf(p.product, u.code), 0) - adj.outSah * 60 + adj.inSah * 60);
+            per[row.ym] = { cap : capMin, used : usedMin, capPcs, capSah : capMin / 60, reqSah : reqMin / 60, qty, qtyErp : row.qty, out : adj.out, in : adj.in,
+                gapQty : capPcs - qty, pct : capPcs > 0 ? qty / capPcs : null };
+            total.cap += capMin; total.used += usedMin; total.capPcs += capPcs; total.qty += qty; total.qtyErp += row.qty; total.out += adj.out; total.in += adj.in; total.reqMin += reqMin;
         }
         per.total = { ...total, capSah : total.cap / 60, reqSah : total.reqMin / 60,
             gapQty : total.capPcs - total.qty, pct : total.capPcs > 0 ? total.qty / total.capPcs : null };
@@ -1625,27 +1685,27 @@ function close() {
                     <span class="hl-uc-erp-t">Month wise capacity vs active orders <i class="hl-dim">· delivery after {{ dmy(addDays(erpMonthly.from || '', -1)) }} · avg SMV {{ unitAvgSmv(u.code) }}</i></span>
                     <div class="hl-em-scroll">
                         <table class="hl-em-tbl">
-                            <thead><tr><th>Delivery month</th><th :title="`Σ of the lines' Capacity pcs for the month (Lines tab) — each line's SAH × 60 ÷ unit average SMV ${unitAvgSmv(u.code)}`">Capacity (pcs)</th><th title="Σ of the lines' Line SAH for the month (Lines tab) — manpower × (hours + OT) × efficiency, standard hours">Cap SAH</th><th title="Active ERP order quantity of the month (mr_order_entry, status Active, production unit of the order)">Order qty</th><th title="Order SAH — Σ order qty × ERP product SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th><th title="Quantity of this month's orders the auto plan could not place on the unit's lines (no capacity) — click for the orders">No capacity</th></tr></thead>
+                            <thead><tr><th>Delivery month</th><th :title="`Σ of the lines' Capacity pcs for the month (Lines tab) — each line's SAH × 60 ÷ unit average SMV ${unitAvgSmv(u.code)}`">Capacity (pcs)</th><th title="Σ of the lines' Line SAH for the month (Lines tab) — manpower × (hours + OT) × efficiency, standard hours">Cap SAH</th><th title="Active ERP order quantity of the month (mr_order_entry, status Active, production unit of the order) − what the simulation moved out of the unit (↗ transfers / GSL) + what it moved in (↙)">Order qty</th><th title="Order SAH — Σ order qty × ERP product SMV ÷ 60, standard hours required by the month's orders">Order SAH</th><th title="Capacity − order quantity (free pieces of the month)">Free qty</th><th title="Order quantity as % of capacity">Load %</th><th title="Quantity of this month's orders the auto plan could not place on the unit's lines (no capacity) — click for the orders">No capacity</th></tr></thead>
                             <tbody>
-                                <tr v-for="m in erpMonthByUnit[u.code].months" :key="m.ym" :class="{ 'hl-em-over' : m.overdue, 'hl-em-cur' : m.ym === thisYm }"
+                                <tr v-for="m in cardMonths[u.code]" :key="m.ym" :class="{ 'hl-em-over' : m.overdue, 'hl-em-cur' : m.ym === thisYm }"
                                     :title="m.overdue ? 'Overdue — delivery month already past, order still Active in ERP' : `${m.orders} order(s), outstanding ${fmtQty(m.outstanding)} pcs — click for the product-wise breakdown`"
                                     @click="openErpMonth(u, m.ym)">
                                     <td>{{ m.overdue ? '⚠ ' : '' }}{{ m.label }}</td>
                                     <td class="hl-r">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.capPcs) }}</td>
                                     <td class="hl-r">{{ fmtQty(Math.round(monthCapRes[u.code]?.[m.ym]?.capSah || 0)) }}</td>
-                                    <td class="hl-r">{{ fmtQty(m.qty) }}</td>
+                                    <td class="hl-r" :class="{ 'hl-em-adj' : monthCapRes[u.code]?.[m.ym]?.out || monthCapRes[u.code]?.[m.ym]?.in }" :title="monthCapRes[u.code]?.[m.ym]?.out || monthCapRes[u.code]?.[m.ym]?.in ? `ERP ${fmtQty(m.qty)} − moved out ${fmtQty(monthCapRes[u.code][m.ym].out)} + moved in ${fmtQty(monthCapRes[u.code][m.ym].in)} (simulation: moves / splits / transfers / GSL on the board)` : ''">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.qty ?? m.qty) }}<i v-if="monthCapRes[u.code]?.[m.ym]?.out" class="hl-em-mv"> ↗{{ fmtQty(monthCapRes[u.code][m.ym].out) }}</i><i v-if="monthCapRes[u.code]?.[m.ym]?.in" class="hl-em-mv hl-em-in"> ↙{{ fmtQty(monthCapRes[u.code][m.ym].in) }}</i></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.reqSah || 0) > (monthCapRes[u.code]?.[m.ym]?.capSah || 0) }">{{ fmtQty(Math.round(monthCapRes[u.code]?.[m.ym]?.reqSah || 0)) }}</td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.gapQty || 0) < 0 }">{{ fmtQty(monthCapRes[u.code]?.[m.ym]?.gapQty) }}</td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.[m.ym]?.pct || 0) > 1 }">{{ monthCapRes[u.code]?.[m.ym]?.pct != null ? fmtPct(monthCapRes[u.code][m.ym].pct) : '—' }}</td>
                                     <td class="hl-r hl-nc" :class="{ 'hl-em-neg' : noCapByUnit[u.code]?.months[m.ym]?.qty }" :title="noCapByUnit[u.code]?.months[m.ym] ? `${noCapByUnit[u.code].months[m.ym].orders} order(s) without capacity — click for the list` : 'nothing without capacity'" @click.stop="noCapByUnit[u.code]?.months[m.ym] && openNoCap(u, m.ym)">{{ noCapByUnit[u.code]?.months[m.ym] ? fmtQty(noCapByUnit[u.code].months[m.ym].qty) : '—' }}</td>
                                 </tr>
-                                <tr v-if="!erpMonthByUnit[u.code].months.length"><td colspan="8" class="hl-dim">No active ERP orders for this unit.</td></tr>
+                                <tr v-if="!cardMonths[u.code]?.length"><td colspan="8" class="hl-dim">No active ERP orders for this unit.</td></tr>
                             </tbody>
-                            <tfoot v-if="erpMonthByUnit[u.code].months.length">
+                            <tfoot v-if="cardMonths[u.code]?.length">
                                 <tr><td><b>Total</b></td>
                                     <td class="hl-r"><b>{{ fmtQty(monthCapRes[u.code]?.total?.capPcs) }}</b></td>
                                     <td class="hl-r"><b>{{ fmtQty(Math.round(monthCapRes[u.code]?.total?.capSah || 0)) }}</b></td>
-                                    <td class="hl-r"><b>{{ fmtQty(erpMonthByUnit[u.code].total.qty) }}</b></td>
+                                    <td class="hl-r" :title="monthCapRes[u.code]?.total?.out || monthCapRes[u.code]?.total?.in ? `ERP ${fmtQty(monthCapRes[u.code].total.qtyErp)} − moved out ${fmtQty(monthCapRes[u.code].total.out)} + moved in ${fmtQty(monthCapRes[u.code].total.in)}` : ''"><b>{{ fmtQty(monthCapRes[u.code]?.total?.qty ?? erpMonthByUnit[u.code].total.qty) }}</b><i v-if="monthCapRes[u.code]?.total?.out" class="hl-em-mv"> ↗{{ fmtQty(monthCapRes[u.code].total.out) }}</i><i v-if="monthCapRes[u.code]?.total?.in" class="hl-em-mv hl-em-in"> ↙{{ fmtQty(monthCapRes[u.code].total.in) }}</i></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.reqSah || 0) > (monthCapRes[u.code]?.total?.capSah || 0) }"><b>{{ fmtQty(Math.round(monthCapRes[u.code]?.total?.reqSah || 0)) }}</b></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.gapQty || 0) < 0 }"><b>{{ fmtQty(monthCapRes[u.code]?.total?.gapQty) }}</b></td>
                                     <td class="hl-r" :class="{ 'hl-em-neg' : (monthCapRes[u.code]?.total?.pct || 0) > 1 }"><b>{{ monthCapRes[u.code]?.total?.pct != null ? fmtPct(monthCapRes[u.code].total.pct) : '—' }}</b></td>
@@ -2451,6 +2511,7 @@ function close() {
 .hl-uc-oq b { color : #1646a0; }
 .hl-uc-erp { margin-top : 6px; padding-top : 5px; border-top : 1px dashed #d5dbe3; font-size : 11px; color : #333; }
 .hl-uc-erp-t { display : block; font-weight : 700; color : #1f3a5f; margin-bottom : 3px; }
+.hl-em-mv { font-style : normal; font-size : 9.5px; color : #b26a00; white-space : nowrap; } .hl-em-mv.hl-em-in { color : #2e7d32; } .hl-em-adj { background : #fff8e1; }
 .hl-em-scroll { max-height : 150px; overflow : auto; border : 1px solid #e3e6ea; border-radius : 3px; }
 .hl-em-tbl { border-collapse : collapse; width : 100%; font-size : 10.5px; }
 .hl-em-tbl th, .hl-em-tbl td { padding : 1px 6px; text-align : right; border-bottom : 1px solid #eef1f4; white-space : nowrap; }
