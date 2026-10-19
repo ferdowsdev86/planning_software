@@ -773,8 +773,11 @@ const APU_UNITS = ['M', 'C', 'A'];
 function apuDefaults(s) {
     const r = planRules(s);
     return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
-        gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100) };
+        gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100),
+        planFrom : r.planFrom || nextMonthStart() };
 }
+// default plan start: the first day of next month
+function nextMonthStart() { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth() + 1, 1)); }
 const apuRules = ref(apuDefaults(null));
 const apuUnits = ref([...APU_UNITS]);
 const apuResult = shallowRef(null);
@@ -786,17 +789,21 @@ function apuRulesObj() {
     return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
         lcSmvHigh : Number(r.lcSmvHigh) || 50, lcDaysMid : Number(r.lcDaysMid) || 0, lcDaysHigh : Number(r.lcDaysHigh) || 0,
         buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
-        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)) };
+        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null };
 }
 async function apuImport() {
     if (!sc.value) return;
     if (!canWrite.value) return denied();
     apuBusy.value = true;
     try {
+        if (!apuUnits.value.length) { props.toast('Tick at least one unit to import its orders', 'warn'); return; }
         const erp = await hlErpOrders(by());
+        // only the ticked units' orders (ERP production unit); the other units' imports stay as they are
+        const liveIds = new Set(apuUnits.value.map(c => HL_UNITS.find(u => u.code === c)?.liveUnitId));
+        const rows = (erp.rows || []).filter(r => liveIds.has(Number(r.unitId)));
         let m = null;
-        mutate('import ERP orders', s => { m = mergeErpOrders(s, erp.rows || []); });
-        props.toast(`ERP orders imported as groups (buyer + production unit + style + colour + PCD + delivery): ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old order row(s) removed` : ''} — one bar per group`, 'ok');
+        mutate('import ERP orders', s => { m = mergeErpOrders(s, rows, { units : apuUnits.value }); });
+        props.toast(`${apuUnits.value.map(unitName).join(' / ')}: ${rows.length} ERP order group(s) (buyer + unit + style + colour + PCD + delivery) — ${m.added} new, ${m.updated} updated${m.removed ? `, ${m.removed} old row(s) removed` : ''} — one bar per group`, 'ok');
     }
     catch (e) { props.toast(`ERP orders failed: ${e.message}`, 'error'); }
     finally { apuBusy.value = false; }
@@ -1801,6 +1808,8 @@ function close() {
                         <label class="hl-chk"><input v-model="apuRules.repeatNoLc" type="checkbox"> repeat order: no learning curve</label>
                         <span class="hl-sep"></span>
                         <label class="hl-lbl" title="Day capacity rule: every day of a bar must give the order at least this share of the line's day capacity (the last day, which takes the remainder, excepted) — a busy line never gets a small order spread over many days of crumbs; the bar waits for a day it can really run on">Day capacity: bar day fills ≥ <input v-model.number="apuRules.minFillPct" type="number" min="5" max="100" class="cal-in hl-num hl-num-s"> % of line capacity</label>
+                        <span class="hl-sep"></span>
+                        <label class="hl-lbl" title="Plan start: the orders are loaded on the lines from this date on (an input date before it moves to it); nothing is planned earlier"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
                     </div>
                     <div v-if="apuResult" class="hl-apu-result">
                         <div class="hl-ab-sum">
@@ -1852,41 +1861,10 @@ function close() {
                                         <td :class="{ 'hl-late' : o.finish && o.finish > o.delivery }">{{ dmy(o.finish) }}</td>
                                         <td><span class="hl-x-small" @click.stop="ordRemove(o)">✖</span></td>
                                     </tr>
-                                    <tr v-if="!orderRows.length"><td colspan="11" class="hl-dim">No orders in this scenario — add one on the right, or import reference data.</td></tr>
+                                    <tr v-if="!orderRows.length"><td colspan="11" class="hl-dim">No orders in this scenario — tick the unit(s) above and click ⬇ Import ERP orders.</td></tr>
                                 </tbody>
                             </table>
                         </div>
-                    </div>
-                    <div class="hl-ord-right">
-                        <div class="hl-form">
-                            <label>Buyer <input v-model="ordForm.buyer" class="cal-in" list="hl-buyers"><datalist id="hl-buyers"><option v-for="b in buyers" :key="b" :value="b"></option></datalist></label>
-                            <label>Style / order <input v-model="ordForm.style" class="cal-in"></label>
-                            <label>Colour <input v-model="ordForm.color" class="cal-in" placeholder="optional"></label>
-                            <label>Product <select v-model="ordForm.product" class="cal-in"><option value="">—</option><option v-for="p in sc.products" :key="p.name" :value="p.name">{{ p.name }}</option></select></label>
-                            <label>Quantity <input v-model.number="ordForm.qty" type="number" min="1" class="cal-in"></label>
-                            <label>PCD <input v-model="ordForm.pcd" type="date" class="cal-in"></label>
-                            <label>Delivery <input v-model="ordForm.delivery" type="date" class="cal-in"></label>
-                            <label>Target unit <select v-model="ordForm.unitCode" class="cal-in"><option v-for="u in sc.units" :key="u.code" :value="u.code">{{ u.name }}</option></select></label>
-                            <label>Note <input v-model="ordForm.note" class="cal-in"></label>
-                        </div>
-                        <div class="hl-actions">
-                            <button class="cal-btn st-btn hl-btn" @click="ordNew">➕ New order</button>
-                            <button class="cal-btn st-btn hl-btn" @click="ordSave">💾 {{ ordForm.id ? 'Update order' : 'Add to scenario' }}</button>
-                            <button class="cal-btn cal-btn-primary st-btn hl-btn" @click="ordTest">🔍 Check capacity</button>
-                            <button class="cal-btn st-btn hl-btn hl-primary" :disabled="!testResult || !testResult.allocations.length" @click="ordReserve">📌 Reserve simulated capacity</button>
-                        </div>
-                        <div v-if="testResult" class="hl-result" :class="testResult.shortage ? 'hl-result-short' : 'hl-result-ok'">
-                            <div class="hl-result-head">{{ unitOf(sc, testResult.unitCode)?.name }}: <b>{{ fmtQty(testResult.feasible) }}</b> of {{ fmtQty(testResult.qty) }} pcs feasible by {{ dmy(testResult.order.delivery) }}
-                                <span v-if="testResult.shortage"> · shortage <b>{{ fmtQty(testResult.shortage) }}</b></span></div>
-                            <div class="hl-result-row">Required production days: <b>{{ testResult.requiredDays }}</b> · expected completion: <b>{{ dmy(testResult.completion) }}</b> · lines used: <b>{{ testResult.allocations.length }}</b> of {{ testResult.linesConsidered }} compatible{{ testResult.lateBy ? ` · ${testResult.lateBy} day(s) after delivery` : '' }}</div>
-                            <table class="hl-table hl-table-s"><thead><tr><th>Line</th><th>From</th><th>To</th><th>Qty</th></tr></thead><tbody>
-                                <tr v-for="a in testResult.allocations" :key="a.id"><td>{{ lineById(sc, a.lineId)?.name }}</td><td>{{ dmy(a.start) }}</td><td>{{ dmy(a.end) }}</td><td class="hl-r">{{ fmtQty(a.qty) }}</td></tr>
-                            </tbody></table>
-                            <div class="hl-result-row">Other units with the same order:
-                                <span v-for="(alt, code) in testResult.alternatives" :key="code" class="hl-alt" :class="{ 'hl-alt-ok' : alt.feasible >= testResult.qty }">{{ unitOf(sc, code)?.name }}: {{ fmtQty(alt.feasible) }} pcs{{ alt.completion ? ` by ${dmy(alt.completion)}` : '' }}</span>
-                            </div>
-                        </div>
-                        <div class="st-hint">Capacity = manpower × (hours + OT) × 60 × efficiency ÷ product SMV of the line, per working day, minus what the scenario's reservations already take. Only lines ticked for the product are considered. Nothing here touches the live plan.</div>
                     </div>
                 </div>
             </div>
@@ -2461,7 +2439,7 @@ function close() {
 
 .hl-x-small { cursor : pointer; color : #b00020; font-weight : 700; }
 .hl-ord-body { display : flex; gap : 14px; }
-.hl-ord-left { flex : 1 1 55%; min-width : 0; } .hl-ord-right { flex : 1 1 45%; min-width : 380px; }
+.hl-ord-left { flex : 1 1 100%; min-width : 0; }
 .hl-ord-scroll { max-height : 70vh; }
 .hl-ord-left tbody tr { cursor : pointer; }
 .hl-form { display : grid; grid-template-columns : 1fr 1fr; gap : 6px 10px; }

@@ -62,7 +62,9 @@ export const ymOf = d => (d ? String(d).slice(0, 7) : 'none');
 // per-order-code imports) are removed with their unlocked reservations;
 // an order with a locked reservation stays.
 // ---------------------------------------------------------------------------
-export function mergeErpOrders(sc, rows) {
+// opts.units: the import covers only these unit codes — stale removal stays inside them
+export function mergeErpOrders(sc, rows, opts = {}) {
+    const scope = opts.units ? new Set(opts.units) : null;
     let added = 0, updated = 0, skipped = 0;
     const byKey = new Map();
     for (const o of sc.orders) { const m = /^erp:(.+)$/.exec(o.source || ''); if (m) byKey.set(m[1], o); else if (o.note && !o.source) byKey.set(o.note, o); }
@@ -88,7 +90,7 @@ export function mergeErpOrders(sc, rows) {
     let removed = 0;
     if (rows.length) {
         const lockedOrders = new Set(sc.reservations.filter(r => r.locked && r.orderId).map(r => r.orderId));
-        const stale = new Set(sc.orders.filter(o => /^erp:/.test(o.source || '') && !seen.has(o.id) && !lockedOrders.has(o.id)).map(o => o.id));
+        const stale = new Set(sc.orders.filter(o => /^erp:/.test(o.source || '') && !seen.has(o.id) && !lockedOrders.has(o.id) && (!scope || scope.has(o.unitCode))).map(o => o.id));
         if (stale.size) {
             sc.orders = sc.orders.filter(o => !stale.has(o.id));
             sc.reservations = sc.reservations.filter(r => !(r.orderId && stale.has(r.orderId)));
@@ -465,7 +467,8 @@ export const DEFAULT_PLAN_RULES = {
     buyerLc     : { 'G-STAR' : 4 },      // buyer → learning-curve days
     noLcBuyers  : ['BORK'],              // buyers without a learning curve
     repeatNoLc  : true,                  // a repeat order ramps no more
-    minFill     : DEFAULT_MIN_FILL       // day capacity rule: share of the line's day capacity a bar day must give the order
+    minFill     : DEFAULT_MIN_FILL,      // day capacity rule: share of the line's day capacity a bar day must give the order
+    planFrom    : null                   // plan start: no bar before this date (null = the scenario's plan range start)
 };
 export function planRules(sc) { const r = sc?.balance?.planRules || {}; return { ...DEFAULT_PLAN_RULES, ...r, buyerLc : { ...DEFAULT_PLAN_RULES.buyerLc, ...(r.buyerLc || {}) } }; }
 const buyerKey = b => String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -488,7 +491,8 @@ export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'De
 export function autoPlanUnits(sc, opts = {}) {
     const rules = { ...planRules(sc), ...(opts.rules || {}) };
     const settings = { ...balanceSettings(sc), minFill : rules.minFill };
-    const from = opts.from && opts.from > sc.from ? opts.from : sc.from;
+    const start = opts.from || rules.planFrom || null;
+    const from = start && start > sc.from ? start : sc.from;
     const to   = opts.to && opts.to < sc.to ? opts.to : sc.to;
     const units = new Set(opts.units || INTERNAL);
     const orders = sc.orders.filter(o => units.has(o.unitCode) && (!opts.orderIds || opts.orderIds.includes(o.id)) && planQty(o, settings) > 0);
