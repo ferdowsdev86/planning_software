@@ -11321,10 +11321,29 @@ function fitWeeks(s, weeks = VIEW_WEEKS_DEFAULT, keep) {
 
 let userZoomed  = false;   // the user pressed a zoom button — keep their zoom
 let lastFitWidth = 0;
+// Vertical fit: the board opens with 15 rows on screen (the Holding Row
+// counted) — row height = body height / 15 — until the planner presses ⇈ / ⇊
+const VIEW_ROWS_DEFAULT = 15;
+let userVZoomed = false;
+let lastFitHeight = 0;
+function fitRows(s) {
+    if (!s || userVZoomed) return;
+    const h = Number(s.bodyContainer?.clientHeight || s.scrollable?.clientHeight) || 0;
+    if (!h) return;
+    const rh = Math.max(24, Math.min(110, Math.floor(h / VIEW_ROWS_DEFAULT)));
+    if (h === lastFitHeight && s.rowHeight === rh) return;
+    lastFitHeight = h;
+    if (s.rowHeight !== rh) {
+        s.rowHeight = rh;
+        syncRowHeightVar(s);
+        requestAnimationFrame(() => updateFrVScroll(s));
+    }
+}
 // Board visible / axis resized: until the user zooms, always show 8 weeks
 // for the current axis width (the width settles over a few layout passes
 // after opening); after a manual zoom only enforce the 16-week bound
 function fitBoardView(s) {
+    fitRows(s);
     const w = axisWidthPx(s);
     if (!s || !w) return;
     if (!userZoomed) {
@@ -11348,7 +11367,8 @@ function hZoom(delta) {
 function vZoom(delta) {
     const s = getInstance();
     if (!s) return;
-    s.rowHeight = Math.max(32, Math.min(110, (s.rowHeight || 56) + delta));
+    userVZoomed = true;
+    s.rowHeight = Math.max(24, Math.min(110, (s.rowHeight || 56) + delta));
     syncRowHeightVar(s);
     requestAnimationFrame(() => updateFrVScroll(s));
 }
