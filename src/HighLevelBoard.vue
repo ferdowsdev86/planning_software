@@ -416,9 +416,8 @@ async function openUnitPlan(code) {
             s.reservations = s.reservations.filter(r => !rm.has(r.id)).concat(out.reservations);
             s.balance = { ...balanceSettings(s), planRules : apuRulesObj(), lastAutoPlan : out.summary };
         });
-        if (out.summary.unplaced) { expandedUnits.add('G'); localStorage.setItem('hl-expanded', JSON.stringify([...expandedUnits])); }   // the pool row with the 'plan elsewhere' bars
         const sm = out.summary;
-        props.toast(`${unitName(code)}: ${sm.orders} orders — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met · ${sm.unplaced} without capacity${sm.noplan ? ` · ${sm.noplan} no plan (expired, ${fmtQty(sm.noplanQty)} pcs)` : ''}${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
+        props.toast(`${unitName(code)}: ${sm.orders} orders — ${sm.ontime} on time · ${sm.pcd} PCD not met · ${sm.late} delivery not met (red: overbooked at the input date, move elsewhere${sm.overbookedQty ? `, ${fmtQty(sm.overbookedQty)} pcs` : ''}) · ${sm.unplaced} without capacity${sm.noplan ? ` · ${sm.noplan} no plan (expired, ${fmtQty(sm.noplanQty)} pcs)` : ''}${sm.maxLate ? ` · up to ${sm.maxLate} d late` : ''} — grey / orange / red bars below, Save to keep`, sm.critical ? 'warn' : 'ok');
     }
     catch (e) { props.toast(`${unitName(code)}: plan failed — ${e.message}`, 'error'); }
     finally { upBusy.value = false; }
@@ -882,7 +881,6 @@ function apuApply() {
         s.balance = { ...balanceSettings(s), planRules : rules, lastAutoPlan : out.summary };
     });
     for (const u of out.summary.units) expandedUnits.add(u);
-    if (out.summary.unplaced) expandedUnits.add('G');
     localStorage.setItem('hl-expanded', JSON.stringify([...expandedUnits]));
     if (!boardUnit.value) boardUnit.value = out.summary.units.length === 1 ? out.summary.units[0] : 'ALL';
     const sm = out.summary;
@@ -1611,7 +1609,7 @@ function close() {
             </template>
             <span class="hl-legend">
                 <i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>holiday <i class="hl-lg hl-day-off"></i>off day <i class="hl-lg hl-day-inactive"></i>inactive
-                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met → plan elsewhere <i class="hl-lg hl-lg-elsewhere"></i>no capacity here → plan elsewhere (pool row) <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
+                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met → move elsewhere (overbooked at its input date; the grey bar keeps the line) <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
             </span>
             <span v-if="conflictList.length" class="hl-warn">⚠ {{ conflictList.length }} overloaded line-day(s)</span>
             <span v-if="reconcileIssues.length" class="hl-warn">⚠ {{ reconcileIssues.length }} reservation(s) do not reconcile</span>
@@ -1905,7 +1903,8 @@ function close() {
                             <span class="hl-ps-chip hl-ps-ontime">on time {{ apuResult.summary.ontime }}</span>
                             <span class="hl-ps-chip hl-ps-pcd">PCD not met {{ apuResult.summary.pcd }}</span>
                             <span class="hl-ps-chip hl-ps-late">delivery not met {{ apuResult.summary.late }}</span>
-                            <span class="hl-ps-chip hl-ps-unplaced" title="no capacity on the unit's lines — violet bars on the pool row: plan elsewhere (other unit / GSL)">no capacity here → elsewhere {{ apuResult.summary.unplaced }}</span>
+                            <span class="hl-ps-chip hl-ps-unplaced">no capacity {{ apuResult.summary.unplaced }}</span>
+                            <span v-if="apuResult.summary.overbooked" class="hl-ps-chip hl-ps-late" title="orders overbooked where the rules put them — no free capacity by delivery: the grey bar keeps the line, these have to move elsewhere (other unit / GSL)">overbooked → move elsewhere {{ apuResult.summary.overbooked }} · {{ fmtQty(apuResult.summary.overbookedQty) }} pcs</span>
                             <span v-if="apuResult.summary.noplan" class="hl-ps-chip hl-ps-noplan" title="PCD and input date already expired before the plan start — kept apart, not planned">no plan {{ apuResult.summary.noplan }} · {{ fmtQty(apuResult.summary.noplanQty) }} pcs</span>
                             <span class="hl-ps-chip hl-ps-crit" :class="{ 'hl-ps-none' : !apuResult.summary.critical }" title="orders whose delivery is not met or whose quantity has no capacity — the real problems of this plan">⚠ critical {{ apuResult.summary.critical }}<template v-if="apuResult.summary.maxLate"> · up to {{ apuResult.summary.maxLate }} d late</template><template v-if="apuResult.summary.shortQty"> · {{ fmtQty(apuResult.summary.shortQty) }} pcs short</template></span>
                             <span v-if="apuResult.summary.stretched" class="hl-dim" title="bars running well under the line's day capacity (more bar days than the work needs)">{{ apuResult.summary.stretched }} stretched</span>
@@ -2568,7 +2567,8 @@ function close() {
 .hl-day-pool { background : #ffe0b2 !important; }
 .hl-root .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
 .hl-root .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
-.hl-root .b-sch-event.hl-res-ps-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
+.hl-root .b-sch-event.hl-res-ps-late, .hl-root .b-sch-event.hl-res-ps-overbook { background : #d32f2f; border-color : #8e0000; color : #fff; }
+.hl-ps-overbook { background : #d32f2f; }
 .hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; } .hl-lg-elsewhere { background : #7b1fa2; }
 .hl-root .b-sch-event.hl-res-k-gsl.hl-res-ps-elsewhere, .hl-root .b-sch-event.hl-res-ps-elsewhere { background : #7b1fa2; border-color : #4a148c; color : #fff; }
 .hl-ps-elsewhere { background : #7b1fa2; }

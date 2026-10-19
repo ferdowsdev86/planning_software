@@ -245,8 +245,18 @@ test('unit-wise auto plan status: orange when delivery needs a start before the 
     assert.equal(byId.x1.placed > 0, true);
     assert.equal(byId.x1.finish > '2026-11-25', true);
     assert.equal(out.summary.late, 1);
+    // the impossible order is OVERBOOKED where the rules put it (its input date), not pushed later: one red bar on
+    // a line of its unit, taking no capacity — the grey bar keeps the line, this one has to move elsewhere
+    assert.equal(byId.x1.overbooked, true);
+    assert.equal(byId.x1.start, '2026-11-04');
+    const xb = out.reservations.filter(r => r.orderId === 'x1');
+    assert.equal(xb.length, 1); assert.equal(xb[0].planStatus, 'overbook'); assert.equal(xb[0].qty, 100000);
+    apply(sc, out);
+    assert.equal(conflicts(sc, buildLoad(sc)).length, 0);                       // an overbooked bar takes no line capacity
+    assert.equal(sc.lines.find(l => l.id === xb[0].lineId).unitCode, 'M');
+    assert.equal(out.summary.overbooked, 1);
     assert.equal(byId.x1.lateDays > 0, true);
-    assert.equal(byId.x1.critical.some(c => /after delivery/.test(c)), true);
+    assert.equal(byId.x1.critical.some(c => /overbooked.*move .* elsewhere/.test(c)), true);
     assert.equal(out.summary.critical, 1);
 });
 
@@ -291,12 +301,11 @@ test('orders whose delivery passed before the plan start are No plan, reported a
     assert.equal(out.summary.noplan, 1); assert.equal(out.summary.noplanQty, 500);
     assert.equal(byId.u1.status, 'ontime'); assert.equal(byId.u2.status, 'ontime'); assert.equal(byId.u3.status, 'ontime');
     assert.equal(byId.p1.status, 'ontime'); assert.equal(byId.p1.start, '2026-11-01');
-    // AQL cannot make Denim Pants → no capacity here → a 'plan elsewhere' bar on the pool row, no line capacity taken
+    // AQL cannot make Denim Pants → no compatible line → no capacity, no bar
     sc.orders.push(order('a1', 'A', 'Denim Pants', 300, '2026-12-20', { pcd : '2026-11-02', smv : 20, repeat : true }));
     const o2 = autoPlanUnits(sc, { units : ['A'] });
-    const a1 = o2.reservations.find(r => r.orderId === 'a1');
     assert.equal(o2.results[0].status, 'unplaced');
-    assert.equal(a1.planStatus, 'elsewhere'); assert.equal(a1.kind, 'gsl'); assert.equal(sc.lines.find(l => l.id === a1.lineId).pool, true); assert.equal(a1.qty, 300);
+    assert.equal(o2.reservations.some(r => r.orderId === 'a1'), false);
     // three small orders never share a line-day: each has its own day(s)
     const key = new Set();
     for (const r of out.reservations) { const k = `${r.lineId}|${r.start}`; assert.equal(key.has(k), false, 'two orders on one line-day'); key.add(k); }

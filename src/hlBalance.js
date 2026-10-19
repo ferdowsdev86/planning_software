@@ -263,7 +263,7 @@ export function autoBalance(sc, opts = {}) {
     const ids = new Set(orders.map(o => o.id));
     const removedIds = sc.reservations.filter(r => ids.has(r.orderId) && r.status === 'proposed' && !r.locked && r.source === 'balance').map(r => r.id);
     const removed = new Set(removedIds);
-    const kept = sc.reservations.filter(r => !removed.has(r.id) && r.status !== 'cancelled' && (settings.includeLive !== false || r.source !== 'live'));
+    const kept = sc.reservations.filter(r => !removed.has(r.id) && r.status !== 'cancelled' && r.planStatus !== 'overbook' && (settings.includeLive !== false || r.source !== 'live'));
     // base load: everything that stays (locked, manual, other orders, live)
     const load = new Map();
     for (const r of kept) {
@@ -367,6 +367,7 @@ export function allocationReport(sc, { settings = balanceSettings(sc), capIndex 
     const byOrder = new Map();
     for (const r of sc.reservations) {
         if (r.status === 'cancelled' || !r.orderId) continue;
+        if (r.planStatus === 'overbook') continue;       // overbooked = not allocated here (no capacity) — stays open / 'no capacity'
         if (!byOrder.has(r.orderId)) byOrder.set(r.orderId, []);
         byOrder.get(r.orderId).push(r);
     }
@@ -490,10 +491,43 @@ export function inputDateFor(o, rules) {
     if (!o.pcd) return null;
     return addDays(o.pcd, Number(o.repeat ? rules.repeatLead : rules.newLead) || 0);
 }
-export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met — plan elsewhere', unplaced : 'No capacity here — plan elsewhere', noplan : 'No plan (delivery expired)', elsewhere : 'Plan elsewhere (no capacity here)' };
+export const PLAN_STATUS = { ontime : 'On time', pcd : 'PCD not met', late : 'Delivery not met — move elsewhere', overbook : 'Overbooked — move elsewhere (no free capacity by delivery)', unplaced : 'No capacity', noplan : 'No plan (delivery expired)', elsewhere : 'Plan elsewhere (no capacity here)' };
 // an order whose DELIVERY date lies before the plan start can no longer be planned — it is reported apart;
 // an order whose PCD has passed is an available order and is planned from the plan start on
 export function planExpired(o, rules, from) { return !!(o.delivery && from && o.delivery < from); }
+
+// overbook: a bar where the rules put the order — from day `fromI`, on the compatible line of its unit with the
+// least load in that window, spanning the working days the quantity needs at the line's FULL day capacity (learning
+// curve ramp included) — ignoring what is already there. It takes nothing from the capacity index.
+function overbook(sc, ix, o, qty, fromI, lcDays, ob = new Map()) {
+    const lines = sc.lines.filter(l => l.unitCode === o.unitCode && l.active && !l.pool && lineSmv(sc, l, o.product) != null);
+    if (!lines.length) return { allocations : [], remaining : qty, reason : `${o.unitCode}: no compatible line` };
+    const smv = orderSmv(sc, o);
+    const ramp = lcDays > 0 ? rampOf(lcDays) : null;
+    const n = ix.days.length;
+    const s = Math.max(0, Math.min(n - 1, fromI));
+    let best = null;
+    for (const l of lines) {
+        const cap = ix.cap.get(l.id), used = ix.used.get(l.id);
+        let o2 = ob.get(l.id); if (!o2) { o2 = new Float64Array(n); ob.set(l.id, o2); }
+        let made = 0, e = s, wd = 0, load = 0, days = 0;
+        for (let i = s; i < n && made < qty * smv; i++) {
+            if (cap[i] <= 0) continue;
+            const r = ramp && wd < ramp.length ? ramp[wd] : 1; wd++;
+            made += cap[i] * r; e = i; load += (used[i] + o2[i]) / cap[i]; days++;
+        }
+        const endI = e, avgLoad = days ? load / days : 1;
+        if (!best || avgLoad < best.avgLoad - 1e-9 || (Math.abs(avgLoad - best.avgLoad) < 1e-9 && endI < best.endI)) best = { l, endI, avgLoad };
+    }
+    // the overbooked bars spread over the unit's lines: this one counts as a full line for the next pick
+    const o2 = ob.get(best.l.id), cap = ix.cap.get(best.l.id);
+    for (let i = s; i <= best.endI; i++) if (cap[i] > 0) o2[i] += cap[i];
+    return { allocations : [{
+        id : uid('rs'), orderId : o.id, lineId : best.l.id, product : o.product, smv, start : ix.days[s], end : ix.days[best.endI], qty,
+        locked : false, status : 'proposed', source : 'autoplan', kind : 'contract', fromUnit : o.unitCode, lcDays : lcDays > 0 ? lcDays : 0,
+        overbooked : true, label : orderLabel(o)
+    }], remaining : 0, reason : null };
+}
 
 export function autoPlanUnits(sc, opts = {}) {
     const rules = { ...planRules(sc), ...(opts.rules || {}) };
@@ -506,7 +540,7 @@ export function autoPlanUnits(sc, opts = {}) {
     const ids = new Set(orders.map(o => o.id));
     const removedIds = sc.reservations.filter(r => ids.has(r.orderId) && r.status === 'proposed' && !r.locked && (r.source === 'autoplan' || r.source === 'balance')).map(r => r.id);
     const removed = new Set(removedIds);
-    const kept = sc.reservations.filter(r => !removed.has(r.id) && r.status !== 'cancelled' && (settings.includeLive !== false || r.source !== 'live'));
+    const kept = sc.reservations.filter(r => !removed.has(r.id) && r.status !== 'cancelled' && r.planStatus !== 'overbook' && (settings.includeLive !== false || r.source !== 'live'));
     const load = new Map();
     for (const r of kept) {
         const { days } = reservationDays(sc, r);
@@ -519,6 +553,7 @@ export function autoPlanUnits(sc, opts = {}) {
     for (const r of kept) if (r.orderId) keptQty.set(r.orderId, (keptQty.get(r.orderId) || 0) + (Number(r.qty) || 0));
     orders.sort((a, b) => String(a.delivery || '9999').localeCompare(String(b.delivery || '9999')) || String(a.pcd || '').localeCompare(String(b.pcd || '')) || String(a.note || a.id).localeCompare(String(b.note || b.id)));
     const idxOf = d => (d == null ? null : (ix.idx.get(d) ?? (d < from ? 0 : (d > to ? lastI + 1 : null))));
+    const ob = new Map();    // overbooked load per line (spreads the red bars over the lines)
     const snapshotUsed = () => { const m = new Map(); for (const [k, v] of ix.used) m.set(k, v.slice()); return m; };
     const restoreUsed = snap => { for (const [k, v] of snap) ix.used.set(k, v); };
     const reservations = [], results = [];
@@ -551,14 +586,17 @@ export function autoPlanUnits(sc, opts = {}) {
             if (!chosen) chosen = { r : null, st, finish : null, late : true };
         }
         if (!chosen || chosen.late) {
-            // delivery cannot be met: plan it AS SOON AS POSSIBLE — from the earliest attempt start (the plan start /
-            // PCD), open-ended — so the overrun is the smallest it can be and the planner sees it (red)
-            const st = starts[starts.length - 1];
-            const r = fitInUnit(sc, ix, o, o.unitCode, open, st.i, lastI, settings, 'contract', lcDays);
+            // delivery cannot be met on the free capacity: the order is NOT pushed later — it is OVERBOOKED where the
+            // rules put it (its input date, at the line's full day capacity + learning curve) on the unit line with
+            // the least load in that window, taking no capacity from the index. The grey bars keep the line; this one
+            // is RED: to meet delivery it has to move elsewhere (other unit / GSL)
+            const st = starts[0];
+            const r = overbook(sc, ix, o, open, st.i, lcDays, ob);
             const finish = r.allocations.reduce((m, a) => (!m || a.end > m ? a.end : m), null);
-            chosen = { r, st, finish, late : true };
+            chosen = { r, st, finish, late : true, overbooked : r.allocations.length > 0 };
         }
         const { r, st, finish, late } = chosen;
+        res.overbooked = !!chosen.overbooked;
         res.placed = open - (r ? r.remaining : open);
         res.start = r?.allocations.reduce((m, a) => (!m || a.start < m ? a.start : m), null) || null;
         res.finish = finish;
@@ -567,32 +605,17 @@ export function autoPlanUnits(sc, opts = {}) {
         else if (late || (finish && finish > deadline)) res.status = 'late';
         else if (st.tag !== 'input' || (inputDate && res.start && res.start < inputDate)) res.status = 'pcd';
         else res.status = 'ontime';
-        const asap = res.status === 'late' || res.status === 'unplaced';
-        res.attempt = asap ? `as soon as possible from ${st.date}${st.tag === 'input' ? ' (input date)' : st.tag === 'pcd' ? ' (PCD, before the input date)' : ' (plan start, before PCD)'}`
-            : st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
+        res.attempt = res.overbooked ? `no free capacity by ${deadline} — overbooked on ${r.allocations.map(a => sc.lines.find(l => l.id === a.lineId)?.name || a.lineId).join(', ')} from ${st.date}: move elsewhere to meet delivery`
+            : res.status === 'unplaced' ? `from ${st.date}` : st.tag === 'input' ? `from the input date ${st.date}` : st.tag === 'pcd' ? `from PCD ${st.date} (before the input date)` : `from ${st.date} (before PCD)`;
         if (res.status === 'unplaced') res.note = r?.reason || 'no free capacity in the plan range';
         else if (r && r.remaining > 0) res.note = `${r.remaining} pcs without capacity in the window`;
-        // no capacity on this unit's lines (whole order, or the rest of it): a violet 'plan elsewhere' bar on the
-        // GSL / outside pool row — input date → deadline — so the order is SEEN on the board and can be moved to
-        // another unit or GSL; it takes no line capacity
-        const shortQty = r ? r.remaining : open;
-        if (shortQty > 0) {
-            const pool = ensurePoolLine(sc);
-            const s0 = [inputDate, from].filter(Boolean).sort().pop();
-            const e0 = deadline && deadline > s0 ? deadline : s0;
-            (r || (r = { allocations : [], remaining : open })).allocations.push({
-                id : uid('rs'), orderId : o.id, lineId : pool.id, product : o.product, smv : orderSmv(sc, o), start : s0, end : e0, qty : shortQty,
-                locked : false, status : 'proposed', source : 'autoplan', kind : 'gsl', fromUnit : o.unitCode, extStatus : 'pending', elsewhere : true,
-                label : orderLabel(o)
-            });
-        }
         // day capacity check of the proposal: bar days (working days the bars
         // cover) against the days the quantity needs at the lines' full day
         // capacity, and the share of those days' capacity the order fills
         const smv = orderSmv(sc, o);
         let capSum = 0, barDays = 0;
         for (const a of r?.allocations || []) {
-            if (a.elsewhere) continue;
+            if (a.overbooked) continue;
             const c = ix.cap.get(a.lineId); if (!c) continue;
             const s = ix.idx.get(a.start), e = ix.idx.get(a.end);
             if (s == null || e == null) continue;
@@ -606,15 +629,16 @@ export function autoPlanUnits(sc, opts = {}) {
         res.lateDays = res.status === 'late' && finish && deadline && finish > deadline ? daysBetween(deadline, finish) : 0;
         res.shortQty = r ? r.remaining : open;
         // what is really critical in the plan, plainest first
-        if (res.status === 'unplaced') res.critical.push(`no capacity for ${open} pcs`);
+        if (res.overbooked) res.critical.push(`overbooked: no free capacity by delivery — move ${open} pcs elsewhere`);
+        else if (res.status === 'unplaced') res.critical.push(`no capacity for ${open} pcs`);
         else if (res.shortQty > 0) res.critical.push(`${res.shortQty} pcs without capacity`);
-        if (res.lateDays > 0) res.critical.push(`finishes ${res.lateDays} d after delivery`);
+        if (res.lateDays > 0 && !res.overbooked) res.critical.push(`finishes ${res.lateDays} d after delivery`);
         else if (res.status === 'late' && res.placed > 0 && !finish) res.critical.push('delivery not met');
         if (res.status === 'pcd' && inputDate && res.start) res.critical.push(`starts ${daysBetween(res.start, inputDate)} d before the input date`);
         if (res.stretched) res.critical.push(`stretched: ${barDays} bar days for ${res.needDays} d of work (fill ${Math.round((res.fill || 0) * 100)} %)`);
         for (const a of r?.allocations || []) {
-            a.source = 'autoplan'; a.planStatus = a.elsewhere ? 'elsewhere' : res.status; a.lcDays = a.elsewhere ? 0 : lcDays;
-            if (a.elsewhere) { delete a.elsewhere; a.reason = `No capacity on ${o.unitCode} lines for ${a.qty} pcs by ${deadline} — plan elsewhere (other unit / GSL)`; reservations.push(a); continue; }
+            a.source = 'autoplan'; a.planStatus = res.status; a.lcDays = lcDays;
+            if (a.overbooked) { delete a.overbooked; a.planStatus = 'overbook'; a.reason = `Overbooked — no free capacity on ${o.unitCode} lines by ${deadline}: the grey bar keeps the line, this order has to move elsewhere (other unit / GSL) to meet delivery · ${res.attempt}`; reservations.push(a); continue; }
             a.reason = `${PLAN_STATUS[res.status]}${res.lateDays ? ` (${res.lateDays} d late)` : ''} · ${res.attempt}${lcDays ? ` · learning curve ${lcDays} d` : ' · no learning curve'}${o.repeat ? ' · repeat order' : ' · new style'}`;
             reservations.push(a);
         }
@@ -623,6 +647,7 @@ export function autoPlanUnits(sc, opts = {}) {
     const count = k => results.filter(x => x.status === k).length;
     const summary = { at : new Date().toISOString().slice(0, 16).replace('T', ' '), from, to, orders : results.length, ontime : count('ontime'), pcd : count('pcd'), late : count('late'), unplaced : count('unplaced'),
         critical : results.filter(x => x.status === 'late' || x.status === 'unplaced' || x.shortQty > 0).length,
+        overbooked : results.filter(x => x.overbooked).length, overbookedQty : results.filter(x => x.overbooked).reduce((a, x) => a + x.open, 0),
         noplan : count('noplan'), noplanQty : results.filter(x => x.status === 'noplan').reduce((a, x) => a + x.open, 0),
         stretched : results.filter(x => x.stretched).length, shortQty : results.reduce((a, x) => a + x.shortQty, 0),
         maxLate : results.reduce((a, x) => Math.max(a, x.lateDays), 0), minFill : rules.minFill,

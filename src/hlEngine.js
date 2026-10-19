@@ -208,6 +208,7 @@ export function buildLoad(sc, extraReservations = []) {
     const load = new Map();   // lineId → Map(day → { min, pcs, items : [{ resId, pcs, min }] })
     for (const r of [...sc.reservations, ...extraReservations]) {
         if (r.status === 'cancelled') continue;
+        if (r.planStatus === 'overbook') continue;        // an overbooked (red, move elsewhere) bar takes no line capacity
         const { days } = reservationDays(sc, r);
         let m = load.get(r.lineId);
         if (!m) { m = new Map(); load.set(r.lineId, m); }
