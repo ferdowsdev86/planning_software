@@ -217,7 +217,22 @@ const config = {
     cls           : 'hl-sched',   // the wrapper drops the class attribute — Bryntum's own cls lands on its element
     minHeight     : 380,
     rowHeight     : 40,
-    barMargin     : 5,
+    barMargin     : 2,
+    resourceMargin : 3,
+    // bars stack tightly (24 px lanes, 2 px apart) from the top of the row — the row grows with the lanes, and is
+    // never shorter than its month list; Bryntum's own stack would make every lane as tall as the row
+    eventLayout   : { type : 'stack', layoutFn : (events, resource) => {
+        const H = 24, G = 2, M = 3;
+        events.sort((a, b) => a.left - b.left || b.width - a.width);
+        const laneEnd = [];
+        for (const e of events) {
+            let lane = laneEnd.findIndex(end => end <= e.left);
+            if (lane < 0) { lane = laneEnd.length; laneEnd.push(0); }
+            laneEnd[lane] = e.left + e.width + 1;
+            e.top = M + lane * (H + G); e.height = H;
+        }
+        return Math.max(resource.rowHeight || 40, M * 2 + laneEnd.length * (H + G) - G);
+    } },
     eventStyle    : 'plain',
     viewPreset    : PRESETS[viewMode.value],
     startDate     : fromYmd(ymd(new Date())),
@@ -334,8 +349,15 @@ function syncScheduler() {
             ym = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`;
             if (months.length > 24) break;
         }
-        // capacity / reserved minutes and reserved pieces of a line in a month
-        const lineMonth = (l, mo) => { let capMin = 0, usedMin = 0, pcs = 0; const lm = load.get(l.id); for (let d = mo.from, g = 0; d <= mo.to && g < 40; d = addDays(d, 1), g++) { capMin += lineDayMinutes(scn, l, d); const c = lm?.get(d); if (c) { usedMin += c.min || 0; pcs += c.pcs || 0; } } return { capMin, usedMin, pcs }; };
+        // capacity / reserved minutes and reserved pieces of a line in a month — every bar on the line counts,
+        // the red overbooked ones too (they are not in the capacity load, so they are added here)
+        const obLoad = new Map();
+        for (const r of scn.reservations) {
+            if (r.status === 'cancelled' || r.planStatus !== 'overbook') continue;
+            let m = obLoad.get(r.lineId); if (!m) { m = new Map(); obLoad.set(r.lineId, m); }
+            for (const d of reservationDays(scn, r).days) { const c = m.get(d.date) || { min : 0, pcs : 0 }; c.min += d.min; c.pcs += d.pcs; m.set(d.date, c); }
+        }
+        const lineMonth = (l, mo) => { let capMin = 0, usedMin = 0, pcs = 0; const lm = load.get(l.id), om = obLoad.get(l.id); for (let d = mo.from, g = 0; d <= mo.to && g < 40; d = addDays(d, 1), g++) { capMin += lineDayMinutes(scn, l, d); const c = lm?.get(d); if (c) { usedMin += c.min || 0; pcs += c.pcs || 0; } const o = om?.get(d); if (o) { usedMin += o.min; pcs += o.pcs; } } return { capMin, usedMin, pcs }; };
         const monthCells = (fn, smv) => {
             const rows = months.map(mo => ({ mo, ...fn(mo) }));
             const cap = rows.map(r => `<div class="hl-mc"><i>${r.mo.label}</i><b>${r.capMin > 0 ? fmtQty(Math.round(r.capMin / (smv || 1))) : '—'}</b></div>`).join('');
@@ -343,7 +365,7 @@ function syncScheduler() {
             const ld  = rows.map(r => { const p = r.capMin > 0 ? r.usedMin / r.capMin : null; return `<div class="hl-mc"><span class="hl-util hl-util-${p == null ? 'ok' : utilCls(p)}">${p == null ? '—' : fmtPct(p)}</span></div>`; }).join('');
             return { capHtml : `<div class="hl-mcs">${cap}</div>`, resHtml : `<div class="hl-mcs">${res}</div>`, loadHtml : `<div class="hl-mcs">${ld}</div>` };
         };
-        const rowH = Math.max(40, 12 + 15 * months.length);
+        const rowH = Math.max(40, 8 + 15 * months.length);
         // one unit chosen: that unit plus the GSL / outside pool row (its 'plan elsewhere' bars)
         const resources = scn.units.filter(u => boardUnit.value === 'ALL' || !boardUnit.value || u.code === boardUnit.value || (u.code === 'G' && scn.reservations.some(r => r.planStatus === 'elsewhere' && r.fromUnit === boardUnit.value))).map(u => {
             const st = us[u.code] || {};
