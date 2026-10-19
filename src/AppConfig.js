@@ -478,6 +478,18 @@ export const searchState = { query : '', ids : null };
 // renderer marks bars that carry notes; the tooltip lists them.
 export const stripNotes = { byPo : new Map() };
 export const stripNotesFor = po => (po ? stripNotes.byPo.get(String(po)) || [] : []);
+// A bar's note key: its PO number; a projection bar (no PO yet) keeps its
+// notes under its MBM order code ("ORD:<code>") — once the confirm PO
+// replaces the projection, the bar still shows the order's notes
+export const noteKeyOf = raw => (raw?.po ? String(raw.po) : (raw?.mbmOrder ? `ORD:${String(raw.mbmOrder).trim()}` : ''));
+export function stripNotesOf(raw) {
+    if (!raw) return [];
+    const own = stripNotesFor(raw.po);
+    const ord = raw.mbmOrder ? stripNotesFor(`ORD:${String(raw.mbmOrder).trim()}`) : [];
+    if (!ord.length) return own;
+    const seen = new Set(own.map(n => n.id));
+    return [...own, ...ord.filter(n => !seen.has(n.id))].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+}
 export function setStripNotes(rows) {
     stripNotes.byPo = new Map();
     for (const n of rows || []) {
@@ -2381,7 +2393,7 @@ export const schedulerProConfig = {
         renderData.cls.add(`mb-risk-${colorKey}`);
         if (orderTypeOf(r.po, r.orderType) === 'confirm') renderData.cls.add('mb-confirm-order');
         if (r.confirmMismatch) renderData.cls.add('mb-qty-mismatch');
-        if (stripNotesFor(r.po).length) renderData.cls.add('mb-has-note');
+        if (stripNotesOf(r).length) renderData.cls.add('mb-has-note');
 
         const q = (searchState.query || '').trim().toLowerCase();
         if (searchState.ids) {
@@ -2991,7 +3003,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
   </div>
 
   ${(() => {
-      const notes = stripNotesFor(r.po);
+      const notes = stripNotesOf(r);
       if (!notes.length) return '';
       const when = d => { const x = new Date(d); return Number.isNaN(x.getTime()) ? '' : `${ddMon(x)} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
       return `<div class="tip4-card tip4-notes">

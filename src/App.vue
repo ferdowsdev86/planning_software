@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted, toRaw } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
@@ -2163,36 +2163,50 @@ async function chApplyToOtherUnit(from, to, timeH) {
 // line's own 0-hour dates show as a grey "off" crosshatch on THAT row only,
 // and a line figure on other dates prints its hours on the row (maroon) —
 // the unit-wide columns stay as they are
-function applyLineOffRanges(s = getInstance()) {
+// Working hours of every line on every day of the plan window, coloured on
+// the row (planner rule): the line's NORMAL hours (its own standard working
+// hours; the weekday's calendar hours when the line has none) → plain white;
+// a date given more than that (Change working hours, unit-wide or for the
+// line) → light grey; less → light red; a Friday / 0-hour day → grey "off".
+// The figure is printed in the cell when it differs from normal.
+function lineNormalHours(res, d) {
+    const own = Number(res.data.hours);
+    return own > 0 ? own : hmToHours(calendarState.days[d.getDay()]?.hours || '0');
+}
+function lineDayHoursOf(res, d) {
+    const lo = lineOverrideOf(d, res.id);
+    if (lo !== undefined) return lo;
+    const ov = calendarState.overrides?.[ymdOf(d)];
+    if (ov != null && ov !== '') return Number(ov) || 0;
+    const weekly = hmToHours(calendarState.days[d.getDay()]?.hours || '0');
+    if (weekly <= 0) return 0;                       // weekly off day (Friday)
+    return lineNormalHours(res, d);
+}
+function applyLineHourRanges(s = getInstance()) {
     const st = s?.resourceTimeRangeStore;
     if (!st) return;
-    const olds = st.records.filter(r => String(r.id).startsWith('lo-'));
+    const olds = st.records.filter(r => String(r.id).startsWith('lo-') || String(r.id).startsWith('lh-'));
     if (olds.length) st.remove(olds);
-    const lov = calendarState.lineOverrides || {};
     const ranges = [];
-    for (const res of s.resourceStore.records) {
-        if (!res.data?.lineRow) continue;
-        const dbId = res.data.dbId ?? LINE_BY_ID[res.id]?.dbId;
-        const mine = dbId != null ? lov[String(dbId)] : null;
-        if (!mine) continue;
-        for (const [ymd, v] of Object.entries(mine)) {
-            const d0 = new Date(`${ymd}T00:00:00`);
-            if (Number.isNaN(d0.getTime())) continue;
-            const d1 = new Date(d0);
-            d1.setDate(d1.getDate() + 1);
-            const h = Number(v) || 0;
-            ranges.push({
-                id         : `lo-${dbId}-${ymd}`,
-                resourceId : res.id,
-                startDate  : d0,
-                endDate    : d1,
-                name       : h > 0 ? hoursToHmPd(h) : 'off',
-                cls        : h > 0 ? 'mb-line-hours' : 'mb-line-off'
-            });
+    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    for (const d0 = new Date(VIEW_START); d0 < VIEW_END; d0.setDate(d0.getDate() + 1)) {
+        const day = new Date(d0); day.setHours(0, 0, 0, 0);
+        const next = new Date(day); next.setDate(next.getDate() + 1);
+        const ymd = ymdOf(day);
+        for (const res of lines) {
+            const normal = lineNormalHours(res, day);
+            const h = lineDayHoursOf(res, day);
+            let cls = null;
+            if (h <= 0) cls = 'mb-lh-off';
+            else if (h > normal + 0.01) cls = 'mb-lh-more';
+            else if (h < normal - 0.01) cls = 'mb-lh-less';
+            if (!cls) continue;
+            ranges.push({ id : `lh-${res.id}-${ymd}`, resourceId : res.id, startDate : day, endDate : next, name : h > 0 ? hoursToHmPd(h) : '', cls });
         }
     }
     if (ranges.length) st.add(ranges);
 }
+const applyLineOffRanges = applyLineHourRanges;   // former name (line-only off / hours marks)
 
 // FastReact "Line 10 + 10": the change lands on the ticked lines only. Each
 // line keeps its own date -> hours map (planning_calendar_intervals rows
@@ -8129,14 +8143,15 @@ async function refreshStripNotes() {
 async function openStripNotes(rec) {
     const raw = eventRawOf(rec);
     if (!raw || raw.stage) { toast('Strip notes শুধু sewing strip-এর জন্য', 'warn'); return; }
-    if (!raw.po) { toast('This bar has no PO number — notes are kept per PO', 'warn'); return; }
+    const key = noteKeyOf(raw);
+    if (!key) { toast('This bar has no PO number and no order code — notes are kept per PO / order', 'warn'); return; }
     snRec.value  = rec;
     snText.value = '';
-    snRows.value = stripNotesFor(raw.po);
+    snRows.value = stripNotesOf(raw);
     snOpen.value = true;
     snBusy.value = true;
     try {
-        snRows.value = await loadStripNotesDb(raw.po);
+        snRows.value = await loadStripNotesDb(key);
     }
     catch (e) { toast(`Notes could not be loaded: ${e.message}`, 'error'); }
     finally { snBusy.value = false; }
@@ -8148,15 +8163,16 @@ const snFocusNew = () => document.querySelector('.sn-dialog textarea')?.focus();
 async function snAdd() {
     const raw = snRaw.value;
     const note = snText.value.trim();
-    if (!raw?.po) return;
+    const key = noteKeyOf(raw);
+    if (!key) return;
     if (whatIfActive.value) { toast(WI_VIEW_MSG, 'warn'); return; }
     if (!note) { toast('Type the note first', 'warn'); return; }
     snBusy.value = true;
     try {
         const evId = String(snRec.value?.id || '').replace(/^db-/, '');
-        await addStripNoteDb({ po : raw.po, orderCode : raw.mbmOrder || null, eventId : /^\d+$/.test(evId) ? Number(evId) : null, note, user : snUser() });
+        await addStripNoteDb({ po : key, orderCode : raw.mbmOrder || null, eventId : /^\d+$/.test(evId) ? Number(evId) : null, note, user : snUser() });
         snText.value = '';
-        snRows.value = await loadStripNotesDb(raw.po);
+        snRows.value = await loadStripNotesDb(key);
         await refreshStripNotes();
         toast('Note saved', 'ok');
     }
@@ -8170,7 +8186,7 @@ async function snDelete(n) {
     snBusy.value = true;
     try {
         await deleteStripNoteDb(n.id, snUser());
-        snRows.value = await loadStripNotesDb(snRaw.value?.po);
+        snRows.value = await loadStripNotesDb(noteKeyOf(snRaw.value));
         await refreshStripNotes();
     }
     catch (e) { toast(`Note not deleted: ${e.message}`, 'error'); }
@@ -10746,7 +10762,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive,
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges,
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
@@ -17894,25 +17910,25 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 
 /* Selected-lines hours on ONE row: 0 hours = grey off crosshatch on that
    line only; another figure = maroon crosshatch with the hours printed */
-.b-sch-resource-time-range.mb-line-off,
-.b-sch-resource-time-range.mb-line-hours {
+/* Line × day working hours: normal = white (no mark); more than the
+   weekday's normal hours = light grey; less = light red; Friday / 0 h = grey */
+.b-sch-resource-time-range.mb-lh-off,
+.b-sch-resource-time-range.mb-lh-more,
+.b-sch-resource-time-range.mb-lh-less {
     display : flex; align-items : flex-end; justify-content : center;
-    font-size : 9px; line-height : 12px; z-index : 2; pointer-events : none;
+    font-size : 9px; line-height : 12px; z-index : 1; pointer-events : none; border : none;
 }
-.b-sch-resource-time-range.mb-line-off {
+.b-sch-resource-time-range.mb-lh-off {
     background :
-        repeating-linear-gradient(45deg, #c9c9c9 0 1px, transparent 1px 6px),
-        repeating-linear-gradient(-45deg, #c9c9c9 0 1px, transparent 1px 6px),
-        rgba(236, 236, 236, .85) !important;
+        repeating-linear-gradient(45deg, #bdbdbd 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, #bdbdbd 0 1px, transparent 1px 6px),
+        #d6d6d6 !important;
 }
-.b-sch-resource-time-range.mb-line-off, .b-sch-resource-time-range.mb-line-off * { color : #777 !important; }
-.b-sch-resource-time-range.mb-line-hours {
-    background :
-        repeating-linear-gradient(45deg, rgba(140,26,26,.45) 0 1px, transparent 1px 5px),
-        repeating-linear-gradient(-45deg, rgba(140,26,26,.45) 0 1px, transparent 1px 5px),
-        rgba(255,244,244,.5) !important;
-}
-.b-sch-resource-time-range.mb-line-hours, .b-sch-resource-time-range.mb-line-hours * { color : #8c1a1a !important; font-weight : bold !important; }
+.b-sch-resource-time-range.mb-lh-more { background : #ececec !important; }
+.b-sch-resource-time-range.mb-lh-less { background : #ffe0e0 !important; }
+.b-sch-resource-time-range.mb-lh-more, .b-sch-resource-time-range.mb-lh-more * { color : #555 !important; font-weight : bold !important; }
+.b-sch-resource-time-range.mb-lh-less, .b-sch-resource-time-range.mb-lh-less * { color : #8c1a1a !important; font-weight : bold !important; }
+.b-sch-resource-time-range.mb-lh-off * { color : #777 !important; }
 
 /* Hours changed from the weekly default — FastReact's maroon crosshatch */
 .b-time-ranges-canvas .b-sch-range.mb-hours-changed {

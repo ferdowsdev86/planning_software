@@ -851,7 +851,7 @@ export function buildDayStartLines() {
 // Off-day columns for the whole plan window (teal crosshatch on the board)
 export function buildOffDayRanges() {
     const ranges = [];
-    let i = 0, j = 0;
+    let i = 0;
     const d = new Date(VIEW_START);
     while (d < VIEW_END) {
         const end = new Date(d);
@@ -864,17 +864,8 @@ export function buildOffDayRanges() {
                 cls       : 'mb-off'
             });
         }
-        else if (calendarState.overrides[ymdOf(d)] != null) {
-            // Hours changed from the weekly default (FastReact-style):
-            // mark the whole day column with the red crosshatch
-            ranges.push({
-                id        : `chg-${++j}`,
-                startDate : new Date(d),
-                endDate   : end,
-                cls       : 'mb-hours-changed',
-                name      : `${hoursToHm(calendarState.overrides[ymdOf(d)])} hrs`
-            });
-        }
+        // a date whose hours differ from the weekly default is no longer a
+        // whole-column crosshatch: every line's row shows its own hours colour
         d.setDate(d.getDate() + 1);
     }
     return ranges;
