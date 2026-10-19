@@ -11328,15 +11328,23 @@ let userVZoomed = false;
 let lastFitHeight = 0;
 function fitRows(s) {
     if (!s || userVZoomed) return;
+    // only a painted grid with rendered rows can take a new row height —
+    // earlier (first mount, an empty store, mid-load) Bryntum's row manager
+    // has no rows to re-position yet ("Cannot read properties of undefined
+    // (reading 'setTop')")
+    if (s.isDestroyed || !s.isPainted || !s.rowManager?.topRow || !(s.resourceStore?.count > 0)) return;
     const h = Number(s.bodyContainer?.clientHeight || s.scrollable?.clientHeight) || 0;
     if (!h) return;
     const rh = Math.max(24, Math.min(110, Math.floor(h / VIEW_ROWS_DEFAULT)));
     if (h === lastFitHeight && s.rowHeight === rh) return;
     lastFitHeight = h;
     if (s.rowHeight !== rh) {
-        s.rowHeight = rh;
-        syncRowHeightVar(s);
-        requestAnimationFrame(() => updateFrVScroll(s));
+        try {
+            s.rowHeight = rh;
+            syncRowHeightVar(s);
+            requestAnimationFrame(() => updateFrVScroll(s));
+        }
+        catch (e) { lastFitHeight = 0; console.warn('[fitRows] row height not applied yet:', e?.message); }
     }
 }
 // Board visible / axis resized: until the user zooms, always show 8 weeks
