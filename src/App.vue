@@ -8617,10 +8617,11 @@ const PLACE_GUARD_MS = 150;
 // Press-and-hold drag: the mouse-down that picked the bar up, where it was
 // pressed, and whether the pointer has moved since (6 px = a drag, not a click)
 let pressPick = null;
-// A press on a bar that sits on a LINE does not lift it until the pointer has
-// really moved (DRAG_PX): the bar stays painted in place — a plain click
-// changes nothing, no "jump" onto the pointer. Only a bar on the holding row
-// keeps click-to-carry (pick with a click, place with the next click).
+// A press on a bar does not lift it until the press ends: while the button is
+// down the bar stays painted in place (no "jump" onto the pointer). A press
+// that moves (DRAG_PX) becomes a drag — the bar follows and drops on release;
+// a plain click picks the bar up — it follows the cursor until the next click
+// places it (click to carry, click to place).
 let carryDeferred = false;
 let skipNextBarClick = false;
 const DRAG_PX = 6;
@@ -10214,13 +10215,11 @@ function onCarryPointerUp(e) {
         const press = pressPick;
         pressPick = null;
         if (!press.moved) {
+            // a plain click on a bar (holding row or line): the bar is picked up now — it follows the
+            // cursor until the next click places it (the press itself kept it painted in place, so a
+            // click never "jumps"; a press that turns into a drag drops on release)
             skipNextBarClick = true;
-            const rec = carried.value;
-            const rid = rec ? (rec.resourceId ?? rec.resource?.id ?? rec.resources?.[0]?.id ?? null) : null;
-            const res = rid != null ? getInstance()?.resourceStore?.getById?.(rid) : null;
-            const onHolding = !!res?.data?.holdingRow || isHoldId(rid);
-            if (!onHolding) { cancelCarry(); return; }        // a plain click on a line bar: the bar stays where it is
-            if (carryDeferred) revealCarry();                 // holding row: click to carry, next click places
+            if (carryDeferred) revealCarry();
             return;
         }
         // released after a drag: drop exactly where the ghost shows — the
