@@ -4533,6 +4533,21 @@ function addBoard() {
     toast(`Planning board "${name}" added — access granted to ${currentUser.value.name}`, 'ok');
 }
 
+// A board added with "Add planning board" lives in THIS browser's list
+// (localStorage mbm-boards) — the built-in unit boards cannot be removed
+const isDefaultBoard = b => DEFAULT_BOARDS.some(d => d.id === b.id);
+const canRemoveBoard = b => !isDefaultBoard(b) && (authUser.value?.role || currentUser.value?.role) === 'Planning Manager';
+function removeBoard(b) {
+    if (!canRemoveBoard(b)) return;
+    if (!window.confirm(`Remove the planning board "${b.name}" from the Planning menu?\n\nOnly the menu entry goes — the unit's plan data is not touched.`)) return;
+    openMenu.value = null;
+    if (currentBoard.value?.id === b.id) closeBoard();
+    boards.value = boards.value.filter(x => x.id !== b.id);
+    for (const u of users.value) u.boards = (u.boards || []).filter(x => x !== b.id && x !== `${b.id}:read`);
+    savePerms();
+    toast(`Planning board "${b.name}" removed from the menu`, 'ok');
+}
+
 function addUser() {
     const name = window.prompt('New user name (display):');
     if (!name) return;
@@ -12062,9 +12077,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div
                         v-for="b in menuBoards"
                         :key="b.id"
-                        class="fr-dd-item"
+                        class="fr-dd-item fr-dd-board"
                         @click="openBoard(b, { ask : true })"
-                    >🗓 {{ b.name }}</div>
+                    >🗓 {{ b.name }}<span v-if="canRemoveBoard(b)" class="fr-dd-x" title="Remove this added board from the menu of this browser (the plan data of its unit is not touched)" @click.stop="removeBoard(b)">✖</span></div>
                     <div v-if="!menuBoards.length" class="fr-dd-item fr-dd-dim">No boards permitted for {{ currentUser?.name }}</div>
                     <div class="fr-dd-sep"></div>
                     <div v-if="hlAccess" class="fr-dd-item" :title="`Standalone capacity & reservation simulation for UNIT-M / C / A / G — the live plans are never changed (${hlAccess === 'write' ? 'simulate & save' : 'read only'})`" @click="openHighLevel">📐 High Level Planning Board<span v-if="hlAccess === 'read'" class="fr-dd-dim"> · read only</span></div>
@@ -14679,6 +14694,9 @@ body {
     padding       : 4px;
 }
 
+.fr-dd-board { display : flex; align-items : center; gap : 10px; }
+.fr-dd-x { margin-left : auto; color : #b00020; font-size : 11px; padding : 0 4px; border-radius : 3px; opacity : .6; }
+.fr-dd-x:hover { opacity : 1; background : #ffe0e0; }
 .fr-dd-item {
     padding       : 8px 12px;
     font-size     : 13px;
