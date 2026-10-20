@@ -10820,7 +10820,15 @@ onMounted(() => {
         installFrVScroll(s);
         s.on?.({
             paint() { installFrVScroll(s); },
-            resize() { updateFrVScroll(s); fitBoardView(s); }
+            // Bryntum fires 'resize' on ANY size change of the element (a panel appearing under
+            // the board, DevTools, a scrollbar…): re-fit only when the axis WIDTH changed, and never
+            // under a carried bar — a re-fit re-sized every row and scrolled the timeline ("jump")
+            resize() {
+                updateFrVScroll(s);
+                const w = axisWidthPx(s);
+                if (carried.value || pressPick) return;
+                if (w && w !== lastSeenAxisW) { lastSeenAxisW = w; fitBoardView(s); }
+            }
         });
         // Press-and-hold drag: a native mouse-down on a bar picks it up at
         // once (capture phase — before the grid's own handlers)
@@ -11440,6 +11448,7 @@ function fitWeeks(s, weeks = VIEW_WEEKS_DEFAULT, keep) {
 
 let userZoomed  = false;   // the user pressed a zoom button — keep their zoom
 let lastFitWidth = 0;
+let lastSeenAxisW = 0;     // axis width at the last resize event (re-fit only when it changes)
 // Vertical fit: the board opens with 15 rows on screen (the Holding Row
 // counted) — row height = body height / 15 — until the planner presses ⇈ / ⇊
 const VIEW_ROWS_DEFAULT = 15;
@@ -11475,8 +11484,11 @@ function fitBoardView(s) {
     if (!s || !w) return;
     if (!userZoomed) {
         if (w === lastFitWidth && s.tickSize === tickForWeeks(s, VIEW_WEEKS_DEFAULT)) return;
+        // the first fit opens on the board date; a later re-fit (the axis got wider / narrower)
+        // keeps the dates the planner is looking at
+        const keep = lastFitWidth ? (s.visibleDateRange?.startDate || currentBoardDate()) : currentBoardDate();
         lastFitWidth = w;
-        fitWeeks(s, VIEW_WEEKS_DEFAULT, currentBoardDate());
+        fitWeeks(s, VIEW_WEEKS_DEFAULT, keep);
     }
     else if ((s.tickSize || 0) < minTickPx(s)) setTick(s, minTickPx(s));
 }
@@ -12299,24 +12311,26 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Order detail panel : values when a bar is selected, labels otherwise -->
-        <div v-if="order" class="fr-orderbar">
+        <!-- always in the layout: a bar that appears / disappears on selection changed the scheduler's
+             height, and every height change re-fitted the rows (board "jumps" on each click) -->
+        <div class="fr-orderbar" :class="{ 'fr-orderbar-empty' : !order }">
             <div class="fr-order-row">
                 <span class="fr-order-label"><span class="fr-order-ico">🧵</span><u>Order</u></span>
-                <span class="fr-cell fr-plain"><b>{{ order.po }}</b></span>
-                <span class="fr-cell fr-link">{{ order.buyer }} · {{ order.style }}</span>
-                <span class="fr-cell fr-plain">{{ fmtQty(order.qty) }} pcs</span>
-                <span class="fr-cell fr-plain">SMV {{ order.smv }}</span>
-                <span class="fr-cell fr-link">{{ fmtQty(order.reqMin) }} min</span>
-                <span class="fr-cell fr-plain">{{ order.dur }} day(s)</span>
-                <span class="fr-cell fr-link fr-magenta">Ship {{ fmtDate(order.ship) }}</span>
+                <span class="fr-cell fr-plain"><b>{{ order ? order.po : '—' }}</b></span>
+                <span class="fr-cell fr-link">{{ order ? `${order.buyer} · ${order.style}` : 'select a bar for its order' }}</span>
+                <span class="fr-cell fr-plain">{{ order ? fmtQty(order.qty) + ' pcs' : '—' }}</span>
+                <span class="fr-cell fr-plain">SMV {{ order ? order.smv : '—' }}</span>
+                <span class="fr-cell fr-link">{{ order ? fmtQty(order.reqMin) + ' min' : '—' }}</span>
+                <span class="fr-cell fr-plain">{{ order ? order.dur + ' day(s)' : '—' }}</span>
+                <span class="fr-cell fr-link fr-magenta">Ship {{ order ? fmtDate(order.ship) : '—' }}</span>
             </div>
             <div class="fr-order-row">
                 <span class="fr-order-label">-</span>
-                <span class="fr-cell fr-plain">Progress {{ order.progress }}%</span>
-                <span class="fr-cell fr-plain">Status: {{ order.status }}</span>
-                <span class="fr-cell fr-plain">Material {{ fmtDate(order.matReady) }}</span>
-                <span class="fr-cell fr-plain">Risk {{ order.risk.score }} ({{ order.risk.level }})</span>
-                <span class="fr-cell fr-link fr-wide">{{ order.risk.reasons.join(' · ') }}</span>
+                <span class="fr-cell fr-plain">Progress {{ order ? order.progress + '%' : '—' }}</span>
+                <span class="fr-cell fr-plain">Status: {{ order ? order.status : '—' }}</span>
+                <span class="fr-cell fr-plain">Material {{ order ? fmtDate(order.matReady) : '—' }}</span>
+                <span class="fr-cell fr-plain">Risk {{ order ? `${order.risk.score} (${order.risk.level})` : '—' }}</span>
+                <span class="fr-cell fr-link fr-wide">{{ order ? order.risk.reasons.join(' · ') : '' }}</span>
             </div>
         </div>
 
@@ -17891,6 +17905,7 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 /* ------------------------------------------------------------------ */
 /* Order detail panel                                                 */
 /* ------------------------------------------------------------------ */
+.fr-orderbar-empty .fr-cell { color : #777; }
 .fr-orderbar {
     flex           : none;
     background     : #d4d0c8;
