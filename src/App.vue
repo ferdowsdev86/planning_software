@@ -17995,6 +17995,8 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .b-sch-resource-time-range.mb-lh-less {
     display : flex; align-items : flex-end; justify-content : center;
     font-size : 9px; line-height : 12px; z-index : 1; pointer-events : none; border : none;
+    /* the mark covers the column line of its day: draw the day separator on the mark itself */
+    border-left : 2px solid #800000 !important; box-sizing : border-box;
 }
 .b-sch-resource-time-range.mb-lh-off {
     background :
