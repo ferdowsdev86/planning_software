@@ -10220,6 +10220,12 @@ function onCarryPointerUp(e) {
             // click never "jumps"; a press that turns into a drag drops on release)
             skipNextBarClick = true;
             if (carryDeferred) revealCarry();
+            // the click that picked the bar up must not also PLACE it: the same gesture's click event
+            // reaches the schedule's click handler a moment later — with a slow press it passed the
+            // pick guard and dropped the bar right there (flush after the previous bar: the strip
+            // "jumped back" and was not on the cursor; only the next click picked it up again)
+            pickStamp      = performance.now();
+            placeGestureAt = performance.now();
             return;
         }
         // released after a drag: drop exactly where the ghost shows — the
