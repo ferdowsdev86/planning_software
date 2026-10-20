@@ -2284,8 +2284,8 @@ export const schedulerProConfig = {
             if (uiHooks.modifierHeld) return false;
             installTip4Tabs();
         },
-        // the pointer has to rest on a bar for 1.5 s before the tooltip opens
-        hoverDelay           : 1500,
+        // the pointer has to rest on a bar for 0.5 s before the tooltip opens
+        hoverDelay           : 500,
         hideOnDelegateChange : true,
         hideOnScroll         : true,
         allowOver            : true,
