@@ -8614,6 +8614,11 @@ const PLACE_GUARD_MS = 150;
 // Press-and-hold drag: the mouse-down that picked the bar up, where it was
 // pressed, and whether the pointer has moved since (6 px = a drag, not a click)
 let pressPick = null;
+// A press on a bar that sits on a LINE does not lift it until the pointer has
+// really moved (DRAG_PX): the bar stays painted in place — a plain click
+// changes nothing, no "jump" onto the pointer. Only a bar on the holding row
+// keeps click-to-carry (pick with a click, place with the next click).
+let carryDeferred = false;
 let skipNextBarClick = false;
 const DRAG_PX = 6;
 // Pointer-to-bar offset in PIXELS, fixed for the whole drag: the pointer
@@ -9133,7 +9138,9 @@ function trackGhost(e) {
     if (pressPick && !pressPick.moved
         && (Math.abs(e.clientX - pressPick.x) > DRAG_PX || Math.abs(e.clientY - pressPick.y) > DRAG_PX)) {
         pressPick.moved = true;
+        if (carryDeferred) revealCarry();
     }
+    if (carryDeferred) { lastMouse.x = e.clientX; lastMouse.y = e.clientY; return; }   // not lifted yet: nothing to draw
     updateCarryPreview(e.clientX, e.clientY);
 }
 
@@ -10011,7 +10018,6 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     if (!(Number(raw.smv) > 0) || (raw.smvMissing && !(Number(raw.smvManual) > 0))) { toast(`${raw.mbmOrder || raw.po} — SMV is 0 / missing, cannot be planned (right-click → Recalculate duration to enter it)`, 'warn'); return; }
 
     const els = ensureCarryDom();
-    els.layer.style.display = 'block';
     // A Ctrl+click selection travels with the bar; else (Consolidate orders
     // ON) the bar's order group. Picking an unselected bar drops the selection.
     if (multiSel.size && !multiSel.has(String(rec.id))) clearMultiSelect();
@@ -10021,7 +10027,6 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
         const r = m.data.raw;
         r._carryGroup = true;
         r._prevCls = String(m.data.cls || '');
-        m.set('cls', `${r._prevCls} mb-carried-away`.trim());
     }
     els.label.textContent = `${rec.name || ''}${carryGroup.length ? ` (+${carryGroup.length})` : ''}`;
     carryRecStart0 = new Date(rec.startDate);
@@ -10039,7 +10044,8 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     // under the mouse pointer. Plain set() so Bryntum repaints the event and
     // the original really disappears (a suppressed refresh left it visible).
     carriedPrevCls = String(rec.data.cls || '');
-    rec.set('cls', `${carriedPrevCls} mb-carried-away`.trim());
+    carryDeferred = !!grab;
+    if (!carryDeferred) revealCarry();
     carryPreview.value = emptyCarrySnap();
     carryOrigin.value  = computeCarryOrigin(s, rec);   // once — refreshed on scroll, not per frame
     const cx = domEvent?.clientX ?? lastMouse.x;
@@ -10053,6 +10059,19 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     requestAnimationFrame(() => syncCarryPreviewNow(lastMouse.x, lastMouse.y));
 }
 
+// the bar leaves the board and its ghost appears under the pointer — at pick-up
+// (click to carry), or once a press on a line bar has turned into a drag
+function revealCarry() {
+    const rec = carried.value;
+    if (!rec) return;
+    carryDeferred = false;
+    const els = ensureCarryDom();
+    els.layer.style.display = 'block';
+    for (const m of carryGroup) m.set('cls', `${m.data.raw?._prevCls || ''} mb-carried-away`.trim());
+    rec.set('cls', `${carriedPrevCls} mb-carried-away`.trim());
+    syncCarryPreviewNow(lastMouse.x, lastMouse.y);
+}
+
 function restoreCarriedCls() {
     const rec = carried.value;
     if (!rec) return;
@@ -10061,6 +10080,7 @@ function restoreCarriedCls() {
 
 function cancelCarry() {
     pressPick = null;
+    carryDeferred = false;
     setBarTooltipEnabled(getInstance(), true);
     restoreCarriedCls();
     releaseCarryGroup();
@@ -10191,8 +10211,13 @@ function onCarryPointerUp(e) {
         const press = pressPick;
         pressPick = null;
         if (!press.moved) {
-            // a plain click on the bar: it stays on the pointer (click to place)
             skipNextBarClick = true;
+            const rec = carried.value;
+            const rid = rec ? (rec.resourceId ?? rec.resource?.id ?? rec.resources?.[0]?.id ?? null) : null;
+            const res = rid != null ? getInstance()?.resourceStore?.getById?.(rid) : null;
+            const onHolding = !!res?.data?.holdingRow || isHoldId(rid);
+            if (!onHolding) { cancelCarry(); return; }        // a plain click on a line bar: the bar stays where it is
+            if (carryDeferred) revealCarry();                 // holding row: click to carry, next click places
             return;
         }
         // released after a drag: drop exactly where the ghost shows — the
