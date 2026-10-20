@@ -190,9 +190,16 @@ export function reservationDays(sc, r) {
         out.push({ date : r.start, pcs : qty, min : qty * smv });
         return { smv, days : out, product };
     }
-    // learning curve: the first lcDays working days of the span make a
-    // ramped share (1/(n+1), 2/(n+1) … of a full day) — the day's weight
     const lc = Math.max(0, Math.round(Number(r.lcDays) || 0));
+    // a planned bar carries its own day spread (sequential fill: a changeover day makes only what was free,
+    // the other days run full, the last day takes the rest) — the board loads and draws it exactly so
+    if (Array.isArray(r.dayPcs) && r.dayPcs.length === days.length && r.dayPcs.reduce((a, b) => a + (Number(b) || 0), 0) === qty) {
+        days.forEach((d, i) => { const pcs = Number(r.dayPcs[i]) || 0; out.push({ date : d, pcs, min : pcs * smv }); });
+        return { smv, days : out, product, lcDays : lc };
+    }
+    // otherwise (live snapshot bars, hand-drawn / moved bars): spread over the span in proportion to the
+    // day's capacity. Learning curve: the first lcDays working days of the span make a ramped share
+    // (1/(n+1), 2/(n+1) … of a full day) — the day's weight
     const weights = caps.map((c, i) => c * (lc && i < lc ? (i + 1) / (lc + 1) : 1));
     const wTot = weights.reduce((a, b) => a + b, 0) || tot;
     let placed = 0;

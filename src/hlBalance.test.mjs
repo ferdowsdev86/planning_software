@@ -294,7 +294,7 @@ test('orders whose delivery passed before the plan start are No plan, reported a
     sc.orders.push(order('u1', 'M', 'Denim Pants', 200, '2026-12-20', { pcd : '2026-11-02', smv : 20, repeat : true }));     // upcoming → planned
     sc.orders.push(order('u2', 'M', 'Denim Pants', 200, '2026-12-21', { pcd : '2026-11-02', smv : 20, repeat : true }));
     sc.orders.push(order('u3', 'M', 'Denim Pants', 200, '2026-12-22', { pcd : '2026-11-02', smv : 20, repeat : true }));
-    const out = autoPlanUnits(sc);
+    const out = autoPlanUnits(sc, { rules : { exclusiveDay : true } });
     const byId = Object.fromEntries(out.results.map(r => [r.orderId, r]));
     assert.equal(byId.x1.status, 'noplan');
     assert.equal(out.reservations.some(r => r.orderId === 'x1'), false);
@@ -309,8 +309,8 @@ test('orders whose delivery passed before the plan start are No plan, reported a
     // three small orders never share a line-day: each has its own day(s)
     const key = new Set();
     for (const r of out.reservations) { const k = `${r.lineId}|${r.start}`; assert.equal(key.has(k), false, 'two orders on one line-day'); key.add(k); }
-    // with the rule off the same three orders may share one day of one line
-    const shared = autoPlanUnits(sc, { rules : { exclusiveDay : false } });
+    // with the rule off (the default) the same three orders may share one day of one line: one starts on the day the other finishes
+    const shared = autoPlanUnits(sc);
     const days = shared.reservations.map(r => `${r.lineId}|${r.start}`);
     assert.equal(new Set(days).size < days.length, true);
 });
@@ -332,4 +332,27 @@ test('sewing never starts before PCD; delivery miss is still placed (red); highe
     const bar = out.reservations.find(r => r.orderId === 'p1');
     assert.equal(bar.lineId, 'M2');                 // best efficiency
     assert.equal(out.reservations.find(r => r.orderId === 'late1').planStatus, 'overbook');
+});
+
+test('changeover day: a bar may start on the day the previous order finishes (≥ 10 % of the day free); a day under 10 % free is not a start day', () => {
+    const sc = scenario();
+    sc.lines = sc.lines.filter(l => l.id === 'M1');                                    // one line, 810 denim / day
+    // A takes 1.5 days (1,215 pcs): day 1 full, day 2 half — B (600 pcs) should start on day 2, not wait for day 3
+    sc.orders.push(order('a', 'M', 'Denim Pants', 1215, '2026-11-20', { pcd : '2026-11-01', smv : 20, repeat : true }));
+    sc.orders.push(order('b', 'M', 'Denim Pants', 600, '2026-11-21', { pcd : '2026-11-01', smv : 20, repeat : true }));
+    const out = autoPlanUnits(sc);
+    const a = out.reservations.find(r => r.orderId === 'a'), b = out.reservations.find(r => r.orderId === 'b');
+    assert.equal(a.start, '2026-11-04'); assert.equal(a.end, '2026-11-05');            // input date = PCD + 3 (repeat)
+    assert.deepEqual(a.dayPcs, [810, 405]);                                            // day 1 full, day 2 the rest
+    assert.equal(b.start, '2026-11-05'); assert.equal(b.end, '2026-11-07');            // changeover on A's last day, Friday off
+    assert.deepEqual(b.dayPcs, [405, 195]);
+    assert.equal(out.results.every(r => r.status === 'ontime'), true);
+    apply(sc, out);
+    assert.equal(conflicts(sc, buildLoad(sc)).length, 0);
+    // strict rule: B waits for the next free day
+    const sc2 = scenario(); sc2.lines = sc2.lines.filter(l => l.id === 'M1');
+    sc2.orders.push(order('a', 'M', 'Denim Pants', 1215, '2026-11-20', { pcd : '2026-11-01', smv : 20, repeat : true }));
+    sc2.orders.push(order('b', 'M', 'Denim Pants', 600, '2026-11-21', { pcd : '2026-11-01', smv : 20, repeat : true }));
+    const strict = autoPlanUnits(sc2, { rules : { exclusiveDay : true } });
+    assert.equal(strict.reservations.find(r => r.orderId === 'b').start, '2026-11-07');   // Friday off → Saturday
 });

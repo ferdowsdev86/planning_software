@@ -134,6 +134,9 @@ export const rampOf = n => { const k = Math.max(0, Math.round(Number(n) || 0)); 
 // run on, and the span breaks at a busy day (the rest is placed afterwards
 // as its own bar). The old 5 % crumb rule is the floor.
 export const DEFAULT_MIN_FILL = 0.5;
+// a bar may START on a day another order finishes (the line changes over that day): the first day only needs this
+// share of the line's day capacity free — the middle days need `minFill`, the last day takes the remainder
+export const FIRST_DAY_SHARE = 0.1;
 // exclusive: ONE order per line per day — every day of the bar must be free of any other bar (the
 // bar's last day keeps its leftover; the next order starts on the next free day)
 export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minFill = DEFAULT_MIN_FILL, exclusive = false) {
@@ -142,46 +145,43 @@ export function fitIndexed(cap, used, smv, qty, fromI, untilI, ramp = null, minF
     const share = Math.min(1, Math.max(0.05, Number(minFill) || 0.05));
     for (let s = fromI; s <= last; s++) {
         if (cap[s] - used[s] <= 0) continue;
-        // a ramped bar must start on a FREE day (its first days run below
-        // capacity, the line is still occupied) — a day already partly used
-        // cannot be its day 1
-        if ((ramp?.length || exclusive) && used[s] > tol(cap[s])) continue;
+        // one order per line per day: the first day must be free of any other bar
+        if (exclusive && used[s] > tol(cap[s])) continue;
         let placed = 0, e = s, wd = 0;
+        const dayPcs = new Map();      // day index → pieces made that day (sequential fill of the free capacity)
         for (let i = s; i <= last && placed < qty; i++) {
             if (cap[i] <= 0) continue;
             const r = ramp?.length && wd < ramp.length ? ramp[wd] : 1;
             wd++;
             const free = (cap[i] - used[i]) * r;
             const left = qty - placed;
-            // day capacity rule: the day must give the order ≥ share of the
-            // line's capacity, unless the rest of the order fits in it
-            const thin = free <= 0 || ((cap[i] - used[i]) < cap[i] * share && left * smv > free) || (exclusive && used[i] > tol(cap[i]));
+            // day capacity rule: a middle day must give the order ≥ share of the line's capacity; the FIRST day
+            // may be the changeover day after another order (≥ FIRST_DAY_SHARE free); the last day takes the
+            // rest whatever is free
+            const need = i === s ? Math.min(share, FIRST_DAY_SHARE) : share;
+            const thin = free <= 0 || ((cap[i] - used[i]) < cap[i] * need && left * smv > free) || (exclusive && used[i] > tol(cap[i]));
             if (thin) break;        // a busy day ends the span (the rest goes after it) — and can never be a bar's first day
             const pcs = Math.min(left, Math.floor(free / smv));
             if (pcs <= 0) break;
-            placed += pcs; e = i;
+            placed += pcs; e = i; dayPcs.set(i, pcs);
         }
         if (placed <= 0) continue;
-        // verify with the board's EXACT day spread (reservationDays): pieces per
-        // day = round(qty × weight ÷ Σweight) — weight = capacity × ramp share —
-        // the last day takes the remainder
-        const w = new Float64Array(e - s + 1);
-        let tot = 0, k = 0;
-        for (let i = s; i <= e; i++) { const r = cap[i] > 0 && ramp?.length && k < ramp.length ? ramp[k] : 1; if (cap[i] > 0) k++; w[i - s] = cap[i] * r; tot += w[i - s]; }
-        if (tot <= 0) continue;
-        let ok = true, acc = 0;
+        // the bar's own day spread IS this sequential fill (kept on the reservation as dayPcs, the board draws
+        // and loads it exactly so) — a changeover day carries only what was free, the other days run full
         const take = new Float64Array(e - s + 1);
         const occupy = new Float64Array(e - s + 1);
+        const pcsList = [];
+        let k = 0;
         for (let i = s; i <= e; i++) {
-            const pcs = i === e ? placed - acc : Math.round(placed * w[i - s] / tot);
-            acc += pcs;
+            if (cap[i] <= 0) continue;
+            const pcs = dayPcs.get(i) || 0;
+            pcsList.push(pcs);
             take[i - s] = pcs * smv;
             // a ramp day is the bar's whole day on the line even though it makes less
-            occupy[i - s] = ramp?.length && w[i - s] < cap[i] ? Math.max(take[i - s], cap[i] - used[i]) : take[i - s];
-            if (used[i] + take[i - s] > cap[i] + tol(cap[i])) { ok = false; break; }
+            const r = ramp?.length && k < ramp.length ? ramp[k] : 1; k++;
+            occupy[i - s] = ramp?.length && r < 1 ? Math.max(take[i - s], cap[i] - used[i]) : take[i - s];
         }
-        if (!ok) continue;
-        return { placed, startI : s, endI : e, take, occupy };
+        return { placed, startI : s, endI : e, take, occupy, dayPcs : pcsList };
     }
     return null;
 }
@@ -215,7 +215,7 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, 
         commit(ix.used.get(best.l.id), best.f);
         out.push({
             id : uid('rs'), orderId : order.id, lineId : best.l.id, product : order.product, smv,
-            start : ix.days[best.f.startI], end : ix.days[best.f.endI], qty : best.f.placed,
+            start : ix.days[best.f.startI], end : ix.days[best.f.endI], qty : best.f.placed, dayPcs : best.f.dayPcs,
             locked : false, status : 'proposed', source : 'balance', kind, fromUnit : order.unitCode,
             lcDays : lcDays > 0 ? lcDays : 0,
             label : orderLabel(order)
@@ -477,7 +477,7 @@ export const DEFAULT_PLAN_RULES = {
     repeatNoLc  : true,                  // a repeat order ramps no more
     minFill     : DEFAULT_MIN_FILL,      // day capacity rule: share of the line's day capacity a bar day must give the order
     planFrom    : null,                  // plan start: no bar before this date (null = the scenario's plan range start)
-    exclusiveDay : true                  // one order per line per day: a bar's days are free of any other bar
+    exclusiveDay : false                 // strict: one order per line per day (off: a bar may start on the day another order finishes)
 };
 export function planRules(sc) { const r = sc?.balance?.planRules || {}; return { ...DEFAULT_PLAN_RULES, ...r, buyerLc : { ...DEFAULT_PLAN_RULES.buyerLc, ...(r.buyerLc || {}) } }; }
 const buyerKey = b => String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -515,20 +515,23 @@ function overbook(sc, ix, o, qty, fromI, lcDays, ob = new Map()) {
         const cap = ix.cap.get(l.id), used = ix.used.get(l.id);
         let o2 = ob.get(l.id); if (!o2) { o2 = new Float64Array(n); ob.set(l.id, o2); }
         let made = 0, e = s, wd = 0, load = 0, days = 0;
-        for (let i = s; i < n && made < qty * smv; i++) {
+        const pcsList = [];
+        for (let i = s; i < n && made < qty; i++) {
             if (cap[i] <= 0) continue;
             const r = ramp && wd < ramp.length ? ramp[wd] : 1; wd++;
-            made += cap[i] * r; e = i; load += (used[i] + o2[i]) / cap[i]; days++;
+            const pcs = Math.min(qty - made, Math.max(1, Math.floor(cap[i] * r / smv)));
+            pcsList.push(pcs); made += pcs; e = i; load += (used[i] + o2[i]) / cap[i]; days++;
         }
+        if (made < qty && pcsList.length) pcsList[pcsList.length - 1] += qty - made;
         const endI = e, avgLoad = days ? load / days : 1, eff = Number(l.eff) || 0;
         const be = Number(best?.l.eff) || 0;
-        if (!best || eff > be + 1e-9 || (Math.abs(eff - be) < 1e-9 && (avgLoad < best.avgLoad - 1e-9 || (Math.abs(avgLoad - best.avgLoad) < 1e-9 && endI < best.endI)))) best = { l, endI, avgLoad };
+        if (!best || eff > be + 1e-9 || (Math.abs(eff - be) < 1e-9 && (avgLoad < best.avgLoad - 1e-9 || (Math.abs(avgLoad - best.avgLoad) < 1e-9 && endI < best.endI)))) best = { l, endI, avgLoad, pcsList };
     }
     // the overbooked bars spread over the unit's lines: this one counts as a full line for the next pick
     const o2 = ob.get(best.l.id), cap = ix.cap.get(best.l.id);
     for (let i = s; i <= best.endI; i++) if (cap[i] > 0) o2[i] += cap[i];
     return { allocations : [{
-        id : uid('rs'), orderId : o.id, lineId : best.l.id, product : o.product, smv, start : ix.days[s], end : ix.days[best.endI], qty,
+        id : uid('rs'), orderId : o.id, lineId : best.l.id, product : o.product, smv, start : ix.days[s], end : ix.days[best.endI], qty, dayPcs : best.pcsList,
         locked : false, status : 'proposed', source : 'autoplan', kind : 'contract', fromUnit : o.unitCode, lcDays : lcDays > 0 ? lcDays : 0,
         overbooked : true, label : orderLabel(o)
     }], remaining : 0, reason : null };
@@ -573,6 +576,7 @@ export function autoPlanUnits(sc, opts = {}) {
             barDays : 0, needDays : 0, fill : null, lateDays : 0, shortQty : 0, stretched : false, critical : [] };
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
         if (planExpired(o, rules, from)) { res.status = 'noplan'; res.attempt = `delivery ${o.delivery} before the plan start ${from} — not planned`; res.note = 'no plan'; results.push(res); continue; }
+        if (o.pcd && o.delivery && o.pcd > o.delivery) res.note = `PCD ${o.pcd} is AFTER the delivery ${o.delivery} (ERP dates) — cannot be met`;
         const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
         // sewing never starts before PCD (or the plan start if PCD has already passed). Attempts:
         //   input date (PCD + lead) → grey if delivery is met

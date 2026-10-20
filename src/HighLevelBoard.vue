@@ -486,7 +486,7 @@ function onBarMoved(resId, lineId, startDate, endDate) {
     const start = ymd(startDate), end = addDays(ymd(endDate), -1);
     mutate(`move ${r.label || product}`, scn => {
         const x = scn.reservations.find(y => y.id === resId);
-        x.lineId = lineId; x.start = start; x.end = end < start ? start : end;
+        x.lineId = lineId; x.start = start; x.end = end < start ? start : end; x.dayPcs = null;   // a hand-moved bar spreads over its span again
         // an allocation keeps its meaning when the planner moves it between units
         if (x.kind && x.kind !== 'live') {
             const contract = x.fromUnit || o?.unitCode;
@@ -522,7 +522,7 @@ function resRefit() {
     const o = orderById(sc.value, r.orderId);
     const others = buildLoad({ ...sc.value, reservations : sc.value.reservations.filter(y => y.id !== r.id) });
     const end = endForQty(sc.value, r.lineId, r.product || o?.product, r.qty, r.start, others);
-    mutate('re-fit end to capacity', s => { s.reservations.find(y => y.id === r.id).end = end; });
+    mutate('re-fit end to capacity', s => { const x = s.reservations.find(y => y.id === r.id); x.end = end; x.dayPcs = null; });
 }
 const splitTargets = computed(() => {
     const r = resRow.value; if (!r || !sc.value) return [];
@@ -538,7 +538,7 @@ function resSplit() {
     const o = orderById(sc.value, r.orderId);
     mutate(`split ${q}`, s => {
         const x = s.reservations.find(y => y.id === r.id);
-        x.qty -= q;
+        x.qty -= q; x.dayPcs = null;
         const load = buildLoad(s);
         const end = endForQty(s, splitLine.value, x.product || o?.product, q, x.start, load);
         const tl = lineById(s, splitLine.value);
@@ -882,7 +882,8 @@ function apuDefaults(s) {
     const r = planRules(s);
     return { newLead : r.newLead, repeatLead : r.repeatLead, lcSmvLow : r.lcSmvLow, lcDaysLow : r.lcDaysLow, lcSmvHigh : r.lcSmvHigh, lcDaysMid : r.lcDaysMid, lcDaysHigh : r.lcDaysHigh,
         gstar : r.buyerLc?.['G-STAR'] ?? 4, noLc : (r.noLcBuyers || []).join(', '), repeatNoLc : r.repeatNoLc !== false, minFillPct : Math.round((r.minFill ?? 0.5) * 100),
-        planFrom : r.planFrom || ymd(new Date()), exclusiveDay : r.exclusiveDay !== false };
+        // the strict 'one order per line per day' flag of rules saved before v2 is dropped: it wasted every day's leftover
+        planFrom : r.planFrom || ymd(new Date()), exclusiveDay : (r.rulesV || 0) >= 2 ? r.exclusiveDay === true : false };
 }
 const apuRules = ref(apuDefaults(null));
 const apuUnits = ref([...APU_UNITS]);
@@ -916,7 +917,7 @@ function apuRulesObj() {
     return { newLead : Number(r.newLead) || 0, repeatLead : Number(r.repeatLead) || 0, lcSmvLow : Number(r.lcSmvLow) || 30, lcDaysLow : Number(r.lcDaysLow) || 0,
         lcSmvHigh : Number(r.lcSmvHigh) || 50, lcDaysMid : Number(r.lcDaysMid) || 0, lcDaysHigh : Number(r.lcDaysHigh) || 0,
         buyerLc : { 'G-STAR' : Number(r.gstar) || 0 }, noLcBuyers : String(r.noLc || '').split(',').map(x => x.trim()).filter(Boolean), repeatNoLc : !!r.repeatNoLc,
-        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null, exclusiveDay : !!r.exclusiveDay };
+        minFill : Math.min(1, Math.max(0.05, (Number(r.minFillPct) || 50) / 100)), planFrom : r.planFrom || null, exclusiveDay : !!r.exclusiveDay, rulesV : 2 };
 }
 // expired for the plan: PCD and input date before the plan start (the rules' Plan from, else the plan range start)
 function isExpiredOrder(o, s = sc.value) { if (!s) return false; const r = planRules(s); const from = r.planFrom && r.planFrom > s.from ? r.planFrom : s.from; return planExpired(o, r, from); }
@@ -2002,7 +2003,7 @@ function close() {
                         <label class="hl-lbl" title="Day capacity rule: every day of a bar must give the order at least this share of the line's day capacity (the last day, which takes the remainder, excepted) — a busy line never gets a small order spread over many days of crumbs; the bar waits for a day it can really run on">Day capacity: bar day fills ≥ <input v-model.number="apuRules.minFillPct" type="number" min="5" max="100" class="cal-in hl-num hl-num-s"> % of line capacity</label>
                         <span class="hl-sep"></span>
                         <label class="hl-lbl" title="Plan start (default today): the available orders are loaded on the lines from this date on — an order whose PCD has passed starts here, a later input date starts there; an order whose delivery date lies before it is not planned (No plan)"><b>Plan from</b> <input v-model="apuRules.planFrom" type="date" class="cal-in hl-date"></label>
-                        <label class="hl-chk" title="One order per line per day: a bar's days are free of any other bar — the next order starts on the line's next free day (off: a day's leftover capacity may take another order)"><input v-model="apuRules.exclusiveDay" type="checkbox"> one order per line per day</label>
+                        <label class="hl-chk" title="Strict: one order per line per day — a bar's days are free of any other bar, the next order waits for the line's next free day (the day's leftover capacity is lost). Off (standard): a bar may start on the day the previous order finishes — the changeover day needs ≥ 10 % of the day free, the middle days the day-capacity share, the last day takes the rest"><input v-model="apuRules.exclusiveDay" type="checkbox"> strict: one order per line per day</label>
                     </div>
                     <div v-if="apuResult" class="hl-apu-result">
                         <div class="hl-ab-sum">

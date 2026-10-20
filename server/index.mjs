@@ -67,7 +67,7 @@ app.use(compression({ threshold : 1024 }));
 // text/plain included: sendBeacon() payloads (board-lock release / session
 // end on tab close) must be CORS-simple — a JSON content-type would need a
 // preflight, which beacons cannot do, and the release would silently fail
-app.use(express.json({ limit : '2mb', type : ['application/json', 'text/plain'] }));
+app.use(express.json({ limit : '20mb', type : ['application/json', 'text/plain'] }));   // a High Level scenario save (thousands of bars with their day spreads) passes 2 MB
 
 const BASE = '/api/v1/planning';
 

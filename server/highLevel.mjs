@@ -125,6 +125,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS smv DECIMAL(8,3) NULL');
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS plan_status VARCHAR(12) NULL');
             await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS lc_days INT NULL');
+            await pool.query('ALTER TABLE hl_reservations ADD COLUMN IF NOT EXISTS day_pcs TEXT NULL');   // the planned bar's own day spread
             await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS is_repeat TINYINT(1) NOT NULL DEFAULT 0');
             await pool.query('ALTER TABLE hl_orders ADD COLUMN IF NOT EXISTS repeat_of VARCHAR(60) NULL');
             // ERP orders grouped by buyer + production unit + style + colour + PCD + delivery (one bar per group)
@@ -210,7 +211,7 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
                 repeat : !!o.is_repeat, repeatOf : o.repeat_of || null, color : o.color || '', codes : o.codes || '', pos : o.pos == null ? null : Number(o.pos) })),
             reservations : reservations.map(r => ({ id : r.id, orderId : r.order_id, lineId : r.line_id, product : r.product || null, start : ymd(r.start_date), end : ymd(r.end_date), qty : Number(r.qty), locked : !!r.locked, status : r.status, label : r.label || '', source : r.source || null,
                 kind : r.kind || null, fromUnit : r.from_unit || null, reason : r.reason || null, extStatus : r.ext_status || null, smv : r.smv == null ? null : Number(r.smv),
-                planStatus : r.plan_status || null, lcDays : r.lc_days == null ? 0 : Number(r.lc_days) }))
+                planStatus : r.plan_status || null, lcDays : r.lc_days == null ? 0 : Number(r.lc_days), dayPcs : (() => { try { const v = JSON.parse(r.day_pcs || 'null'); return Array.isArray(v) ? v : null; } catch { return null; } })() }))
         };
     }
 
@@ -248,10 +249,10 @@ export function mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF = '
             (sc.orders || []).map(o => [o.id, id, o.buyer || null, o.style || null, o.product || null, Number(o.qty) || 0, o.pcd || null, o.delivery || null, o.unitCode || null, o.note || null, o.source ? String(o.source).slice(0, 200) : null,
                 o.garment || null, o.smv == null || o.smv === '' ? null : Number(o.smv), o.outstanding == null ? null : Number(o.outstanding), o.priority ? 1 : 0, o.po ? String(o.po).slice(0, 400) : null,
                 o.repeat ? 1 : 0, o.repeatOf ? String(o.repeatOf).slice(0, 60) : null, o.color ? String(o.color).slice(0, 120) : null, o.codes ? String(o.codes).slice(0, 400) : null, o.pos == null ? null : Number(o.pos)]));
-        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv, plan_status, lc_days)', Array(19).fill(0),
+        await bulk('INSERT INTO hl_reservations (id, scenario_id, order_id, line_id, product, start_date, end_date, qty, locked, status, label, source, kind, from_unit, reason, ext_status, smv, plan_status, lc_days, day_pcs)', Array(20).fill(0),
             (sc.reservations || []).map(r => [r.id, id, r.orderId || null, r.lineId, r.product || null, r.start, r.end, Number(r.qty) || 0, r.locked ? 1 : 0, r.status || 'reserved', r.label || null, r.source || null,
                 r.kind || null, r.fromUnit || null, r.reason ? String(r.reason).slice(0, 400) : null, r.extStatus || null, r.smv == null ? null : Number(r.smv),
-                r.planStatus || null, r.lcDays ? Number(r.lcDays) : null]));
+                r.planStatus || null, r.lcDays ? Number(r.lcDays) : null, Array.isArray(r.dayPcs) && r.dayPcs.length ? JSON.stringify(r.dayPcs.map(x => Number(x) || 0)).slice(0, 4000) : null]));
         await conn.query('UPDATE hl_scenarios SET plan_from = ?, plan_to = ?, thresholds = ?, balance = ?, source_note = ?, source_at = ?, updated_by = ?, version = version + 1 WHERE id = ?',
             [sc.from || null, sc.to || null, JSON.stringify(sc.thresholds || null), sc.balance ? JSON.stringify(sc.balance) : null, sc.source?.note || null, sc.source?.at ? String(sc.source.at).slice(0, 19) : null, by, id]);
     }
