@@ -3744,6 +3744,9 @@ const currentUser     = computed(() => users.value.find(u => u.id === currentUse
 // planning_users.boards, JSON): "<boardId>" = write (edit + save),
 // "<boardId>:read" = read only (open and look, no edit, no save).
 function boardAccessOf(u, boardId) {
+    // the Planning Manager plans every board — a ':read' entry in the user's
+    // list (b5:read …) must not open the board view-only for that role
+    if (u?.role === 'Planning Manager') return 'write';
     const list = u?.boards || [];
     if (list.includes(boardId)) return 'write';
     if (list.includes(`${boardId}:read`)) return 'read';
