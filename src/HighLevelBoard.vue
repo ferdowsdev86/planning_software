@@ -15,7 +15,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import { StringHelper } from '@bryntum/schedulerpro';
 import {
     HL_UNITS, newScenario, newLine, uid, ymd, addDays, daysBetween, fromYmd, orderLabel,
-    lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary, isWorkDay, holidayOn,
+    lineById, orderById, unitOf, buildLoad, usedMinutes, lineDayMinutes, lineSummary, unitSummary, isWorkDay, holidayOn, unitDayHours,
     unitDayStatus, lineDayStatus, planOrder, autoPlan, endForQty, conflicts, reconcile, lineCompatible, reservationDays, isOver, lineSmv, ensurePoolLine
 } from './hlEngine.js';
 import {
@@ -249,7 +249,12 @@ const config = {
     eventResizeFeature        : true,
     eventTooltipFeature       : { template : ({ eventRecord }) => tipHtml(eventRecord) },
     resourceTimeRangesFeature : true,
-    eventMenuFeature          : false,
+    // right-click on a bar: its day-by-day schedule plan (table + chart), the reservation dialog, lock / cancel
+    eventMenuFeature          : { items : {
+        deleteEvent : false, unassignEvent : false, editEvent : false, copyEvent : false, cutEvent : false, splitEvent : false, eventColor : false,
+        schedulePlan : { text : '📅 Schedule plan — start, per day, finish (table & chart)', weight : 100, onItem : ({ eventRecord }) => openSchedule(eventRecord.id) },
+        openRes      : { text : '📌 Reservation — move / split / lock', weight : 110, onItem : ({ eventRecord }) => openReservation(eventRecord.id) }
+    } },
     scheduleMenuFeature       : false,
     cellMenuFeature           : false,
     headerMenuFeature         : false,
@@ -500,6 +505,48 @@ function onBarMoved(resId, lineId, startDate, endDate) {
 // ---------------------------------------------------------------------------
 // Reservation popup
 // ---------------------------------------------------------------------------
+// ---- schedule plan of one bar: start, per-day pieces, finish — table and chart ------------------------------
+// Day shift is taken as 08:00 → 08:00 + the line's hours (+ OT); on the first / last day the bar's share of the
+// line's minutes gives the estimated start / finish time (bars that started earlier on that day run first).
+const SHIFT_START = 8;
+const schedOpen = ref(false);
+const schedSel = ref(null);
+function openSchedule(id) { schedSel.value = id; schedOpen.value = true; }
+const schedPlan = computed(() => {
+    void tick.value;
+    const s = sc.value; const r = s?.reservations.find(x => x.id === schedSel.value); if (!s || !r) return null;
+    const o = orderById(s, r.orderId) || {};
+    const line = lineById(s, r.lineId); if (!line) return null;
+    const unit = unitOf(s, line.unitCode) || {};
+    const { days, smv, lcDays } = reservationDays(s, r);
+    const load = loadMap.value;
+    const hm = x => { const t = Math.round(x * 60); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+    const overbooked = r.planStatus === 'overbook';
+    const share0 = (min, cap) => (cap > 0 ? min / cap : 0);
+    const rows = days.map((d, i) => {
+        const capMin = lineDayMinutes(s, line, d.date);
+        const dh = unitDayHours(s, line.unitCode, d.date);
+        const hours = (dh != null ? dh : (Number(line.hours ?? unit.hours) || 0)) + (Number(line.ot ?? unit.ot) || 0);
+        const rate = capMin > 0 && hours > 0 ? capMin / hours : 0;                        // line minutes per clock hour
+        const capPcs = capMin > 0 ? Math.round(capMin / smv) : 0;
+        // what other bars take on this day before this one (bars that started earlier)
+        const cell = load.get(line.id)?.get(d.date);
+        // an overbooked bar overlays the line's plan: its times run from the shift start
+        const before = overbooked ? 0 : (cell?.items || []).filter(it => { const x = s.reservations.find(y => y.id === it.resId); return x && x.id !== r.id && x.start <= r.start && x.id < r.id; }).reduce((a, it) => a + it.min, 0);
+        const own = d.min;
+        const from = rate ? SHIFT_START + before / rate : SHIFT_START;
+        const to = rate ? (share0(own, capMin) >= 0.98 ? SHIFT_START + hours : from + own / rate) : from;   // a full day ends with the shift
+        const share = capMin > 0 ? d.pcs / (capMin / smv) : 0;
+        const note = capMin <= 0 ? 'no working day' : overbooked ? (i === days.length - 1 && share < 0.95 ? 'overbooked — last day, remainder' : 'overbooked — full day capacity over the line\'s plan') : i < lcDays ? `learning curve day ${i + 1} of ${lcDays}` : i === 0 && before > 0 ? 'changeover — starts after the previous order' : i === days.length - 1 && share < 0.95 ? 'last day — remainder' : 'full day';
+        return { date : d.date, dow : DOW[fromYmd(d.date).getDay()], hours, capPcs, pcs : d.pcs, cum : 0, share, from : hm(Math.min(from, SHIFT_START + hours)), to : hm(Math.min(to, SHIFT_START + hours + 0.001)), note, lc : i < lcDays };
+    });
+    let cum = 0; for (const x of rows) { cum += x.pcs; x.cum = cum; }
+    const maxPcs = Math.max(1, ...rows.map(x => Math.max(x.pcs, x.capPcs)));
+    const status = r.planStatus || (o.delivery && r.end > o.delivery ? 'late' : null);
+    return { r, o, line, unit, smv, lcDays, rows, maxPcs, status,
+        start : rows[0] ? `${dmy(rows[0].date)} ${rows[0].from}` : dmy(r.start), finish : rows.length ? `${dmy(rows[rows.length - 1].date)} ${rows[rows.length - 1].to}` : dmy(r.end),
+        workDays : rows.filter(x => x.capPcs > 0).length, avg : rows.length ? Math.round(r.qty / Math.max(1, rows.filter(x => x.capPcs > 0).length)) : 0 };
+});
 const resOpen = ref(false);
 const resSel = ref(null);
 const resRow = computed(() => { void tick.value; return sc.value?.reservations.find(r => r.id === resSel.value) || null; });
@@ -1784,6 +1831,56 @@ function close() {
             <div v-if="!sc && !busy" class="hl-empty">No scenario yet — click <b>➕ New</b> to start a simulation.</div>
         </div>
 
+        <!-- Schedule plan of one bar -->
+        <div v-if="schedOpen && schedPlan" class="cal-overlay" @click.self="schedOpen = false">
+            <div class="cal-dialog pf-dialog hl-dialog hl-sched-dialog">
+                <div class="cal-title">📅 Schedule plan — {{ schedPlan.r.label || orderLabel(schedPlan.o) }} <span class="cal-title-btns"><span class="cal-x" @click="schedOpen = false">✕</span></span></div>
+                <div class="st-body">
+                    <div class="hl-sp-head">
+                        <span><b>{{ fmtQty(schedPlan.r.qty) }}</b> pcs · {{ schedPlan.o.product || schedPlan.r.product }} · SMV {{ schedPlan.smv }}</span>
+                        <span>{{ schedPlan.unit.name }} · <b>{{ schedPlan.line.name }}</b> <i class="hl-dim">{{ schedPlan.line.manpower }} mp · {{ schedPlan.line.eff }}%</i></span>
+                        <span>PCD <b>{{ dmy(schedPlan.o.pcd) }}</b> · delivery <b :class="{ 'hl-late' : schedPlan.o.delivery && schedPlan.r.end > schedPlan.o.delivery }">{{ dmy(schedPlan.o.delivery) }}</b></span>
+                        <span v-if="schedPlan.status" class="hl-ps-chip" :class="`hl-ps-${schedPlan.status}`">{{ PLAN_STATUS[schedPlan.status] || schedPlan.status }}</span>
+                        <span v-if="schedPlan.lcDays" class="hl-dim">learning curve {{ schedPlan.lcDays }} d</span>
+                    </div>
+                    <div class="hl-sp-sum">
+                        <span>▶ Start <b>{{ schedPlan.start }}</b></span>
+                        <span>■ Finish <b>{{ schedPlan.finish }}</b></span>
+                        <span>{{ schedPlan.workDays }} working day(s) · avg <b>{{ fmtQty(schedPlan.avg) }}</b> pcs/day</span>
+                        <span class="hl-dim">shift taken as {{ SHIFT_START }}:00 → {{ SHIFT_START }}:00 + line hours; times are estimates from the line's minutes</span>
+                    </div>
+                    <div class="hl-sp-chart">
+                        <svg :viewBox="`0 0 ${Math.max(420, schedPlan.rows.length * 46 + 60)} 190`" preserveAspectRatio="none" class="hl-sp-svg">
+                            <g v-for="(x, i) in schedPlan.rows" :key="x.date">
+                                <rect :x="50 + i * 46 + 4" :y="160 - 140 * (x.capPcs / schedPlan.maxPcs)" width="38" :height="140 * (x.capPcs / schedPlan.maxPcs)" class="hl-sp-cap" />
+                                <rect :x="50 + i * 46 + 8" :y="160 - 140 * (x.pcs / schedPlan.maxPcs)" width="30" :height="Math.max(0, 140 * (x.pcs / schedPlan.maxPcs))" :class="['hl-sp-bar', `hl-sp-${schedPlan.status || 'ontime'}`, { 'hl-sp-lc' : x.lc }]" />
+                                <text :x="50 + i * 46 + 23" :y="156 - 140 * (x.pcs / schedPlan.maxPcs)" text-anchor="middle" class="hl-sp-val">{{ x.pcs ? fmtQty(x.pcs) : '' }}</text>
+                                <text :x="50 + i * 46 + 23" y="176" text-anchor="middle" class="hl-sp-day">{{ x.dow }} {{ x.date.slice(8) }}/{{ x.date.slice(5, 7) }}</text>
+                            </g>
+                            <line x1="46" y1="160" :x2="50 + schedPlan.rows.length * 46" y2="160" class="hl-sp-axis" />
+                            <text x="44" y="24" text-anchor="end" class="hl-sp-day">{{ fmtQty(schedPlan.maxPcs) }}</text>
+                            <text x="44" y="162" text-anchor="end" class="hl-sp-day">0</text>
+                        </svg>
+                        <div class="hl-sp-legend"><i class="hl-lg hl-sp-cap-lg"></i>line day capacity (pcs) <i class="hl-lg" :class="`hl-lg-${schedPlan.status === 'pcd' ? 'pcd' : schedPlan.status === 'late' || schedPlan.status === 'overbook' ? 'late2' : 'ontime'}`"></i>planned pcs <i class="hl-lg hl-sp-lc-lg"></i>learning-curve day</div>
+                    </div>
+                    <div class="hl-scroll hl-sp-scroll">
+                        <table class="hl-table hl-table-s">
+                            <thead><tr><th>Date</th><th>Day</th><th>Line hours</th><th>Day capacity (pcs)</th><th>Planned pcs</th><th>% of day</th><th>Cumulative</th><th>From</th><th>To</th><th>Note</th></tr></thead>
+                            <tbody>
+                                <tr v-for="x in schedPlan.rows" :key="x.date" :class="{ 'hl-sp-off' : !x.capPcs }">
+                                    <td>{{ dmy(x.date) }}</td><td>{{ x.dow }}</td><td class="hl-r">{{ x.capPcs ? x.hours + ' h' : '—' }}</td><td class="hl-r">{{ x.capPcs ? fmtQty(x.capPcs) : '—' }}</td>
+                                    <td class="hl-r"><b>{{ fmtQty(x.pcs) }}</b></td><td class="hl-r" :class="{ 'hl-late' : x.share > 1.001 }">{{ x.capPcs ? fmtPct(x.share) : '—' }}</td><td class="hl-r">{{ fmtQty(x.cum) }}</td>
+                                    <td>{{ x.capPcs ? x.from : '—' }}</td><td>{{ x.capPcs ? x.to : '—' }}</td><td class="hl-dim">{{ x.note }}</td>
+                                </tr>
+                            </tbody>
+                            <tfoot><tr><td colspan="4"><b>Total</b></td><td class="hl-r"><b>{{ fmtQty(schedPlan.r.qty) }}</b></td><td colspan="5"></td></tr></tfoot>
+                        </table>
+                    </div>
+                    <div class="hl-actions hl-right"><button class="cal-btn st-btn hl-btn" @click="schedOpen = false; openReservation(schedPlan.r.id)">📌 Reservation (move / split / lock)</button><button class="cal-btn st-btn hl-btn" @click="schedOpen = false">Close</button></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Reservation detail -->
         <div v-if="resOpen && resRow" class="cal-overlay" @click.self="resOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog hl-res-dialog">
@@ -2702,6 +2799,14 @@ function close() {
 .hl-warn { color : #e65100; font-weight : 600; }
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
 .cal-overlay .cal-dialog.hl-cap-dialog { width : 1500px; max-width : 96vw; }
+.cal-overlay .cal-dialog.hl-sched-dialog { width : 1000px; max-width : 96vw; }
+.hl-sp-head, .hl-sp-sum { display : flex; flex-wrap : wrap; gap : 6px 18px; align-items : center; font-size : 12.5px; margin-bottom : 6px; }
+.hl-sp-sum { background : #f2f4f7; border : 1px solid #d5dbe3; border-radius : 4px; padding : 5px 10px; }
+.hl-sp-chart { margin : 4px 0 8px; } .hl-sp-svg { width : 100%; height : 190px; display : block; background : #fafbfc; border : 1px solid #e3e7ec; border-radius : 4px; }
+.hl-sp-cap { fill : #e3e7ec; } .hl-sp-bar { fill : #9e9e9e; } .hl-sp-pcd { fill : #fb8c00; } .hl-sp-late, .hl-sp-overbook { fill : #d32f2f; } .hl-sp-lc { stroke : #1646a0; stroke-width : 2; stroke-dasharray : 3 2; }
+.hl-sp-val { font-size : 10px; fill : #222; font-weight : 700; } .hl-sp-day { font-size : 10px; fill : #555; } .hl-sp-axis { stroke : #889; stroke-width : 1; }
+.hl-sp-legend { font-size : 11px; color : #555; margin-top : 3px; } .hl-sp-cap-lg { background : #e3e7ec; } .hl-sp-lc-lg { background : #fff; border : 2px dashed #1646a0; }
+.hl-sp-scroll { max-height : 42vh; } .hl-sp-off td { color : #999; font-style : italic; }
 .hl-cap-scroll { max-height : 68vh; overflow : auto; }
 .hl-cap-tbl th, .hl-cap-tbl td { white-space : nowrap; }
 .hl-cap-tbl thead th { position : sticky; top : 0; background : #f2f4f7; z-index : 2; }
