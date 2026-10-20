@@ -455,7 +455,7 @@ async function openUnitPlan(code) {
     if (!canWrite.value) { props.toast(`${unitName(code)}: showing the plan on the board (read-only access — no new plan)`, 'ok'); return; }
     upBusy.value = true;
     try {
-        if (!sc.value.orders.some(o => /^erp:/.test(o.source || '') && o.unitCode === code)) await importErpUnits([code]);
+        await importErpUnits([code]);
         const out = autoPlanUnits(sc.value, { units : [code], rules : apuRulesObj() });
         if (!out.results.length) { props.toast(`${unitName(code)}: no ERP active order for this unit`, 'warn'); return; }
         mutate(`auto plan ${unitName(code)}`, s => {
@@ -1716,7 +1716,7 @@ function close() {
             </template>
             <span class="hl-legend">
                 <i class="hl-lg hl-day-idle"></i>idle <i class="hl-lg hl-day-available"></i>available <i class="hl-lg hl-day-partial"></i>partial <i class="hl-lg hl-day-full"></i>full <i class="hl-lg hl-day-overloaded"></i>overloaded <i class="hl-lg hl-day-holiday"></i>holiday <i class="hl-lg hl-day-off"></i>off day <i class="hl-lg hl-day-inactive"></i>inactive
-                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met → move elsewhere (overbooked at its input date; the grey bar keeps the line) <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
+                <i class="hl-lg hl-lg-res"></i>reservation <i class="hl-lg hl-lg-contract"></i>contract unit <i class="hl-lg hl-lg-transfer"></i>cross-unit transfer <i class="hl-lg hl-lg-gsl"></i>GSL overflow <i class="hl-lg hl-lg-pend"></i>pending ext. confirmation <i class="hl-lg hl-lg-ontime"></i>auto plan on time <i class="hl-lg hl-lg-pcd"></i>PCD not met <i class="hl-lg hl-lg-late2"></i>delivery not met (red — started from PCD, full day capacity at the best-efficiency line) <i class="hl-lg hl-lg-live"></i>live load (snapshot) <i class="hl-lg hl-lg-lock"></i>locked <i class="hl-lg hl-lg-conf"></i>conflict <i class="hl-lg hl-lg-late"></i>after delivery
             </span>
             <span v-if="conflictList.length" class="hl-warn">⚠ {{ conflictList.length }} overloaded line-day(s)</span>
             <span v-if="reconcileIssues.length" class="hl-warn">⚠ {{ reconcileIssues.length }} reservation(s) do not reconcile</span>
@@ -2598,7 +2598,7 @@ function close() {
 .hl-root .b-sch-event.hl-res-live { background : #7a7a7a; border-color : #555; }
 .hl-root .b-sch-event.hl-res-proposed { background : #26a69a; }
 .hl-root .b-sch-event.hl-res-conflict { background : #d32f2f; border-color : #8e0000; }
-.hl-root .b-sch-event.hl-res-late { box-shadow : inset 0 -4px 0 #ff9800; }
+.hl-root .b-sch-event.hl-res-late { background : #d32f2f; border-color : #8e0000; color : #fff; }
 .hl-root .b-sch-event.hl-res-locked { opacity : .9; border-style : dashed; }
 .hl-res-txt { white-space : nowrap; overflow : hidden; text-overflow : ellipsis; padding : 0 4px; }
 .hl-tip table td { padding : 1px 6px; font-size : 11.5px; } .hl-tip table td:first-child { color : #666; }
@@ -2679,7 +2679,9 @@ function close() {
 .hl-day-pool { background : #ffe0b2 !important; }
 .hl-root .b-sch-event.hl-res-ps-ontime { background : #9e9e9e; border-color : #616161; color : #fff; }
 .hl-root .b-sch-event.hl-res-ps-pcd { background : #fb8c00; border-color : #e65100; color : #fff; }
-.hl-root .b-sch-event.hl-res-ps-late, .hl-root .b-sch-event.hl-res-ps-overbook { background : #d32f2f; border-color : #8e0000; color : #fff; }
+.hl-root .b-sch-event.hl-res-late,
+.hl-root .b-sch-event.hl-res-ps-late,
+.hl-root .b-sch-event.hl-res-ps-overbook { background : #d32f2f !important; border-color : #8e0000 !important; color : #fff !important; }
 .hl-ps-overbook { background : #d32f2f; }
 .hl-lg-ontime { background : #9e9e9e; } .hl-lg-pcd { background : #fb8c00; } .hl-lg-late2 { background : #d32f2f; } .hl-lg-elsewhere { background : #7b1fa2; }
 .hl-root .b-sch-event.hl-res-k-gsl.hl-res-ps-elsewhere, .hl-root .b-sch-event.hl-res-ps-elsewhere { background : #7b1fa2; border-color : #4a148c; color : #fff; }

@@ -207,7 +207,9 @@ function fitInUnit(sc, ix, order, unitCode, qty, fromI, untilI, settings, kind, 
         for (const l of lines) {
             const f = fitIndexed(ix.cap.get(l.id), ix.used.get(l.id), smv, remaining, fromI, untilI, ramp, minFill, exclusive);
             if (!f || !f.placed) continue;
-            if (!best || f.placed > best.f.placed || (f.placed === best.f.placed && f.endI < best.f.endI)) best = { l, f };
+            const eff = Number(l.eff) || 0, be = Number(best?.l.eff) || 0;
+            // optimum fill: most pieces by delivery, then the highest-efficiency line, then the earliest finish
+            if (!best || f.placed > best.f.placed || (f.placed === best.f.placed && (eff > be || (eff === be && f.endI < best.f.endI)))) best = { l, f };
         }
         if (!best) break;
         commit(ix.used.get(best.l.id), best.f);
@@ -459,8 +461,10 @@ export function reconcileAllocation(report) {
 //   for a repeat order / season-style carry-over;
 //   learning curve: none for a repeat order; else by SMV (< 30 → 3 days,
 //   30–50 → 4 days, > 50 → 5 days), buyer overrides (G-STAR 4 days, …);
+//   sewing never starts before PCD (plan start if PCD has passed);
 //   delivery must be met: on time = grey, delivery met only by starting
-//   before the input date = orange (PCD not met), delivery missed = red.
+//   before the input date = orange (PCD not met), delivery missed = red
+//   (overbooked from PCD on the highest-efficiency compatible line).
 // ---------------------------------------------------------------------------
 export const DEFAULT_PLAN_RULES = {
     newLead     : 7,          // days after PCD a new style starts sewing
@@ -516,8 +520,9 @@ function overbook(sc, ix, o, qty, fromI, lcDays, ob = new Map()) {
             const r = ramp && wd < ramp.length ? ramp[wd] : 1; wd++;
             made += cap[i] * r; e = i; load += (used[i] + o2[i]) / cap[i]; days++;
         }
-        const endI = e, avgLoad = days ? load / days : 1;
-        if (!best || avgLoad < best.avgLoad - 1e-9 || (Math.abs(avgLoad - best.avgLoad) < 1e-9 && endI < best.endI)) best = { l, endI, avgLoad };
+        const endI = e, avgLoad = days ? load / days : 1, eff = Number(l.eff) || 0;
+        const be = Number(best?.l.eff) || 0;
+        if (!best || eff > be + 1e-9 || (Math.abs(eff - be) < 1e-9 && (avgLoad < best.avgLoad - 1e-9 || (Math.abs(avgLoad - best.avgLoad) < 1e-9 && endI < best.endI)))) best = { l, endI, avgLoad };
     }
     // the overbooked bars spread over the unit's lines: this one counts as a full line for the next pick
     const o2 = ob.get(best.l.id), cap = ix.cap.get(best.l.id);
@@ -569,12 +574,15 @@ export function autoPlanUnits(sc, opts = {}) {
         if (open <= 0) { res.status = 'ontime'; res.attempt = 'already reserved'; results.push(res); continue; }
         if (planExpired(o, rules, from)) { res.status = 'noplan'; res.attempt = `delivery ${o.delivery} before the plan start ${from} — not planned`; res.note = 'no plan'; results.push(res); continue; }
         const untilI = Math.min(lastI, idxOf(deadline) ?? lastI);
-        // attempts: the input date (grey) → PCD itself (orange) → the window start (orange) → late anyway (red)
+        // sewing never starts before PCD (or the plan start if PCD has already passed). Attempts:
+        //   input date (PCD + lead) → grey if delivery is met
+        //   PCD itself → orange if delivery is met only by starting before the input date
+        //   cannot meet delivery from PCD → red (overbooked at PCD / plan start, full day capacity)
+        const pcdStart = o.pcd && o.pcd > from ? o.pcd : from;
         const starts = [];
         const push = (d, tag) => { const i = Math.max(0, Math.min(lastI + 1, idxOf(d) ?? 0)); if (!starts.some(x => x.i === i)) starts.push({ i, tag, date : ix.days[Math.min(i, lastI)] }); };
-        push(inputDate && inputDate > from ? inputDate : from, 'input');
-        if (o.pcd && o.pcd > from && o.pcd < (inputDate || o.pcd)) push(o.pcd, 'pcd');
-        push(from, 'window');
+        push(inputDate && inputDate > pcdStart ? inputDate : pcdStart, 'input');
+        if (pcdStart < (inputDate || pcdStart)) push(pcdStart, 'pcd');
         let chosen = null;
         for (const st of starts) {
             if (st.i > untilI) continue;
@@ -586,11 +594,11 @@ export function autoPlanUnits(sc, opts = {}) {
             if (!chosen) chosen = { r : null, st, finish : null, late : true };
         }
         if (!chosen || chosen.late) {
-            // delivery cannot be met on the free capacity: the order is NOT pushed later — it is OVERBOOKED where the
-            // rules put it (its input date, at the line's full day capacity + learning curve) on the unit line with
-            // the least load in that window, taking no capacity from the index. The grey bars keep the line; this one
-            // is RED: to meet delivery it has to move elsewhere (other unit / GSL)
-            const st = starts[0];
+            // delivery cannot be met on the free capacity: the order is NOT pushed later — it is OVERBOOKED from
+            // PCD (or the plan start if PCD has passed), at the highest-efficiency compatible line's full day
+            // capacity + learning curve, taking no capacity from the index. The grey bars keep the line; this one
+            // is RED: delivery is not met
+            const st = starts[starts.length - 1] || starts[0];
             const r = overbook(sc, ix, o, open, st.i, lcDays, ob);
             const finish = r.allocations.reduce((m, a) => (!m || a.end > m ? a.end : m), null);
             chosen = { r, st, finish, late : true, overbooked : r.allocations.length > 0 };

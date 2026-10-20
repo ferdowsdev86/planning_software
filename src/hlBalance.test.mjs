@@ -245,10 +245,10 @@ test('unit-wise auto plan status: orange when delivery needs a start before the 
     assert.equal(byId.x1.placed > 0, true);
     assert.equal(byId.x1.finish > '2026-11-25', true);
     assert.equal(out.summary.late, 1);
-    // the impossible order is OVERBOOKED where the rules put it (its input date), not pushed later: one red bar on
+    // the impossible order is OVERBOOKED from PCD (never before PCD), not pushed later: one red bar on
     // a line of its unit, taking no capacity — the grey bar keeps the line, this one has to move elsewhere
     assert.equal(byId.x1.overbooked, true);
-    assert.equal(byId.x1.start, '2026-11-04');
+    assert.equal(byId.x1.start, '2026-11-01');
     const xb = out.reservations.filter(r => r.orderId === 'x1');
     assert.equal(xb.length, 1); assert.equal(xb[0].planStatus, 'overbook'); assert.equal(xb[0].qty, 100000);
     apply(sc, out);
@@ -313,4 +313,23 @@ test('orders whose delivery passed before the plan start are No plan, reported a
     const shared = autoPlanUnits(sc, { rules : { exclusiveDay : false } });
     const days = shared.reservations.map(r => `${r.lineId}|${r.start}`);
     assert.equal(new Set(days).size < days.length, true);
+});
+
+test('sewing never starts before PCD; delivery miss is still placed (red); highest-efficiency line is preferred', () => {
+    const sc = scenario();
+    sc.lines.find(l => l.id === 'M2').eff = 80;   // M2 80 % vs M1 60 % — same manpower
+    // PCD is 15 Nov: must not start on 1 Nov even if that would meet delivery
+    sc.orders.push(order('p1', 'M', 'Shirt', 400, '2026-12-20', { pcd : '2026-11-15', smv : 18, repeat : true }));
+    // delivery 18 Nov from PCD 15 Nov cannot be met for 100k pcs → red, starts on PCD
+    sc.orders.push(order('late1', 'M', 'Shirt', 100000, '2026-11-18', { pcd : '2026-11-15', smv : 18, repeat : true }));
+    const out = autoPlanUnits(sc);
+    const byId = Object.fromEntries(out.results.map(r => [r.orderId, r]));
+    assert.equal(byId.p1.start >= '2026-11-15', true);
+    assert.equal(byId.p1.status, 'ontime');
+    assert.equal(byId.late1.status, 'late');
+    assert.equal(byId.late1.overbooked, true);
+    assert.equal(byId.late1.start, '2026-11-15');
+    const bar = out.reservations.find(r => r.orderId === 'p1');
+    assert.equal(bar.lineId, 'M2');                 // best efficiency
+    assert.equal(out.reservations.find(r => r.orderId === 'late1').planStatus, 'overbook');
 });
