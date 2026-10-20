@@ -291,7 +291,8 @@ const config = {
             }
         },
         eventResizeEnd({ eventRecord, changed }) { if (changed) onBarMoved(eventRecord.id, eventRecord.resourceId, eventRecord.startDate, eventRecord.endDate); },
-        eventClick({ eventRecord }) { openReservation(eventRecord.id); }
+        // a click on a bar opens the small menu (Schedule plan / Reservation) at the pointer
+        eventClick({ eventRecord, event }) { openBarMenu(eventRecord.id, event); }
     },
     eventRenderer({ eventRecord, renderData }) {
         const r = eventRecord.data;
@@ -509,6 +510,14 @@ function onBarMoved(resId, lineId, startDate, endDate) {
 // Day shift is taken as 08:00 → 08:00 + the line's hours (+ OT); on the first / last day the bar's share of the
 // line's minutes gives the estimated start / finish time (bars that started earlier on that day run first).
 const SHIFT_START = 8;
+// ---- click menu on a bar --------------------------------------------------------------------------------------
+const barMenu = ref({ open : false, x : 0, y : 0, id : null });
+function openBarMenu(id, ev) {
+    const x = Math.min((ev?.clientX || 0) + 2, window.innerWidth - 340), y = Math.min((ev?.clientY || 0) + 2, window.innerHeight - 90);
+    barMenu.value = { open : true, x, y, id };
+}
+function closeBarMenu() { barMenu.value.open = false; }
+const barMenuRes = computed(() => (barMenu.value.open ? sc.value?.reservations.find(r => r.id === barMenu.value.id) || null : null));
 const schedOpen = ref(false);
 const schedSel = ref(null);
 function openSchedule(id) { schedSel.value = id; schedOpen.value = true; }
@@ -1831,6 +1840,15 @@ function close() {
             <div v-if="!sc && !busy" class="hl-empty">No scenario yet — click <b>➕ New</b> to start a simulation.</div>
         </div>
 
+        <!-- click menu on a bar -->
+        <div v-if="barMenu.open" class="hl-bm-overlay" @click="closeBarMenu" @contextmenu.prevent="closeBarMenu">
+            <div class="hl-bm" :style="{ left : barMenu.x + 'px', top : barMenu.y + 'px' }" @click.stop>
+                <div v-if="barMenuRes" class="hl-bm-title">{{ barMenuRes.label || orderLabel(orderById(sc, barMenuRes.orderId)) }} <span class="hl-dim">· {{ fmtQty(barMenuRes.qty) }} pcs · {{ dmy(barMenuRes.start) }} → {{ dmy(barMenuRes.end) }}</span></div>
+                <div class="hl-bm-item" @click="closeBarMenu(); openSchedule(barMenu.id)">📅 Schedule plan — start, per day, finish (table &amp; chart)</div>
+                <div class="hl-bm-item" @click="closeBarMenu(); openReservation(barMenu.id)">📌 Reservation — move / split / lock</div>
+            </div>
+        </div>
+
         <!-- Schedule plan of one bar -->
         <div v-if="schedOpen && schedPlan" class="cal-overlay" @click.self="schedOpen = false">
             <div class="cal-dialog pf-dialog hl-dialog hl-sched-dialog">
@@ -2800,6 +2818,10 @@ function close() {
 .hl-k-contract { color : #00796b; } .hl-k-transfer { color : #512da8; } .hl-k-gsl { color : #e65100; } .hl-k-manual { color : #1b52ad; } .hl-k-live { color : #555; }
 .cal-overlay .cal-dialog.hl-cap-dialog { width : 1500px; max-width : 96vw; }
 .cal-overlay .cal-dialog.hl-sched-dialog { width : 1000px; max-width : 96vw; }
+.hl-bm-overlay { position : fixed; inset : 0; z-index : 9000; }
+.hl-bm { position : fixed; min-width : 300px; background : #fff; border : 1px solid #c3cad3; border-radius : 6px; box-shadow : 0 6px 20px rgba(0,0,0,.18); padding : 4px 0; font-size : 13px; }
+.hl-bm-title { padding : 5px 14px 6px; font-size : 11.5px; font-weight : 700; color : #1f3a5f; border-bottom : 1px solid #e3e7ec; margin-bottom : 3px; white-space : nowrap; }
+.hl-bm-item { padding : 7px 14px; cursor : pointer; white-space : nowrap; } .hl-bm-item:hover { background : #e8f0fe; }
 .hl-sp-head, .hl-sp-sum { display : flex; flex-wrap : wrap; gap : 6px 18px; align-items : center; font-size : 12.5px; margin-bottom : 6px; }
 .hl-sp-sum { background : #f2f4f7; border : 1px solid #d5dbe3; border-radius : 4px; padding : 5px 10px; }
 .hl-sp-chart { margin : 4px 0 8px; } .hl-sp-svg { width : 100%; height : 190px; display : block; background : #fafbfc; border : 1px solid #e3e7ec; border-radius : 4px; }
