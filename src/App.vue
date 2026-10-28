@@ -6639,7 +6639,10 @@ function overlayBoardPlacements(rows) {
             // ids first, then PO number + colour, and only then PO number.
             let hits = rowIds.length ? cands.filter(c => rowIds.some(id => c.ids.has(id))) : [];
             if (!hits.length && rowClr) hits = cands.filter(c => c.color === rowClr && rowPos.some(p => c.pos.has(p)));
-            if (!hits.length) hits = cands.filter(c => rowPos.some(p => c.pos.has(p))).slice(0, 1);
+            // PO number alone only when a colour is unknown on one side: a PO number
+            // with several colours (271LJKNEWALBERT-435: BEIGE + MOOD INDIGO) must not
+            // show its other colours as planned on the one colour's bar
+            if (!hits.length) hits = cands.filter(c => rowPos.some(p => c.pos.has(p)) && (!rowClr || !c.color)).slice(0, 1);
             if (!hits.length) continue;
             // A colour group split over several strips / lines: every line it
             // runs on, from its first start to its last end
@@ -6647,7 +6650,15 @@ function overlayBoardPlacements(rows) {
             r.line  = [...new Set(hits.map(h => lineName(h.lid)))].join(', ');
             r.start = new Date(Math.min(...hits.map(h => +h.ev.startDate)));
             r.end   = new Date(Math.max(...hits.map(h => +h.ev.endDate)));
-            if (r.status !== 'completed') { r.status = 'planned'; r.planned = true; r.replaced = false; }
+            // Only part of the colour group is on the board (a 32-pc row of a 1,606-pc
+            // group): the row stays unplanned with the planned part noted, so the rest
+            // is still there to plan — not hidden behind the small bar
+            const onBoardQty = hits.reduce((t, h) => t + (Number(h.ev.data?.raw?.qty) || 0), 0);
+            const rowQtyPlan = planQtyOf(Number(r.orderQty ?? r.qty) || 0);
+            if (r.status !== 'completed') {
+                if (rowQtyPlan > 0 && onBoardQty < rowQtyPlan * 0.9) { r.status = 'unplanned'; r.planned = false; r.replaced = false; r.onBoardQty = onBoardQty; }
+                else { r.status = 'planned'; r.planned = true; r.replaced = false; }
+            }
             continue;
         }
         if (r.orderType !== 'projected') continue;
