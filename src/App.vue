@@ -6641,11 +6641,16 @@ function overlayBoardPlacements(rows) {
             // the order on the first bar's line. Match the row's own PO-row
             // ids first, then PO number + colour, and only then PO number.
             let hits = rowIds.length ? cands.filter(c => rowIds.some(id => c.ids.has(id))) : [];
-            if (!hits.length && rowClr) hits = cands.filter(c => c.color === rowClr && rowPos.some(p => c.pos.has(p)));
+            // When both sides know their PO-row ids, a bar that does not carry this
+            // row's id is NOT this row's bar — 26SSOVS177 BEIGE has three 24/32-pc rows
+            // of one PO number and colour, and only one of them is the 33-pc bar on
+            // Line 08; the other two must stay unplanned, not borrow that bar
+            const idAware = c => !(rowIds.length && c.ids.size) || rowIds.some(id => c.ids.has(id));
+            if (!hits.length && rowClr) hits = cands.filter(c => idAware(c) && c.color === rowClr && rowPos.some(p => c.pos.has(p)));
             // PO number alone only when a colour is unknown on one side: a PO number
             // with several colours (271LJKNEWALBERT-435: BEIGE + MOOD INDIGO) must not
             // show its other colours as planned on the one colour's bar
-            if (!hits.length) hits = cands.filter(c => rowPos.some(p => c.pos.has(p)) && (!rowClr || !c.color)).slice(0, 1);
+            if (!hits.length) hits = cands.filter(c => idAware(c) && rowPos.some(p => c.pos.has(p)) && (!rowClr || !c.color)).slice(0, 1);
             if (!hits.length) continue;
             if (r.status === 'completed') continue;
             // A colour group split over several strips / lines: every line it

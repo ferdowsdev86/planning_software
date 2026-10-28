@@ -813,6 +813,7 @@ function mapUnplannedRow(o) {
 // The saved bar sits on the hidden HOLD-<unit> resource ("Holding Row"): on
 // the board, but not planned on any line
 const onHoldRes = r => /^holding\s*row/i.test(String(r.resource_name || ''));
+const isPlannedStatus = r => r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned';
 
 // Load all ERP orders (projected from mr_order_entry + confirm from planning_orders)
 export async function loadErpAllOrders(prodUnit = null) {
@@ -859,8 +860,10 @@ export async function loadErpAllOrders(prodUnit = null) {
         line         : onHoldRes(r) ? 'Holding'
                      : (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned') ? (r.resource_name || '—')
                      : '—',
-        start        : !onHoldRes(r) && r.start_date ? new Date(r.start_date) : null,
-        end          : !onHoldRes(r) && r.end_date   ? new Date(r.end_date)   : null,
+        // Dates only for a planned row — an unplanned row's simulated start/end
+        // (the proposal behind "Pending Line Selection") never shows beside "unplanned"
+        start        : !onHoldRes(r) && isPlannedStatus(r) && r.start_date ? new Date(r.start_date) : null,
+        end          : !onHoldRes(r) && isPlannedStatus(r) && r.end_date   ? new Date(r.end_date)   : null,
         progress     : 0,
         poCount      : r.po_count ?? (r.po_number ? 1 : 0),
         poList       : Array.isArray(r.po_list) ? r.po_list : (r.po_number ? [r.po_number] : []),

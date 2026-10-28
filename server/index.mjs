@@ -2250,6 +2250,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     po_count         : g.pos.length,
                     po_list          : g.pos.map(p => p.po_number),
                     po_details       : memberRows.map(m => ({
+                        id       : m.plo_id,          // planning_orders.id — the board bar's dbId / idList
                         po       : m.po_number,
                         qty      : Number(m.po_qty),
                         delivery : m.shipment_date,
