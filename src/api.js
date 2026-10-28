@@ -810,6 +810,10 @@ function mapUnplannedRow(o) {
     };
 }
 
+// The saved bar sits on the hidden HOLD-<unit> resource ("Holding Row"): on
+// the board, but not planned on any line
+const onHoldRes = r => /^holding\s*row/i.test(String(r.resource_name || ''));
+
 // Load all ERP orders (projected from mr_order_entry + confirm from planning_orders)
 export async function loadErpAllOrders(prodUnit = null) {
     const q = prodUnit ? `?prod_unit=${prodUnit}` : '';
@@ -846,13 +850,17 @@ export async function loadErpAllOrders(prodUnit = null) {
         reqMin       : Math.round(Number(r.po_qty ?? r.order_qty ?? 0) * Number(r.smv || 0)),
         status       : r.planning_status === 'completed' ? 'completed'
                      : r.planning_status === 'replaced' ? 'replaced'
+                     : onHoldRes(r) ? 'holding'
                      : (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned') ? 'planned'
                      : 'unplanned',
         replaced     : r.planning_status === 'replaced',
-        planned      : r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned',
-        line         : r.resource_name || '—',
-        start        : r.start_date ? new Date(r.start_date) : null,
-        end          : r.end_date   ? new Date(r.end_date)   : null,
+        planned      : !onHoldRes(r) && (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned'),
+        // An unplanned row never carries a line; a bar parked on the Holding Row shows "Holding"
+        line         : onHoldRes(r) ? 'Holding'
+                     : (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned') ? (r.resource_name || '—')
+                     : '—',
+        start        : !onHoldRes(r) && r.start_date ? new Date(r.start_date) : null,
+        end          : !onHoldRes(r) && r.end_date   ? new Date(r.end_date)   : null,
         progress     : 0,
         poCount      : r.po_count ?? (r.po_number ? 1 : 0),
         poList       : Array.isArray(r.po_list) ? r.po_list : (r.po_number ? [r.po_number] : []),

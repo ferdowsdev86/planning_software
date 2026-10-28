@@ -5930,7 +5930,7 @@ const ordersSummary = computed(() => {
             orderQty += Number(r.orderQty) || 0;
         }
         if (r.planned || r.status === 'planned') plannedQty += rowQty(r);
-        else if (r.status === 'unplanned') unplannedQty += rowQty(r);
+        else if (r.status === 'unplanned' || r.status === 'holding') unplannedQty += rowQty(r);
         if (r.createdAt) {
             if (r.createdAt >= cutToday) todayQty += rowQty(r);
             if (r.createdAt >= cut3)     last3Qty += rowQty(r);
@@ -6604,11 +6604,14 @@ function overlayBoardPlacements(rows) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
         const lid = lineIdOf(s, ev);
-        if (!lid || isHoldId(lid)) continue;
+        if (!lid) continue;
+        // A bar parked on the Holding Row is on the board but NOT planned: the
+        // row shows "holding" with line "Holding" (never a line name)
+        const hold = isHoldId(lid);
         const pid = String(raw.id || '');
         if (orderTypeOf(raw.po, raw.orderType) === 'confirm') {
             confirmBars.push({
-                ev, lid,
+                ev, lid, hold,
                 order : String(raw.mbmOrder || '').trim(),
                 color : String(raw.color || '').trim().toLowerCase(),
                 pos   : new Set((raw.poList || []).map(String).concat(raw.po ? [String(raw.po)] : [])),
@@ -6644,32 +6647,56 @@ function overlayBoardPlacements(rows) {
             // show its other colours as planned on the one colour's bar
             if (!hits.length) hits = cands.filter(c => rowPos.some(p => c.pos.has(p)) && (!rowClr || !c.color)).slice(0, 1);
             if (!hits.length) continue;
+            if (r.status === 'completed') continue;
             // A colour group split over several strips / lines: every line it
-            // runs on, from its first start to its last end
-            hits.sort((a, b) => a.ev.startDate - b.ev.startDate);
-            r.line  = [...new Set(hits.map(h => lineName(h.lid)))].join(', ');
-            r.start = new Date(Math.min(...hits.map(h => +h.ev.startDate)));
-            r.end   = new Date(Math.max(...hits.map(h => +h.ev.endDate)));
-            // Only part of the colour group is on the board (a 32-pc row of a 1,606-pc
-            // group): the row stays unplanned with the planned part noted, so the rest
-            // is still there to plan — not hidden behind the small bar
-            const onBoardQty = hits.reduce((t, h) => t + (Number(h.ev.data?.raw?.qty) || 0), 0);
-            const rowQtyPlan = planQtyOf(Number(r.orderQty ?? r.qty) || 0);
-            if (r.status !== 'completed') {
-                if (rowQtyPlan > 0 && onBoardQty < rowQtyPlan * 0.9) { r.status = 'unplanned'; r.planned = false; r.replaced = false; r.onBoardQty = onBoardQty; }
-                else { r.status = 'planned'; r.planned = true; r.replaced = false; }
+            // runs on, from its first start to its last end. Bars parked on the
+            // Holding Row are on the board but not on a line.
+            const onLine = hits.filter(h => !h.hold).sort((a, b) => a.ev.startDate - b.ev.startDate);
+            const onHold = hits.filter(h => h.hold);
+            const lines  = [...new Set(onLine.map(h => lineName(h.lid)))].join(', ');
+            // Only part of the colour group is on a line (a 33-pc strip of a 1,606-pc
+            // group): the row stays unplanned — no line, no dates — with the planned
+            // part noted beside the status, so the rest is still there to plan
+            const onBoardQty = onLine.reduce((t, h) => t + (Number(h.ev.data?.raw?.qty) || 0), 0);
+            // The row is one colour group: compare with ITS PO qty, not the whole
+            // order's qty across colours (26S2BUS002 BEIGE 1,000 of a 3,000 order
+            // with 1,030 on Line 04 is planned, not "unplanned")
+            const rowQtyPlan = planQtyOf(Number(r.qty) || Number(r.orderQty) || 0);
+            r.replaced = false;
+            if (onLine.length && !(rowQtyPlan > 0 && onBoardQty < rowQtyPlan * 0.9)) {
+                r.status = 'planned'; r.planned = true;
+                r.line  = lines;
+                r.start = new Date(Math.min(...onLine.map(h => +h.ev.startDate)));
+                r.end   = new Date(Math.max(...onLine.map(h => +h.ev.endDate)));
+                r.onBoardQty = 0; r.onBoardLines = '';
+            }
+            else {
+                r.status  = onHold.length ? 'holding' : 'unplanned';
+                r.planned = false;
+                r.line    = onHold.length ? 'Holding' : '—';
+                r.start   = null; r.end = null;
+                r.onBoardQty   = onBoardQty;
+                r.onBoardLines = lines;
             }
             continue;
         }
         if (r.orderType !== 'projected') continue;
         const ev = byProj.get(r.mbmOrder);
         if (ev) {
+            if (isHoldId(lineIdOf(s, ev))) {
+                // Parked on the Holding Row: on the board, not planned
+                if (r.status !== 'completed') {
+                    r.status = 'holding'; r.planned = false; r.replaced = false;
+                    r.line = 'Holding'; r.start = null; r.end = null;
+                }
+                continue;
+            }
             r.line  = lineName(lineIdOf(s, ev));
             r.start = ev.startDate ? new Date(ev.startDate) : r.start;
             r.end   = ev.endDate   ? new Date(ev.endDate)   : r.end;
             // The projection's own bar is live on the board — it is PLANNED,
             // not replaced (replaced = bar gone, a planned confirm took its slot)
-            if (r.status === 'unplanned' || r.status === 'replaced' || r.replaced) {
+            if (r.status === 'unplanned' || r.status === 'holding' || r.status === 'replaced' || r.replaced) {
                 r.status   = 'planned';
                 r.planned  = true;
                 r.replaced = false;
@@ -12563,8 +12590,13 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                             :title="canReopenOrders ? (markedReopen.has(row.mbmOrder) ? 'Will be re-opened on Save — click to undo' : 'Click to re-open this completed order (projection / confirm stage)') : 'Completed — re-open needs permission'"
                                             @click.stop="toggleMarkReopen(row)"
                                         >{{ markedReopen.has(row.mbmOrder) ? '↩ unplanned' : 'completed' }}</span>
-                                        <span v-else-if="k === 'status'" class="od-status" :class="`od-${row.status}`"
-                                        >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
+                                        <template v-else-if="k === 'status'">
+                                            <span class="od-status" :class="`od-${row.status}`"
+                                            >{{ row.replaced || row.status === 'replaced' ? 'replaced' : row.status }}</span>
+                                            <span v-if="row.onBoardQty > 0 && (row.status === 'unplanned' || row.status === 'holding')" class="od-onboard"
+                                                :title="`${fmtQty(row.onBoardQty)} pcs of this group are already on ${row.onBoardLines} — the rest is still to plan`"
+                                            >{{ fmtQty(row.onBoardQty) }} on {{ row.onBoardLines }}</span>
+                                        </template>
                                         <span v-else-if="k === 'deliveryStatus' && projPartialInfo(row)"
                                             class="od-status od-ds-partial"
                                         >Partial</span>
@@ -12594,8 +12626,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td></td>
                                     <td class="od-num">{{ fmtQty(pd.qty) }}</td>
                                     <td>{{ pd.delivery ? fmtDateDdMonRr(pd.delivery) : '—' }}</td>
-                                    <td>{{ pd.planned ? 'planned' : 'unplanned' }}</td>
-                                    <td>{{ pd.line || '—' }}</td>
+                                    <td>{{ /^holding/i.test(pd.line || '') ? 'holding' : pd.planned ? 'planned' : 'unplanned' }}</td>
+                                    <td>{{ /^holding/i.test(pd.line || '') ? 'Holding' : (pd.planned && pd.line) || '—' }}</td>
                                     <td>{{ pd.start ? fmtDate(new Date(pd.start)) : '—' }}</td>
                                     <td>{{ pd.end ? fmtDate(new Date(pd.end)) : '—' }}</td>
                                 </tr>
@@ -15590,7 +15622,10 @@ body {
 .od-draft     { background : #1e88e5; }
 .od-completed { background : #9e9e9e; }
 .od-unplanned { background : #d40000; }
+.od-holding   { background : #f9a825; color : #222; }
 .od-replaced  { background : #6d4c41; }
+/* part of the group already on a line while the row itself is still to plan */
+.od-onboard   { display : block; font-size : 9px; color : #555; white-space : nowrap; margin-top : 1px; }
 .od-ord-proj    { background : #ef6c00; }
 .od-ord-confirm { background : #2e7d32; }
 
