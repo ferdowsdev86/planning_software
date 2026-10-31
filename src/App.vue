@@ -6906,32 +6906,86 @@ const dpUnitName = computed(() => {
     return b?.unitName || currentBoard.value?.unitName || unitLabel(uid) || dpGroups.value[0]?.unit || '—';
 });
 
-// Filters (Generate applies them): one floor / line / buyer, '' = all
+// Filters (Generate applies them): one floor ('' = all); lines / buyers /
+// styles are MULTI-select ([] = all) — a report of 2–4 lines, of several
+// buyers, or of one or several styles. Every view (Summary, Floor Target,
+// Plan Hours, Plan Efficiency) and Excel / PDF are built from the generated
+// groups, so the filters apply to all of them.
 const dpFloorF = ref('');
-const dpLineF  = ref('');
-const dpBuyerF = ref('');
+const dpLineF  = ref([]);    // line resource ids
+const dpBuyerF = ref([]);    // buyer names
+const dpStyleF = ref([]);    // style numbers
 const dpFilterTick = ref(0);
 const dpFilterOptions = computed(() => {
     void dpFilterTick.value;
     const s = getInstance();
-    const lines = [], floors = new Set(), buyers = new Set();
+    const lines = [], floors = new Set(), buyers = new Set(), styles = new Set();
     for (const r of s?.resourceStore?.records || []) {
         if (!r.data?.lineRow) continue;
         lines.push({ id : r.id, name : r.data.name || r.name });
         floors.add(dpFloorLabel(r, LINE_BY_ID[r.id]));
     }
+    const buyerPick = new Set(dpBuyerF.value.map(b => b.toUpperCase()));
     for (const ev of s?.eventStore?.records || []) {
-        const b = String(ev.data?.raw?.buyer || '').trim();
-        if (b && !ev.data.raw.stage) buyers.add(b);
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const b = String(raw.buyer || '').trim();
+        if (b) buyers.add(b);
+        // Styles narrow to the picked buyers (buyer-wise, then style-wise)
+        const st = String(raw.style || '').trim();
+        if (st && (!buyerPick.size || buyerPick.has(b.toUpperCase()))) styles.add(st);
     }
-    return { lines, floors : [...floors].sort(), buyers : [...buyers].sort((a, b) => a.localeCompare(b)) };
+    const byName = (a, b) => a.localeCompare(b);
+    return { lines, floors : [...floors].sort(), buyers : [...buyers].sort(byName), styles : [...styles].sort(byName) };
 });
 const dpFiltersLabel = computed(() => {
     const parts = [];
     if (dpFloorF.value) parts.push(`Floor ${dpFloorF.value}`);
-    if (dpLineF.value)  parts.push(dpFilterOptions.value.lines.find(l => l.id === dpLineF.value)?.name || dpLineF.value);
-    if (dpBuyerF.value) parts.push(dpBuyerF.value);
+    if (dpLineF.value.length)  parts.push(`Line${dpLineF.value.length > 1 ? 's' : ''}: ${dpLineF.value.map(id => dpFilterOptions.value.lines.find(l => l.id === id)?.name || id).join(', ')}`);
+    if (dpBuyerF.value.length) parts.push(`Buyer${dpBuyerF.value.length > 1 ? 's' : ''}: ${dpBuyerF.value.join(', ')}`);
+    if (dpStyleF.value.length) parts.push(`Style${dpStyleF.value.length > 1 ? 's' : ''}: ${dpStyleF.value.join(', ')}`);
     return parts.join(' · ');
+});
+
+// Multi-select pickers in the toolbar: which one is open, its search text
+const dpPick  = ref('');     // '' | 'line' | 'buyer' | 'style'
+const dpPickQ = ref('');
+const DP_PICKS = [
+    { k : 'line',  label : 'Line',  title : 'One or several lines (Generate applies it)' },
+    { k : 'buyer', label : 'Buyer', title : 'One or several buyers (Generate applies it)' },
+    { k : 'style', label : 'Style', title : 'One or several styles — of the picked buyers (Generate applies it)' }
+];
+const dpPickRef = k => k === 'line' ? dpLineF : k === 'buyer' ? dpBuyerF : dpStyleF;
+// Options of a picker as { v, label }, narrowed by its search text
+function dpPickList(k) {
+    const o = dpFilterOptions.value;
+    const all = k === 'line' ? o.lines.map(l => ({ v : l.id, label : l.name }))
+        : (k === 'buyer' ? o.buyers : o.styles).map(x => ({ v : x, label : x }));
+    const q = dpPickQ.value.trim().toLowerCase();
+    return q ? all.filter(x => x.label.toLowerCase().includes(q)) : all;
+}
+// Button text: "all", the names when few, else "3 lines"
+function dpPickText(k) {
+    const sel = dpPickRef(k).value;
+    if (!sel.length) return 'all';
+    const names = k === 'line' ? sel.map(id => dpFilterOptions.value.lines.find(l => l.id === id)?.name || id) : sel;
+    if (names.length <= 2) return names.join(', ');
+    return `${names.length} ${k}s`;
+}
+function dpPickOpen(k) {
+    dpPick.value  = dpPick.value === k ? '' : k;
+    dpPickQ.value = '';
+}
+function dpPickToggle(k, v) {
+    const r = dpPickRef(k);
+    r.value = r.value.includes(v) ? r.value.filter(x => x !== v) : [...r.value, v];
+    if (k === 'buyer') dpStyleF.value = dpStyleF.value.filter(st => dpFilterOptions.value.styles.includes(st));
+}
+function dpPickAll(k)   { dpPickRef(k).value = dpPickList(k).map(x => x.v); }
+function dpPickClear(k) { dpPickRef(k).value = []; if (k === 'buyer') dpStyleF.value = []; }
+// A click anywhere outside the open picker closes it (the dialog stays)
+document.addEventListener('mousedown', e => {
+    if (dpPick.value && !e.target.closest?.('.dp-pick')) dpPick.value = '';
 });
 
 // Generate button: one unit (the open board) or every unit the planner may open
@@ -6988,12 +7042,13 @@ const dpUnits = computed(() => {
 const dpUnit = ref(null);
 // Picking a unit opens that unit's board (the report reads the board) and regenerates
 async function dpSelectUnit(uid) {
-    if (uid === 'all') { dpUnit.value = 'all'; dpFloorF.value = ''; dpLineF.value = ''; await dpGenerateAllUnits(); return; }
+    if (uid === 'all') { dpUnit.value = 'all'; dpFloorF.value = ''; dpLineF.value = []; await dpGenerateAllUnits(); return; }
     dpAllUnits.value = false;
     const u = dpUnits.value.find(x => x.unitId === Number(uid));
     if (!u) { toast('You have no access to that unit\'s board', 'warn'); return; }
     dpUnit.value = u.unitId;
     if (Number(currentBoard.value?.unitId) !== u.unitId) {
+        dpFloorF.value = ''; dpLineF.value = [];     // lines belong to the board that was open
         openBoard(u.board);
         setBoardLoad(true, `Loading ${u.name} board for the report…`, 0);
         try {
@@ -7128,10 +7183,22 @@ const dpSummary = computed(() => {
 //   Load %            = Load ÷ Capacity · Free = Capacity − Load
 //   Planned Qty / SAH / Avg SMV / Plan Eff % = the Summary figures
 //   Fty Eff           = average line efficiency (planning_resources)
+// Lines the line-wise views (Plan Hours, Plan Efficiency, Load vs Capacity)
+// report on: every sewing line of the board — or, when the report was
+// generated with a line / floor / buyer / style filter, only the lines that
+// are in the report, so every tab shows the same selection
+const dpLinesFiltered = ref(false);
+function dpReportLines(s) {
+    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    if (!dpLinesFiltered.value) return lines;
+    const inReport = new Set(dpGroups.value.map(g => g.lineId));
+    return lines.filter(r => inReport.has(r.id));
+}
+
 const dpLoadCap = computed(() => {
     const s = getInstance();
     if (!s?.resourceStore || !dpGroups.value.length || dpAllUnits.value) return null;
-    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    const lines = dpReportLines(s);
     const from = new Date(dpFrom.value + 'T00:00:00'), to = new Date(dpTo.value + 'T00:00:00');
     if (!lines.length || Number.isNaN(+from) || Number.isNaN(+to) || from > to) return null;
     let workDays = 0, lineHours = 0, lineDays = 0, capSah = 0;
@@ -7190,7 +7257,7 @@ const dpFloorMatrix = computed(() => {
 const dpHoursMatrix = computed(() => {
     const s = getInstance();
     if (!s) return { rows : [], avg : {}, manpower : 0 };
-    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    const lines = dpReportLines(s);
     const rows = lines.map(r => {
         const lineRef = { id : r.id, hours : r.data?.hours };
         const days = {};
@@ -7235,7 +7302,7 @@ const dpEffMatrix = computed(() => {
     const s = getInstance();
     if (!s) return { rows : [], avg : {}, manpower : 0 };
     const byLine = new Map(dpGroups.value.map(g => [g.lineId, g]));
-    const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
+    const lines = dpReportLines(s);
     const rows = lines.map(r => {
         const g = byLine.get(r.id);
         const days = {};
@@ -7297,6 +7364,7 @@ function generateDayPlan({ quiet = false } = {}) {
         return false;
     }
     dpFilterTick.value++;
+    dpLinesFiltered.value = !!(dpLineF.value.length || dpFloorF.value || dpBuyerF.value.length || dpStyleF.value.length);
     let from, to;
     if (dpScope.value === 'board') {
         // Whole board: span = earliest start … latest end of every bar
@@ -7353,10 +7421,11 @@ function generateDayPlan({ quiet = false } = {}) {
 
         const res  = s.resourceStore.getById(lid);
         const line = LINE_BY_ID[lid] || res?.data || {};
-        // Line / floor / buyer filters (Generate applies them)
-        if (dpLineF.value && lid !== dpLineF.value) continue;
+        // Line / floor / buyer / style filters (Generate applies them; [] = all)
+        if (dpLineF.value.length && !dpLineF.value.includes(lid)) continue;
         if (dpFloorF.value && dpFloorLabel(res, line) !== dpFloorF.value) continue;
-        if (dpBuyerF.value && String(raw.buyer || '').trim().toUpperCase() !== dpBuyerF.value.toUpperCase()) continue;
+        if (dpBuyerF.value.length && !dpBuyerF.value.some(b => b.toUpperCase() === String(raw.buyer || '').trim().toUpperCase())) continue;
+        if (dpStyleF.value.length && !dpStyleF.value.some(st => st.toUpperCase() === String(raw.style || '').trim().toUpperCase())) continue;
         const smv  = Number(raw.smv) || randSmv(raw.po);
         const qty  = Number(raw.qty) || 0;
         // Orders-list parity: a confirm bar's PO Qty is its colour-group total
@@ -7553,7 +7622,8 @@ function dpBuildTableHtml() {
     const grandRow = dpGroups.value.length
         ? `<tr class="dp-grand">${totalsFor({ ...grand, dayLabel : 'Day total' }, 'All lines', dpUnitName.value)}${daysFor(grand.days)}</tr>`
         : '';
-    const range = dpRangeLabel.value;
+    // Excel / PDF heads carry the filters the report was generated with
+    const range = dpRangeLabel.value + (dpFiltersLabel.value ? ` · ${dpFiltersLabel.value}` : '');
     const summary = `<div style="margin:4px 0 8px;font-size:9pt">
         Orders: <b>${grand.orders}</b> · Lines: <b>${grand.lines}</b> ·
         Plan Qty: <b>${fmtQty(grand.planQty)}</b> · Qty in range: <b>${fmtQty(grand.rangeQty)}</b> ·
@@ -12671,12 +12741,25 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <label class="dp-range" title="Only this floor (Generate applies it)">Floor
                         <select v-model="dpFloorF" class="cal-in dp-filter"><option value="">all</option><option v-for="f in dpFilterOptions.floors" :key="f" :value="f">{{ f }}</option></select>
                     </label>
-                    <label class="dp-range" title="Only this line (Generate applies it)">Line
-                        <select v-model="dpLineF" class="cal-in dp-filter"><option value="">all</option><option v-for="l in dpFilterOptions.lines" :key="l.id" :value="l.id">{{ l.name }}</option></select>
-                    </label>
-                    <label class="dp-range" title="Only this buyer (Generate applies it)">Buyer
-                        <select v-model="dpBuyerF" class="cal-in dp-filter dp-filter-buyer"><option value="">all</option><option v-for="b in dpFilterOptions.buyers" :key="b" :value="b">{{ b }}</option></select>
-                    </label>
+                    <!-- Multi-select pickers: several lines / buyers / styles in one report -->
+                    <div v-for="p in DP_PICKS" :key="p.k" class="dp-range dp-pick" :title="p.title">{{ p.label }}
+                        <button type="button" class="cal-in dp-pick-btn" :class="{ 'dp-pick-set' : dpPickRef(p.k).value.length, 'dp-pick-on' : dpPick === p.k }"
+                            @click="dpPickOpen(p.k)"><span class="dp-pick-txt">{{ dpPickText(p.k) }}</span><span class="dp-pick-car">▾</span></button>
+                        <div v-if="dpPick === p.k" class="dp-pick-pop">
+                            <input v-model="dpPickQ" class="cal-in dp-pick-q" type="text" :placeholder="`Search ${p.label.toLowerCase()}…`" autofocus>
+                            <div class="dp-pick-acts">
+                                <span class="dp-pick-act" @click="dpPickAll(p.k)">All shown</span>
+                                <span class="dp-pick-act" @click="dpPickClear(p.k)">Clear</span>
+                                <span class="dp-pick-n">{{ dpPickRef(p.k).value.length ? dpPickRef(p.k).value.length + ' picked' : 'all' }}</span>
+                            </div>
+                            <div class="dp-pick-list">
+                                <label v-for="o in dpPickList(p.k)" :key="o.v" class="dp-pick-opt">
+                                    <input type="checkbox" :checked="dpPickRef(p.k).value.includes(o.v)" @change="dpPickToggle(p.k, o.v)"> {{ o.label }}
+                                </label>
+                                <div v-if="!dpPickList(p.k).length" class="dp-pick-none">nothing matches</div>
+                            </div>
+                        </div>
+                    </div>
                     <label v-if="dpScope !== 'board'" class="dp-range">From
                         <input v-model="dpFrom" class="cal-in dp-date" type="date">
                     </label>
@@ -15236,6 +15319,47 @@ body {
 .dp-filter { width : 110px; }
 .dp-filter-buyer { width : 150px; }
 .dp-flex { flex : 1 1 auto; }
+
+/* Multi-select pickers (Line / Buyer / Style) */
+.dp-pick { position : relative; }
+.dp-pick .dp-pick-btn {           /* beats .cal-in's fixed 70px width */
+    display     : inline-flex;
+    align-items : center;
+    gap         : 6px;
+    width       : auto;
+    min-width   : 96px;
+    max-width   : 220px;
+    white-space : nowrap;
+    text-align  : left;
+    background  : #fff;
+    cursor      : pointer;
+    font-weight : normal;
+}
+.dp-pick-txt { flex : 1 1 auto; overflow : hidden; text-overflow : ellipsis; }
+.dp-pick .dp-pick-btn.dp-pick-set { font-weight : bold; color : #17356b; border-color : #1a5dab; }
+.dp-pick .dp-pick-btn.dp-pick-on  { background : #eef4ff; }
+.dp-pick-car { flex : 0 0 auto; color : #666; }
+.dp-pick-pop {
+    position   : absolute;
+    top        : calc(100% + 3px);
+    left       : 0;
+    z-index    : 60;
+    width      : 260px;
+    background : #fff;
+    border     : 1px solid #8a8a8a;
+    box-shadow : 0 4px 14px rgba(0,0,0,.25);
+    padding    : 6px;
+    font-weight : normal;
+    color      : #222;
+}
+.dp-pick-pop .dp-pick-q { width : 100%; box-sizing : border-box; text-align : left; margin-bottom : 4px; }
+.dp-pick-acts { display : flex; gap : 10px; align-items : center; font-size : 11px; margin-bottom : 4px; }
+.dp-pick-act { color : #1a5dab; cursor : pointer; text-decoration : underline; }
+.dp-pick-n { margin-left : auto; color : #666; }
+.dp-pick-list { max-height : 260px; overflow : auto; border-top : 1px solid #ddd; padding-top : 4px; }
+.dp-pick-opt { display : flex; align-items : center; gap : 6px; padding : 2px 2px; font-size : 12px; cursor : pointer; white-space : nowrap; }
+.dp-pick-opt:hover { background : #f1f5fb; }
+.dp-pick-none { padding : 6px; color : #888; font-size : 11px; }
 
 .dp-act {
     padding       : 5px 16px;
