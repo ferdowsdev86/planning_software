@@ -6973,6 +6973,10 @@ function dpPickText(k) {
     return `${names.length} ${k}s`;
 }
 function dpPickOpen(k) {
+    // The option lists come from the board's stores, which Vue does not watch:
+    // re-read them every time a picker opens (the board may have loaded, or
+    // changed, since the list was first built — else "nothing matches")
+    dpFilterTick.value++;
     dpPick.value  = dpPick.value === k ? '' : k;
     dpPickQ.value = '';
 }
@@ -7335,6 +7339,7 @@ function dpPickDay(d) {
 
 function openDayPlanReport() {
     openMenu.value = null;
+    dpFilterTick.value++;        // fresh line / buyer / style lists from the board on screen
     dpScope.value = 'range';
     dpView.value = 'report';
     dpOpen.value = true;
