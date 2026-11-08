@@ -1931,10 +1931,10 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
 
         // Pre-fetch order_code → {prod_unit, unit_id, order_qty} from mr_order_entry (for confirm rows)
         const [puRows] = await pool.query(
-            `SELECT order_code, prod_unit, unit_id, order_qty FROM \`${ERP_DB}\`.mr_order_entry
+            `SELECT order_code, prod_unit, unit_id, order_qty, order_delivery_date FROM \`${ERP_DB}\`.mr_order_entry
              WHERE order_code IS NOT NULL AND order_code != ''`
         );
-        const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty }]));
+        const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty, order_delivery_date: r.order_delivery_date }]));
 
         // OS order codes (GSL-…) resolve to their MAPPED unit (os 20 → AQL/3)
         // and the OS order's own qty — so their confirm rows pass the unit
@@ -1942,7 +1942,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         if (OS_UNIT_IDS.length) {
             const osPhAll = OS_UNIT_IDS.map(() => '?').join(',');
             const [osMapRows] = await pool.query(
-                `SELECT o.os_order_code, o.order_qty, o.os_unit_id
+                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd
                  FROM \`${OS_DB}\`.os_orders o
                  WHERE o.os_unit_id IN (${osPhAll})`,
                 [...OS_UNIT_IDS]);
@@ -1950,7 +1950,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 erpOrderMap.set(r.os_order_code, {
                     prod_unit : OS_UNIT_MAP[r.os_unit_id] ?? r.os_unit_id,
                     unit_id   : null,
-                    order_qty : r.order_qty
+                    order_qty : r.order_qty,
+                    order_delivery_date : r.odd
                 });
             }
         }
@@ -1973,6 +1974,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     NULL                                                   AS po_number,
                     NULL                                                   AS color,
                     o.odd                                                  AS shipment_date,
+                    o.odd                                                  AS order_delivery_date,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id,
                     o.os_unit_id                                           AS prod_unit,
@@ -2008,6 +2010,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 NULL                                                       AS po_number,
                 NULL                                                       AS color,
                 COALESCE(MIN(po.po_ex_fty), oe.order_delivery_date)       AS shipment_date,
+                oe.order_delivery_date                                     AS order_delivery_date,
                 COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)                  AS smv,
                 oe.unit_id,
                 oe.prod_unit,
@@ -2284,6 +2287,9 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             // Order Qty always mirrors the SOURCE (mr_order_entry.order_qty) —
             // the sum of synced PO rows is only a fallback
             if (Number(erpInfo.order_qty) > 0) r.order_qty = Number(erpInfo.order_qty);
+            // ERP order delivery (mr_order_entry.order_delivery_date / os_orders.odd)
+            // drives the Planning Month; the PO delivery is only a fallback
+            r.order_delivery_date = erpInfo.order_delivery_date || r.shipment_date || null;
             r.prod_unit        = erpInfo.prod_unit ?? null;
             r.prod_unit_name   = r.prod_unit ? (unitShortName.get(r.prod_unit) || null) : null;
             r.unit_short_name  = r.unit_id   ? (unitShortName.get(r.unit_id)   || null) : null;

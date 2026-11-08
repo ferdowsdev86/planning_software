@@ -840,6 +840,8 @@ export async function loadErpAllOrders(prodUnit = null) {
         garmentColor : r.color || '',
         orderDelivery : r.shipment_date ? new Date(r.shipment_date) : null,
         poDelivery    : r.order_type === 'confirm' && r.shipment_date ? new Date(r.shipment_date) : null,
+        // ERP order delivery (mr_order_entry.order_delivery_date) — Planning Month base
+        erpDelivery   : r.order_delivery_date ? new Date(r.order_delivery_date) : null,
         createdAt    : r.created_at ? new Date(r.created_at) : null,
         pcd          : r.effective_pcd ? new Date(r.effective_pcd) : null,
         pcdSource    : r.pcd_source || null,

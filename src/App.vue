@@ -5569,7 +5569,7 @@ const ORDER_COLS = [
     'done',
     'orderType', 'status', 'deliveryStatus',
     'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
-    'orderQty', 'smv', 'pcd', 'pcdSource', 'orderDelivery',
+    'orderQty', 'smv', 'pcd', 'pcdSource', 'orderDelivery', 'planMonth',
     'ppStart', 'prodStart', 'prodEnd',
     'po', 'color', 'qty', 'planQty', 'poDelivery', 'grouping',
     'line', 'start', 'end'
@@ -5590,6 +5590,7 @@ const ORDER_COL_LABELS = {
     pcd          : 'PCD',
     pcdSource    : 'PCD Src',
     orderDelivery: 'Order Delivery',
+    planMonth    : 'Planning Month',
     ppStart      : 'PP Start',
     prodStart    : 'Prod Start',
     prodEnd      : 'Prod Complete',
@@ -5655,6 +5656,31 @@ function sopDateOf(r, k) {
 // Date value of a list column — SOP columns are derived, the rest stored
 const rowDateVal = (r, k) => SOP_COLS.has(k) ? sopDateOf(r, k) : r[k];
 
+// Planning Month (ERP running month): the month of (order delivery − 10 days),
+// i.e. a period runs from the 11th of a month to the 10th of the next —
+//   running_month = DATE_FORMAT(DATE_SUB(order_delivery_date, INTERVAL 10 DAY), '%Y-%m')
+//   period_start  = running_month-01 + 10 days, period_end = next month-01 + 9 days
+// Base date = mr_order_entry.order_delivery_date (os_orders.odd for OS orders);
+// rows without it fall back to the delivery shown in the list.
+function planMonthOf(r) {
+    const base = r.erpDelivery || r.orderDelivery || r.poDelivery;
+    if (!base) return null;
+    const d = new Date(base);
+    if (Number.isNaN(+d)) return null;
+    d.setDate(d.getDate() - 10);
+    const y = d.getFullYear(), m = d.getMonth();
+    return {
+        label : `${y}-${String(m + 1).padStart(2, '0')}`,
+        start : new Date(y, m, 11),
+        end   : new Date(y, m + 1, 10)
+    };
+}
+const planMonthText = r => planMonthOf(r)?.label || '—';
+function planMonthTitle(r) {
+    const pm = planMonthOf(r);
+    return pm ? `${pm.label} · ${fmtDateDdMonRr(pm.start)} → ${fmtDateDdMonRr(pm.end)}` : '';
+}
+
 function orderCellText(r, key) {
     const hidePoFields = r.orderType === 'projection' || r.orderType === 'projected';
     switch (key) {
@@ -5668,6 +5694,7 @@ function orderCellText(r, key) {
         case 'pcd'           : return r.pcd ? fmtDateDdMonRr(r.pcd) : '—';
         case 'poDelivery'    : return hidePoFields ? '' : (r.poDelivery ? fmtDateDdMonRr(r.poDelivery) : '—');
         case 'orderDelivery' : return r.orderDelivery ? fmtDateDdMonRr(r.orderDelivery) : '—';
+        case 'planMonth'     : return planMonthText(r);
         case 'ppStart'       : { const sp = sopForRow(r); return sp ? `${sp.breached ? '⚠ ' : ''}${fmtDateDdMonRr(sp.milestones.pp_start.date)}` : '—'; }
         case 'prodStart'     : { const sp = sopForRow(r); return sp ? `${sp.production.needsCapacityReview ? '⚑ ' : ''}${fmtDateDdMonRr(sp.milestones.production_start.date)}` : '—'; }
         case 'prodEnd'       : { const sp = sopForRow(r); return sp ? `${fmtDateDdMonRr(sp.milestones.production_complete.date)} (${sp.production.days}d)` : '—'; }
@@ -12653,7 +12680,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
                                         :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv', 'st-user' : k === 'po' }]"
-                                        :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null : (orderCellText(row, k) || null)"
+                                        :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null
+                                            : (k === 'planMonth' ? (planMonthTitle(row) || null) : (orderCellText(row, k) || null))"
                                     >
                                         <input v-if="k === 'done' && row.orderType === 'projected' && row.status !== 'completed'"
                                             type="checkbox"
