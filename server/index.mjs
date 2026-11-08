@@ -1256,9 +1256,11 @@ const ERP_DB     = 'cuttingedgedb';
 // code / style / qty (the unit's own share). os_orders.os_unit_id refers to
 // mbm_os.os_units — NOT hr_unit: os_units 20 = ABSOLUTE QUALITYWEAR LTD
 // (AQL, fty AQL-3) = planning production unit 3, so its OS orders belong on
-// the AQL board and display AQL (never hr_unit 20 = MCON).
+// the AQL board and display AQL (never hr_unit 20 = MCON). Same for
+// os_units 19 = MBM (prod unit 1) and 48 = CEIL (prod unit 2) — the
+// "Outside Orders" rule of the ERP running-month report (2026-11-08).
 const OS_DB       = 'mbm_os';
-const OS_UNIT_MAP = { 20 : 3 };  // os_units.id → planning prod unit (hr)
+const OS_UNIT_MAP = { 19 : 1, 48 : 2, 20 : 3 };  // os_units.id → planning prod unit (hr)
 const OS_UNIT_IDS = Object.keys(OS_UNIT_MAP).map(Number);
 const osUnitsForProdUnit = pu => OS_UNIT_IDS.filter(id => OS_UNIT_MAP[id] === Number(pu));
 // Delivery cut-off: orders (projection AND confirm, every unit) whose
@@ -1280,6 +1282,25 @@ const erpOrderOk = (alias = 'oe') => {
     const a = alias ? `${alias}.` : '';
     return `${a}order_qty > 0 AND COALESCE(${a}order_type, 1) NOT IN (${ERP_SKIP_TYPES.join(',')})`;
 };
+// The ORDERS LIST (/all-orders) follows the "In-house Orders" rule of the
+// ERP running-month report (2026-11-08): order qty > 0, order_type IN
+// (1 bulk, 3 combine, 5 SMS), not TBA (is_tba = 0) and a planning
+// production unit (1 MBM, 2 CEIL, 3 AQL). List only — the sync and the
+// board hygiene keep erpOrderOk above, so no live bar is retired by this
+// rule (GSL / unit-16 and TBA orders still have bars on the boards).
+const ERP_LIST_TYPES = [1, 3, 5];
+const ERP_LIST_UNITS = [1, 2, 3];
+const erpListOk = (alias = 'oe') => {
+    const a = alias ? `${alias}.` : '';
+    return `${a}order_qty > 0 AND COALESCE(${a}order_type, 1) IN (${ERP_LIST_TYPES.join(',')})`
+        + ` AND COALESCE(${a}is_tba, 0) = 0 AND ${a}prod_unit IN (${ERP_LIST_UNITS.join(',')})`;
+};
+// same rule for a confirm group, judged from the pre-fetched mr_order_entry
+// row (an order unknown to ERP — e.g. an OS order — is not judged here)
+const erpListOkRow = o => Number(o.order_qty) > 0
+    && ERP_LIST_TYPES.includes(Number(o.order_type ?? 1))
+    && Number(o.is_tba ?? 0) === 0
+    && ERP_LIST_UNITS.includes(Number(o.prod_unit));
 
 const ERP_QUERY = (cutoff) => [`
     SELECT
@@ -1931,10 +1952,15 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
 
         // Pre-fetch order_code → {prod_unit, unit_id, order_qty} from mr_order_entry (for confirm rows)
         const [puRows] = await pool.query(
-            `SELECT order_code, prod_unit, unit_id, order_qty, order_delivery_date FROM \`${ERP_DB}\`.mr_order_entry
+            `SELECT order_code, prod_unit, unit_id, order_qty, order_delivery_date, order_type, is_tba
+             FROM \`${ERP_DB}\`.mr_order_entry
              WHERE order_code IS NOT NULL AND order_code != ''`
         );
-        const erpOrderMap = new Map(puRows.map(r => [r.order_code, { prod_unit: r.prod_unit, unit_id: r.unit_id, order_qty: r.order_qty, order_delivery_date: r.order_delivery_date }]));
+        const erpOrderMap = new Map(puRows.map(r => [r.order_code, {
+            prod_unit : r.prod_unit, unit_id : r.unit_id, order_qty : r.order_qty,
+            order_delivery_date : r.order_delivery_date,
+            order_type : r.order_type, is_tba : r.is_tba, erp : true
+        }]));
 
         // OS order codes (GSL-…) resolve to their MAPPED unit (os 20 → AQL/3)
         // and the OS order's own qty — so their confirm rows pass the unit
@@ -2024,7 +2050,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po
                    ON po.mr_order_entry_order_id = oe.order_id AND po.po_qty > 0
             WHERE oe.order_status NOT IN ('Closed','Inactive')
-              AND ${erpOrderOk('oe')}
+              AND ${erpListOk('oe')}
               ${puf}
             GROUP BY oe.order_id, oe.order_code, b.b_name, s.stl_no,
                      pt.prd_type_name, s.stl_type, oe.unit_id, oe.prod_unit, oe.order_qty,
@@ -2033,8 +2059,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             ORDER BY shipment_date, order_code
         `, [...pbp, cutoff]);
 
-        // OS orders join their mapped unit's list (os 20 → AQL/3); the
-        // all-units list carries every OS unit's orders
+        // OS orders join their mapped unit's list (os 19 → MBM/1, 48 → CEIL/2,
+        // 20 → AQL/3); the all-units list carries every OS unit's orders
         const osUnits2 = prodUnitId == null ? OS_UNIT_IDS : osUnitsForProdUnit(prodUnitId);
         if (osUnits2.length) projRows.push(...await osAllOrdersRows(osUnits2));
 
@@ -2302,10 +2328,13 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             }
         });
 
-        // Filter by prod_unit in JS (planning_orders lacks this column)
-        const filteredConf = prodUnitId
-            ? groupedConf.filter(r => r.prod_unit === prodUnitId)
-            : groupedConf;
+        // Filter by prod_unit in JS (planning_orders lacks this column), and
+        // apply the list rule to confirm groups of ERP orders (type / TBA / unit)
+        const filteredConf = groupedConf.filter(r => {
+            if (prodUnitId && r.prod_unit !== prodUnitId) return false;
+            const erpInfo = erpOrderMap.get(r.order_code);
+            return !erpInfo?.erp || erpListOkRow(erpInfo);
+        });
 
         res.json({ success : true, rows : [...projRows, ...filteredConf], total : projRows.length + filteredConf.length });
     }
