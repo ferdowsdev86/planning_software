@@ -816,8 +816,13 @@ const onHoldRes = r => /^holding\s*row/i.test(String(r.resource_name || ''));
 const isPlannedStatus = r => r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned';
 
 // Load all ERP orders (projected from mr_order_entry + confirm from planning_orders)
-export async function loadErpAllOrders(prodUnit = null) {
-    const q = prodUnit ? `?prod_unit=${prodUnit}` : '';
+// only = 'projected' → the order book alone (one row per order, no confirm PO
+// rows) — light enough to read every unit at once (Available Order summary)
+export async function loadErpAllOrders(prodUnit = null, only = '') {
+    const qs = [];
+    if (prodUnit) qs.push(`prod_unit=${prodUnit}`);
+    if (only)     qs.push(`only=${only}`);
+    const q = qs.length ? `?${qs.join('&')}` : '';
     const data = await get(`/all-orders${q}`, 15000);
     if (!data.success) throw new Error(data.error || 'load failed');
     return (data.rows || []).map(r => ({

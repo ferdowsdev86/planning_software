@@ -2119,6 +2119,12 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             }
         });
 
+        // ?only=projected — the order book alone (one row per order, no confirm
+        // PO rows): the "Available Order" summary reads every unit this way
+        if (req.query.only === 'projected') {
+            return res.json({ success : true, rows : projRows, total : projRows.length });
+        }
+
         // 2. Confirm orders: one row per PO from planning_orders
         //    planning_status is derived from actual planning_events (not stale planning_orders status)
         //    One row per PO with its planning event/resource; grouping happens in JS below.

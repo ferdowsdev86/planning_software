@@ -6211,6 +6211,97 @@ ${summary}
     toast(`Exported ${rows.length} row(s) to Excel`, 'ok');
 }
 
+// ---------------------------------------------------------------------------
+// Available Order: the order book of EVERY unit, summed per production unit ×
+// Planning Month (ERP running month, 11th → 10th) — order qty and SAH
+// (qty × SMV / 60). Same order rule as the list: one row per order (the
+// projected rows), completed orders left out.
+// ---------------------------------------------------------------------------
+const AVAIL_UNITS  = [{ id : 1, name : 'MBM' }, { id : 2, name : 'CEIL' }, { id : 3, name : 'AQL' }];
+const availOpen    = ref(false);
+const availLoading = ref(false);
+const availError   = ref('');
+const availRows    = ref([]);
+
+function openAvailableOrders() {
+    availOpen.value    = true;
+    availLoading.value = true;
+    availError.value   = '';
+    loadErpAllOrders(null, 'projected').then(rows => {
+        availRows.value    = rows;
+        availLoading.value = false;
+    }).catch(e => {
+        availError.value   = e.message || 'load failed';
+        availLoading.value = false;
+    });
+}
+
+const availSummary = computed(() => {
+    const blank  = () => ({ orders : 0, qty : 0, sah : 0 });
+    const units  = AVAIL_UNITS.map(u => ({ ...u }));
+    const months = new Map();
+    const total  = { cells : {}, all : blank() };
+    let noSmv = 0;
+    for (const r of availRows.value) {
+        if (r.orderType !== 'projected' || r.status === 'completed') continue;
+        const qty = Number(r.orderQty) || 0;
+        if (!(qty > 0)) continue;
+        const uid = Number(r.prodUnit) || 0;
+        if (!units.some(u => u.id === uid)) units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
+        const pm  = planMonthOf(r);
+        const key = pm?.label || '—';
+        if (!months.has(key)) months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
+        const m   = months.get(key);
+        const smv = Number(r.smv) || 0;
+        const sah = qty * smv / 60;
+        if (!(smv > 0)) noSmv++;
+        for (const c of [m.cells[uid] ||= blank(), m.all, total.cells[uid] ||= blank(), total.all]) {
+            c.orders++; c.qty += qty; c.sah += sah;
+        }
+    }
+    const rows = [...months.values()].sort((a, b) =>
+        a.label === '—' ? 1 : b.label === '—' ? -1 : a.label.localeCompare(b.label));
+    return { units, rows, total, noSmv, current : planMonthOf({ erpDelivery : new Date() })?.label || '' };
+});
+
+const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
+const availCell   = (m, uid) => m.cells[uid] || { orders : 0, qty : 0, sah : 0 };
+const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
+const fmtAvQty    = v => (v ? fmtQty(v) : '—');
+
+function exportAvailExcel() {
+    const s = availSummary.value;
+    if (!s.rows.length) { toast('No orders to export', 'warn'); return; }
+    const num  = v => `<td style="text-align:right">${v ? Math.round(v) : ''}</td>`;
+    const trio = c => num(c.orders) + num(c.qty) + num(c.sah);
+    const line = (m, lead) => `<tr>${lead}${s.units.map(u => trio(availCell(m, u.id))).join('')}${trio(m.all)}</tr>`;
+    const head1 = `<tr><th rowspan="2">Planning Month</th><th rowspan="2">Period</th>`
+        + [...s.units.map(u => u.name), 'Total'].map(n => `<th colspan="3">${n}</th>`).join('') + '</tr>';
+    const head2 = `<tr>${[...s.units, 0].map(() => '<th>Orders</th><th>Order Qty</th><th>SAH</th>').join('')}</tr>`;
+    const body  = s.rows.map(m => line(m, `<td style="mso-number-format:'\\@'">${m.label}</td><td>${availPeriod(m)}</td>`)).join('');
+    const foot  = line(s.total, '<th colspan="2">Total</th>');
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8">
+<style>
+  table { border-collapse: collapse; font-family: Calibri, Arial, sans-serif; font-size: 9pt; }
+  th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; }
+  th { background: #17356b; color: #fff; font-weight: bold; }
+</style>
+</head>
+<body>
+<h2 style="margin:0">Available Order — unit × planning month</h2>
+<div style="margin:4px 0 8px;font-size:9pt">SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th</div>
+<table><thead>${head1}${head2}</thead><tbody>${body}${foot}</tbody></table>
+</body></html>`;
+    const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `AvailableOrder_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Available Order summary exported to Excel', 'ok');
+}
+
 function listStatus(raw, planned) {
     if (raw?.replaced || raw?.status === 'replaced') return 'replaced';
     if (!planned || raw?.status === 'unplanned') return 'unplanned';
@@ -12586,6 +12677,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <button v-if="markedReopen.size" class="od-done-btn od-reopen-btn" :disabled="markSaving"
                         @click="saveMarkedReopen"
                     >{{ markSaving ? '⏳ Saving…' : `↩ Save re-open (${markedReopen.size})` }}</button>
+                    <button class="od-avail-btn" title="Available order — every unit, per planning month: order qty and SAH"
+                        @click="openAvailableOrders">📦 Available Order</button>
                     <button class="od-xls-btn" :disabled="!filteredErpOrders.length" @click="exportOrdersExcel">📊 Excel</button>
                     <button
                         class="od-reload-btn"
@@ -12753,6 +12846,77 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div v-if="odTip.show" class="od-hovertip"
                     :style="{ left : odTip.x + 'px', top : odTip.y + 'px' }"
                 >{{ odTip.text }}</div>
+            </div>
+        </div>
+
+        <!-- Available Order: every unit × planning month — order qty and SAH -->
+        <div v-if="availOpen" class="cal-overlay av-overlay" @click.self="availOpen = false">
+            <div class="cal-dialog av-dialog">
+                <div class="cal-title">
+                    Available Order
+                    <span style="font-size:12px;color:#888;font-weight:400;margin-left:10px;">
+                        all units · planning month wise
+                        <span v-if="availLoading"> · ⏳ loading…</span>
+                    </span>
+                    <span class="cal-title-btns">
+                        <button class="od-xls-btn av-xls" :disabled="availLoading || !availSummary.rows.length" @click="exportAvailExcel">📊 Excel</button>
+                        <span class="cal-x" @click="availOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="av-body">
+                    <div v-if="availError" class="av-empty">Could not load the orders — {{ availError }}</div>
+                    <div v-else-if="availLoading" class="av-empty">⏳ Loading the order book of every unit…</div>
+                    <div v-else-if="!availSummary.rows.length" class="av-empty">No available orders.</div>
+                    <table v-else class="st-table av-table">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" class="av-l">Planning Month</th>
+                                <th rowspan="2" class="av-l">Period</th>
+                                <th v-for="u in availSummary.units" :key="u.id" colspan="3" class="av-grp">{{ u.name }}</th>
+                                <th colspan="3" class="av-grp av-tot">Total</th>
+                            </tr>
+                            <tr>
+                                <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
+                                    <th class="av-grp-start" :class="{ 'av-tot' : u.id === 'all' }">Orders</th>
+                                    <th :class="{ 'av-tot' : u.id === 'all' }">Order Qty</th>
+                                    <th :class="{ 'av-tot' : u.id === 'all' }">SAH</th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="m in availSummary.rows" :key="m.label" :class="{ 'av-cur' : m.label === availSummary.current }">
+                                <td class="av-l av-month">{{ m.label }}<span v-if="m.label === availSummary.current" class="av-cur-tag">running</span></td>
+                                <td class="av-l av-period">{{ availPeriod(m) }}</td>
+                                <template v-for="u in availSummary.units" :key="u.id">
+                                    <td class="av-grp-start">{{ fmtAvQty(availCell(m, u.id).orders) }}</td>
+                                    <td>{{ fmtAvQty(availCell(m, u.id).qty) }}</td>
+                                    <td class="av-sah">{{ fmtSah(availCell(m, u.id).sah) }}</td>
+                                </template>
+                                <td class="av-grp-start av-tot">{{ fmtAvQty(m.all.orders) }}</td>
+                                <td class="av-tot">{{ fmtAvQty(m.all.qty) }}</td>
+                                <td class="av-tot av-sah">{{ fmtSah(m.all.sah) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td class="av-l" colspan="2">Total</td>
+                                <template v-for="u in availSummary.units" :key="u.id">
+                                    <td class="av-grp-start">{{ fmtAvQty(availCell(availSummary.total, u.id).orders) }}</td>
+                                    <td>{{ fmtAvQty(availCell(availSummary.total, u.id).qty) }}</td>
+                                    <td class="av-sah">{{ fmtSah(availCell(availSummary.total, u.id).sah) }}</td>
+                                </template>
+                                <td class="av-grp-start">{{ fmtAvQty(availSummary.total.all.orders) }}</td>
+                                <td>{{ fmtAvQty(availSummary.total.all.qty) }}</td>
+                                <td class="av-sah">{{ fmtSah(availSummary.total.all.sah) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div class="av-note">
+                        Order qty per order (in-house: mr_order_entry · outside / TBA: os_orders), completed orders left out ·
+                        SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th
+                        <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — their SAH counts as 0</span>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -15123,6 +15287,65 @@ body {
 }
 .od-xls-btn:hover:not(:disabled) { background : #2e7d32; }
 .od-xls-btn:disabled { opacity : 0.5; cursor : default; }
+
+/* Available Order: button in the search bar + the unit × planning month summary */
+.od-avail-btn {
+    border        : 1px solid #17356b;
+    background    : #24509a;
+    color         : #fff;
+    border-radius : 6px;
+    padding       : 7px 14px;
+    font-size     : 13px;
+    cursor        : pointer;
+    white-space   : nowrap;
+}
+.od-avail-btn:hover { background : #17356b; }
+.av-overlay { z-index : 30010; }
+.cal-dialog.av-dialog { width : 1120px; max-width : 96vw; }
+.av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
+.av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
+.av-body { padding : 10px 12px 12px; max-height : 78vh; overflow : auto; background : #fff; }
+.av-empty { padding : 30px 10px; text-align : center; color : #777; font-size : 13px; }
+.av-table { width : 100%; border-collapse : collapse; font-size : 12px; }
+.av-table th, .av-table td {
+    border      : 1px solid #d5d9e2;
+    padding     : 5px 8px;
+    text-align  : right;
+    white-space : nowrap;
+    font-variant-numeric : tabular-nums;
+}
+.av-table thead th { background : #17356b; color : #fff; font-weight : bold; text-align : center; }
+.av-table thead tr:nth-child(2) th { background : #2b4a86; font-weight : normal; font-size : 11px; }
+.av-table .av-l { text-align : left; }
+.av-table .av-grp-start { border-left : 2px solid #9db3d6; }
+.av-table thead th.av-grp { border-left : 2px solid #9db3d6; }
+.av-table td.av-month { font-weight : bold; color : #17356b; }
+.av-table td.av-period { color : #666; }
+.av-table td.av-sah { color : #1b5e20; }
+.av-table td.av-tot { background : #f4f7fc; font-weight : bold; }
+.av-table thead th.av-tot { background : #0f2650; }
+.av-table tbody tr:hover td { background : #fff8e1; }
+.av-table tr.av-cur td { background : #e8f5e9; }
+.av-table tr.av-cur td.av-tot { background : #dcedc8; }
+.av-cur-tag {
+    margin-left   : 6px;
+    padding       : 0 5px;
+    border-radius : 8px;
+    background    : #43a047;
+    color         : #fff;
+    font-size     : 9px;
+    font-weight   : normal;
+    vertical-align : middle;
+}
+.av-table tfoot td {
+    position    : sticky;
+    bottom      : -12px;   /* the body's bottom padding — keeps the Total row in view */
+    background  : #eef1f6;
+    font-weight : bold;
+    box-shadow  : inset 0 2px 0 #17356b;
+}
+.av-note { margin-top : 8px; font-size : 11px; color : #777; line-height : 1.5; }
+.av-warn { color : #c62828; }
 
 /* ⟳ reset + refresh beside Excel */
 .od-reload-btn {
