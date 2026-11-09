@@ -5703,6 +5703,8 @@ function orderCellText(r, key) {
         case 'progress'      : return `${r.progress}%`;
         case 'done'          : return '';
         case 'prodUnitName'  : return String(r.prodUnitName ?? '—');
+        // OS order: "26SPJCP098 · GSL-251176" — the MBM order first, its OS part after
+        case 'mbmOrder'      : return r.erpOrder ? `${r.erpOrder} · ${r.mbmOrder}` : String(r.mbmOrder ?? '');
         case 'pcdSource'     : return r.pcdSource === 'order_pcd' ? 'ERP PCD'
                                     : r.pcdSource === 'delivery_minus_30' ? 'Delivery-30'
                                     : (r.pcdStatus === 'missing' ? 'missing' : '');

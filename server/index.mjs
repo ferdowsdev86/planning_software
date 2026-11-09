@@ -1968,7 +1968,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         if (OS_UNIT_IDS.length) {
             const osPhAll = OS_UNIT_IDS.map(() => '?').join(',');
             const [osMapRows] = await pool.query(
-                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd
+                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd, o.mr_order_code
                  FROM \`${OS_DB}\`.os_orders o
                  WHERE o.os_unit_id IN (${osPhAll})`,
                 [...OS_UNIT_IDS]);
@@ -1977,7 +1977,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     prod_unit : OS_UNIT_MAP[r.os_unit_id] ?? r.os_unit_id,
                     unit_id   : null,
                     order_qty : r.order_qty,
-                    order_delivery_date : r.odd
+                    order_delivery_date : r.odd,
+                    erp_order_code : r.mr_order_code || null   // the MBM order the OS order belongs to
                 });
             }
         }
@@ -2001,6 +2002,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     NULL                                                   AS color,
                     o.odd                                                  AS shipment_date,
                     o.odd                                                  AS order_delivery_date,
+                    o.mr_order_code                                        AS erp_order_code,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id,
                     o.os_unit_id                                           AS prod_unit,
@@ -2316,6 +2318,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             // ERP order delivery (mr_order_entry.order_delivery_date / os_orders.odd)
             // drives the Planning Month; the PO delivery is only a fallback
             r.order_delivery_date = erpInfo.order_delivery_date || r.shipment_date || null;
+            r.erp_order_code   = erpInfo.erp_order_code || null;   // OS confirm → its MBM order
             r.prod_unit        = erpInfo.prod_unit ?? null;
             r.prod_unit_name   = r.prod_unit ? (unitShortName.get(r.prod_unit) || null) : null;
             r.unit_short_name  = r.unit_id   ? (unitShortName.get(r.unit_id)   || null) : null;
