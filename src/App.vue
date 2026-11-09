@@ -5944,7 +5944,7 @@ function projPartialInfo(r) {
 
 // Live summary over the FILTERED rows (shown above the table + qty headers)
 const ordersSummary = computed(() => {
-    let proj = 0, conf = 0, orderQty = 0, poQty = 0;
+    let proj = 0, conf = 0, orderQty = 0, poQty = 0, doneOrderQty = 0;
     let plannedQty = 0, unplannedQty = 0, todayQty = 0, last3Qty = 0;
     const cutToday = recentCutoff('today');
     const cut3     = recentCutoff('last3');
@@ -5956,7 +5956,11 @@ const ordersSummary = computed(() => {
         }
         else {
             proj++;
-            orderQty += Number(r.orderQty) || 0;
+            // Order Qty = the OPEN order book: a completed order (it only shows
+            // while a filter / search is on) is kept out of the sum, so it
+            // equals Available + Planned of the Available Order report
+            if (r.status === 'completed') doneOrderQty += Number(r.orderQty) || 0;
+            else orderQty += Number(r.orderQty) || 0;
         }
         if (r.planned || r.status === 'planned') plannedQty += rowQty(r);
         else if (r.status === 'unplanned' || r.status === 'holding') unplannedQty += rowQty(r);
@@ -5965,7 +5969,7 @@ const ordersSummary = computed(() => {
             if (r.createdAt >= cut3)     last3Qty += rowQty(r);
         }
     }
-    return { rows : filteredErpOrders.value.length, proj, conf, orderQty, poQty, plannedQty, unplannedQty, todayQty, last3Qty };
+    return { rows : filteredErpOrders.value.length, proj, conf, orderQty, doneOrderQty, poQty, plannedQty, unplannedQty, todayQty, last3Qty };
 });
 
 // ---------------------------------------------------------------------------
@@ -6240,11 +6244,11 @@ function openAvailableOrders() {
 
 // Tabs of the report — each order sits in exactly ONE of them, by its status
 // in the list: Available = unplanned (incl. holding) + replaced, Planned = its
-// projection bar is on a line, Completed = marked complete
+// projection bar is on a line, Complete Order = marked complete
 const AVAIL_TABS = [
     { key : 'open',    label : 'Available', hint : 'Unplanned + Replaced',  match : r => r.status !== 'completed' && r.status !== 'planned' },
     { key : 'planned', label : 'Planned',   hint : 'Projection bar on a line', match : r => r.status === 'planned' },
-    { key : 'done',    label : 'Completed', hint : 'Marked complete',       match : r => r.status === 'completed' }
+    { key : 'done',    label : 'Complete Order', hint : 'Marked complete', match : r => r.status === 'completed' }
 ];
 const availTab = ref('open');
 
@@ -6324,7 +6328,7 @@ function exportAvailExcel() {
     const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `AvailableOrder_${tab.label}_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.download = `AvailableOrder_${tab.label.replace(/\s+/g, '')}_${new Date().toISOString().slice(0, 10)}.xls`;
     a.click();
     URL.revokeObjectURL(a.href);
     toast(`Available Order — ${tab.label} exported to Excel`, 'ok');
@@ -12727,7 +12731,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @click="tileAction('planned')">Planned <b>{{ fmtQty(ordersSummary.plannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-unpl od-sum-click" title="Unplanned quantity — click to show only unplanned rows"
                         @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
-                    <span class="od-sum-tile od-sum-qty od-sum-click" title="Sort by Order Qty"
+                    <span class="od-sum-tile od-sum-qty od-sum-click"
+                        :title="'Order qty of the open orders (= Available + Planned in Available Order) — click to sort'
+                            + (ordersSummary.doneOrderQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.doneOrderQty)}` : '')"
                         @click="tileAction('orderQty')">Order Qty <b>{{ fmtQty(ordersSummary.orderQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click" title="Sort by PO Qty"
                         @click="tileAction('poQty')">PO Qty <b>{{ fmtQty(ordersSummary.poQty) }}</b></span>
@@ -12900,7 +12906,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div class="av-body">
                     <div v-if="availError" class="av-empty">Could not load the orders — {{ availError }}</div>
                     <div v-else-if="availLoading" class="av-empty">⏳ Loading the order book of every unit…</div>
-                    <div v-else-if="!availSummary.rows.length" class="av-empty">No {{ availTabInfo.label.toLowerCase() }} orders in these months.</div>
+                    <div v-else-if="!availSummary.rows.length" class="av-empty">No orders in the {{ availTabInfo.label }} tab for these months.</div>
                     <table v-else class="st-table av-table">
                         <thead>
                             <tr>
