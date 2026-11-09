@@ -5942,34 +5942,73 @@ function projPartialInfo(r) {
     return { confQty, orderQty, diff : orderQty - confQty };
 }
 
-// Live summary over the FILTERED rows (shown above the table + qty headers)
+// Planned confirm qty per order, over the WHOLE list (not the filtered rows) —
+// a 'replaced' order's planned share, whatever filter hides its confirm rows
+const plannedConfQtyByOrder = computed(() => {
+    const m = new Map();
+    for (const r of erpAllOrders.value) {
+        if (r.orderType !== 'confirm' || !r.mbmOrder) continue;
+        if (!(r.planned || r.status === 'planned')) continue;
+        m.set(r.mbmOrder, (m.get(r.mbmOrder) || 0) + (Number(r.qty) || 0));
+    }
+    return m;
+});
+
+// Live summary over the FILTERED rows (shown above the table + qty headers).
+// The quantity tiles count the OPEN order book, each order ONCE (its projected
+// row) — a completed order, which only shows while a filter / search is on,
+// adds to none of them:
+//   Order Qty = Planned + Unplanned
+//     planned projection            → all planned
+//     unplanned / holding           → all unplanned
+//     replaced (confirm POs took over) → planned = its planned confirm PO qty
+//                                     (never above the order qty), rest unplanned
+//   PO Qty    = the confirm rows of the open orders
+// A view without projected rows (Type = confirm) splits by its confirm rows.
 const ordersSummary = computed(() => {
-    let proj = 0, conf = 0, orderQty = 0, poQty = 0, doneOrderQty = 0;
-    let plannedQty = 0, unplannedQty = 0, todayQty = 0, last3Qty = 0;
+    let proj = 0, conf = 0, orderQty = 0, poQty = 0, doneOrderQty = 0, donePoQty = 0;
+    let plannedQty = 0, unplannedQty = 0, confPlanned = 0, confUnplanned = 0, openProj = 0;
+    let todayQty = 0, last3Qty = 0;
     const cutToday = recentCutoff('today');
     const cut3     = recentCutoff('last3');
     const rowQty = r => Number(r.orderType === 'confirm' ? r.qty : r.orderQty) || 0;
+    const isPlanned = r => r.planned || r.status === 'planned';
     for (const r of filteredErpOrders.value) {
+        const done = r.status === 'completed';
         if (r.orderType === 'confirm') {
             conf++;
-            poQty += Number(r.qty) || 0;
+            const q = Number(r.qty) || 0;
+            if (done) donePoQty += q;
+            else {
+                poQty += q;
+                if (isPlanned(r)) confPlanned += q;
+                else if (r.status === 'unplanned' || r.status === 'holding') confUnplanned += q;
+            }
         }
         else {
             proj++;
-            // Order Qty = the OPEN order book: a completed order (it only shows
-            // while a filter / search is on) is kept out of the sum, so it
-            // equals Available + Planned of the Available Order report
-            if (r.status === 'completed') doneOrderQty += Number(r.orderQty) || 0;
-            else orderQty += Number(r.orderQty) || 0;
+            const q = Number(r.orderQty) || 0;
+            if (done) doneOrderQty += q;
+            else {
+                openProj++;
+                orderQty += q;
+                if (isPlanned(r)) plannedQty += q;
+                else if (r.replaced || r.status === 'replaced') {
+                    const p = Math.min(q, plannedConfQtyByOrder.value.get(r.mbmOrder) || 0);
+                    plannedQty   += p;
+                    unplannedQty += q - p;
+                }
+                else unplannedQty += q;
+            }
         }
-        if (r.planned || r.status === 'planned') plannedQty += rowQty(r);
-        else if (r.status === 'unplanned' || r.status === 'holding') unplannedQty += rowQty(r);
         if (r.createdAt) {
             if (r.createdAt >= cutToday) todayQty += rowQty(r);
             if (r.createdAt >= cut3)     last3Qty += rowQty(r);
         }
     }
-    return { rows : filteredErpOrders.value.length, proj, conf, orderQty, doneOrderQty, poQty, plannedQty, unplannedQty, todayQty, last3Qty };
+    if (!openProj) { plannedQty = confPlanned; unplannedQty = confUnplanned; }
+    return { rows : filteredErpOrders.value.length, proj, conf, orderQty, doneOrderQty, poQty, donePoQty,
+        plannedQty, unplannedQty, todayQty, last3Qty };
 });
 
 // ---------------------------------------------------------------------------
@@ -12727,15 +12766,17 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @click="tileAction('projected')"><b>{{ fmtQty(ordersSummary.proj) }}</b> projected</span>
                     <span class="od-sum-tile od-sum-conf od-sum-click" title="Show only confirm orders"
                         @click="tileAction('confirm')"><b>{{ fmtQty(ordersSummary.conf) }}</b> confirm</span>
-                    <span class="od-sum-tile od-sum-click" title="Planned quantity — click to show only planned rows"
+                    <span class="od-sum-tile od-sum-click" title="Planned qty of the open orders (Planned + Unplanned = Order Qty) — click to show only planned rows"
                         @click="tileAction('planned')">Planned <b>{{ fmtQty(ordersSummary.plannedQty) }}</b></span>
-                    <span class="od-sum-tile od-sum-unpl od-sum-click" title="Unplanned quantity — click to show only unplanned rows"
+                    <span class="od-sum-tile od-sum-unpl od-sum-click" title="Unplanned qty of the open orders (Planned + Unplanned = Order Qty) — click to show only unplanned rows"
                         @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
                         :title="'Order qty of the open orders (= Available + Planned in Available Order) — click to sort'
                             + (ordersSummary.doneOrderQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.doneOrderQty)}` : '')"
                         @click="tileAction('orderQty')">Order Qty <b>{{ fmtQty(ordersSummary.orderQty) }}</b></span>
-                    <span class="od-sum-tile od-sum-qty od-sum-click" title="Sort by PO Qty"
+                    <span class="od-sum-tile od-sum-qty od-sum-click"
+                        :title="'PO qty of the confirm rows of the open orders — click to sort'
+                            + (ordersSummary.donePoQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.donePoQty)}` : '')"
                         @click="tileAction('poQty')">PO Qty <b>{{ fmtQty(ordersSummary.poQty) }}</b></span>
                     <span class="od-sum-tile od-sum-recent od-sum-click" :class="{ 'od-sum-on' : ordersRecentFilter === 'today' }"
                         title="Orders created today — click to filter the list"
