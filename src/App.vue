@@ -6215,7 +6215,8 @@ ${summary}
 // Available Order: the order book of EVERY unit, summed per production unit ×
 // Planning Month (ERP running month, 11th → 10th) — order qty and SAH
 // (qty × SMV / 60). Same order rule as the list: one row per order (the
-// projected rows), completed orders left out.
+// projected rows), split into tabs by the order's status — Available
+// (unplanned + replaced), Planned, Completed.
 // ---------------------------------------------------------------------------
 const AVAIL_UNITS  = [{ id : 1, name : 'MBM' }, { id : 2, name : 'CEIL' }, { id : 3, name : 'AQL' }];
 const availOpen    = ref(false);
@@ -6225,6 +6226,7 @@ const availRows    = ref([]);
 
 function openAvailableOrders() {
     availOpen.value    = true;
+    availTab.value     = 'open';
     availLoading.value = true;
     availError.value   = '';
     loadErpAllOrders(null, 'projected').then(rows => {
@@ -6236,39 +6238,58 @@ function openAvailableOrders() {
     });
 }
 
-const availSummary = computed(() => {
-    const blank  = () => ({ orders : 0, qty : 0, sah : 0 });
-    const units  = AVAIL_UNITS.map(u => ({ ...u }));
-    const months = new Map();
-    const total  = { cells : {}, all : blank() };
-    let noSmv = 0;
+// Tabs of the report — each order sits in exactly ONE of them, by its status
+// in the list: Available = unplanned (incl. holding) + replaced, Planned = its
+// projection bar is on a line, Completed = marked complete
+const AVAIL_TABS = [
+    { key : 'open',    label : 'Available', hint : 'Unplanned + Replaced',  match : r => r.status !== 'completed' && r.status !== 'planned' },
+    { key : 'planned', label : 'Planned',   hint : 'Projection bar on a line', match : r => r.status === 'planned' },
+    { key : 'done',    label : 'Completed', hint : 'Marked complete',       match : r => r.status === 'completed' }
+];
+const availTab = ref('open');
+
+const availByTab = computed(() => {
+    const blank = () => ({ orders : 0, qty : 0, sah : 0 });
     // The report window: ONE month back from the running month, the running
     // month, and every later month — older months are left out (and out of Total)
     const cur  = planMonthOf({ erpDelivery : new Date() });
     const prev = cur ? new Date(cur.start.getFullYear(), cur.start.getMonth() - 1, 1) : null;
     const from = prev ? `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}` : '';
+    const out  = {};
+    for (const t of AVAIL_TABS) {
+        out[t.key] = { units : AVAIL_UNITS.map(u => ({ ...u })), months : new Map(), total : { cells : {}, all : blank() },
+            noSmv : 0, current : cur?.label || '', from };
+    }
     for (const r of availRows.value) {
-        if (r.orderType !== 'projected' || r.status === 'completed') continue;
+        if (r.orderType !== 'projected') continue;
         const qty = Number(r.orderQty) || 0;
         if (!(qty > 0)) continue;
         const pm  = planMonthOf(r);
         if (from && pm && pm.label < from) continue;
+        const tab = AVAIL_TABS.find(t => t.match(r));
+        if (!tab) continue;
+        const o   = out[tab.key];
         const uid = Number(r.prodUnit) || 0;
-        if (!units.some(u => u.id === uid)) units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
+        if (!o.units.some(u => u.id === uid)) o.units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
         const key = pm?.label || '—';
-        if (!months.has(key)) months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
-        const m   = months.get(key);
+        if (!o.months.has(key)) o.months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
+        const m   = o.months.get(key);
         const smv = Number(r.smv) || 0;
         const sah = qty * smv / 60;
-        if (!(smv > 0)) noSmv++;
-        for (const c of [m.cells[uid] ||= blank(), m.all, total.cells[uid] ||= blank(), total.all]) {
+        if (!(smv > 0)) o.noSmv++;
+        for (const c of [m.cells[uid] ||= blank(), m.all, o.total.cells[uid] ||= blank(), o.total.all]) {
             c.orders++; c.qty += qty; c.sah += sah;
         }
     }
-    const rows = [...months.values()].sort((a, b) =>
-        a.label === '—' ? 1 : b.label === '—' ? -1 : a.label.localeCompare(b.label));
-    return { units, rows, total, noSmv, current : cur?.label || '', from };
+    for (const o of Object.values(out)) {
+        o.rows = [...o.months.values()].sort((a, b) =>
+            a.label === '—' ? 1 : b.label === '—' ? -1 : a.label.localeCompare(b.label));
+    }
+    return out;
 });
+
+const availSummary = computed(() => availByTab.value[availTab.value] || availByTab.value.open);
+const availTabInfo = computed(() => AVAIL_TABS.find(t => t.key === availTab.value) || AVAIL_TABS[0]);
 
 const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
 const availCell   = (m, uid) => m.cells[uid] || { orders : 0, qty : 0, sah : 0 };
@@ -6276,7 +6297,8 @@ const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
 const fmtAvQty    = v => (v ? fmtQty(v) : '—');
 
 function exportAvailExcel() {
-    const s = availSummary.value;
+    const s   = availSummary.value;
+    const tab = availTabInfo.value;
     if (!s.rows.length) { toast('No orders to export', 'warn'); return; }
     const num  = v => `<td style="text-align:right">${v ? Math.round(v) : ''}</td>`;
     const trio = c => num(c.orders) + num(c.qty) + num(c.sah);
@@ -6295,17 +6317,17 @@ function exportAvailExcel() {
 </style>
 </head>
 <body>
-<h2 style="margin:0">Available Order — unit × planning month</h2>
+<h2 style="margin:0">Available Order — ${tab.label} (${tab.hint}) — unit × planning month</h2>
 <div style="margin:4px 0 8px;font-size:9pt">SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th · from ${s.from || 'the first month'}</div>
 <table><thead>${head1}${head2}</thead><tbody>${body}${foot}</tbody></table>
 </body></html>`;
     const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `AvailableOrder_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.download = `AvailableOrder_${tab.label}_${new Date().toISOString().slice(0, 10)}.xls`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('Available Order summary exported to Excel', 'ok');
+    toast(`Available Order — ${tab.label} exported to Excel`, 'ok');
 }
 
 function listStatus(raw, planned) {
@@ -12869,10 +12891,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <span class="cal-x" @click="availOpen = false">✕</span>
                     </span>
                 </div>
+                <div class="av-tabs">
+                    <span v-for="t in AVAIL_TABS" :key="t.key" class="av-tab" :class="{ 'av-tab-on' : availTab === t.key }"
+                        :title="t.hint" @click="availTab = t.key"
+                    >{{ t.label }}<small>{{ t.hint }}</small>
+                        <b v-if="!availLoading && !availError">{{ fmtQty(availByTab[t.key].total.all.qty) }}</b></span>
+                </div>
                 <div class="av-body">
                     <div v-if="availError" class="av-empty">Could not load the orders — {{ availError }}</div>
                     <div v-else-if="availLoading" class="av-empty">⏳ Loading the order book of every unit…</div>
-                    <div v-else-if="!availSummary.rows.length" class="av-empty">No available orders.</div>
+                    <div v-else-if="!availSummary.rows.length" class="av-empty">No {{ availTabInfo.label.toLowerCase() }} orders in these months.</div>
                     <table v-else class="st-table av-table">
                         <thead>
                             <tr>
@@ -12918,7 +12946,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tfoot>
                     </table>
                     <div class="av-note">
-                        Order qty per order (in-house: mr_order_entry · outside / TBA: os_orders), completed orders left out ·
+                        <b>{{ availTabInfo.label }}</b> tab: {{ availTabInfo.hint.toLowerCase() }} ·
+                        order qty per order (in-house: mr_order_entry · outside / TBA: os_orders) ·
                         SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th ·
                         shown: the previous month, the running month and every later month
                         <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — their SAH counts as 0</span>
@@ -15311,6 +15340,27 @@ body {
 .cal-dialog.av-dialog { width : 1120px; max-width : 96vw; }
 .av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
 .av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
+.av-tabs { display : flex; gap : 4px; padding : 8px 12px 0; background : #fff; border-bottom : 2px solid #17356b; }
+.av-tab {
+    display       : flex;
+    align-items   : baseline;
+    gap           : 6px;
+    padding       : 6px 14px;
+    border        : 1px solid #c5cede;
+    border-bottom : none;
+    border-radius : 6px 6px 0 0;
+    background    : #eef1f6;
+    color         : #17356b;
+    font-size     : 13px;
+    font-weight   : bold;
+    cursor        : pointer;
+    white-space   : nowrap;
+}
+.av-tab small { font-size : 10px; font-weight : normal; color : #6b7a94; }
+.av-tab b { font-size : 12px; font-variant-numeric : tabular-nums; }
+.av-tab:hover { background : #e0e7f3; }
+.av-tab.av-tab-on { background : #17356b; border-color : #17356b; color : #fff; }
+.av-tab.av-tab-on small { color : #c9d6ee; }
 .av-body { padding : 10px 12px 12px; max-height : 78vh; overflow : auto; background : #fff; }
 .av-empty { padding : 30px 10px; text-align : center; color : #777; font-size : 13px; }
 .av-table { width : 100%; border-collapse : collapse; font-size : 12px; }
