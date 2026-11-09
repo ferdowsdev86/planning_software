@@ -6242,13 +6242,19 @@ const availSummary = computed(() => {
     const months = new Map();
     const total  = { cells : {}, all : blank() };
     let noSmv = 0;
+    // The report window: ONE month back from the running month, the running
+    // month, and every later month — older months are left out (and out of Total)
+    const cur  = planMonthOf({ erpDelivery : new Date() });
+    const prev = cur ? new Date(cur.start.getFullYear(), cur.start.getMonth() - 1, 1) : null;
+    const from = prev ? `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}` : '';
     for (const r of availRows.value) {
         if (r.orderType !== 'projected' || r.status === 'completed') continue;
         const qty = Number(r.orderQty) || 0;
         if (!(qty > 0)) continue;
+        const pm  = planMonthOf(r);
+        if (from && pm && pm.label < from) continue;
         const uid = Number(r.prodUnit) || 0;
         if (!units.some(u => u.id === uid)) units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
-        const pm  = planMonthOf(r);
         const key = pm?.label || '—';
         if (!months.has(key)) months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
         const m   = months.get(key);
@@ -6261,7 +6267,7 @@ const availSummary = computed(() => {
     }
     const rows = [...months.values()].sort((a, b) =>
         a.label === '—' ? 1 : b.label === '—' ? -1 : a.label.localeCompare(b.label));
-    return { units, rows, total, noSmv, current : planMonthOf({ erpDelivery : new Date() })?.label || '' };
+    return { units, rows, total, noSmv, current : cur?.label || '', from };
 });
 
 const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
@@ -6290,7 +6296,7 @@ function exportAvailExcel() {
 </head>
 <body>
 <h2 style="margin:0">Available Order — unit × planning month</h2>
-<div style="margin:4px 0 8px;font-size:9pt">SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th</div>
+<div style="margin:4px 0 8px;font-size:9pt">SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th · from ${s.from || 'the first month'}</div>
 <table><thead>${head1}${head2}</thead><tbody>${body}${foot}</tbody></table>
 </body></html>`;
     const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
@@ -12855,7 +12861,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div class="cal-title">
                     Available Order
                     <span style="font-size:12px;color:#888;font-weight:400;margin-left:10px;">
-                        all units · planning month wise
+                        all units · planning month wise<span v-if="availSummary.from"> · from {{ availSummary.from }}</span>
                         <span v-if="availLoading"> · ⏳ loading…</span>
                     </span>
                     <span class="cal-title-btns">
@@ -12913,7 +12919,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </table>
                     <div class="av-note">
                         Order qty per order (in-house: mr_order_entry · outside / TBA: os_orders), completed orders left out ·
-                        SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th
+                        SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th ·
+                        shown: the previous month, the running month and every later month
                         <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — their SAH counts as 0</span>
                     </div>
                 </div>
