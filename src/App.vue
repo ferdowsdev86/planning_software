@@ -24,7 +24,7 @@ import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
-    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, completeOrdersDb, reopenOrdersDb,
+    resolveResourceDbId, poBaseEventCode, loadErpAllOrders, loadPlanAllocation, completeOrdersDb, reopenOrdersDb,
     acquireBoardLock, releaseBoardLock, linkAudit,
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
@@ -6275,6 +6275,7 @@ function openAvailableOrders() {
     loadErpAllOrders(null, 'projected').then(rows => {
         availRows.value    = rows;
         availLoading.value = false;
+        runPlanAllocation(rows);
     }).catch(e => {
         availError.value   = e.message || 'load failed';
         availLoading.value = false;
@@ -6284,14 +6285,19 @@ function openAvailableOrders() {
 // Tabs of the report — BOTH count the available orders (unplanned incl.
 // holding + replaced; planned and completed orders are out of the report):
 //   Available       — orders / order qty / SAH per unit × planning month
-//   Plan allocation — the same orders laid on the calendar by the plan rule:
-//                     sewing start = PCD − 8 days, sewing end = order delivery
-//                     − 7 days, the order qty spread evenly over the calendar
-//                     days of that window. Plan Qty = the part that falls inside
-//                     the plan window (1st → last day of the planning month),
-//                     Excess = the rest (before the 1st / after the last day)
+//   Plan allocation — the same orders planned by the SERVER's simulation of
+//                     the planning board (server/planAllocation.mjs): sewing
+//                     start = PCD − 8 days, sewing end = order delivery − 7
+//                     days, each unit's lines (manpower × hours × efficiency
+//                     profile ÷ SMV), the factory calendar with its off days
+//                     and changed-hours dates, the saved bars already on the
+//                     lines, the Build up (learning) curve on a product change,
+//                     +3 % plan qty. Plan Qty = the pieces the simulation makes
+//                     inside the plan window (1st → last day of the planning
+//                     month), Excess = the rest: made before the 1st / after
+//                     the last day, or not plannable at all (no capacity)
 const AVAIL_ORDER_OK       = r => r.status !== 'completed' && r.status !== 'planned';
-const SEW_START_BEFORE_PCD = 8;   // sewing start = PCD − 8 days
+const SEW_START_BEFORE_PCD = 8;   // sewing start = PCD − 8 days   (server/planAllocation.mjs)
 const SEW_END_BEFORE_SHIP  = 7;   // sewing end   = order delivery − 7 days
 const AVAIL_TABS = [
     { key : 'open', label : 'Available', hint : 'Unplanned + Replaced', headline : 'qty',
@@ -6299,70 +6305,92 @@ const AVAIL_TABS = [
       cols : [{ key : 'orders', label : 'Orders' }, { key : 'qty', label : 'Order Qty' },
               { key : 'sah', label : 'SAH', cls : 'av-sah', round : true }],
       xnote : 'SAH = order qty × SMV / 60' },
-    { key : 'alloc', label : 'Plan allocation', hint : 'Sewing window inside the calendar month', headline : 'plan',
+    { key : 'alloc', label : 'Plan allocation', hint : 'Board simulation: lines · calendar · capacity', headline : 'plan',
       left : [{ key : 'window', label : 'Plan Window' }],
       cols : [{ key : 'qty', label : 'Order Qty' }, { key : 'plan', label : 'Plan Qty', cls : 'av-plan' },
               { key : 'sah', label : 'Plan SAH', cls : 'av-sah', round : true },
               { key : 'excess', label : 'Excess', cls : 'av-excess', tip : true }],
-      xnote : `sewing start = PCD − ${SEW_START_BEFORE_PCD} days, sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
-            + 'order qty spread evenly over the days of that window · Plan Qty = the part inside the plan window (1st → last day), '
-            + 'Plan SAH = Plan Qty × SMV / 60 · Excess = the rest (before the 1st / after the last day)' }
+      xnote : `board simulation — sewing start = PCD − ${SEW_START_BEFORE_PCD} days, sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
+            + 'each unit\'s lines (manpower × hours × efficiency ÷ SMV), factory calendar (off days, changed hours), saved bars, '
+            + 'Build up curve, +3 % plan qty · Plan Qty = pieces made inside the plan window (1st → last day), '
+            + 'Plan SAH = Plan Qty × SMV / 60 · Excess = made before the 1st / after the last day, or no capacity' }
 ];
 const availTab = ref('open');
 
-// Sewing window of an order by the plan rule — null when it has no delivery /
-// PCD. A PCD later than the end puts the whole qty on the end day.
-function sewWindowOf(r) {
-    const ship = r.erpDelivery || r.orderDelivery || r.poDelivery;
-    if (!ship || !r.pcd) return null;
-    const s = new Date(r.pcd); s.setHours(0, 0, 0, 0);
-    const e = new Date(ship);  e.setHours(0, 0, 0, 0);
-    if (Number.isNaN(+s) || Number.isNaN(+e)) return null;
-    s.setDate(s.getDate() - SEW_START_BEFORE_PCD);
-    e.setDate(e.getDate() - SEW_END_BEFORE_SHIP);
-    if (e < s) s.setTime(e.getTime());
-    return { start : s, end : e };
+// Plan allocation = the server's board-rule simulation of the available
+// orders (POST /plan-allocation): per order the pieces made on each day,
+// what no line could make in its window (`left`) and whether it ran late
+const allocLoading = ref(false);
+const allocError   = ref('');
+const allocByKey   = ref(new Map());
+const allocInfo    = ref(null);
+const availKey     = (r, i) => `${r.prodUnit}|${r.mbmOrder || ''}|${i}`;
+const availOrderOk = r => r.orderType === 'projected' && AVAIL_ORDER_OK(r) && Number(r.orderQty) > 0;
+// The report window: ONE month back from the running month, the running
+// month, and every later month — older months are left out (and out of Total)
+function availWindowFrom() {
+    const cur  = planMonthOf({ erpDelivery : new Date() });
+    const prev = cur ? new Date(cur.start.getFullYear(), cur.start.getMonth() - 1, 1) : null;
+    return { cur, from : prev ? `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}` : '' };
 }
-const dayNo = d => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
-// How much of qty (spread evenly over the window's calendar days) falls inside
-// [calStart, calEnd], before it and after it — whole pieces, summing to qty
-function allocInWindow(w, calStart, calEnd, qty) {
-    if (!w) return { plan : 0, before : 0, after : qty };
-    const ws = dayNo(w.start), we = dayNo(w.end), cs = dayNo(calStart), ce = dayNo(calEnd);
-    const days    = we - ws + 1;
-    const inDays  = Math.max(0, Math.min(we, ce) - Math.max(ws, cs) + 1);
-    const befDays = Math.max(0, Math.min(we, cs - 1) - ws + 1);
-    const plan    = Math.round(qty * inDays / days);
-    const before  = Math.min(Math.round(qty * befDays / days), qty - plan);
-    return { plan, before, after : qty - plan - before };
+function runPlanAllocation(rows) {
+    const { from } = availWindowFrom();
+    const orders = [];
+    rows.forEach((r, i) => {
+        if (!availOrderOk(r)) return;
+        const pm = planMonthOf(r);
+        if (from && pm && pm.label < from) return;
+        const ship = r.erpDelivery || r.orderDelivery || r.poDelivery;
+        orders.push({
+            key : availKey(r, i), unit : Number(r.prodUnit) || 0,
+            qty : Number(r.orderQty) || 0, smv : Number(r.smv) || 0,
+            pcd : r.pcd ? ymdOf(new Date(r.pcd)) : null, ship : ship ? ymdOf(new Date(ship)) : null,
+            productType : r.productType || '', buyer : r.buyer || '', style : r.style || ''
+        });
+    });
+    allocLoading.value = true;
+    allocError.value   = '';
+    allocByKey.value   = new Map();
+    allocInfo.value    = null;
+    loadPlanAllocation(orders).then(j => {
+        allocByKey.value   = new Map((j.orders || []).map(o => [o.key, o]));
+        allocInfo.value    = { today : j.today, units : j.units || [] };
+        allocLoading.value = false;
+    }).catch(e => {
+        allocError.value   = e.name === 'AbortError' ? 'the simulation took too long' : (e.message || 'simulation failed');
+        allocLoading.value = false;
+    });
 }
 
 const availByTab = computed(() => {
-    const blank = () => ({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0 });
-    // The report window: ONE month back from the running month, the running
-    // month, and every later month — older months are left out (and out of Total)
-    const cur  = planMonthOf({ erpDelivery : new Date() });
-    const prev = cur ? new Date(cur.start.getFullYear(), cur.start.getMonth() - 1, 1) : null;
-    const from = prev ? `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}` : '';
+    const blank = () => ({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0, nocap : 0, late : 0 });
+    const { cur, from } = availWindowFrom();
     const out  = {};
     for (const t of AVAIL_TABS) {
         out[t.key] = { units : AVAIL_UNITS.map(u => ({ ...u })), months : new Map(), total : { cells : {}, all : blank() },
-            noSmv : 0, pcdFallback : 0, noWindow : 0, current : cur?.label || '', from };
+            noSmv : 0, pcdFallback : 0, noWindow : 0, lateOrders : 0, current : cur?.label || '', from };
     }
-    for (const r of availRows.value) {
-        if (r.orderType !== 'projected' || !AVAIL_ORDER_OK(r)) continue;
+    const alloc = allocByKey.value;
+    availRows.value.forEach((r, i) => {
+        if (!availOrderOk(r)) return;
         const qty = Number(r.orderQty) || 0;
-        if (!(qty > 0)) continue;
         const pm  = planMonthOf(r);
-        if (from && pm && pm.label < from) continue;
+        if (from && pm && pm.label < from) return;
         const uid = Number(r.prodUnit) || 0;
         const key = pm?.label || '—';
         const smv = Number(r.smv) || 0;
         // plan window = the calendar month of the planning month label (1st → last day)
         const calStart = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth(), 1) : null;
         const calEnd   = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth() + 1, 0) : null;
-        const w        = calStart ? sewWindowOf(r) : null;
-        const a        = calStart ? allocInWindow(w, calStart, calEnd, qty) : { plan : 0, before : 0, after : qty };
+        // the simulation's day-wise pieces of this order, split by the plan window
+        const sim = alloc.get(availKey(r, i));
+        const a   = { plan : 0, before : 0, after : 0, nocap : sim ? sim.left : 0, late : sim?.late ? sim.placed : 0 };
+        if (sim && calStart) {
+            const cs = ymdOf(calStart), ce = ymdOf(calEnd);
+            for (const [d, q] of Object.entries(sim.days || {})) {
+                if (d < cs) a.before += q; else if (d > ce) a.after += q; else a.plan += q;
+            }
+        }
         for (const t of AVAIL_TABS) {
             const o = out[t.key];
             if (!o.units.some(u => u.id === uid)) o.units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
@@ -6371,15 +6399,17 @@ const availByTab = computed(() => {
             if (!(smv > 0)) o.noSmv++;
             if (t.key === 'alloc') {
                 if (r.pcdSource === 'delivery_minus_30') o.pcdFallback++;
-                if (!w) o.noWindow++;
+                if (sim && (sim.noDates || sim.past)) o.noWindow++;
+                if (sim?.late) o.lateOrders++;
             }
             const sahQty = t.key === 'alloc' ? a.plan : qty;
             for (const c of [m.cells[uid] ||= blank(), m.all, o.total.cells[uid] ||= blank(), o.total.all]) {
                 c.orders++; c.qty += qty; c.sah += sahQty * smv / 60;
-                c.plan += a.plan; c.before += a.before; c.after += a.after; c.excess += a.before + a.after;
+                c.plan += a.plan; c.before += a.before; c.after += a.after; c.nocap += a.nocap; c.late += a.late;
+                c.excess += a.before + a.after + a.nocap;
             }
         }
-    }
+    });
     for (const o of Object.values(out)) {
         o.rows = [...o.months.values()].sort((a, b) =>
             a.label === '—' ? 1 : b.label === '—' ? -1 : a.label.localeCompare(b.label));
@@ -6393,13 +6423,23 @@ const availTabInfo = computed(() => AVAIL_TABS.find(t => t.key === availTab.valu
 const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
 const availWindow = m => (m.calStart ? `${fmtDateDdMonRr(m.calStart)} → ${fmtDateDdMonRr(m.calEnd)}` : '—');
 const availLeft   = (m, key) => (key === 'window' ? availWindow(m) : availPeriod(m));
-const AVAIL_BLANK = Object.freeze({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0 });
+const AVAIL_BLANK = Object.freeze({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0, nocap : 0, late : 0 });
 const availCell   = (m, uid) => (uid === 'all' ? m.all : m.cells[uid]) || AVAIL_BLANK;
 const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
 const fmtAvQty    = v => (v ? fmtQty(v) : '—');
 const availFmt    = (c, v) => (c.round ? fmtSah(v) : fmtAvQty(v));
 const availTip    = (c, cell) => (c.tip && cell.excess
-    ? `before the 1st: ${fmtQty(cell.before)} · after the last day: ${fmtQty(cell.after)}` : '');
+    ? `made before the 1st: ${fmtQty(cell.before)} · made after the last day: ${fmtQty(cell.after)} · no capacity in the window: ${fmtQty(cell.nocap)}`
+      + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)}` : '')
+    : '');
+// Lines per unit and the Build up curve the simulation used, for the note
+const allocInfoText = computed(() => {
+    const info = allocInfo.value;
+    if (!info) return '';
+    const lines = info.units.map(u => `${AVAIL_UNITS.find(x => x.id === u.unitId)?.name || u.unitId} ${u.lines}`).join(' · ');
+    const curves = [...new Set(info.units.map(u => u.curve).filter(Boolean))];
+    return `lines: ${lines}${curves.length ? ` · Build up curve: ${curves.join(', ')}` : ' · no Build up curve'} · today ${info.today}`;
+});
 
 function exportAvailExcel() {
     const s   = availSummary.value;
@@ -13004,11 +13044,13 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span v-for="t in AVAIL_TABS" :key="t.key" class="av-tab" :class="{ 'av-tab-on' : availTab === t.key }"
                         :title="t.hint" @click="availTab = t.key"
                     >{{ t.label }}<small>{{ t.hint }}</small>
-                        <b v-if="!availLoading && !availError">{{ fmtQty(availByTab[t.key].total.all[t.headline]) }}</b></span>
+                        <b v-if="!availLoading && !availError">{{ t.key === 'alloc' && allocLoading ? '⏳' : fmtQty(availByTab[t.key].total.all[t.headline]) }}</b></span>
                 </div>
                 <div class="av-body">
                     <div v-if="availError" class="av-empty">Could not load the orders — {{ availError }}</div>
                     <div v-else-if="availLoading" class="av-empty">⏳ Loading the order book of every unit…</div>
+                    <div v-else-if="availTabInfo.key === 'alloc' && allocError" class="av-empty">Could not simulate the plan — {{ allocError }}</div>
+                    <div v-else-if="availTabInfo.key === 'alloc' && allocLoading" class="av-empty">⏳ Planning the available orders on every unit's lines (board rules)…</div>
                     <div v-else-if="!availSummary.rows.length" class="av-empty">No available orders for these months.</div>
                     <table v-else class="st-table av-table">
                         <thead>
@@ -13050,16 +13092,21 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tfoot>
                     </table>
                     <div v-if="availTabInfo.key === 'alloc'" class="av-note">
-                        <b>Plan allocation</b> tab: the available orders (unplanned + replaced) laid on the calendar by the plan rule ·
-                        sewing start = PCD − {{ SEW_START_BEFORE_PCD }} days · sewing end = order delivery − {{ SEW_END_BEFORE_SHIP }} days ·
-                        the order qty is spread evenly over the calendar days of that window ·
-                        <b>Plan Qty</b> = the part that falls inside the plan window (1st → last day of the planning month) ·
-                        Plan SAH = Plan Qty × SMV / 60 ·
-                        <b>Excess</b> = the rest, before the 1st or after the last day (hover a cell for the split) ·
+                        <b>Plan allocation</b> tab: the available orders (unplanned + replaced) planned by a simulation of the planning board on every unit's own lines —
+                        sewing start = PCD − {{ SEW_START_BEFORE_PCD }} days (never before today) · sewing end = order delivery − {{ SEW_END_BEFORE_SHIP }} days ·
+                        line capacity = manpower × working hours × efficiency (buyer rule → line profile per product → line efficiency) ÷ SMV ·
+                        factory calendar: weekly off days, changed-hours dates (0 = off), per-line hours ·
+                        the bars already saved on a line keep their time, only the free part of a day is used ·
+                        Build up curve on a product / style change · capacity is taken at the plan qty (+3 %), figures are order pieces ·
+                        orders are planned in the board's order (PCD, then delivery), on the line that finishes earliest, spilling over to other lines when one cannot hold them ·
+                        <b>Plan Qty</b> = pieces the simulation makes inside the plan window (1st → last day of the planning month) · Plan SAH = Plan Qty × SMV / 60 ·
+                        <b>Excess</b> = pieces made before the 1st / after the last day + pieces no line can make in the window (hover a cell for the split) ·
                         planning month = month of (order delivery − 10 days), 11th → 10th
+                        <span v-if="allocInfoText"> · {{ allocInfoText }}</span>
+                        <span v-if="availSummary.lateOrders" class="av-warn"> · ⚠ {{ availSummary.lateOrders }} order(s) whose window already closed (delivery − 7 before today) are planned late, up to their delivery date</span>
                         <span v-if="availSummary.pcdFallback" class="av-warn"> · ⚠ {{ availSummary.pcdFallback }} order(s) have no ERP PCD — PCD taken as delivery − 30</span>
-                        <span v-if="availSummary.noWindow" class="av-warn"> · ⚠ {{ availSummary.noWindow }} order(s) have no delivery / PCD — all of their qty counts as Excess</span>
-                        <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — their SAH counts as 0</span>
+                        <span v-if="availSummary.noWindow" class="av-warn"> · ⚠ {{ availSummary.noWindow }} order(s) have no delivery / PCD or their delivery is already past — nothing can be planned, all of their qty is Excess</span>
+                        <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — they cannot be planned (Excess) and their SAH counts as 0</span>
                     </div>
                     <div v-else class="av-note">
                         <b>{{ availTabInfo.label }}</b> tab: {{ availTabInfo.hint.toLowerCase() }} ·

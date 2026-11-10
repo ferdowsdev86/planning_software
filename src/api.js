@@ -426,6 +426,25 @@ async function postRows(path, rows) {
 }
 
 export const saveEffProfilesDb     = rows => postRows('/efficiency-profiles', rows);
+// Plan allocation (Available Order report): the server lays the posted
+// available orders on every unit's lines by the board's rules and answers
+// the day-wise pieces per order — nothing is written
+export async function loadPlanAllocation(orders) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 90000);
+    try {
+        const res = await apiFetch(`${API_BASE}/plan-allocation`, {
+            method  : 'POST',
+            headers : { 'Content-Type' : 'application/json' },
+            body    : JSON.stringify({ orders }),
+            signal  : ctl.signal
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'simulation failed');
+        return data;
+    }
+    finally { clearTimeout(timer); }
+}
 // Line / product-type efficiency rows as saved in the DB (efficiency_profile)
 // All units' sewing lines, as board line objects (id l6 / m3 / c17 like the board)
 export async function loadAllLinesDb() {

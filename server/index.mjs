@@ -11,6 +11,7 @@ import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
+import { simulateAllocation, pickCurve } from './planAllocation.mjs';
 
 const {
     DB_HOST = '10.135.50.27',
@@ -4057,6 +4058,110 @@ app.post(`${BASE}/production-sync`, async (req, res) => {
         const to   = b.to   || new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
         const from = b.from || PROD_SYNC_FROM;
         res.json({ success : true, ...(await syncErpProduction({ from, to })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+// --------------------------------------------------------------------------
+// Plan allocation (Available Order report → Plan allocation tab). The client
+// posts the available orders { key, unit, qty, smv, pcd, ship, productType,
+// buyer, style }; the server lays them on each unit's sewing lines by the
+// board's rules (planAllocation.mjs: factory calendar + date / line overrides,
+// saved bars, line manpower / hours / efficiency profiles, Build up curve,
+// +3 % plan qty) and answers the day-wise pieces of every order. READ ONLY.
+// --------------------------------------------------------------------------
+app.post(`${BASE}/plan-allocation`, async (req, res) => {
+    const orders = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    try {
+        const [[lineRows], [calRows], [ovRows], [evRows], [profRows], [lcRows], [replRows], completed] = await Promise.all([
+            pool.query(
+                `SELECT id, resource_name AS name, unit_id, manpower, default_efficiency AS eff, working_hours_per_day AS hours
+                   FROM planning_resources
+                  WHERE active = TRUE AND resource_type = 'sewing_line' AND unit_id IN (1,2,3) AND resource_code NOT LIKE 'HOLD-%'
+                  ORDER BY unit_id, sort_order, id`),
+            pool.query(
+                `SELECT c.unit_id, i.interval_type, i.weekday_no, i.start_time, i.end_time
+                   FROM planning_calendars c JOIN planning_calendar_intervals i ON i.calendar_id = c.id
+                  WHERE c.active = TRUE AND i.weekday_no IS NOT NULL
+                    AND (i.recurrent_rule IS NULL OR i.recurrent_rule <> ?)`, [CAL_OVERRIDE]),
+            pool.query(
+                `SELECT c.unit_id, i.resource_id, DATE_FORMAT(i.start_date, '%Y-%m-%d') AS d, i.interval_name AS n
+                   FROM planning_calendar_intervals i JOIN planning_calendars c ON c.id = i.calendar_id
+                  WHERE i.recurrent_rule = ? AND i.start_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)`, [CAL_OVERRIDE]),
+            // saved bars on the lines (with the product / style the line is
+            // running — the learning-curve run a new order follows)
+            pool.query(
+                `SELECT pe.event_code, pe.start_date, pe.end_date, pa.resource_id,
+                        COALESCE(o.order_code, p.order_code) AS order_code,
+                        COALESCE(o.product_category, p.product_category) AS product_category,
+                        COALESCE(o.style_no, p.style_no) AS style_no
+                   FROM planning_events pe
+                   JOIN planning_assignments pa ON pa.event_id = pe.id AND pa.is_primary = 1
+                   LEFT JOIN planning_orders o ON o.id = pe.planning_order_id
+                   LEFT JOIN planning_orders p ON pe.planning_order_id IS NULL AND pe.event_code LIKE 'ev-proj:%'
+                        AND p.id = (SELECT x.id FROM planning_orders x
+                                     WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(pe.event_code, 9), '-[0-9]{1,2}$', '')
+                                     ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
+                  WHERE pe.event_status <> 'cancelled' AND pe.end_date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)`),
+            pool.query('SELECT line, product_type, efficiency_pct FROM efficiency_profile'),
+            pool.query('SELECT curve_name, period_days, unit_id, day_number, efficiency_pct FROM learning_curve ORDER BY curve_name, day_number'),
+            // orders whose confirm POs are planned: their projection strips
+            // are ghosts the board never shows
+            pool.query(
+                `SELECT DISTINCT po.erp_order_id AS code FROM planning_orders po
+                   JOIN planning_events pe ON pe.planning_order_id = po.id AND pe.event_status <> 'cancelled'
+                  WHERE po.erp_order_id IS NOT NULL AND po.erp_order_id <> '' AND po.erp_po_id NOT LIKE 'proj-%'`),
+            completedOrderCodes()
+        ]);
+        const toMin = t => { const [h, m] = String(t || '08:00').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+        const blankCal = () => ({ days : {}, overrides : {}, lineOverrides : {} });
+        const calByUnit = {};
+        for (const r of calRows) {
+            const c = calByUnit[r.unit_id] ||= blankCal();
+            const start = toMin(r.start_time);
+            let hours = 0;
+            if (r.interval_type === 'working' && r.end_time) {
+                let diff = toMin(r.end_time) - start;
+                if (diff <= 0) diff += 1440;
+                hours = diff / 60;
+            }
+            c.days[r.weekday_no] = { start, hours };
+        }
+        for (const r of ovRows) {
+            const c = calByUnit[r.unit_id] ||= blankCal();
+            const h = Number(String(r.n || '').replace(/^HOURS=/, ''));
+            if (!r.d || !Number.isFinite(h)) continue;
+            if (r.resource_id) (c.lineOverrides[r.resource_id] ||= {})[r.d] = h;
+            else c.overrides[r.d] = h;
+        }
+        const profiles = {};
+        for (const r of profRows) (profiles[r.line] ||= {})[r.product_type] = Number(r.efficiency_pct) || 0;
+        const replaced = new Set(replRows.map(r => String(r.code)));
+        const projCode = ec => (String(ec || '').startsWith('ev-proj:') ? String(ec).slice(8).replace(/-\d{1,2}$/, '') : null);
+        const lineUnit = new Map(lineRows.map(l => [Number(l.id), Number(l.unit_id)]));
+        const busyByUnit = {};
+        for (const e of evRows) {
+            const u = lineUnit.get(Number(e.resource_id));
+            if (!u) continue;
+            const pc   = projCode(e.event_code);
+            const code = e.order_code || pc;
+            if (code && completed.has(code)) continue;      // retired order — the board drops its bars
+            if (pc && replaced.has(pc)) continue;           // projection replaced by its confirm POs
+            (busyByUnit[u] ||= []).push({ lineId : Number(e.resource_id), start : e.start_date, end : e.end_date,
+                productType : e.product_category, style : e.style_no });
+        }
+        const units = [1, 2, 3].map(uid => ({
+            unitId   : uid,
+            lines    : lineRows.filter(l => Number(l.unit_id) === uid)
+                .map(l => ({ id : Number(l.id), name : l.name, manpower : Number(l.manpower), eff : Number(l.eff), hours : Number(l.hours) })),
+            calendar : calByUnit[uid] || blankCal(),
+            busy     : busyByUnit[uid] || [],
+            profiles,
+            curve    : pickCurve(lcRows, uid),
+            orders   : orders.filter(o => Number(o.unit) === uid)
+        }));
+        const out = simulateAllocation({ today : new Date(), units });
+        res.json({ success : true, ...out });
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
