@@ -6281,18 +6281,64 @@ function openAvailableOrders() {
     });
 }
 
-// Tabs of the report — each order sits in exactly ONE of them, by its status
-// in the list: Available = unplanned (incl. holding) + replaced, Planned = its
-// projection bar is on a line, Complete Order = marked complete
+// Tabs of the report — BOTH count the available orders (unplanned incl.
+// holding + replaced; planned and completed orders are out of the report):
+//   Available       — orders / order qty / SAH per unit × planning month
+//   Plan allocation — the same orders laid on the calendar by the plan rule:
+//                     sewing start = PCD − 8 days, sewing end = order delivery
+//                     − 7 days, the order qty spread evenly over the calendar
+//                     days of that window. Plan Qty = the part that falls inside
+//                     the plan window (1st → last day of the planning month),
+//                     Excess = the rest (before the 1st / after the last day)
+const AVAIL_ORDER_OK       = r => r.status !== 'completed' && r.status !== 'planned';
+const SEW_START_BEFORE_PCD = 8;   // sewing start = PCD − 8 days
+const SEW_END_BEFORE_SHIP  = 7;   // sewing end   = order delivery − 7 days
 const AVAIL_TABS = [
-    { key : 'open',    label : 'Available', hint : 'Unplanned + Replaced',  match : r => r.status !== 'completed' && r.status !== 'planned' },
-    { key : 'planned', label : 'Planned',   hint : 'Projection bar on a line', match : r => r.status === 'planned' },
-    { key : 'done',    label : 'Complete Order', hint : 'Marked complete', match : r => r.status === 'completed' }
+    { key : 'open', label : 'Available', hint : 'Unplanned + Replaced', headline : 'qty',
+      left : [{ key : 'period', label : 'Period' }],
+      cols : [{ key : 'orders', label : 'Orders' }, { key : 'qty', label : 'Order Qty' },
+              { key : 'sah', label : 'SAH', cls : 'av-sah', round : true }],
+      xnote : 'SAH = order qty × SMV / 60' },
+    { key : 'alloc', label : 'Plan allocation', hint : 'Sewing window inside the calendar month', headline : 'plan',
+      left : [{ key : 'window', label : 'Plan Window' }],
+      cols : [{ key : 'qty', label : 'Order Qty' }, { key : 'plan', label : 'Plan Qty', cls : 'av-plan' },
+              { key : 'sah', label : 'Plan SAH', cls : 'av-sah', round : true },
+              { key : 'excess', label : 'Excess', cls : 'av-excess', tip : true }],
+      xnote : `sewing start = PCD − ${SEW_START_BEFORE_PCD} days, sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
+            + 'order qty spread evenly over the days of that window · Plan Qty = the part inside the plan window (1st → last day), '
+            + 'Plan SAH = Plan Qty × SMV / 60 · Excess = the rest (before the 1st / after the last day)' }
 ];
 const availTab = ref('open');
 
+// Sewing window of an order by the plan rule — null when it has no delivery /
+// PCD. A PCD later than the end puts the whole qty on the end day.
+function sewWindowOf(r) {
+    const ship = r.erpDelivery || r.orderDelivery || r.poDelivery;
+    if (!ship || !r.pcd) return null;
+    const s = new Date(r.pcd); s.setHours(0, 0, 0, 0);
+    const e = new Date(ship);  e.setHours(0, 0, 0, 0);
+    if (Number.isNaN(+s) || Number.isNaN(+e)) return null;
+    s.setDate(s.getDate() - SEW_START_BEFORE_PCD);
+    e.setDate(e.getDate() - SEW_END_BEFORE_SHIP);
+    if (e < s) s.setTime(e.getTime());
+    return { start : s, end : e };
+}
+const dayNo = d => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
+// How much of qty (spread evenly over the window's calendar days) falls inside
+// [calStart, calEnd], before it and after it — whole pieces, summing to qty
+function allocInWindow(w, calStart, calEnd, qty) {
+    if (!w) return { plan : 0, before : 0, after : qty };
+    const ws = dayNo(w.start), we = dayNo(w.end), cs = dayNo(calStart), ce = dayNo(calEnd);
+    const days    = we - ws + 1;
+    const inDays  = Math.max(0, Math.min(we, ce) - Math.max(ws, cs) + 1);
+    const befDays = Math.max(0, Math.min(we, cs - 1) - ws + 1);
+    const plan    = Math.round(qty * inDays / days);
+    const before  = Math.min(Math.round(qty * befDays / days), qty - plan);
+    return { plan, before, after : qty - plan - before };
+}
+
 const availByTab = computed(() => {
-    const blank = () => ({ orders : 0, qty : 0, sah : 0 });
+    const blank = () => ({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0 });
     // The report window: ONE month back from the running month, the running
     // month, and every later month — older months are left out (and out of Total)
     const cur  = planMonthOf({ erpDelivery : new Date() });
@@ -6301,27 +6347,37 @@ const availByTab = computed(() => {
     const out  = {};
     for (const t of AVAIL_TABS) {
         out[t.key] = { units : AVAIL_UNITS.map(u => ({ ...u })), months : new Map(), total : { cells : {}, all : blank() },
-            noSmv : 0, current : cur?.label || '', from };
+            noSmv : 0, pcdFallback : 0, noWindow : 0, current : cur?.label || '', from };
     }
     for (const r of availRows.value) {
-        if (r.orderType !== 'projected') continue;
+        if (r.orderType !== 'projected' || !AVAIL_ORDER_OK(r)) continue;
         const qty = Number(r.orderQty) || 0;
         if (!(qty > 0)) continue;
         const pm  = planMonthOf(r);
         if (from && pm && pm.label < from) continue;
-        const tab = AVAIL_TABS.find(t => t.match(r));
-        if (!tab) continue;
-        const o   = out[tab.key];
         const uid = Number(r.prodUnit) || 0;
-        if (!o.units.some(u => u.id === uid)) o.units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
         const key = pm?.label || '—';
-        if (!o.months.has(key)) o.months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
-        const m   = o.months.get(key);
         const smv = Number(r.smv) || 0;
-        const sah = qty * smv / 60;
-        if (!(smv > 0)) o.noSmv++;
-        for (const c of [m.cells[uid] ||= blank(), m.all, o.total.cells[uid] ||= blank(), o.total.all]) {
-            c.orders++; c.qty += qty; c.sah += sah;
+        // plan window = the calendar month of the planning month label (1st → last day)
+        const calStart = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth(), 1) : null;
+        const calEnd   = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth() + 1, 0) : null;
+        const w        = calStart ? sewWindowOf(r) : null;
+        const a        = calStart ? allocInWindow(w, calStart, calEnd, qty) : { plan : 0, before : 0, after : qty };
+        for (const t of AVAIL_TABS) {
+            const o = out[t.key];
+            if (!o.units.some(u => u.id === uid)) o.units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
+            if (!o.months.has(key)) o.months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, calStart, calEnd, cells : {}, all : blank() });
+            const m = o.months.get(key);
+            if (!(smv > 0)) o.noSmv++;
+            if (t.key === 'alloc') {
+                if (r.pcdSource === 'delivery_minus_30') o.pcdFallback++;
+                if (!w) o.noWindow++;
+            }
+            const sahQty = t.key === 'alloc' ? a.plan : qty;
+            for (const c of [m.cells[uid] ||= blank(), m.all, o.total.cells[uid] ||= blank(), o.total.all]) {
+                c.orders++; c.qty += qty; c.sah += sahQty * smv / 60;
+                c.plan += a.plan; c.before += a.before; c.after += a.after; c.excess += a.before + a.after;
+            }
         }
     }
     for (const o of Object.values(out)) {
@@ -6335,22 +6391,28 @@ const availSummary = computed(() => availByTab.value[availTab.value] || availByT
 const availTabInfo = computed(() => AVAIL_TABS.find(t => t.key === availTab.value) || AVAIL_TABS[0]);
 
 const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
-const availCell   = (m, uid) => m.cells[uid] || { orders : 0, qty : 0, sah : 0 };
+const availWindow = m => (m.calStart ? `${fmtDateDdMonRr(m.calStart)} → ${fmtDateDdMonRr(m.calEnd)}` : '—');
+const availLeft   = (m, key) => (key === 'window' ? availWindow(m) : availPeriod(m));
+const AVAIL_BLANK = Object.freeze({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0 });
+const availCell   = (m, uid) => (uid === 'all' ? m.all : m.cells[uid]) || AVAIL_BLANK;
 const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
 const fmtAvQty    = v => (v ? fmtQty(v) : '—');
+const availFmt    = (c, v) => (c.round ? fmtSah(v) : fmtAvQty(v));
+const availTip    = (c, cell) => (c.tip && cell.excess
+    ? `before the 1st: ${fmtQty(cell.before)} · after the last day: ${fmtQty(cell.after)}` : '');
 
 function exportAvailExcel() {
     const s   = availSummary.value;
     const tab = availTabInfo.value;
     if (!s.rows.length) { toast('No orders to export', 'warn'); return; }
     const num  = v => `<td style="text-align:right">${v ? Math.round(v) : ''}</td>`;
-    const trio = c => num(c.orders) + num(c.qty) + num(c.sah);
-    const line = (m, lead) => `<tr>${lead}${s.units.map(u => trio(availCell(m, u.id))).join('')}${trio(m.all)}</tr>`;
-    const head1 = `<tr><th rowspan="2">Planning Month</th><th rowspan="2">Period</th>`
-        + [...s.units.map(u => u.name), 'Total'].map(n => `<th colspan="3">${n}</th>`).join('') + '</tr>';
-    const head2 = `<tr>${[...s.units, 0].map(() => '<th>Orders</th><th>Order Qty</th><th>SAH</th>').join('')}</tr>`;
-    const body  = s.rows.map(m => line(m, `<td style="mso-number-format:'\\@'">${m.label}</td><td>${availPeriod(m)}</td>`)).join('');
-    const foot  = line(s.total, '<th colspan="2">Total</th>');
+    const grp  = c => tab.cols.map(k => num(c[k.key])).join('');
+    const line = (m, lead) => `<tr>${lead}${s.units.map(u => grp(availCell(m, u.id))).join('')}${grp(m.all)}</tr>`;
+    const head1 = `<tr><th rowspan="2">Planning Month</th>${tab.left.map(c => `<th rowspan="2">${c.label}</th>`).join('')}`
+        + [...s.units.map(u => u.name), 'Total'].map(n => `<th colspan="${tab.cols.length}">${n}</th>`).join('') + '</tr>';
+    const head2 = `<tr>${[...s.units, 0].map(() => tab.cols.map(c => `<th>${c.label}</th>`).join('')).join('')}</tr>`;
+    const body  = s.rows.map(m => line(m, `<td style="mso-number-format:'\\@'">${m.label}</td>${tab.left.map(c => `<td>${availLeft(m, c.key)}</td>`).join('')}`)).join('');
+    const foot  = line(s.total, `<th colspan="${1 + tab.left.length}">Total</th>`);
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <head><meta charset="UTF-8">
 <style>
@@ -6361,7 +6423,7 @@ function exportAvailExcel() {
 </head>
 <body>
 <h2 style="margin:0">Available Order — ${tab.label} (${tab.hint}) — unit × planning month</h2>
-<div style="margin:4px 0 8px;font-size:9pt">SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th · from ${s.from || 'the first month'}</div>
+<div style="margin:4px 0 8px;font-size:9pt">${tab.xnote} · planning month = month of (order delivery − 10 days), 11th → 10th · from ${s.from || 'the first month'}</div>
 <table><thead>${head1}${head2}</thead><tbody>${body}${foot}</tbody></table>
 </body></html>`;
     const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
@@ -12926,7 +12988,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
 
         <!-- Available Order: every unit × planning month — order qty and SAH -->
         <div v-if="availOpen" class="cal-overlay av-overlay" @click.self="availOpen = false">
-            <div class="cal-dialog av-dialog">
+            <div class="cal-dialog av-dialog" :class="{ 'av-wide' : availTabInfo.key === 'alloc' }">
                 <div class="cal-title">
                     Available Order
                     <span style="font-size:12px;color:#888;font-weight:400;margin-left:10px;">
@@ -12942,57 +13004,64 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span v-for="t in AVAIL_TABS" :key="t.key" class="av-tab" :class="{ 'av-tab-on' : availTab === t.key }"
                         :title="t.hint" @click="availTab = t.key"
                     >{{ t.label }}<small>{{ t.hint }}</small>
-                        <b v-if="!availLoading && !availError">{{ fmtQty(availByTab[t.key].total.all.qty) }}</b></span>
+                        <b v-if="!availLoading && !availError">{{ fmtQty(availByTab[t.key].total.all[t.headline]) }}</b></span>
                 </div>
                 <div class="av-body">
                     <div v-if="availError" class="av-empty">Could not load the orders — {{ availError }}</div>
                     <div v-else-if="availLoading" class="av-empty">⏳ Loading the order book of every unit…</div>
-                    <div v-else-if="!availSummary.rows.length" class="av-empty">No orders in the {{ availTabInfo.label }} tab for these months.</div>
+                    <div v-else-if="!availSummary.rows.length" class="av-empty">No available orders for these months.</div>
                     <table v-else class="st-table av-table">
                         <thead>
                             <tr>
                                 <th rowspan="2" class="av-l">Planning Month</th>
-                                <th rowspan="2" class="av-l">Period</th>
-                                <th v-for="u in availSummary.units" :key="u.id" colspan="3" class="av-grp">{{ u.name }}</th>
-                                <th colspan="3" class="av-grp av-tot">Total</th>
+                                <th v-for="c in availTabInfo.left" :key="c.key" rowspan="2" class="av-l">{{ c.label }}</th>
+                                <th v-for="u in availSummary.units" :key="u.id" :colspan="availTabInfo.cols.length" class="av-grp">{{ u.name }}</th>
+                                <th :colspan="availTabInfo.cols.length" class="av-grp av-tot">Total</th>
                             </tr>
                             <tr>
                                 <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
-                                    <th class="av-grp-start" :class="{ 'av-tot' : u.id === 'all' }">Orders</th>
-                                    <th :class="{ 'av-tot' : u.id === 'all' }">Order Qty</th>
-                                    <th :class="{ 'av-tot' : u.id === 'all' }">SAH</th>
+                                    <th v-for="(c, i) in availTabInfo.cols" :key="c.key"
+                                        :class="{ 'av-grp-start' : i === 0, 'av-tot' : u.id === 'all' }">{{ c.label }}</th>
                                 </template>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="m in availSummary.rows" :key="m.label" :class="{ 'av-cur' : m.label === availSummary.current }">
-                                <td class="av-l av-month">{{ m.label }}<span v-if="m.label === availSummary.current" class="av-cur-tag">running</span></td>
-                                <td class="av-l av-period">{{ availPeriod(m) }}</td>
-                                <template v-for="u in availSummary.units" :key="u.id">
-                                    <td class="av-grp-start">{{ fmtAvQty(availCell(m, u.id).orders) }}</td>
-                                    <td>{{ fmtAvQty(availCell(m, u.id).qty) }}</td>
-                                    <td class="av-sah">{{ fmtSah(availCell(m, u.id).sah) }}</td>
+                                <td class="av-l av-month" :title="availPeriod(m)">{{ m.label }}<span v-if="m.label === availSummary.current" class="av-cur-tag">running</span></td>
+                                <td v-for="c in availTabInfo.left" :key="c.key" class="av-l av-period">{{ availLeft(m, c.key) }}</td>
+                                <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
+                                    <td v-for="(c, i) in availTabInfo.cols" :key="c.key"
+                                        :class="[c.cls, { 'av-grp-start' : i === 0, 'av-tot' : u.id === 'all' }]"
+                                        :title="availTip(c, availCell(m, u.id))"
+                                    >{{ availFmt(c, availCell(m, u.id)[c.key]) }}</td>
                                 </template>
-                                <td class="av-grp-start av-tot">{{ fmtAvQty(m.all.orders) }}</td>
-                                <td class="av-tot">{{ fmtAvQty(m.all.qty) }}</td>
-                                <td class="av-tot av-sah">{{ fmtSah(m.all.sah) }}</td>
                             </tr>
                         </tbody>
                         <tfoot>
                             <tr>
-                                <td class="av-l" colspan="2">Total</td>
-                                <template v-for="u in availSummary.units" :key="u.id">
-                                    <td class="av-grp-start">{{ fmtAvQty(availCell(availSummary.total, u.id).orders) }}</td>
-                                    <td>{{ fmtAvQty(availCell(availSummary.total, u.id).qty) }}</td>
-                                    <td class="av-sah">{{ fmtSah(availCell(availSummary.total, u.id).sah) }}</td>
+                                <td class="av-l" :colspan="1 + availTabInfo.left.length">Total</td>
+                                <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
+                                    <td v-for="(c, i) in availTabInfo.cols" :key="c.key"
+                                        :class="[c.cls, { 'av-grp-start' : i === 0 }]"
+                                        :title="availTip(c, availCell(availSummary.total, u.id))"
+                                    >{{ availFmt(c, availCell(availSummary.total, u.id)[c.key]) }}</td>
                                 </template>
-                                <td class="av-grp-start">{{ fmtAvQty(availSummary.total.all.orders) }}</td>
-                                <td>{{ fmtAvQty(availSummary.total.all.qty) }}</td>
-                                <td class="av-sah">{{ fmtSah(availSummary.total.all.sah) }}</td>
                             </tr>
                         </tfoot>
                     </table>
-                    <div class="av-note">
+                    <div v-if="availTabInfo.key === 'alloc'" class="av-note">
+                        <b>Plan allocation</b> tab: the available orders (unplanned + replaced) laid on the calendar by the plan rule ·
+                        sewing start = PCD − {{ SEW_START_BEFORE_PCD }} days · sewing end = order delivery − {{ SEW_END_BEFORE_SHIP }} days ·
+                        the order qty is spread evenly over the calendar days of that window ·
+                        <b>Plan Qty</b> = the part that falls inside the plan window (1st → last day of the planning month) ·
+                        Plan SAH = Plan Qty × SMV / 60 ·
+                        <b>Excess</b> = the rest, before the 1st or after the last day (hover a cell for the split) ·
+                        planning month = month of (order delivery − 10 days), 11th → 10th
+                        <span v-if="availSummary.pcdFallback" class="av-warn"> · ⚠ {{ availSummary.pcdFallback }} order(s) have no ERP PCD — PCD taken as delivery − 30</span>
+                        <span v-if="availSummary.noWindow" class="av-warn"> · ⚠ {{ availSummary.noWindow }} order(s) have no delivery / PCD — all of their qty counts as Excess</span>
+                        <span v-if="availSummary.noSmv" class="av-warn"> · ⚠ {{ availSummary.noSmv }} order(s) have no SMV — their SAH counts as 0</span>
+                    </div>
+                    <div v-else class="av-note">
                         <b>{{ availTabInfo.label }}</b> tab: {{ availTabInfo.hint.toLowerCase() }} ·
                         order qty per order (in-house: mr_order_entry · outside / TBA: os_orders) ·
                         SAH = order qty × SMV / 60 · planning month = month of (order delivery − 10 days), 11th → 10th ·
@@ -15385,6 +15454,11 @@ body {
 .od-avail-btn:hover { background : #17356b; }
 .av-overlay { z-index : 30010; }
 .cal-dialog.av-dialog { width : 1120px; max-width : 96vw; }
+.cal-dialog.av-dialog.av-wide { width : 1460px; }
+.av-wide .av-table { font-size : 11px; }
+.av-wide .av-table th, .av-wide .av-table td { padding : 5px 6px; }
+.av-table td.av-plan { color : #0d47a1; font-weight : bold; }
+.av-table td.av-excess { color : #c62828; }
 .av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
 .av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
 .av-tabs { display : flex; gap : 4px; padding : 8px 12px 0; background : #fff; border-bottom : 2px solid #17356b; }
