@@ -201,28 +201,41 @@ export function simulateUnit(unit, today) {
         return v;
     }
     // Dry run of `rem` plan pieces of order o on line L between wStart and
-    // wEnd: the days it would produce on, the pieces fitted, the finish day
+    // wEnd. Like a bar on the board the order runs as ONE CONTIGUOUS RUN of
+    // working days (an off day does not break it, a day the line has no free
+    // time left does): the earliest run that finishes the order wins, else
+    // the run that fits the most. Returns its days, pieces fitted, finish day.
     function trial(L, o, rem0, wStart, wEnd) {
         const eff = effFor(L, o);
         const ramp = curve && L.runKey != null && L.runKey !== o.runKey;
-        const rate = L.manpower * eff / 100 / o.smv;        // pieces per free minute at 100 % curve
-        const days = [];
-        let rem = rem0, k = 0, started = false, finish = null;
+        const rate = L.manpower * eff / 100 / o.smv;        // pieces per free line minute at 100 % curve
+        let best = null, run = null;
+        const close = () => {
+            if (run && run.days.length) {
+                const cand = { L, eff, ramp, days : run.days, fitted : rem0 - run.rem, finish : run.finish };
+                if (!best) best = cand;
+                else if (cand.finish && (!best.finish || cand.finish < best.finish)) best = cand;
+                else if (!cand.finish && !best.finish && cand.fitted > best.fitted) best = cand;
+            }
+            run = null;
+        };
         for (let d = new Date(wStart), g = 0; d <= wEnd && g < MAX_WIN; d = addDays(d, 1), g++) {
             const info = dayOf(L, d);
             if (info.off) continue;
-            const factor = ramp && k < curve.pct.length ? curve.pct[k] / 100 : 1;
+            if (!run) run = { days : [], rem : rem0, k : 0, finish : null };
+            const factor = ramp && run.k < curve.pct.length ? curve.pct[run.k] / 100 : 1;
             const cap = Math.floor(info.freeMin * rate * factor);
-            if (cap > 0) {
-                const q = Math.min(cap, rem);
-                days.push({ d : new Date(d), q, min : q / (rate * factor) });
-                rem -= q;
-                started = true;
-                if (rem <= 0) { finish = new Date(d); break; }
-            }
-            if (started) k++;
+            if (cap <= 0) { close(); continue; }            // a full day ends the run
+            const q = Math.min(cap, run.rem);
+            // min = line minutes the pieces take; loss = the part of them the
+            // Build up ramp costs against full-speed running
+            run.days.push({ d : new Date(d), q, min : q / (rate * factor), loss : q / (rate * factor) * (1 - factor) });
+            run.rem -= q;
+            run.k++;
+            if (run.rem <= 0) { run.finish = new Date(d); close(); break; }   // scanning forward: the first finish is the earliest
         }
-        return { L, eff, ramp, days, fitted : rem0 - rem, finish };
+        close();
+        return best || { L, eff, ramp, days : [], fitted : 0, finish : null };
     }
 
     const orders = (unit.orders || []).map(o => {
@@ -235,6 +248,30 @@ export function simulateUnit(unit, today) {
         || ((a.ship || 0) - (b.ship || 0))
         || String(a.productType || '').localeCompare(String(b.productType || ''))
         || String(a.key).localeCompare(String(b.key)));
+
+    // Capacity per calendar month, from the 1st of this month to the last
+    // window end: the lines' minutes (× manpower), what is already gone
+    // (before today), what the saved bars hold, what is free for new plan —
+    // and, after the run, what this plan used. Pieces at the unit's order-mix
+    // SMV and the lines' mean efficiency, so the figures compare with Plan Qty
+    const capacity = {};
+    {
+        const horizon = orders.reduce((m, o) => (o.ship && o.ship > m ? o.ship : m), addDays(t0, 30));
+        const hEnd = new Date(Math.min(horizon.getTime(), addDays(t0, 240).getTime()));
+        const hStart = new Date(t0.getFullYear(), t0.getMonth(), 1);
+        for (const L of lines) {
+            for (let d = new Date(hStart), g = 0; d <= hEnd && g < MAX_WIN; d = addDays(d, 1), g++) {
+                const info = dayOf(L, d);
+                if (info.off) continue;
+                const ym = ymdOf(d).slice(0, 7);
+                const c = capacity[ym] ||= { manMin : 0, pastManMin : 0, busyManMin : 0, freeManMin : 0, usedManMin : 0, curveManMin : 0 };
+                c.manMin += info.minutes * L.manpower;
+                if (d < t0) { c.pastManMin += info.minutes * L.manpower; continue; }
+                c.busyManMin += (info.minutes - info.freeMin) * L.manpower;
+                c.freeManMin += info.freeMin * L.manpower;
+            }
+        }
+    }
 
     const out = [];
     for (const o of orders) {
@@ -279,6 +316,8 @@ export function simulateUnit(unit, today) {
                 const key = ymdOf(x.d);
                 planDays.set(key, (planDays.get(key) || 0) + x.q);
                 lineQty += x.q;
+                const c = capacity[key.slice(0, 7)];
+                if (c) c.curveManMin += x.loss * L.manpower;
             }
             L.runKey = o.runKey;
             used.add(L.id);
@@ -301,16 +340,45 @@ export function simulateUnit(unit, today) {
         res.start  = keys[0] || null;
         res.end    = keys[keys.length - 1] || null;
     }
-    return { orders : out };
+    // what the plan used per month = free before − free after (from today)
+    for (const L of lines) {
+        for (const [k, info] of L.days) {
+            const c = capacity[k.slice(0, 7)];
+            if (!c || k < ymdOf(t0)) continue;
+            c.usedManMin += Math.max(0, (info.minutes - info.freeMin) * L.manpower);   // busy now (saved + plan)
+        }
+    }
+    const effMean = lines.length ? lines.reduce((a, l) => a + l.eff, 0) / lines.length / 100 : 0;
+    const wQty = orders.filter(o => o.smv > 0).reduce((a, o) => a + o.qty, 0);
+    const smvMix = wQty ? orders.filter(o => o.smv > 0).reduce((a, o) => a + o.qty * o.smv, 0) / wQty : 0;
+    const pcs = manMin => (smvMix > 0 ? Math.round(manMin * effMean / smvMix / (1 + PLAN_EXTRA)) : 0);
+    for (const c of Object.values(capacity)) {
+        c.usedManMin = Math.max(0, c.usedManMin - c.busyManMin);   // busy now minus the saved bars = this plan
+        c.smv = Math.round(smvMix * 10) / 10;
+        c.eff = Math.round(effMean * 100);
+        c.pcs = pcs(c.manMin); c.pastPcs = pcs(c.pastManMin); c.busyPcs = pcs(c.busyManMin);
+        c.freePcs = pcs(c.freeManMin); c.usedPcs = pcs(c.usedManMin); c.curvePcs = pcs(c.curveManMin);
+    }
+
+    const result = { orders : out, capacity };
+    // diagnostics only (unit.debug): every line's day minutes and what is
+    // still free after the simulation
+    if (unit.debug) {
+        result.lines = lines.map(L => ({ id : L.id, name : L.name, manpower : L.manpower, eff : L.eff,
+            days : [...L.days.entries()].map(([k, v]) => [k, v.minutes, Math.round(v.freeMin)]) }));
+    }
+    return result;
 }
 
 export function simulateAllocation({ today = new Date(), units = [] } = {}) {
     const orders = [];
     const summary = [];
+    const capacity = {};
     for (const u of units) {
         const r = simulateUnit(u, today);
         for (const o of r.orders) orders.push({ ...o, unit : u.unitId });
         summary.push({ unitId : u.unitId, lines : (u.lines || []).length, orders : r.orders.length, curve : u.curve?.name || null });
+        capacity[u.unitId] = r.capacity;
     }
-    return { today : ymdOf(toDay(today) || new Date()), orders, units : summary };
+    return { today : ymdOf(toDay(today) || new Date()), orders, units : summary, capacity };
 }

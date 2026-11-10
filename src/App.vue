@@ -6307,7 +6307,7 @@ const AVAIL_TABS = [
       xnote : 'SAH = order qty × SMV / 60' },
     { key : 'alloc', label : 'Plan allocation', hint : 'Board simulation: lines · calendar · capacity', headline : 'plan',
       left : [{ key : 'window', label : 'Plan Window' }],
-      cols : [{ key : 'qty', label : 'Order Qty' }, { key : 'plan', label : 'Plan Qty', cls : 'av-plan' },
+      cols : [{ key : 'qty', label : 'Order Qty' }, { key : 'plan', label : 'Plan Qty', cls : 'av-plan', capTip : true },
               { key : 'sah', label : 'Plan SAH', cls : 'av-sah', round : true },
               { key : 'excess', label : 'Excess', cls : 'av-excess', tip : true }],
       xnote : `board simulation — sewing start = PCD − ${SEW_START_BEFORE_PCD} days, sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
@@ -6354,7 +6354,7 @@ function runPlanAllocation(rows) {
     allocInfo.value    = null;
     loadPlanAllocation(orders).then(j => {
         allocByKey.value   = new Map((j.orders || []).map(o => [o.key, o]));
-        allocInfo.value    = { today : j.today, units : j.units || [] };
+        allocInfo.value    = { today : j.today, units : j.units || [], capacity : j.capacity || {} };
         allocLoading.value = false;
     }).catch(e => {
         allocError.value   = e.name === 'AbortError' ? 'the simulation took too long' : (e.message || 'simulation failed');
@@ -6428,10 +6428,36 @@ const availCell   = (m, uid) => (uid === 'all' ? m.all : m.cells[uid]) || AVAIL_
 const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
 const fmtAvQty    = v => (v ? fmtQty(v) : '—');
 const availFmt    = (c, v) => (c.round ? fmtSah(v) : fmtAvQty(v));
-const availTip    = (c, cell) => (c.tip && cell.excess
-    ? `made before the 1st: ${fmtQty(cell.before)} · made after the last day: ${fmtQty(cell.after)} · no capacity in the window: ${fmtQty(cell.nocap)}`
-      + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)}` : '')
-    : '');
+// Line capacity of a unit (or every unit) in a calendar month, as the
+// simulation counted it — the Plan Qty cell's tooltip
+function availCapacity(uid, ym) {
+    const cap = allocInfo.value?.capacity;
+    if (!cap || !ym || ym === '—') return null;
+    const units = uid === 'all' ? Object.keys(cap) : [String(uid)];
+    const sum = { pcs : 0, pastPcs : 0, busyPcs : 0, freePcs : 0, usedPcs : 0, curvePcs : 0, n : 0 };
+    for (const u of units) {
+        const c = cap[u]?.[ym];
+        if (!c) continue;
+        sum.n++;
+        for (const k of ['pcs', 'pastPcs', 'busyPcs', 'freePcs', 'usedPcs', 'curvePcs']) sum[k] += c[k] || 0;
+    }
+    return sum.n ? sum : null;
+}
+const availTip = (c, cell, m = null, uid = null) => {
+    if (c.tip && cell.excess) {
+        return `made before the 1st: ${fmtQty(cell.before)} · made after the last day: ${fmtQty(cell.after)} · no capacity in the window: ${fmtQty(cell.nocap)}`
+            + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)}` : '');
+    }
+    if (c.capTip && m) {
+        const k = availCapacity(uid, m.label);
+        if (!k) return '';
+        return `line capacity in ${m.label} (lines' manpower × hours × efficiency ÷ order-mix SMV): ${fmtQty(k.pcs)} pcs`
+            + ` · already gone before today: ${fmtQty(k.pastPcs)} · held by the bars saved on the board: ${fmtQty(k.busyPcs)}`
+            + ` · free for new plan: ${fmtQty(k.freePcs)} · this plan uses: ${fmtQty(k.usedPcs)} (orders of every planning month)`
+            + (k.curvePcs ? `, of which the Build up curve (product / style change) costs ${fmtQty(k.curvePcs)}` : '');
+    }
+    return '';
+};
 // Lines per unit and the Build up curve the simulation used, for the note
 const allocInfoText = computed(() => {
     const info = allocInfo.value;
@@ -13074,7 +13100,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
                                     <td v-for="(c, i) in availTabInfo.cols" :key="c.key"
                                         :class="[c.cls, { 'av-grp-start' : i === 0, 'av-tot' : u.id === 'all' }]"
-                                        :title="availTip(c, availCell(m, u.id))"
+                                        :title="availTip(c, availCell(m, u.id), m, u.id)"
                                     >{{ availFmt(c, availCell(m, u.id)[c.key]) }}</td>
                                 </template>
                             </tr>
@@ -13101,6 +13127,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         orders are planned in the board's order (PCD, then delivery), on the line that finishes earliest, spilling over to other lines when one cannot hold them ·
                         <b>Plan Qty</b> = pieces the simulation makes inside the plan window (1st → last day of the planning month) · Plan SAH = Plan Qty × SMV / 60 ·
                         <b>Excess</b> = pieces made before the 1st / after the last day + pieces no line can make in the window (hover a cell for the split) ·
+                        hover a Plan Qty cell for the month's line capacity: whole month, gone before today, held by saved bars, free, used by this plan ·
                         planning month = month of (order delivery − 10 days), 11th → 10th
                         <span v-if="allocInfoText"> · {{ allocInfoText }}</span>
                         <span v-if="availSummary.lateOrders" class="av-warn"> · ⚠ {{ availSummary.lateOrders }} order(s) whose window already closed (delivery − 7 before today) are planned late, up to their delivery date</span>

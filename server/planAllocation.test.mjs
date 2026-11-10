@@ -126,6 +126,37 @@ test('per-line override: 0 = that line off even on a working day, > 0 = it works
     near(o.days['2026-11-06'], Math.round(1440 * 100000 / 103000));   // only line 2, 8 h × 180 / h
 });
 
+test('an order runs as one contiguous run: a line that is full in the middle of the window is passed over for a line that is free', () => {
+    const L2 = { ...LINE, id : 2, name : 'Line 02' };
+    // line 1 is fully booked on 3 Nov; the order (≈ 3 working days) starts 2 Nov
+    const r = simulateUnit({ unitId : 3, lines : [LINE, L2], calendar : cal(), profiles : {},
+        busy : [{ lineId : 1, start : '2026-11-03T08:00:00', end : '2026-11-03T18:00:00', productType : 'Pant', style : 'S1' }],
+        orders : [{ key : 'I', qty : 5000, smv : 10, pcd : '2026-11-10', ship : '2026-11-30', productType : 'Pant', style : 'S1' }] }, TODAY);
+    const o = r.orders[0];
+    assert.equal(o.lines.length, 1);
+    assert.equal(o.lines[0].id, 2);                        // line 2 finishes it earliest (4 Nov), line 1 only by 5 Nov
+    assert.deepEqual(Object.keys(o.days), ['2026-11-02', '2026-11-03', '2026-11-04']);
+    assert.equal(o.left, 0);
+});
+
+test('capacity per month: minutes of the lines, gone before today, saved bars, free, used by the plan — in pieces at the order mix SMV', () => {
+    const r = simulateUnit({ unitId : 3, lines : [LINE], calendar : cal(), profiles : {},
+        busy : [{ lineId : 1, start : '2026-11-02T08:00:00', end : '2026-11-02T18:00:00', productType : 'Pant', style : 'S1' }],
+        orders : [{ key : 'J', qty : 1000, smv : 10, pcd : '2026-11-10', ship : '2026-11-30', productType : 'Pant' }] }, TODAY);
+    const c = r.capacity['2026-11'];
+    // 26 working days (Fridays off) × 600 min × 50 mp
+    assert.equal(c.manMin, 26 * 600 * 50);
+    assert.equal(c.pastManMin, 0);                         // today is the 1st
+    assert.equal(c.busyManMin, 600 * 50);                  // the saved bar's day
+    assert.equal(c.freeManMin, 25 * 600 * 50);
+    assert.ok(c.usedManMin > 0 && c.usedManMin < 600 * 50);  // 1,030 plan pcs ≈ 0.57 day
+    assert.equal(c.smv, 10);
+    assert.equal(c.eff, 60);
+    assert.equal(c.pcs, Math.round(26 * 600 * 50 * 0.6 / 10 / 1.03));
+    assert.ok(Math.abs(c.usedPcs - 1000) <= 2);
+    assert.equal(c.freePcs + c.busyPcs + c.pastPcs, c.pcs - (c.pcs - c.freePcs - c.busyPcs - c.pastPcs));   // parts add up (rounding aside)
+});
+
 test('pickCurve: the unit\'s own 3-step curve, else the shared one, by name order', () => {
     const rows = [
         { curve_name : 'MBM 3 Days', period_days : 3, unit_id : null, day_number : 1, efficiency_pct : 35 },
