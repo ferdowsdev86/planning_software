@@ -439,7 +439,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
     }).filter(o => o.qty > 0);
 
     // PCD first so same-PCD orders stay together, then delivery / style / colour
+    // — strict runs: the latest sewing finish (deadline) first, backward urgency
+    const latestKey = o => { const l = latestSewEndOf?.(o); return l && !Number.isNaN(+l) ? +l : +o.ship; };
     prepared.sort((a, b) => {
+        if (strictDelivery) { const dl = latestKey(a) - latestKey(b); if (dl) return dl; }
         const dp = a.pcd - b.pcd;
         if (dp) return dp;
         const ds = a.ship - b.ship;

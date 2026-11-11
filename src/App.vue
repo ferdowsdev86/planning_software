@@ -936,27 +936,13 @@ async function runLiveOrderPlan(s, {
     };
     const latestOf = o => latestFinishOf ? latestFinishOf(o) : endOfWorkDay(addCalDays(new Date(o.ship), -SEW_END_BEFORE_SHIP));
 
-    // Calculate in small slices so the main thread stays responsive
     const placements = [];
     const unplaced = [];
-    const CALC_CHUNK = 25;
-    for (let i = 0; i < orders.length; i += CALC_CHUNK) {
-        const chunk = orders.slice(i, i + CALC_CHUNK);
-        const done  = Math.min(i + CALC_CHUNK, orders.length);
-        onProgress?.({
-            phase   : 'calc',
-            done,
-            total   : orders.length,
-            message : `Calculating plan… ${done} / ${orders.length}`
-        });
-        await yieldUi();
-        const { placements : part, unplaced : skipped = [] } = autoPlanOrders(chunk, lineStates, planCtx);
-        placements.push(...part);
-        unplaced.push(...skipped);
-    }
     const events = [];
     let late = 0, tight = 0;
-    for (const p of placements) {
+    // the board event of one engine placement (its raw carries the order,
+    // the critical path and the plan efficiency)
+    const buildEvent = p => {
         const o = p.order;
         const start = startOfWorkDay(p.start);
         const end   = endOfWork(start, p.dur);
@@ -1009,7 +995,7 @@ async function runLiveOrderPlan(s, {
             })
         };
 
-        events.push({
+        return {
             id         : `ev-${o.id}`,
             resourceId : p.line.id,
             startDate  : start,
@@ -1022,8 +1008,8 @@ async function runLiveOrderPlan(s, {
             draggable  : true,
             resizable  : true,
             raw
-        });
-    }
+        };
+    };
 
     // Strict delivery (Auto plan from available orders): every bar is placed on
     // the REAL board one by one — its length from the board's own production
@@ -1069,115 +1055,151 @@ async function runLiveOrderPlan(s, {
         raw.start = start; raw.end = end; raw.latePlan = false;
         return { ok : true, rec, start, end };
     };
-    if (events.length && strictDelivery) {
-        if (showToasts) toast(`Placing ${events.length} order(s) on the board…`, 'ok');
-        const byId = new Map(placements.map(p => [`ev-${p.order.id}`, p]));
-        const kept = [];
-        beginBoardInteraction(s, 'batch');
-        s.suspendRefresh?.();
-        try {
-            let n = 0;
-            for (const e of events) {
-                const p = byId.get(e.id);
-                if (!p) continue;
-                const o = p.order;
-                const r = placeExactBar(e, p.line.id, p.start, latestOf(o));
-                if (!r.ok) { unplaced.push({ order : o, reason : r.reason, raw : e.raw }); continue; }
-                kept.push(p);
-                if (++n % 25 === 0) {
-                    onProgress?.({ phase : 'add', done : n, total : events.length, message : `Placing orders on board… ${n} / ${events.length}` });
-                    await yieldUi();
-                }
-            }
-        }
-        finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
-        placements.length = 0;
-        placements.push(...kept);
-        late = 0;
-        if (kept.length) expandTimeAxisForEvents(s);
-    }
+    // the engine's line model follows the REAL board: a line is free again
+    // only after the real finish of the bar just placed on it
+    const feedFree = (lid, end) => {
+        const line = lineStates.find(l => l.id === lid);
+        if (!line || !end) return;
+        const nxt = nextStartAfter(end);
+        if (nxt > line.freeFrom) line.freeFrom = nxt;
+    };
     // Split across compatible lines: an order no single line can finish in
     // time is cut into up to 3 pieces (exact total kept) — each piece on the
-    // line with the most output by the latest sewing finish, placed exactly
+    // line with the most output by the latest sewing finish, placed exactly.
+    // Runs the moment the order fails (deadline order), so the line time it
+    // needs has not yet gone to a later delivery.
     let splitOrders = 0, splitPieces = 0;
-    if (strictDelivery && splitAcrossLines && unplaced.length) {
-        const todo = unplaced.splice(0);
-        const profOf = o => o.profileType || o.productType;
-        const lineLastEnd = lid => {
-            let m = null;
-            for (const ev of s.eventStore.records) { const x = ev.data?.raw; if (!x || x.stage) continue; if (lineIdOf(s, ev) !== lid) continue; if (!m || ev.endDate > m) m = ev.endDate; }
-            return m;
-        };
+    const profOf = o => o.profileType || o.productType;
+    const splitUnplaced = todo => {
+        if (!todo.length) return;
+        if (!splitAcrossLines) { unplaced.push(...todo); return; }
+        // last bar end per line on the real board (one indexed pass)
+        const lastEnd = new Map();
+        const idx = buildLineIndex(s);
+        for (const ev of s.eventStore.records) {
+            const x = ev.data?.raw;
+            if (!x || x.stage) continue;
+            const lid = lineIdOf(s, ev, idx);
+            if (!lid) continue;
+            const m = lastEnd.get(lid);
+            if (!m || ev.endDate > m) lastEnd.set(lid, ev.endDate);
+        }
+        for (const u of todo) {
+            const o = u.order;
+            const qty = Number(o.qty) || 0;
+            if (!(qty > 1) || !o.ship) { unplaced.push(u); continue; }
+            const latest = latestOf(o);
+            const earliest = planCtx.sewStartOf ? planCtx.sewStartOf(o) : (o.pcd ? addWorkDays(new Date(o.pcd), 5) : today);
+            const desired0 = clampIntoWorkWindow(new Date(Math.max(+earliest, +today)));
+            // template raw of the whole order (the pieces copy it)
+            const base = u.raw || { ...o, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color, risk : calcRisk({ start : desired0, end : desired0, ship : o.ship, matReady : o.matReady || o.pcd, lineUtil : 0, status : 'draft' }) };
+            let cands = lineStates.filter(l => planCtx.lineHasProductType(l.id, profOf(o)));
+            if (!cands.length) cands = lineStates;
+            const caps = [];
+            for (const l of cands) {
+                const le = lastEnd.get(l.id);
+                let st = desired0;
+                if (le) { const after = nextDayStartAfter(le); if (after > st) st = after; }
+                if (st > latest) continue;
+                const tmp = { ...base, qty, lc : undefined };
+                try {
+                    deriveLcForPlacement(s, tmp, l.id, st);
+                    applyLineFormulaDuration(s, tmp, l.id);
+                    const sim = simulateStrip(s, tmp, l.id, st);
+                    let cap = 0;
+                    for (const d of sim?.days || []) { if (endOfWorkDay(new Date(d.date)) <= latest) cap += Number(d.q) || 0; }
+                    if (cap > 0) caps.push({ line : l, start : st, cap : Math.min(cap, qty), finish : sim?.finish || null });
+                }
+                catch { /* line skipped */ }
+            }
+            caps.sort((a, b) => b.cap - a.cap);
+            let pick = [], sum = 0;
+            for (const c of caps) { pick.push(c); sum += c.cap; if (sum >= qty || pick.length === 3) break; }
+            if (sum < qty || pick.length < 2) {
+                const best = caps[0];
+                unplaced.push({ ...u, reason : `no single line finishes it in time and the ${pick.length || 1} best compatible line(s) make only ${fmtQty(sum)} of ${fmtQty(qty)} pcs by the latest sewing finish`,
+                    qtyAtRisk : Math.max(0, qty - sum), bestFinish : best?.finish || null, bestLine : best?.line?.name || null });
+                continue;
+            }
+            // proportional pieces, exact total
+            const parts = pick.map(c => Math.floor(qty * c.cap / sum));
+            let rest = qty - parts.reduce((a, b) => a + b, 0);
+            for (let i = 0; rest > 0; i = (i + 1) % parts.length) { parts[i]++; rest--; }
+            const baseCode = String(o.id).startsWith('proj:') ? `ev-${o.id}` : poBaseEventCode(o.po);
+            const orderQty0 = Number(base.orderQty ?? qty) || qty;
+            const placed = [];
+            let ok = true;
+            for (let i = 0; i < pick.length; i++) {
+                const q = parts[i];
+                if (!(q > 0)) continue;
+                const code = i === 0 ? baseCode : nextStripEventCode(s, o.po, baseCode);
+                const raw = { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), orderQty : Math.round(orderQty0 * q / qty), baseQty : Number(base.baseQty) > 0 ? Math.round(Number(base.baseQty) * q / qty) : base.baseQty,
+                    eventCode : code, id : i === 0 ? o.id : (code.startsWith('ev-') ? code.slice(3) : code), keepSeparate : true, lc : undefined, dur : undefined, start : pick[i].start, end : pick[i].start, split : { of : o.id, part : i + 1, parts : pick.length } };
+                const e = { id : i === 0 ? `ev-${o.id}` : `ev-${o.id}-sp${i + 1}`, resourceId : pick[i].line.id, startDate : pick[i].start, endDate : endOfWork(pick[i].start, 1), duration : 1, durationUnit : 'day', manuallyScheduled : true, name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : true, raw };
+                const r = placeExactBar(e, pick[i].line.id, pick[i].start, latest);
+                if (!r.ok) { ok = false; break; }
+                placed.push({ rec : r.rec, lid : pick[i].line.id, end : r.end });
+            }
+            if (!ok) {
+                for (const p of placed) removeRec(p.rec);
+                unplaced.push({ ...u, reason : 'split pieces did not all fit before the latest sewing finish' });
+                continue;
+            }
+            for (const p of placed) {
+                const m = lastEnd.get(p.lid);
+                if (!m || p.end > m) lastEnd.set(p.lid, p.end);
+                feedFree(p.lid, p.end);
+            }
+            splitOrders++; splitPieces += placed.length;
+            placements.push({ order : o, line : pick[0].line, start : pick[0].start, split : placed.length });
+        }
+    };
+
+    // Strict runs: deadline first (backward urgency) — the order whose latest
+    // sewing finish comes first is placed first, so a later delivery never
+    // takes the line time an earlier one needs; same deadline → earlier PCD
+    if (strictDelivery) {
+        const tOf = o => { const l = latestOf(o); return l && !Number.isNaN(+l) ? +l : Infinity; };
+        orders.sort((a, b) => (tOf(a) - tOf(b)) || ((+new Date(a.pcd || 0)) - (+new Date(b.pcd || 0))));
+    }
+    // Calculate in small slices so the main thread stays responsive; a strict
+    // run places every slice on the real board at once (then the next slice
+    // sees the real occupancy) and splits what no single line could take
+    const CALC_CHUNK = 25;
+    for (let i = 0; i < orders.length; i += CALC_CHUNK) {
+        const chunk = orders.slice(i, i + CALC_CHUNK);
+        const done  = Math.min(i + CALC_CHUNK, orders.length);
+        onProgress?.({
+            phase   : strictDelivery ? 'add' : 'calc',
+            done,
+            total   : orders.length,
+            message : strictDelivery ? `Placing orders on board… ${done} / ${orders.length}` : `Calculating plan… ${done} / ${orders.length}`
+        });
+        await yieldUi();
+        const { placements : part, unplaced : skipped = [] } = autoPlanOrders(chunk, lineStates, planCtx);
+        if (!strictDelivery) { placements.push(...part); unplaced.push(...skipped); continue; }
+        const failed = [];
         beginBoardInteraction(s, 'batch');
         s.suspendRefresh?.();
         try {
-            for (const u of todo) {
-                const o = u.order;
-                const qty = Number(o.qty) || 0;
-                if (!(qty > 1) || !o.ship) { unplaced.push(u); continue; }
-                const latest = latestOf(o);
-                const earliest = planCtx.sewStartOf ? planCtx.sewStartOf(o) : (o.pcd ? addWorkDays(new Date(o.pcd), 5) : today);
-                const desired0 = clampIntoWorkWindow(new Date(Math.max(+earliest, +today)));
-                // template raw of the whole order (the pieces copy it)
-                const base = u.raw || { ...o, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color, risk : calcRisk({ start : desired0, end : desired0, ship : o.ship, matReady : o.matReady || o.pcd, lineUtil : 0, status : 'draft' }) };
-                let cands = lineStates.filter(l => planCtx.lineHasProductType(l.id, profOf(o)));
-                if (!cands.length) cands = lineStates;
-                const caps = [];
-                for (const l of cands) {
-                    const lastEnd = lineLastEnd(l.id);
-                    let st = desired0;
-                    if (lastEnd) { const after = nextDayStartAfter(lastEnd); if (after > st) st = after; }
-                    if (st > latest) continue;
-                    const tmp = { ...base, qty, lc : undefined };
-                    try {
-                        deriveLcForPlacement(s, tmp, l.id, st);
-                        applyLineFormulaDuration(s, tmp, l.id);
-                        const sim = simulateStrip(s, tmp, l.id, st);
-                        let cap = 0;
-                        for (const d of sim?.days || []) { if (endOfWorkDay(new Date(d.date)) <= latest) cap += Number(d.q) || 0; }
-                        if (cap > 0) caps.push({ line : l, start : st, cap : Math.min(cap, qty), finish : sim?.finish || null });
-                    }
-                    catch { /* line skipped */ }
-                }
-                caps.sort((a, b) => b.cap - a.cap);
-                let pick = [], sum = 0;
-                for (const c of caps) { pick.push(c); sum += c.cap; if (sum >= qty || pick.length === 3) break; }
-                if (sum < qty || pick.length < 2) {
-                    const best = caps[0];
-                    unplaced.push({ ...u, reason : `no single line finishes it in time and the ${pick.length || 1} best compatible line(s) make only ${fmtQty(sum)} of ${fmtQty(qty)} pcs by the latest sewing finish`,
-                        qtyAtRisk : Math.max(0, qty - sum), bestFinish : best?.finish || null, bestLine : best?.line?.name || null });
-                    continue;
-                }
-                // proportional pieces, exact total
-                const parts = pick.map(c => Math.floor(qty * c.cap / sum));
-                let rest = qty - parts.reduce((a, b) => a + b, 0);
-                for (let i = 0; rest > 0; i = (i + 1) % parts.length) { parts[i]++; rest--; }
-                const baseCode = String(o.id).startsWith('proj:') ? `ev-${o.id}` : poBaseEventCode(o.po);
-                const orderQty0 = Number(base.orderQty ?? qty) || qty;
-                const placed = [];
-                let ok = true;
-                for (let i = 0; i < pick.length; i++) {
-                    const q = parts[i];
-                    if (!(q > 0)) continue;
-                    const code = i === 0 ? baseCode : nextStripEventCode(s, o.po, baseCode);
-                    const raw = { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), orderQty : Math.round(orderQty0 * q / qty), baseQty : Number(base.baseQty) > 0 ? Math.round(Number(base.baseQty) * q / qty) : base.baseQty,
-                        eventCode : code, id : i === 0 ? o.id : (code.startsWith('ev-') ? code.slice(3) : code), keepSeparate : true, lc : undefined, dur : undefined, start : pick[i].start, end : pick[i].start, split : { of : o.id, part : i + 1, parts : pick.length } };
-                    const e = { id : i === 0 ? `ev-${o.id}` : `ev-${o.id}-sp${i + 1}`, resourceId : pick[i].line.id, startDate : pick[i].start, endDate : endOfWork(pick[i].start, 1), duration : 1, durationUnit : 'day', manuallyScheduled : true, name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : true, raw };
-                    const r = placeExactBar(e, pick[i].line.id, pick[i].start, latest);
-                    if (!r.ok) { ok = false; break; }
-                    placed.push(r.rec);
-                }
-                if (!ok) {
-                    for (const rec of placed) removeRec(rec);
-                    unplaced.push({ ...u, reason : 'split pieces did not all fit before the latest sewing finish' });
-                    continue;
-                }
-                splitOrders++; splitPieces += placed.length;
-                placements.push({ order : o, line : pick[0].line, start : pick[0].start, split : placed.length });
+            for (const p of part) {
+                const e = buildEvent(p);
+                const r = placeExactBar(e, p.line.id, p.start, latestOf(p.order));
+                if (!r.ok) { failed.push({ order : p.order, reason : r.reason, raw : e.raw }); continue; }
+                placements.push(p);
+                feedFree(p.line.id, r.end);
             }
+            splitUnplaced([...skipped, ...failed]);
         }
         finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
+    }
+    if (strictDelivery) {
+        late = 0;
+        if (placements.length) expandTimeAxisForEvents(s);
         if (splitOrders && showToasts) toast(`${splitOrders} order(s) split across lines (${splitPieces} pieces) to meet their delivery`, 'ok');
+    }
+    else {
+        for (const p of placements) events.push(buildEvent(p));
     }
     if (unplaced.length && showToasts) toast(`${unplaced.length} order(s) cannot finish before their delivery on any line — left unplanned (never planned late)`, 'warn');
 
@@ -3405,16 +3427,38 @@ function settleStrictBoard(s, r) {
             });
             if (!lateBars.length && !(rr.grown || rr.shrunk || rr.pushed || rr.pulled)) break;
             if (lateBars.length) {
+                // a late split piece takes its sister pieces with it: the whole
+                // order goes back to unplanned with its exact total — never a
+                // partial PO on the board, never a piece re-planned on its own
+                const lateSet = new Set(lateBars.map(ev => String(ev.id)));
+                const splitOf = new Set(lateBars.map(ev => ev.data.raw.split?.of).filter(Boolean));
+                if (splitOf.size) {
+                    for (const ev of s.eventStore.records) {
+                        const x = ev.data?.raw;
+                        if (x?.split?.of && splitOf.has(x.split.of) && !lateSet.has(String(ev.id))) { lateBars.push(ev); lateSet.add(String(ev.id)); }
+                    }
+                }
                 const back = [];
+                const merged = new Map();   // split.of → the whole order's record
+                const recordOf = (x, id) => ({ id, mbmOrder : x.mbmOrder || '', po : x.po || '', poList : x.poList, buyer : x.buyer || '', style : x.style || '',
+                    color : x.color || '', productType : x.productType || '', orderType : x.orderType, qty : Number(x.qty) || 0, baseQty : x.baseQty,
+                    orderQty : Number(x.orderQty ?? x.qty) || 0, smv : Number(x.smv) || 0, pcd : x.pcd || null, ship : x.ship || null, matReady : x.matReady || null,
+                    unitId : x.unitId ?? currentUnitId.value ?? null, dbId : x.dbId, status : 'unplanned', parked : false, suitable : x.suitable });
                 for (const ev of lateBars) {
                     const x = ev.data.raw;
                     const sid = String(ev.id);
                     const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
                     if (asgn.length) s.assignmentStore.remove(asgn);
-                    back.push({ id : x.id || `proj:${x.mbmOrder || x.po}`, mbmOrder : x.mbmOrder || '', po : x.po || '', poList : x.poList, buyer : x.buyer || '', style : x.style || '',
-                        color : x.color || '', productType : x.productType || '', orderType : x.orderType, qty : Number(x.qty) || 0, baseQty : x.baseQty,
-                        orderQty : Number(x.orderQty ?? x.qty) || 0, smv : Number(x.smv) || 0, pcd : x.pcd || null, ship : x.ship || null, matReady : x.matReady || null,
-                        unitId : x.unitId ?? currentUnitId.value ?? null, dbId : x.dbId, status : 'unplanned', parked : false, suitable : x.suitable });
+                    if (x.split?.of) {
+                        const k = String(x.split.of);
+                        let m = merged.get(k);
+                        if (!m) { m = recordOf(x, x.split.of); m.qty = 0; m.orderQty = 0; m.baseQty = Number(x.baseQty) > 0 ? 0 : x.baseQty; merged.set(k, m); back.push(m); }
+                        m.qty += Number(x.qty) || 0;
+                        m.orderQty += Number(x.orderQty ?? x.qty) || 0;
+                        if (Number(x.baseQty) > 0) m.baseQty = (Number(m.baseQty) || 0) + Number(x.baseQty);
+                        continue;
+                    }
+                    back.push(recordOf(x, x.id || `proj:${x.mbmOrder || x.po}`));
                 }
                 s.eventStore.remove(lateBars);
                 const have = new Set(unplanned.value.map(u => String(u.id)));
