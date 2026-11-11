@@ -12344,6 +12344,11 @@ function toggleFindPanel() {
     if (view.value !== 'board' || !currentBoard.value) { toast('Open a planning board first', 'warn'); return; }
     const s = getInstance();
     if (s) findRefreshOptions(s);
+    // Every open starts clean: blank criteria, no result list, no dimming
+    // left from the previous find
+    findForm.value = FIND_BLANK();
+    clearFind(true);
+    findMin.value = false;
     findOpen.value = true;
     setTimeout(() => document.querySelector('.fnd-panel input')?.focus(), 30);
 }
@@ -16398,7 +16403,8 @@ body {
     padding    : 0 0 6px;
 }
 .fnd-panel.fnd-minimized { width : 260px; padding : 0; overflow : hidden; }
-.fnd-title { display : flex; align-items : center; gap : 6px; padding : 4px 8px; font-weight : bold; font-size : 12.5px; background : #fff; border-bottom : 1px solid #c9c5b8; cursor : move; user-select : none; }
+/* the title bar stays pinned at the top while the panel body scrolls */
+.fnd-title { position : sticky; top : 0; z-index : 5; display : flex; align-items : center; gap : 6px; padding : 4px 8px; font-weight : bold; font-size : 12.5px; background : #fff; border-bottom : 1px solid #c9c5b8; cursor : move; user-select : none; }
 .fnd-minimized .fnd-title { border-bottom : none; }
 .fnd-body { display : contents; }
 .fnd-sp { flex : 1 1 auto; }
