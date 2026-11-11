@@ -3880,8 +3880,13 @@ app.get(`${BASE}/board-snapshots/:id/compare`, async (req, res) => {
 //   only orders / POs that exist in the plan order list (planning_orders)
 //   one row per PO per day; rows are matched to the board bar (event_ref)
 //   so "Made so far" in the Daily production update follows automatically.
-//   Runs twice a day (18:00 and 23:30 Asia/Dhaka) plus a catch-up on start.
+//   Ran twice a day (18:00 and 23:30 Asia/Dhaka) plus a catch-up on start —
+//   SWITCHED OFF for every planning board (planner decision 2026-11-11): all
+//   units report production BY HAND in the production dialogs. The code and
+//   the manual POST /production-sync stay; PROD_AUTO_SYNC=1 in the
+//   environment turns the schedule back on.
 // --------------------------------------------------------------------------
+const PROD_AUTO_SYNC  = process.env.PROD_AUTO_SYNC === '1';
 const PROD_SYNC_TIMES = ['18:00', '23:30'];
 const PROD_SYNC_FROM  = '2026-09-26';        // daily rows start here; before it: one summary row per PO
 const PROD_SUMMARY_TO = '2026-09-25';
@@ -4286,18 +4291,23 @@ mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF });
 
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);
-    // Actual production: one-time summary (≤ PROD_SUMMARY_TO, one row per PO) if
-    // it is not there yet, catch up daily rows since PROD_SYNC_FROM, then 18:00 / 23:30
-    setTimeout(async () => {
-        try {
-            const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM day_production_update_plan WHERE save_date = ?', [PROD_SUMMARY_TO]);
-            if (!n) await syncErpProduction({ from : '2000-01-01', to : PROD_SUMMARY_TO, summary : true });
-        }
-        catch (e) { console.error('[prod-sync] summary check failed:', e.message); }
-        await syncErpProduction({ from : PROD_SYNC_FROM, to : new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ }) });
-    }, 15000);
-    setInterval(prodSyncTick, 60000);
-    console.log(`[prod-sync] ERP production sync at ${PROD_SYNC_TIMES.join(' & ')} ${SNAP_TZ} (daily rows from ${PROD_SYNC_FROM})`);
+    // Actual production from the ERP: only when PROD_AUTO_SYNC=1 — one-time
+    // summary (≤ PROD_SUMMARY_TO, one row per PO) if it is not there yet,
+    // catch up daily rows since PROD_SYNC_FROM, then 18:00 / 23:30. Off by
+    // default: every board's production is entered by hand.
+    if (PROD_AUTO_SYNC) {
+        setTimeout(async () => {
+            try {
+                const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM day_production_update_plan WHERE save_date = ?', [PROD_SUMMARY_TO]);
+                if (!n) await syncErpProduction({ from : '2000-01-01', to : PROD_SUMMARY_TO, summary : true });
+            }
+            catch (e) { console.error('[prod-sync] summary check failed:', e.message); }
+            await syncErpProduction({ from : PROD_SYNC_FROM, to : new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ }) });
+        }, 15000);
+        setInterval(prodSyncTick, 60000);
+        console.log(`[prod-sync] ERP production sync at ${PROD_SYNC_TIMES.join(' & ')} ${SNAP_TZ} (daily rows from ${PROD_SYNC_FROM})`);
+    }
+    else console.log('[prod-sync] automatic ERP production sync is OFF for every board (production is entered by hand) — POST /production-sync runs it on demand');
     ensureUsersTable().catch(e => console.error('[users] table init failed:', e.message));
     ensureStripNotesTable().catch(e => console.error('[strip-notes] table init failed:', e.message));
     ensureBuyerColorsTable().catch(e => console.error('[buyer-colors] table init failed:', e.message));
