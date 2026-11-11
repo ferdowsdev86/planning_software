@@ -18127,7 +18127,25 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     opacity : 0.25;
 }
 
-.b-sch-current-time { border-color : #6a1b9a; border-width : 1px; }
+/* Current-time (now) line on the board: thick, solid, fully opaque red with
+   a thin white halo so it stays visible across red bars and dark off-day
+   columns (Bryntum draws it with border-inline-start + the --b-time-range-line-* vars) */
+.b-timeline-sub-grid .b-sch-current-time {
+    --b-time-range-line-width   : 3px;
+    --b-time-range-line-style   : solid;
+    --b-time-range-line-color   : #d50000;
+    --b-time-range-line-opacity : 1;
+    border-inline-start : 3px solid #d50000;
+    opacity             : 1;
+    margin-inline-start : -1.5px;
+    box-shadow          : 0 0 0 1px rgba(255, 255, 255, 0.85);
+    pointer-events      : none;
+}
+.b-time-ranges-header-canvas .b-sch-current-time {
+    --b-current-time-color : #d50000;
+    --b-time-range-line-width : 3px;
+    opacity : 1;
+}
 .b-sch-current-time label { display : none; }
 
 /* Highlighted horizontal separators between the lines (rows) */
