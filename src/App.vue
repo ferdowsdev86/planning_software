@@ -6204,30 +6204,61 @@ async function autoCompleteFinished(s) {
     }));
     const fullSet = new Set(fullyDone);
     const pieces = done.filter(ev => !fullSet.has(String(ev.data.raw.mbmOrder || '')));
-    if (pieces.length) {
-        for (const ev of pieces) {
-            const sid = String(ev.id);
-            if (sid.startsWith('db-') && !sid.includes('-sp')) {
-                const dbId = Number(sid.slice(3).split('-')[0]);
-                if (dbId) removedDbEventIds.add(dbId);
-            }
-            const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
-            if (asgn.length) s.assignmentStore.remove(asgn);
-        }
-        s.eventStore.remove(pieces);
-        s.features?.eventTooltip?.hide?.();
-        s.refreshRows?.();
-        try { await syncToApi(s, { eventIds : [], unitId : currentUnitId.value }); } catch (e) { toast(`Finished strip removal not saved: ${e.message}`, 'warn'); }
-        if (boardDbState) for (const ev of pieces) delete boardDbState[String(ev.id)];
-        setBoardBaseline(s);
-        recalcCapacity(s);
-        touchBoardCache(s);
-        toast(`${pieces.length} finished strip(s) removed from the board (production reached the plan qty)`, 'ok');
-    }
+    if (pieces.length) await removeFinishedStrips(s, pieces, `${pieces.length} finished strip(s) removed from the board (production reached the plan qty)`);
     if (fullyDone.length) {
         try { await completeOrders(fullyDone); }
         catch (e) { toast(`Auto complete failed: ${e.message}`, 'error'); }
     }
+}
+
+// Finished strips leave the board: the bars go (their DB rows are cancelled
+// by the save), the slot stays empty, nothing repacks
+async function removeFinishedStrips(s, pieces, note) {
+    for (const ev of pieces) {
+        const sid = String(ev.id);
+        if (sid.startsWith('db-') && !sid.includes('-sp')) {
+            const dbId = Number(sid.slice(3).split('-')[0]);
+            if (dbId) removedDbEventIds.add(dbId);
+        }
+        const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+        if (asgn.length) s.assignmentStore.remove(asgn);
+    }
+    s.eventStore.remove(pieces);
+    s.features?.eventTooltip?.hide?.();
+    s.refreshRows?.();
+    try { await syncToApi(s, { eventIds : [], unitId : currentUnitId.value }); } catch (e) { toast(`Finished strip removal not saved: ${e.message}`, 'warn'); }
+    if (boardDbState) for (const ev of pieces) delete boardDbState[String(ev.id)];
+    setBoardBaseline(s);
+    recalcCapacity(s);
+    touchBoardCache(s);
+    if (note) toast(note, 'ok');
+}
+
+// "Mark strip complete" (strip production dialog): THIS strip is finished —
+// it leaves the board whatever its made qty says; when it was the order's
+// last open strip on the board the order completes too (the same rule the
+// automatic finish applies). Other strips of the order are never touched.
+async function finishStrip(s, ev) {
+    const raw = ev?.data?.raw;
+    if (!s || !raw) return false;
+    const code = String(raw.mbmOrder || '');
+    const label = mbmOrderNo(raw.po, raw.mbmOrder) || raw.po || 'strip';
+    await removeFinishedStrips(s, [ev], null);
+    const othersOpen = code && s.eventStore.records.some(e => {
+        const r = e.data?.raw;
+        return r && !r.stage && String(r.mbmOrder || '') === code && r.status !== 'completed';
+    });
+    if (code && !othersOpen) {
+        try {
+            await completeOrders([code]);
+            toast(`Strip ${label} completed — it was the order's last open strip: ${code} is complete (Orders list → completed)`, 'ok');
+        }
+        catch (e) { toast(`Strip removed, but completing order ${code} failed: ${e.message}`, 'error'); }
+    }
+    else {
+        toast(`Strip ${label} completed and removed from the board — the order's other strip(s) stay`, 'ok');
+    }
+    return true;
 }
 
 async function completeOrders(codes) {
@@ -8770,7 +8801,7 @@ const spRec  = shallowRef(null);
 const spRows = ref([]);
 const spHead = ref(null);
 const spBusy = ref(false);
-const spComplete = ref(false);   // "Mark order complete" tick — Save then completes the order
+const spComplete = ref(false);   // "Mark strip complete" tick — Save then finishes THIS strip (order completes when it was the last open one)
 
 // ---------------------------------------------------------------------------
 // Strip notes (FastReact Notes window): right-click a bar → "Strip notes".
@@ -9039,22 +9070,22 @@ async function spSave() {
         await autoCompleteFinished(s);
         if (!s.eventStore.getById(head.evId)) { spComplete.value = false; spOpen.value = false; if (puOpen.value) buildPuRows(); return; }
     }
-    // "Mark order complete": the order is completed in the DB, every bar of
-    // it leaves the board (cancelled server-side) and the Orders list shows
-    // it completed — the same path as the Orders list tick
+    // "Mark strip complete": THIS strip is finished and leaves the board;
+    // the order completes only when no other open strip of it is left
     if (spComplete.value) {
-        if (!head.mbmOrder) {
-            toast('এই strip-এর ERP order code নেই — Orders list থেকে complete করুন', 'warn');
+        const ev = s.eventStore.getById(head.evId);
+        if (!ev) {
+            toast('এই strip টা এই board-এ নেই — যে board-এ আছে সেটা খুলে complete করুন', 'warn');
         }
         else {
             try {
-                await completeOrders([head.mbmOrder]);
+                await finishStrip(s, ev);
                 spComplete.value = false;
                 spOpen.value = false;
                 if (puOpen.value) buildPuRows();
                 return;
             }
-            catch (e) { toast(`Mark complete failed: ${e.message}`, 'error'); }
+            catch (e) { toast(`Mark strip complete failed: ${e.message}`, 'error'); }
         }
     }
     await spBuild();
@@ -13886,7 +13917,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
                     <label class="sp-complete">
                         <input v-model="spComplete" type="checkbox">
-                        Mark order complete — Save করলে order complete হবে, bar board থেকে সরে যাবে, Orders list-এ completed দেখাবে
+                        Mark strip complete — Save করলে এই strip টা finished হয়ে board থেকে সরে যাবে · order-এর আর কোনো open strip না থাকলে order complete হবে, Orders list-এ completed দেখাবে
                         <span v-if="spHead?.mbmOrder" class="ls-dim">({{ spHead.mbmOrder }})</span>
                     </label>
                     <div class="st-actions">
