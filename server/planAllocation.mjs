@@ -289,7 +289,10 @@ export function simulateUnit(unit, today) {
                 const info = dayOf(L, d);
                 if (info.off) continue;
                 const ym = ymdOf(d).slice(0, 7);
-                const c = capacity[ym] ||= { manMin : 0, pastManMin : 0, busyManMin : 0, freeManMin : 0, usedManMin : 0, curveManMin : 0 };
+                const c = capacity[ym] ||= { manMin : 0, pastManMin : 0, busyManMin : 0, freeManMin : 0, usedManMin : 0, curveManMin : 0,
+                    lines : lines.length, manpower : lines.reduce((a, l) => a + l.manpower, 0), lineDays : 0, lineMin : 0 };
+                c.lineDays++;                       // one line × one working day
+                c.lineMin += info.minutes;          // its working minutes (hours × 60)
                 c.manMin += info.minutes * L.manpower;
                 if (d < t0) { c.pastManMin += info.minutes * L.manpower; continue; }
                 c.busyManMin += (info.minutes - info.freeMin) * L.manpower;
@@ -402,6 +405,10 @@ export function simulateUnit(unit, today) {
         c.usedManMin = Math.max(0, c.usedManMin - c.busyManMin);   // busy now minus the saved bars = this plan
         c.smv = Math.round(smvMix * 10) / 10;
         c.eff = Math.round(effMean * 100);
+        // how the whole-month figure is built: active lines, their manpower,
+        // working days in the month and the mean hours per line-day
+        c.workDays = c.lines ? Math.round(c.lineDays / c.lines) : 0;
+        c.hours    = c.lineDays ? Math.round(c.lineMin / c.lineDays / 60 * 10) / 10 : 0;
         c.pcs = pcs(c.manMin); c.pastPcs = pcs(c.pastManMin); c.busyPcs = pcs(c.busyManMin);
         c.freePcs = pcs(c.freeManMin); c.usedPcs = pcs(c.usedManMin); c.curvePcs = pcs(c.curveManMin);
     }

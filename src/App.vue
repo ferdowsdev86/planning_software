@@ -6595,23 +6595,38 @@ function allocMonthTip(m, uid, ym, isTotal = false) {
 }
 // Capacity rows under the pivot, per production month of the selected unit:
 // free line capacity, what this plan uses (%), the Build up curve's share, still free
+// Capacity rows under the pivot, per production month: the WHOLE month's
+// line capacity first (active lines × working days × hours × manpower ×
+// efficiency ÷ the unit's order-mix SMV), then what of it is already gone
+// (saved bars, days before today), what is free for this plan, and what the
+// plan does with the free part
+const capHow = k => `${fmtQty(k.lines)} active line(s) · manpower ${fmtQty(k.manpower)} · ${k.workDays} working day(s) × ${k.hours} h · eff ${k.eff} %`
+    + (k.smv != null ? ` · order-mix SMV ${k.smv}` : ' · each unit at its own order-mix SMV') + ` · = ${fmtQty(k.sah)} SAH`;
 const ALLOC_CAP_ROWS = [
-    { key : 'free',  label : 'Line capacity (free for plan)', cls : 'av-cap-free',
-      tip : k => `whole month ${fmtQty(k.pcs)} pcs − gone before today ${fmtQty(k.pastPcs)} − held by saved bars ${fmtQty(k.busyPcs)}` },
-    { key : 'used',  label : 'Utilised by this plan', cls : 'av-cap-used', pct : true,
+    { key : 'whole', label : 'Line capacity (whole month)', cls : 'av-cap-whole', note : 'active lines × working days × hours × manpower × eff ÷ order-mix SMV (plan qty +3 %)',
+      tip : k => `${fmtQty(k.pcs)} pcs — ${capHow(k)}` },
+    { key : 'saved', label : 'Held by saved bars', cls : 'av-cap-saved', pct : 'whole', note : '% of the whole month · bars already on the board',
+      tip : k => `line time the bars saved on the board already take in this month — ${fmtQty(k.busyPcs)} of ${fmtQty(k.pcs)} pcs` },
+    { key : 'gone',  label : 'Gone before today', cls : 'av-cap-gone', pct : 'whole', note : 'running month only',
+      tip : k => `line time of the month's days before today — ${fmtQty(k.pastPcs)} of ${fmtQty(k.pcs)} pcs` },
+    { key : 'free',  label : 'Free for this plan', cls : 'av-cap-free', pct : 'whole', note : '= whole month − saved bars − gone',
+      tip : k => `whole month ${fmtQty(k.pcs)} − held by saved bars ${fmtQty(k.busyPcs)} − gone before today ${fmtQty(k.pastPcs)} = ${fmtQty(k.freePcs)} pcs` },
+    { key : 'used',  label : 'Utilised by this plan', cls : 'av-cap-used', pct : 'free', note : '% of the free capacity',
       tip : k => `pieces made + Build up curve loss — ${fmtQty(k.usedPcs)} of ${fmtQty(k.freePcs)} free` },
-    { key : 'curve', label : 'Lost to Build up curve', cls : 'av-cap-curve', pct : true,
+    { key : 'curve', label : 'Lost to Build up curve', cls : 'av-cap-curve', pct : 'free', note : '',
       tip : k => `line time the style-change ramps (${allocInfoText.value.match(/Build up curve: ([^·]+)/)?.[1]?.trim() || 'curve'}) cost, in pieces — ${fmtQty(k.curvePcs)} of ${fmtQty(k.freePcs)} free` },
-    { key : 'still', label : 'Still free', cls : 'av-cap-still', pct : true,
+    { key : 'still', label : 'Still free', cls : 'av-cap-still', pct : 'free', note : '',
       tip : k => `free − utilised: ${fmtQty(Math.max(0, k.freePcs - k.usedPcs))} pcs no order of the window could take` }
 ];
 function allocCapVal(row, uid, ym) {
     const k = availCapacity(uid, ym);
     if (!k) return null;
-    const v = row.key === 'free' ? k.freePcs : row.key === 'used' ? k.usedPcs : row.key === 'curve' ? k.curvePcs : Math.max(0, k.freePcs - k.usedPcs);
-    return { v, pct : row.pct && k.freePcs ? Math.round(100 * v / k.freePcs) : null, k };
+    const v = row.key === 'whole' ? k.pcs : row.key === 'saved' ? k.busyPcs : row.key === 'gone' ? k.pastPcs
+        : row.key === 'free' ? k.freePcs : row.key === 'used' ? k.usedPcs : row.key === 'curve' ? k.curvePcs : Math.max(0, k.freePcs - k.usedPcs);
+    const base = row.pct === 'whole' ? k.pcs : row.pct === 'free' ? k.freePcs : 0;
+    return { v, pct : row.pct && base ? Math.round(100 * v / base) : null, k };
 }
-const allocCapText = (row, uid, ym) => { const c = allocCapVal(row, uid, ym); return !c ? '—' : c.pct != null ? `${fmtQty(c.v)} · ${c.pct} %` : fmtQty(c.v); };
+const allocCapText = (row, uid, ym) => { const c = allocCapVal(row, uid, ym); return !c || (row.key === 'gone' && !c.v) ? '—' : c.pct != null ? `${fmtQty(c.v)} · ${c.pct} %` : fmtQty(c.v); };
 const allocCapTip  = (row, uid, ym) => { const c = allocCapVal(row, uid, ym); return c ? `${row.label} · ${ym}: ${row.tip(c.k)}` : ''; };
 const allocLeftTip = cell => (cell.left
     ? `pieces no line can make before the delivery (no capacity in the window / window closed), or orders without dates / SMV`
@@ -6622,14 +6637,23 @@ function availCapacity(uid, ym) {
     const cap = allocInfo.value?.capacity;
     if (!cap || !ym || ym === '—') return null;
     const units = uid === 'all' ? Object.keys(cap) : [String(uid)];
-    const sum = { pcs : 0, pastPcs : 0, busyPcs : 0, freePcs : 0, usedPcs : 0, curvePcs : 0, n : 0 };
+    const sum = { pcs : 0, pastPcs : 0, busyPcs : 0, freePcs : 0, usedPcs : 0, curvePcs : 0, n : 0,
+        // how the whole-month figure is built (active lines × working days × hours × manpower × eff)
+        lines : 0, manpower : 0, lineDays : 0, lineMin : 0, manMin : 0, effManMin : 0, smv : null, eff : null, workDays : 0, hours : 0 };
     for (const u of units) {
         const c = cap[u]?.[ym];
         if (!c) continue;
         sum.n++;
-        for (const k of ['pcs', 'pastPcs', 'busyPcs', 'freePcs', 'usedPcs', 'curvePcs']) sum[k] += c[k] || 0;
+        for (const k of ['pcs', 'pastPcs', 'busyPcs', 'freePcs', 'usedPcs', 'curvePcs', 'lines', 'manpower', 'lineDays', 'lineMin', 'manMin']) sum[k] += c[k] || 0;
+        sum.effManMin += (c.manMin || 0) * (Number(c.eff) || 0);
+        if (sum.n === 1) { sum.smv = c.smv ?? null; sum.workDays = c.workDays || 0; sum.hours = c.hours || 0; }
+        else { sum.smv = null; }                                  // several units: no single order-mix SMV
     }
-    return sum.n ? sum : null;
+    if (!sum.n) return null;
+    sum.eff   = sum.manMin ? Math.round(sum.effManMin / sum.manMin) : 0;
+    sum.sah   = Math.round(sum.manMin * sum.eff / 100 / 60);     // standard hours the lines offer in the month
+    if (sum.n > 1) { sum.workDays = sum.lines ? Math.round(sum.lineDays / sum.lines) : 0; sum.hours = sum.lineDays ? Math.round(sum.lineMin / sum.lineDays / 60 * 10) / 10 : 0; }
+    return sum;
 }
 const availTip = () => '';
 // Click a unit × month cell: the report minimises to the window bar and the
@@ -13442,7 +13466,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td class="av-l" colspan="3">{{ row.label }}</td>
                                     <td v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0 }"
                                         :title="allocCapTip(row, allocUnit, ym)">{{ allocCapText(row, allocUnit, ym) }}</td>
-                                    <td colspan="3" class="av-cap-note">{{ row.key === 'free' ? 'pcs at the unit\'s order-mix SMV' : row.key === 'used' ? '% of the free capacity' : '' }}</td>
+                                    <td colspan="3" class="av-cap-note">{{ row.note }}</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -15930,7 +15954,10 @@ body {
 .av-pivot tfoot td { font-weight : bold; background : #f4f6fa; }
 .av-pivot tfoot tr.av-cap td { font-weight : normal; background : #fafbfd; color : #444; font-size : 11px; }
 .av-pivot tfoot tr.av-cap td.av-l { font-style : italic; color : #6b7a94; }
-.av-pivot tfoot tr.av-cap-free td { border-top : 2px solid #17356b; }
+.av-pivot tfoot tr.av-cap-whole td { border-top : 2px solid #17356b; font-weight : bold; color : #17356b; }
+.av-pivot tfoot tr.av-cap-saved td:not(.av-l):not(.av-cap-note),
+.av-pivot tfoot tr.av-cap-gone td:not(.av-l):not(.av-cap-note) { color : #7a5a00; }
+.av-pivot tfoot tr.av-cap-free td { border-top : 1px solid #b9c4d0; font-weight : bold; }
 .av-pivot tfoot tr.av-cap-used td:not(.av-l):not(.av-cap-note) { color : #0d47a1; font-weight : bold; }
 .av-pivot tfoot tr.av-cap-curve td:not(.av-l):not(.av-cap-note) { color : #e65100; }
 .av-pivot tfoot tr.av-cap-still td:not(.av-l):not(.av-cap-note) { color : #2e7d32; }
