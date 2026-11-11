@@ -509,6 +509,9 @@ export const uiHooks = {
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
+    lineSel          : null,   // Set of selected LINE ids (Ctrl+click on the line cell) — the cell shows the ☒ box
+    onLineCtrlClick  : null,   // (resourceRecord) → toggle that line in the selection
+    onLineClick      : null,   // (resourceRecord) → plain click on a line cell (clears the selection)
     consol           : null,   // Consolidate orders ON: Map(eventId → group) — the head bar is drawn over the whole group, the others are hidden
     multiSelCount    : 0,      // bars in the Ctrl+click selection (menu shows "Merge" from 2)
     onSplitPieces    : null,   // (rec, n) → split one bar into n equal pieces
@@ -1984,11 +1987,15 @@ export const schedulerProConfig = {
             cellCls    : 'mb-linecell',
             headerRenderer  : () =>
                 '<div class="fr-clock" id="mb-hover-clock">Fri 28/08/26 8:00:00 AM<br>0.0 x 0:00 x 0 = 0.000</div>',
-            renderer : ({ record : r }) => {
+            renderer : ({ record : r, cellElement }) => {
                 const enc  = StringHelper.encodeHtml;
                 const d    = r.data || r;
                 const code = floorLabelOf(d.unit, d.floor);
                 const ico = '<span class="fr-line-ico"></span>';
+                // Selected line (Ctrl+click): FastReact's ☒ box in the cell
+                const sel = !!(d.lineRow && uiHooks.lineSel?.has(String(d.id)));
+                cellElement?.classList.toggle('mb-line-on', sel);
+                const selBox = sel ? '<span class="fr-line-selbox" title="Selected line — Ctrl+click = unselect · Esc = clear all"></span>' : '';
                 const nums = (red, blue, black) =>
                     `<div class="fr-line-nums">
                         <div><span class="fr-n-red">${red}</span> <span class="fr-n-blue">${blue}</span></div>
@@ -2028,7 +2035,7 @@ export const schedulerProConfig = {
                         <div class="fr-line-name">${d.lineRow ? ico : ''}${enc(d.name)}</div>
                         <div class="fr-line-sub">${enc(code)}</div>
                     </div>
-                    ${nums(d.manpower ?? 0, 0, d.machines ?? 0)}
+                    ${selBox}${nums(d.manpower ?? 0, 0, d.machines ?? 0)}
                 </div>`;
             }
         }
@@ -2051,6 +2058,11 @@ export const schedulerProConfig = {
     // mark complete, confirm replacement) — never by a stray Delete/Backspace
     // on a selected bar
     enableDeleteKey : false,
+
+    // Line selection is the app's own (Ctrl+click on the line cell → ☒ box,
+    // several lines together) — Bryntum's row / cell selection stays off so
+    // a plain click on a row never highlights it
+    selectionMode : { row : false, cell : false, multiSelect : false, dragSelect : false },
 
     // FastReact-style strip context menu (right-click on a bar)
     eventMenuFeature : {
@@ -2563,6 +2575,17 @@ export const schedulerProConfig = {
         setBarTooltipEnabled(uiHooks.instance, false);
         uiHooks.onScheduleClick?.(ev);
         setTimeout(() => setBarTooltipEnabled(uiHooks.instance, true), 300);
+    },
+
+    // Line cell (locked grid): Ctrl / ⌘ + click toggles the line in the
+    // selection (several lines together), a plain click clears it
+    onCellClick({ record, event }) {
+        if (!record?.data?.lineRow) return;
+        if (event?.ctrlKey || event?.metaKey) {
+            event.preventDefault?.();
+            uiHooks.onLineCtrlClick?.(record);
+        }
+        else uiHooks.onLineClick?.(record);
     },
 
     // Board pan never starts from a bar: with eventDrag disabled (pick &

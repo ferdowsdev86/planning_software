@@ -2014,7 +2014,7 @@ function openWorkHours(rec) {
     chLineSel.value = {};
     chTargetMode.value = 'calendar';
     const s = getInstance();
-    const selLines = (s?.selectedRecords || []).filter(r => r?.data?.lineRow);
+    const selLines = (s?.resourceStore?.records || []).filter(r => r?.data?.lineRow && lineSel.has(String(r.id)));
     if (selLines.length) {
         for (const r of selLines) chLineSel.value[r.id] = true;
         chTargetMode.value = 'lines';
@@ -2026,6 +2026,39 @@ function openWorkHours(rec) {
     chOpen.value = true;
 }
 uiHooks.onOpenWorkHours = openWorkHours;
+
+// Line selection (FastReact): Ctrl / ⌘ + click on a line cell toggles that
+// line — several lines together — and the cell shows the ☒ box. A plain
+// click on a line or Esc clears it. Setup → Change working hours opens with
+// the selected lines pre-ticked ("Selected lines only").
+const lineSel = new Set();
+const lineSelCount = ref(0);
+uiHooks.lineSel = lineSel;
+function refreshLineCells() {
+    const s = getInstance();
+    lineSelCount.value = lineSel.size;
+    // Bryntum's own row highlight never shows: the ☒ box is the selection
+    try { s?.deselectAll?.(); } catch { /* no selection */ }
+    try { s?.refreshRows?.(); } catch { /* board not painted */ }
+}
+function toggleLineSel(rec) {
+    const id = String(rec?.id || '');
+    if (!id) return;
+    if (lineSel.has(id)) lineSel.delete(id); else lineSel.add(id);
+    refreshLineCells();
+    const n = lineSel.size;
+    toast(n
+        ? `${n} line(s) selected — Ctrl+click more lines · Setup → Change working hours uses them (Selected lines only) · Esc or a plain click = clear`
+        : 'Line selection cleared', 'ok');
+}
+function clearLineSel(quiet = false) {
+    if (!lineSel.size) { try { getInstance()?.deselectAll?.(); } catch { /* no selection */ } return; }
+    lineSel.clear();
+    refreshLineCells();
+    if (!quiet) toast('Line selection cleared', 'ok');
+}
+uiHooks.onLineCtrlClick = toggleLineSel;
+uiHooks.onLineClick = () => clearLineSel();
 
 function chApply() {
     const from = new Date(chFrom.value + 'T00:00:00');
@@ -10202,6 +10235,11 @@ function boardUndoKeys(e) {
         pfEndPick();
         return;
     }
+    // Esc with nothing carried and no bar selection = clear the selected lines
+    if (e.key === 'Escape' && !carried.value && !multiSel.size && lineSel.size && view.value === 'board') {
+        clearLineSel();
+        return;
+    }
     // Esc with nothing carried = drop the Ctrl+click selection
     if (e.key === 'Escape' && !carried.value && multiSel.size && view.value === 'board') {
         clearMultiSelect();
@@ -17623,6 +17661,22 @@ body {
 }
 
 .fr-line-sub  { font-size : 10px; color : #333; padding-left : 15px; }
+
+/* Selected line (Ctrl+click): FastReact's ☒ box — a white square with a
+   black X — and a light blue cell */
+.fr-line-selbox {
+    flex       : 0 0 auto;
+    width      : 26px;
+    height     : 26px;
+    box-sizing : border-box;
+    border     : 1.5px solid #222;
+    background :
+        linear-gradient(to top right, transparent calc(50% - 0.75px), #222 calc(50% - 0.75px), #222 calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+        linear-gradient(to top left,  transparent calc(50% - 0.75px), #222 calc(50% - 0.75px), #222 calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+        #fff;
+    margin-right : 2px;
+}
+.b-grid-cell.mb-linecell.mb-line-on { background : #dbe8fb !important; box-shadow : inset 3px 0 0 #1b52ad; }
 
 .fr-line-nums {
     flex        : 0 0 48px;
