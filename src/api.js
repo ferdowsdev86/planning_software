@@ -1462,7 +1462,10 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
         .map(id => ({ id }));
     // A dead connection must fail fast with a clear error, not hang the save
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90000);
+    // A whole-board save (auto plan: 400+ bars, ~5 DB round trips each over
+    // the WAN) takes several minutes — the server keeps writing after a
+    // client abort, so a short timeout only hid a save that did go through
+    const timer = setTimeout(() => ctrl.abort(), 600000);
     if (toWhatIf) {
         const resW = await apiFetch(`${API_BASE}/whatif/${encodeURIComponent(whatIfView.id)}/board`, {
             method  : 'PUT',
