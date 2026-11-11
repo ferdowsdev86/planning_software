@@ -6466,6 +6466,26 @@ function allocMonthTip(m, uid, ym, isTotal = false) {
     }
     return tip;
 }
+// Capacity rows under the pivot, per production month of the selected unit:
+// free line capacity, what this plan uses (%), the Build up curve's share, still free
+const ALLOC_CAP_ROWS = [
+    { key : 'free',  label : 'Line capacity (free for plan)', cls : 'av-cap-free',
+      tip : k => `whole month ${fmtQty(k.pcs)} pcs − gone before today ${fmtQty(k.pastPcs)} − held by saved bars ${fmtQty(k.busyPcs)}` },
+    { key : 'used',  label : 'Utilised by this plan', cls : 'av-cap-used', pct : true,
+      tip : k => `pieces made + Build up curve loss — ${fmtQty(k.usedPcs)} of ${fmtQty(k.freePcs)} free` },
+    { key : 'curve', label : 'Lost to Build up curve', cls : 'av-cap-curve', pct : true,
+      tip : k => `line time the style-change ramps (${allocInfoText.value.match(/Build up curve: ([^·]+)/)?.[1]?.trim() || 'curve'}) cost, in pieces — ${fmtQty(k.curvePcs)} of ${fmtQty(k.freePcs)} free` },
+    { key : 'still', label : 'Still free', cls : 'av-cap-still', pct : true,
+      tip : k => `free − utilised: ${fmtQty(Math.max(0, k.freePcs - k.usedPcs))} pcs no order of the window could take` }
+];
+function allocCapVal(row, uid, ym) {
+    const k = availCapacity(uid, ym);
+    if (!k) return null;
+    const v = row.key === 'free' ? k.freePcs : row.key === 'used' ? k.usedPcs : row.key === 'curve' ? k.curvePcs : Math.max(0, k.freePcs - k.usedPcs);
+    return { v, pct : row.pct && k.freePcs ? Math.round(100 * v / k.freePcs) : null, k };
+}
+const allocCapText = (row, uid, ym) => { const c = allocCapVal(row, uid, ym); return !c ? '—' : c.pct != null ? `${fmtQty(c.v)} · ${c.pct} %` : fmtQty(c.v); };
+const allocCapTip  = (row, uid, ym) => { const c = allocCapVal(row, uid, ym); return c ? `${row.label} · ${ym}: ${row.tip(c.k)}` : ''; };
 const allocLeftTip = cell => (cell.left
     ? `pieces no line can make before the delivery (no capacity in the window / window closed), or orders without dates / SMV`
       + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)} pcs` : '') : '');
@@ -6532,7 +6552,9 @@ function exportAvailExcel() {
             return num(c.orders) + num(c.qty) + p.months.map(ym => num(allocMonthQty(m, uid, ym))).join('') + num(c.placed) + num(c.sah) + num(c.left); };
         head1 = `<tr><th>Planning Month</th><th>Orders</th><th>Order Qty</th>${p.months.map(ym => `<th>made in ${ym}</th>`).join('')}<th>Planned</th><th>Plan SAH</th><th>Not planned</th></tr>`;
         body  = p.rows.map(m => `<tr>${mLbl(m)}${row(m)}</tr>`).join('');
-        foot  = `<tr><th>Total</th>${row(p.total)}</tr>`;
+        const capRow = r => `<tr><th colspan="3">${r.label}</th>${p.months.map(ym => { const c = allocCapVal(r, uid, ym); return `<td style="text-align:right">${c ? Math.round(c.v) : ''}</td>`; }).join('')}<td colspan="3"></td></tr>`
+            + (r.pct ? `<tr><th colspan="3">${r.label} % of free</th>${p.months.map(ym => { const c = allocCapVal(r, uid, ym); return `<td style="text-align:right">${c && c.pct != null ? c.pct : ''}</td>`; }).join('')}<td colspan="3"></td></tr>` : '');
+        foot  = `<tr><th>Total</th>${row(p.total)}</tr>` + ALLOC_CAP_ROWS.map(capRow).join('');
         title = `${p.unitName === 'Total' ? 'every unit' : p.unitName} — planning month × production month`;
     }
     else {
@@ -13194,6 +13216,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td class="av-sah">{{ fmtSah(availCell(allocPivot.total, allocUnit).sah) }}</td>
                                     <td class="av-excess" :title="allocLeftTip(availCell(allocPivot.total, allocUnit))">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).left) }}</td>
                                 </tr>
+                                <tr v-for="row in ALLOC_CAP_ROWS" :key="row.key" class="av-cap" :class="row.cls">
+                                    <td class="av-l" colspan="3">{{ row.label }}</td>
+                                    <td v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0 }"
+                                        :title="allocCapTip(row, allocUnit, ym)">{{ allocCapText(row, allocUnit, ym) }}</td>
+                                    <td colspan="3" class="av-cap-note">{{ row.key === 'free' ? 'pcs at the unit\'s order-mix SMV' : row.key === 'used' ? '% of the free capacity' : '' }}</td>
+                                </tr>
                             </tfoot>
                         </table>
                     </template>
@@ -15678,6 +15706,13 @@ body {
 .av-pivot td.av-ahead  { color : #0d47a1; }
 .av-pivot td.av-behind { color : #e65100; font-weight : bold; }
 .av-pivot tfoot td { font-weight : bold; background : #f4f6fa; }
+.av-pivot tfoot tr.av-cap td { font-weight : normal; background : #fafbfd; color : #444; font-size : 11px; }
+.av-pivot tfoot tr.av-cap td.av-l { font-style : italic; color : #6b7a94; }
+.av-pivot tfoot tr.av-cap-free td { border-top : 2px solid #17356b; }
+.av-pivot tfoot tr.av-cap-used td:not(.av-l):not(.av-cap-note) { color : #0d47a1; font-weight : bold; }
+.av-pivot tfoot tr.av-cap-curve td:not(.av-l):not(.av-cap-note) { color : #e65100; }
+.av-pivot tfoot tr.av-cap-still td:not(.av-l):not(.av-cap-note) { color : #2e7d32; }
+.av-pivot tfoot td.av-cap-note { text-align : left; color : #9aa5b8; font-style : italic; }
 .av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
 .av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
 .av-tabs { display : flex; gap : 4px; padding : 8px 12px 0; background : #fff; border-bottom : 2px solid #17356b; }
