@@ -5841,10 +5841,13 @@ const filteredErpOrders = computed(() => {
     // Comma-separated search: "26DROTT080, 26SUBOR150" shows rows matching ANY term
     const terms = (ordersGlobalSearch.value || '').split(',')
         .map(t => t.trim().toLowerCase()).filter(Boolean);
-    const hasQuery = terms.length > 0
+    const pick = ordersPick.value;
+    const hasQuery = terms.length > 0 || !!pick
         || ORDER_COLS.some(k => String(orderFilters.value[k] || '').trim());
     const recentCut = ordersRecentFilter.value ? recentCutoff(ordersRecentFilter.value) : null;
     return erpAllOrders.value.filter(r => {
+        // an explicit set of orders (a cell of the Available Order report) — only those rows
+        if (pick && !pick.ids.has(ordersPickId(r))) return false;
         // Completed orders stay OUT of the default list — they only surface
         // when the user actively searches / filters (and the row matches)
         if (r.status === 'completed' && !hasQuery) return false;
@@ -5872,8 +5875,15 @@ const filteredErpOrders = computed(() => {
 function clearOrderFilters() {
     ordersGlobalSearch.value = '';
     ordersRecentFilter.value = '';
+    ordersPick.value = null;
     orderFilters.value = Object.fromEntries(ORDER_COLS.map(k => [k, '']));
 }
+// An explicit order set on the list (set by a cell of the Available Order
+// report's Plan allocation pivot): { ids : Set, label, n, pcs }. A row is
+// identified by its list id + production unit (the same order can be a
+// projected row of more than one unit)
+const ordersPick   = ref(null);
+const ordersPickId = r => `${r.id}|${r.prodUnit || ''}`;
 
 // ⟳ button beside Excel: reset every filter/sort AND re-download the order
 // book from the DB in one click
@@ -6526,6 +6536,54 @@ function availDrill(m, uid) {
     }
     else toast(`Orders list: ${unitName || 'all units'} · ${m.label} · available orders (projected, not planned / completed)`, 'ok');
 }
+// Click a Plan allocation pivot cell: the report minimises and the Orders
+// list shows exactly the orders behind the cell — m = the planning-month row
+// (the Total row = every planning month), kind = 'month' (orders with pieces
+// made in production month ym) / 'planned' (orders with pieces placed) /
+// 'left' (orders with pieces no line could make)
+function availDrillSet(m, uid, kind, ym = null) {
+    const isTotal = !m || m === allocPivot.value.total;
+    if (!isTotal && (!m.label || m.label === '—')) return;
+    const { from } = availWindowFrom();
+    const alloc = allocByKey.value;
+    const ids = new Set();
+    let n = 0, pcs = 0;
+    availRows.value.forEach((r, i) => {
+        if (!availOrderOk(r)) return;
+        const pm = planMonthOf(r);
+        if (from && pm && pm.label < from) return;
+        if (!isTotal && (pm?.label || '—') !== m.label) return;
+        if (uid !== 'all' && Number(r.prodUnit) !== Number(uid)) return;
+        const sim = alloc.get(availKey(r, i));
+        let q = 0;
+        if (kind === 'month')        q = sim ? Object.entries(sim.days || {}).reduce((a, [d, v]) => a + (d.slice(0, 7) === ym ? v : 0), 0) : 0;
+        else if (kind === 'planned') q = sim ? sim.placed : 0;
+        else if (kind === 'left')    q = sim ? sim.left : 0;
+        if (!(q > 0)) return;
+        ids.add(ordersPickId(r));
+        n++; pcs += q;
+    });
+    if (!n) return;
+    const unitName = uid === 'all' ? 'every unit' : (availSummary.value.units.find(u => u.id === uid)?.name || '');
+    const scope = isTotal ? 'every planning month' : `planning month ${m.label}`;
+    const what  = kind === 'month' ? `pieces made in ${ym}` : kind === 'planned' ? 'pieces planned' : 'pieces not planned';
+    const label = `${unitName} · ${scope} · ${what}`;
+    clearOrderFilters();
+    orderSort.value  = { key : null, dir : 1 };
+    ordersPick.value = { ids, label, n, pcs };
+    availMin.value   = true;
+    ordersMin.value  = false;
+    const listUnit = currentUnitId.value ? AVAIL_UNITS.find(u => u.id === Number(currentUnitId.value))?.name : '';
+    if (listUnit && uid !== 'all' && Number(uid) !== Number(currentUnitId.value)) {
+        toast(`The Orders list holds ${listUnit} orders only — ${unitName} orders cannot be listed here`, 'warn');
+    }
+    else toast(`Orders list: ${n} order(s) with ${what} — ${fmtQty(pcs)} pcs (${unitName} · ${scope})`, 'ok');
+}
+const availDrillSetTip = (m, uid, kind, ym = null) => {
+    const isTotal = !m || m === allocPivot.value.total;
+    const scope = isTotal ? 'every planning month' : `planning month ${m.label}`;
+    return `click → the Orders list shows the ${scope} orders with ${kind === 'month' ? `pieces made in ${ym}` : kind === 'planned' ? 'pieces planned' : 'pieces not planned'}`;
+};
 const availDrillTip = (m, uid) => (m?.label && m.label !== '—'
     ? `click → the Orders list shows the available orders of ${uid === 'all' ? 'every unit' : (availSummary.value.units.find(u => u.id === uid)?.name || 'this unit')} · ${m.label}` : '');
 
@@ -12957,6 +13015,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         @keydown.escape="clearOrderFilters"
                     >
                     <span v-if="ordersGlobalSearch || ORDER_COLS.some(k => orderFilters[k])" class="od-gsearch-clear" @click="clearOrderFilters">✕</span>
+                    <span v-if="ordersPick" class="od-pick-chip" :title="`${ordersPick.n} order(s) picked from the Available Order report — ${fmtQty(ordersPick.pcs)} pcs · click ✕ to show the whole list again`">
+                        📦 {{ ordersPick.label }} · {{ ordersPick.n }} orders · {{ fmtQty(ordersPick.pcs) }} pcs
+                        <b class="od-pick-x" @click="ordersPick = null">✕</b></span>
                     <span v-if="boardReadOnly" class="od-readonly-tag" :title="`${boardLockHolder?.name || boardLockHolder?.username || ''} is editing — save disabled`">🔒 Save disabled</span>
                     <button v-if="markedComplete.size" class="od-done-btn" :disabled="markSaving"
                         @click="saveMarkedComplete"
@@ -13198,11 +13259,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td :class="{ 'av-click' : availCell(m, allocUnit).qty > 0 }" :title="availDrillTip(m, allocUnit)"
                                         @click="availCell(m, allocUnit).qty > 0 && availDrill(m, allocUnit)">{{ fmtAvQty(availCell(m, allocUnit).qty) }}</td>
                                     <td v-for="(ym, i) in allocPivot.months" :key="ym"
-                                        :class="[allocMonthQty(m, allocUnit, ym) ? allocMonthCls(m, ym) : '', { 'av-grp-start' : i === 0 }]"
-                                        :title="allocMonthTip(m, allocUnit, ym)">{{ fmtAvQty(allocMonthQty(m, allocUnit, ym)) }}</td>
-                                    <td class="av-plan av-grp-start">{{ fmtAvQty(availCell(m, allocUnit).placed) }}</td>
+                                        :class="[allocMonthQty(m, allocUnit, ym) ? allocMonthCls(m, ym) : '', { 'av-grp-start' : i === 0, 'av-click' : allocMonthQty(m, allocUnit, ym) > 0 }]"
+                                        :title="allocMonthTip(m, allocUnit, ym) + (allocMonthQty(m, allocUnit, ym) > 0 ? '\n' + availDrillSetTip(m, allocUnit, 'month', ym) : '')"
+                                        @click="allocMonthQty(m, allocUnit, ym) > 0 && availDrillSet(m, allocUnit, 'month', ym)">{{ fmtAvQty(allocMonthQty(m, allocUnit, ym)) }}</td>
+                                    <td class="av-plan av-grp-start" :class="{ 'av-click' : availCell(m, allocUnit).placed > 0 }"
+                                        :title="availCell(m, allocUnit).placed > 0 ? availDrillSetTip(m, allocUnit, 'planned') : ''"
+                                        @click="availCell(m, allocUnit).placed > 0 && availDrillSet(m, allocUnit, 'planned')">{{ fmtAvQty(availCell(m, allocUnit).placed) }}</td>
                                     <td class="av-sah">{{ fmtSah(availCell(m, allocUnit).sah) }}</td>
-                                    <td class="av-excess" :title="allocLeftTip(availCell(m, allocUnit))">{{ fmtAvQty(availCell(m, allocUnit).left) }}</td>
+                                    <td class="av-excess" :class="{ 'av-click' : availCell(m, allocUnit).left > 0 }"
+                                        :title="allocLeftTip(availCell(m, allocUnit)) + (availCell(m, allocUnit).left > 0 ? '\n' + availDrillSetTip(m, allocUnit, 'left') : '')"
+                                        @click="availCell(m, allocUnit).left > 0 && availDrillSet(m, allocUnit, 'left')">{{ fmtAvQty(availCell(m, allocUnit).left) }}</td>
                                 </tr>
                             </tbody>
                             <tfoot>
@@ -13210,11 +13276,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td class="av-l">Total</td>
                                     <td>{{ fmtAvQty(availCell(allocPivot.total, allocUnit).orders) }}</td>
                                     <td>{{ fmtAvQty(availCell(allocPivot.total, allocUnit).qty) }}</td>
-                                    <td v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0 }"
-                                        :title="allocMonthTip(allocPivot.total, allocUnit, ym, true)">{{ fmtAvQty(allocMonthQty(allocPivot.total, allocUnit, ym)) }}</td>
-                                    <td class="av-plan av-grp-start">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).placed) }}</td>
+                                    <td v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0, 'av-click' : allocMonthQty(allocPivot.total, allocUnit, ym) > 0 }"
+                                        :title="allocMonthTip(allocPivot.total, allocUnit, ym, true) + (allocMonthQty(allocPivot.total, allocUnit, ym) > 0 ? '\n' + availDrillSetTip(allocPivot.total, allocUnit, 'month', ym) : '')"
+                                        @click="allocMonthQty(allocPivot.total, allocUnit, ym) > 0 && availDrillSet(allocPivot.total, allocUnit, 'month', ym)">{{ fmtAvQty(allocMonthQty(allocPivot.total, allocUnit, ym)) }}</td>
+                                    <td class="av-plan av-grp-start" :class="{ 'av-click' : availCell(allocPivot.total, allocUnit).placed > 0 }"
+                                        :title="availCell(allocPivot.total, allocUnit).placed > 0 ? availDrillSetTip(allocPivot.total, allocUnit, 'planned') : ''"
+                                        @click="availCell(allocPivot.total, allocUnit).placed > 0 && availDrillSet(allocPivot.total, allocUnit, 'planned')">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).placed) }}</td>
                                     <td class="av-sah">{{ fmtSah(availCell(allocPivot.total, allocUnit).sah) }}</td>
-                                    <td class="av-excess" :title="allocLeftTip(availCell(allocPivot.total, allocUnit))">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).left) }}</td>
+                                    <td class="av-excess" :class="{ 'av-click' : availCell(allocPivot.total, allocUnit).left > 0 }"
+                                        :title="allocLeftTip(availCell(allocPivot.total, allocUnit)) + (availCell(allocPivot.total, allocUnit).left > 0 ? '\n' + availDrillSetTip(allocPivot.total, allocUnit, 'left') : '')"
+                                        @click="availCell(allocPivot.total, allocUnit).left > 0 && availDrillSet(allocPivot.total, allocUnit, 'left')">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).left) }}</td>
                                 </tr>
                                 <tr v-for="row in ALLOC_CAP_ROWS" :key="row.key" class="av-cap" :class="row.cls">
                                     <td class="av-l" colspan="3">{{ row.label }}</td>
@@ -15928,6 +15999,22 @@ body {
     outline      : none;
 }
 .od-gsearch:focus { border-color: #1976d2; box-shadow: 0 0 0 2px rgba(25,118,210,.15); }
+.od-pick-chip {
+    display       : inline-flex;
+    align-items   : center;
+    gap           : 6px;
+    padding       : 4px 10px;
+    border        : 1px solid #24509a;
+    border-radius : 14px;
+    background    : #e8eef9;
+    color         : #17356b;
+    font-size     : 12px;
+    white-space   : nowrap;
+    max-width     : 480px;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+}
+.od-pick-chip .od-pick-x { cursor : pointer; color : #c62828; margin-left : 2px; }
 .od-gsearch-clear {
     cursor    : pointer;
     color     : #888;
