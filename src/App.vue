@@ -21,7 +21,7 @@ import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWind
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
-    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, saveProdUpdatesDb, saveLineEfficiencyDb,
+    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, loadPlanAllocation, completeOrdersDb, reopenOrdersDb,
@@ -3849,6 +3849,20 @@ const puWriteUnits = computed(() => {
 });
 const puUnitAllowed = unit => !puWriteUnits.value || puWriteUnits.value.has(String(unit || '').toUpperCase());
 const puUnitsLabel = computed(() => puWriteUnits.value ? ([...puWriteUnits.value].join(', ') || 'no unit') : 'all units');
+// …and the unit ids of those boards: the dialog lists the lines of EVERY
+// board the planner may write — the open board from the board itself, the
+// others from the saved plan (loadProdDayBars). Planning Manager = every unit.
+const puWriteUnitIds = computed(() => {
+    const u = currentUser.value || authUser.value;
+    const role = u?.role || authUser.value?.role;
+    if (role === 'Management') return [];
+    const ids = new Set();
+    for (const b of boards.value) {
+        if (!(Number(b.unitId) > 0)) continue;
+        if (role === 'Planning Manager' || boardAccessOf(u, b.id) === 'write') ids.add(Number(b.unitId));
+    }
+    return [...ids].sort((a, b) => a - b);
+});
 
 function savePerms() {
     localStorage.setItem('mbm-boards', JSON.stringify(boards.value));
@@ -8579,6 +8593,15 @@ async function buildPuRows() {
     const dayQty = evId => Math.max(0, (store[evId]?.[date] || 0) - (otherLine[evId] || 0));
     const rows = [];
     const listed = new Set();
+    // The other boards this planner may write (not the one open here): their
+    // bars running on the date, from the saved plan — day plan estimated
+    const openUnit = s && currentBoard.value ? Number(currentBoard.value.unitId) : null;
+    const otherUnits = puWriteUnitIds.value.filter(u => u !== openUnit);
+    let otherBars = [];
+    if (otherUnits.length) {
+        try { otherBars = await loadProdDayBars(date, otherUnits); }
+        catch (e) { toast(`Other boards' lines could not be loaded (${e.message}) — only the open board is listed`, 'warn'); }
+    }
     if (s) {
         const day = new Date(date + 'T12:00:00');
         for (const ev of s.eventStore.records) {
@@ -8612,6 +8635,22 @@ async function buildPuRows() {
                 prodQty  : store[String(ev.id)]?.[date] == null ? '' : dayQty(String(ev.id))
             });
         }
+    }
+    for (const b of otherBars) {
+        if (!String(b.buyer || '').trim()) continue;
+        if (listed.has(b.eventRef)) continue;
+        const made = madeOf(store, b.eventRef);
+        listed.add(b.eventRef);
+        rows.push({
+            evId : b.eventRef, dbId : b.eventId ?? null,
+            unit : b.unit, floor : b.floor || '—', line : b.line || '—', opType : 'Sewing',
+            style : b.style || '—', order : mbmOrderNo(b.po, b.order), po : b.po || '—',
+            color : b.color || orderColor(b.po),
+            orderQty : b.orderQty, planQty : Number(b.dayPlanQty) || 0,
+            made, rest : Math.max(0, (Number(b.orderQty) || 0) - made),
+            prodQty : store[b.eventRef]?.[date] == null ? '' : dayQty(b.eventRef),
+            otherBoard : true
+        });
     }
     // Saved production for this date whose bar is not running that day on
     // the board (moved / finished earlier / other board)
@@ -8652,7 +8691,10 @@ async function buildPuRows() {
         byLine.get(k).prodQty += Number(r.prod_qty) || 0;
     }
     rows.push(...byLine.values());
-    rows.sort((a, b) => String(a.line).localeCompare(String(b.line)) || String(a.po).localeCompare(String(b.po)));
+    // the open board's unit first, then the other boards, each unit line-wise
+    const unitRank = u => (s && currentBoard.value && String(u).toUpperCase() === String(currentBoard.value.unitName || '').toUpperCase() ? 0 : 1);
+    rows.sort((a, b) => unitRank(a.unit) - unitRank(b.unit) || String(a.unit).localeCompare(String(b.unit))
+        || String(a.line).localeCompare(String(b.line), undefined, { numeric : true }) || String(a.po).localeCompare(String(b.po)));
     // only the units this planner may write (board write permission)
     puRows.value = rows.filter(r => puUnitAllowed(r.unit));
 }
@@ -8666,8 +8708,9 @@ function saveProdUpdate() {
             : `🔒 Save disabled — ${h?.name || h?.username || 'another user'} is editing this board`, 'warn');
         return;
     }
+    // no board open: the rows are other boards' bars — the DB save alone
+    // (their strips pick the figures up when that board loads)
     const s = getInstance();
-    if (!s) return;
     const store = loadProdStore();
     const entries = puRows.value.filter(r => !r.fromErp && r.prodQty !== '' && r.prodQty != null);
     if (!entries.length) {
@@ -8679,9 +8722,14 @@ function saveProdUpdate() {
         store[r.evId][puDate.value] = Math.max(0, Number(r.prodQty) || 0);
     }
     localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
-    pushUndo(s, `production update ${puDate.value}`);
-    applyProdUpdates(s);
-    autoCompleteFinished(s).then(() => buildPuRows());
+    if (s) {
+        pushUndo(s, `production update ${puDate.value}`);
+        applyProdUpdates(s);
+        autoCompleteFinished(s).then(() => buildPuRows());
+    }
+    else {
+        setTimeout(() => buildPuRows(), 600);
+    }
 
     // Persist to the fastreact DB (day_production_update_plan)
     const payload = entries.map(r => ({
@@ -13941,7 +13989,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in puView" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : ''">
+                            <tr v-for="r in puView" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp, 'pu-other' : r.otherBoard }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : r.otherBoard ? `${r.unit} board (not open here): bar from the saved plan — Day Plan Qty is the production model's estimate` : ''">
                                 <td>{{ r.unit }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ r.line }}</td>
@@ -13953,7 +14001,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td class="od-num">{{ fmtQty(r.orderQty) }}</td>
                                 <td class="od-num">{{ fmtQty(r.made) }}</td>
                                 <td class="od-num pu-rest">{{ fmtQty(r.rest) }}</td>
-                                <td class="od-num pu-plan">{{ fmtQty(r.planQty) }}</td>
+                                <td class="od-num pu-plan"><span v-if="r.otherBoard" class="pu-est" title="estimated — this unit's board is not open">≈</span>{{ fmtQty(r.planQty) }}</td>
                                 <td class="od-num">
                                     <input v-model="r.prodQty" class="cal-in pu-in" type="number" min="0" placeholder="0" :disabled="r.fromErp">
                                 </td>
@@ -16504,6 +16552,10 @@ body {
 }
 .pu-rest { color : #c62828; font-weight : bold; }
 .pu-fromdb td { background : #f3f7ff; }
+/* bars of another board this planner may write (not open here) */
+.pu-other td { background : #f7fbf4; }
+.pu-other td:first-child { font-weight : 700; color : #2e6b1f; }
+.pu-est { color : #6b7a8c; font-weight : 400; margin-right : 2px; }
 .pf-line-select { min-width : 150px; height : 28px; margin-left : 6px; }
 .pf-line-hint { font-size : 11px; color : #5b6b84; margin-top : 6px; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }

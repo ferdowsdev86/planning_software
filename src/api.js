@@ -399,6 +399,16 @@ export async function loadProdUpdatesDb() {
     return data.rows || [];
 }
 
+// Bars running on `date` on the lines of the given units, from the SAVED plan
+// (the boards the planner may write but has not open) — day plan estimated
+export async function loadProdDayBars(date, unitIds) {
+    const ids = (unitIds || []).map(Number).filter(u => u > 0);
+    if (!ids.length) return [];
+    const data = await get(`/production-day-bars?date=${encodeURIComponent(date)}&units=${ids.join(',')}`, 30000);
+    if (!data.success) throw new Error(data.error || 'load failed');
+    return data.rows || [];
+}
+
 export async function saveProdUpdatesDb(rows) {
     const res = await apiFetch(`${API_BASE}/production-updates`, {
         method  : 'POST',

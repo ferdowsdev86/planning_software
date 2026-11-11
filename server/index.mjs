@@ -12,6 +12,7 @@ import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
 import { simulateAllocation, pickCurve } from './planAllocation.mjs';
+import { buildCalendar, simulateBar, prevRunKey } from './prodDayBars.mjs';
 
 const {
     DB_HOST = '10.135.50.27',
@@ -1008,6 +1009,119 @@ app.get(`${BASE}/production-updates`, async (req, res) => {
              ORDER BY save_date, line`
         );
         res.json({ success : true, rows });
+    }
+    catch (e) {
+        res.status(500).json({ success : false, error : e.message });
+    }
+});
+
+// Daily production update — the bars running on a date on the lines of the
+// given units, read from the SAVED plan (for the boards the dialog's user may
+// write but has not open). Same hygiene as the board: cancelled / completed
+// bars, retired orders and bars that belong to another unit than the line's
+// board are left out. dayPlanQty is the production model's ESTIMATE for the
+// date (the open board shows its own exact figure).
+app.get(`${BASE}/production-day-bars`, async (req, res) => {
+    try {
+        const date = String(req.query.date || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ success : false, error : 'date=YYYY-MM-DD required' });
+        const units = String(req.query.units || '').split(',').map(Number).filter(u => u > 0);
+        if (!units.length) return res.json({ success : true, rows : [] });
+        const ph = units.map(() => '?').join(',');
+        const dayStart = `${date} 00:00:00`, dayEnd = `${date} 23:59:59`;
+        const [[lineRows], [calRows], [ovRows], [profRows], [lcRows], [evRows], [madeRows], completed] = await Promise.all([
+            pool.query(
+                `SELECT id, resource_name AS name, unit_id, floor_id, manpower, default_efficiency AS eff, working_hours_per_day AS hours
+                   FROM planning_resources
+                  WHERE active = TRUE AND resource_type = 'sewing_line' AND unit_id IN (${ph}) AND resource_code NOT LIKE 'HOLD-%'
+                  ORDER BY unit_id, sort_order, id`, units),
+            pool.query(
+                `SELECT c.unit_id, i.interval_type, i.weekday_no, i.start_time, i.end_time
+                   FROM planning_calendars c JOIN planning_calendar_intervals i ON i.calendar_id = c.id
+                  WHERE c.active = TRUE AND i.weekday_no IS NOT NULL
+                    AND (i.recurrent_rule IS NULL OR i.recurrent_rule <> ?)`, [CAL_OVERRIDE]),
+            pool.query(
+                `SELECT c.unit_id, i.resource_id, DATE_FORMAT(i.start_date, '%Y-%m-%d') AS d, i.interval_name AS n
+                   FROM planning_calendar_intervals i JOIN planning_calendars c ON c.id = i.calendar_id
+                  WHERE i.recurrent_rule = ? AND i.start_date BETWEEN DATE_SUB(?, INTERVAL 120 DAY) AND DATE_ADD(?, INTERVAL 30 DAY)`, [CAL_OVERRIDE, date, date]),
+            pool.query('SELECT line, product_type, efficiency_pct FROM efficiency_profile'),
+            pool.query('SELECT curve_name, period_days, unit_id, day_number, efficiency_pct FROM learning_curve ORDER BY curve_name, day_number'),
+            // bars on those lines around the date: the ones running on the date
+            // are the rows, the earlier ones decide the Build up ramp
+            pool.query(
+                `SELECT e.id, e.event_code, e.event_name, e.start_date, e.end_date, e.planned_quantity, e.event_status, e.notes,
+                        pa.resource_id,
+                        COALESCE(o.buyer_name, p.buyer_name) AS buyer_name, COALESCE(o.style_no, p.style_no) AS style_no,
+                        o.po_number, COALESCE(o.order_code, p.order_code) AS order_code, COALESCE(o.color, p.color) AS color,
+                        COALESCE(o.smv, p.smv) AS smv, COALESCE(o.product_category, p.product_category) AS product_category,
+                        COALESCE(o.prod_unit, o.unit_id) AS order_prod_unit, COALESCE(p.prod_unit, p.unit_id) AS proj_prod_unit
+                   FROM planning_events e
+                   JOIN planning_assignments pa ON pa.event_id = e.id AND pa.is_primary = 1
+                   JOIN planning_resources pr ON pr.id = pa.resource_id AND pr.resource_type = 'sewing_line' AND pr.unit_id IN (${ph})
+                   LEFT JOIN planning_orders o ON o.id = e.planning_order_id
+                   LEFT JOIN planning_orders p ON e.planning_order_id IS NULL AND e.event_code LIKE 'ev-proj:%'
+                        AND p.id = (SELECT x.id FROM planning_orders x
+                                     WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
+                                     ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
+                  WHERE e.event_status NOT IN ('cancelled', 'completed')
+                    AND e.start_date <= ? AND e.end_date >= DATE_SUB(?, INTERVAL 45 DAY)`, [...units, dayEnd, dayStart]),
+            // production already made per bar (MBM / CEIL: hand-entered rows only)
+            pool.query(
+                `SELECT SUBSTRING_INDEX(event_ref, ':po', 1) AS ref, SUM(prod_qty) AS made
+                   FROM day_production_update_plan
+                  WHERE event_ref LIKE 'db-%' AND NOT (event_ref LIKE '%:po%' AND unit IN ('MBM', 'CEIL'))
+                  GROUP BY SUBSTRING_INDEX(event_ref, ':po', 1)`),
+            completedOrderCodes()
+        ]);
+        const lineById = new Map(lineRows.map(l => [Number(l.id), l]));
+        const made = new Map(madeRows.map(r => [String(r.ref), Number(r.made) || 0]));
+        const profiles = {};
+        for (const r of profRows) (profiles[r.line] ||= {})[r.product_type] = Number(r.efficiency_pct) || 0;
+        const ctxByUnit = {};
+        for (const u of units) ctxByUnit[u] = { cal : buildCalendar(calRows, ovRows, u), profiles, curve : pickCurve(lcRows, u) };
+        const projCode = ec => (String(ec || '').startsWith('ev-proj:') ? String(ec).slice(8).replace(/-\d{1,2}$/, '') : null);
+        // the bar's board: its order's production unit, else the projection
+        // row's, else the unit saved in its notes, else the line's unit
+        const unitOf = e => {
+            let u = e.order_prod_unit ?? e.proj_prod_unit ?? null;
+            if (u == null) { try { const n = JSON.parse(e.notes || '{}') || {}; if (Number(n.unit) > 0) u = Number(n.unit); } catch { /* no notes */ } }
+            if (u == null) u = lineById.get(Number(e.resource_id))?.unit_id ?? null;
+            return u == null ? null : Number(u);
+        };
+        const bars = [];
+        for (const e of evRows) {
+            const L = lineById.get(Number(e.resource_id));
+            if (!L) continue;
+            const code = e.order_code || projCode(e.event_code);
+            if (code && completed.has(code)) continue;
+            if (unitOf(e) !== Number(L.unit_id)) continue;          // shown on another unit's board, not this line's
+            bars.push({ e, L, code, productType : e.product_category, style : e.style_no, start : e.start_date, end : e.end_date, id : e.id });
+        }
+        const byLine = new Map();
+        for (const b of bars) (byLine.get(b.L.id) || byLine.set(b.L.id, []).get(b.L.id)).push(b);
+        const d0 = new Date(`${date}T00:00:00`), d1 = new Date(`${date}T23:59:59`);
+        const rows = [];
+        for (const b of bars) {
+            const s = new Date(b.start), en = new Date(b.end);
+            if (!(s <= d1 && en >= d0)) continue;                    // not running on the date
+            const e = b.e, L = b.L;
+            const ref = `db-${e.id}`;
+            const buyer = e.buyer_name || (projCode(e.event_code) && String(e.event_name || '').includes('|') ? String(e.event_name).split('|')[0].trim() : '') || '';
+            const qty = Number(e.planned_quantity) || 0;
+            const sim = simulateBar(ctxByUnit[Number(L.unit_id)], { id : L.id, name : L.name, manpower : L.manpower, eff : L.eff, hours : L.hours },
+                { start : b.start, end : b.end, qty, made : made.get(ref) || 0, smv : e.smv, productType : b.productType, buyer, style : b.style,
+                    prevKey : prevRunKey(byLine.get(L.id), b.start, e.id) }, date);
+            rows.push({
+                eventId : e.id, eventRef : ref,
+                unitId : Number(L.unit_id), unit : unitLabel(L.unit_id),
+                floor : L.floor_id != null ? `F${L.floor_id}` : '—', line : L.name, lineDbId : L.id,
+                buyer, style : e.style_no || '', order : b.code || '', po : e.po_number || '', color : e.color || '',
+                orderQty : qty, made : made.get(ref) || 0, dayPlanQty : sim.days.get(date) || 0,
+                start : e.start_date, end : e.end_date, status : e.event_status, ramp : sim.ramp
+            });
+        }
+        rows.sort((a, b) => a.unitId - b.unitId || String(a.line).localeCompare(String(b.line)) || String(a.po).localeCompare(String(b.po)));
+        res.json({ success : true, date, units, rows });
     }
     catch (e) {
         res.status(500).json({ success : false, error : e.message });
