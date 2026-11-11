@@ -576,6 +576,7 @@ const openWindows = computed(() => [
         open : !!currentBoard.value && (view.value === 'board' || boardMin.value), min : boardMin.value },
     { id : 'orders',   icon : '🔴', title : 'Orders',              open : ordersOpen.value,   min : ordersMin.value },
     { id : 'dayplan',  icon : '📄', title : 'Day Plan Report',     open : dpOpen.value,       min : dpMin.value },
+    { id : 'avail',    icon : '📦', title : 'Available Order',     open : availOpen.value,    min : availMin.value },
     { id : 'produpd',  icon : '🏭', title : 'Production update',   open : puOpen.value,       min : puMin.value },
     { id : 'stripprod', icon : '🏭', title : `Production update — ${spHead.value?.po || 'strip'}`, open : spOpen.value, min : spMin.value },
     { id : 'settings', icon : '⚙️', title : 'Settings',            open : settingsOpen.value, min : settingsMin.value },
@@ -593,6 +594,7 @@ function restoreWin(id) {
     if (id === 'board' && currentBoard.value) openBoard(currentBoard.value);
     if (id === 'orders')   ordersMin.value = false;
     if (id === 'dayplan')  dpMin.value = false;
+    if (id === 'avail')    availMin.value = false;
     if (id === 'produpd')  puMin.value = false;
     if (id === 'stripprod') spMin.value = false;
     if (id === 'settings') settingsMin.value = false;
@@ -5756,6 +5758,13 @@ function cmpApply(op, a, b) {
 }
 
 function matchColFilter(r, k, q) {
+    // '!=a,b' / '<>a,b': the cell is NONE of the listed values (exact) —
+    // "!=planned,completed" = the available orders
+    const not = /^(?:!=|<>)\s*(.+)$/.exec(q.trim());
+    if (not) {
+        const cell = orderCellText(r, k).toLowerCase();
+        return !not[1].split(',').map(s => s.trim().toLowerCase()).filter(Boolean).includes(cell);
+    }
     const m = /^(>=|<=|=|>|<)\s*(.+)$/.exec(q.trim());
     if (m) {
         const [, op, rawVal] = m;
@@ -6263,12 +6272,14 @@ ${summary}
 // ---------------------------------------------------------------------------
 const AVAIL_UNITS  = [{ id : 1, name : 'MBM' }, { id : 2, name : 'CEIL' }, { id : 3, name : 'AQL' }];
 const availOpen    = ref(false);
+const availMin     = ref(false);   // minimised to the window bar (drill-down into the list)
 const availLoading = ref(false);
 const availError   = ref('');
 const availRows    = ref([]);
 
 function openAvailableOrders() {
     availOpen.value    = true;
+    availMin.value     = false;
     availTab.value     = 'open';
     availLoading.value = true;
     availError.value   = '';
@@ -6458,6 +6469,30 @@ const availTip = (c, cell, m = null, uid = null) => {
     }
     return '';
 };
+// Click a unit × month cell: the report minimises to the window bar and the
+// Orders list filters to exactly those orders — projected rows of that
+// production unit and planning month that are neither planned nor completed
+// (= the Available tab's set; the Total column = every unit)
+function availDrill(m, uid) {
+    if (!m || !m.label || m.label === '—') return;
+    const unitName = uid === 'all' ? '' : (availSummary.value.units.find(u => u.id === uid)?.name || '');
+    clearOrderFilters();
+    orderSort.value = { key : null, dir : 1 };
+    orderFilters.value.orderType = 'projected';
+    orderFilters.value.status    = '!=planned,completed';
+    orderFilters.value.planMonth = `=${m.label}`;
+    if (unitName) orderFilters.value.prodUnitName = `=${unitName}`;
+    availMin.value  = true;
+    ordersMin.value = false;
+    const listUnit = currentUnitId.value ? AVAIL_UNITS.find(u => u.id === Number(currentUnitId.value))?.name : '';
+    if (listUnit && uid !== 'all' && Number(uid) !== Number(currentUnitId.value)) {
+        toast(`The Orders list holds ${listUnit} orders only — ${unitName} ${m.label} cannot be listed here`, 'warn');
+    }
+    else toast(`Orders list: ${unitName || 'all units'} · ${m.label} · available orders (projected, not planned / completed)`, 'ok');
+}
+const availDrillTip = (m, uid) => (m?.label && m.label !== '—'
+    ? `click → the Orders list shows the available orders of ${uid === 'all' ? 'every unit' : (availSummary.value.units.find(u => u.id === uid)?.name || 'this unit')} · ${m.label}` : '');
+
 // Lines per unit and the Build up curve the simulation used, for the note
 const allocInfoText = computed(() => {
     const info = allocInfo.value;
@@ -13053,16 +13088,18 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         </div>
 
         <!-- Available Order: every unit × planning month — order qty and SAH -->
-        <div v-if="availOpen" class="cal-overlay av-overlay" @click.self="availOpen = false">
+        <div v-if="availOpen && !availMin" class="cal-overlay av-overlay" @click.self="availOpen = false">
             <div class="cal-dialog av-dialog" :class="{ 'av-wide' : availTabInfo.key === 'alloc' }">
                 <div class="cal-title">
                     Available Order
                     <span style="font-size:12px;color:#888;font-weight:400;margin-left:10px;">
                         all units · planning month wise<span v-if="availSummary.from"> · from {{ availSummary.from }}</span>
                         <span v-if="availLoading"> · ⏳ loading…</span>
+                        · click a cell → its orders in the list
                     </span>
                     <span class="cal-title-btns">
                         <button class="od-xls-btn av-xls" :disabled="availLoading || !availSummary.rows.length" @click="exportAvailExcel">📊 Excel</button>
+                        <span class="cal-x cal-minbtn" title="Minimise" @click="availMin = true">—</span>
                         <span class="cal-x" @click="availOpen = false">✕</span>
                     </span>
                 </div>
@@ -13099,8 +13136,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td v-for="c in availTabInfo.left" :key="c.key" class="av-l av-period">{{ availLeft(m, c.key) }}</td>
                                 <template v-for="u in [...availSummary.units, { id : 'all' }]" :key="u.id">
                                     <td v-for="(c, i) in availTabInfo.cols" :key="c.key"
-                                        :class="[c.cls, { 'av-grp-start' : i === 0, 'av-tot' : u.id === 'all' }]"
-                                        :title="availTip(c, availCell(m, u.id), m, u.id)"
+                                        :class="[c.cls, { 'av-grp-start' : i === 0, 'av-tot' : u.id === 'all', 'av-click' : availCell(m, u.id).qty > 0 }]"
+                                        :title="availTip(c, availCell(m, u.id), m, u.id) || availDrillTip(m, u.id)"
+                                        @click="availCell(m, u.id).qty > 0 && availDrill(m, u.id)"
                                     >{{ availFmt(c, availCell(m, u.id)[c.key]) }}</td>
                                 </template>
                             </tr>
@@ -15532,6 +15570,8 @@ body {
 .av-wide .av-table { font-size : 11px; }
 .av-wide .av-table th, .av-wide .av-table td { padding : 5px 6px; }
 .av-table td.av-plan { color : #0d47a1; font-weight : bold; }
+.av-table td.av-click { cursor : pointer; }
+.av-table td.av-click:hover { background : #ffe082 !important; }
 .av-table td.av-excess { color : #c62828; }
 .av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
 .av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
