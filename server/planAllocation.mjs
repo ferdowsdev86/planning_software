@@ -20,14 +20,22 @@
 //   plan qty        +3 % (the board's planQtyOf) — capacity is consumed at
 //                   the plan qty, the result is reported in order pieces
 //   learning curve  a product / style changeover on a line runs its first N
-//                   working days at the unit's Build up curve percentages
+//                   working days at the unit's Build up curve percentages —
+//                   a changeover = the run that ENDS right before the new run
+//                   on that line's timeline (saved bar or planned run) is
+//                   another product / style; a ramping run that cannot finish
+//                   the order must outlive the ramp (curve days + 1), a 1-day
+//                   scrap of a changed style is never booked
 //   planning order  PCD, then delivery (the board's auto-plan order); an
 //                   order takes the line that finishes it earliest inside its
 //                   window, spills over to further lines when one cannot hold
 //                   it, and what no line can make in the window is `left`
 //   late orders     window already closed (delivery − 7 before today) → the
 //                   order is planned from today up to its delivery date and
-//                   flagged `late`; a delivery already past places nothing
+//                   flagged `late`; a delivery already past places nothing.
+//                   unit.lateFill (off by default): an open window that is
+//                   full may run on into the delivery buffer (pieces after
+//                   delivery − 7 are `latePcs`)
 // ---------------------------------------------------------------------------
 
 export const SEW_START_BEFORE_PCD = 8;
@@ -148,20 +156,30 @@ export function simulateUnit(unit, today) {
         manpower : Number(l.manpower) > 0 ? Number(l.manpower) : 50,
         eff      : Number(l.eff) > 0 ? Number(l.eff) : 50,
         hours    : Number(l.hours) > 0 ? Number(l.hours) : 0,
-        busy : [], runKey : null, lastEnd : 0, days : new Map(), effs : new Map()
+        busy : [], runs : [], days : new Map(), effs : new Map()
     }));
     const lineById = new Map(lines.map(l => [String(l.id), l]));
+    const lateFill = !!unit.lateFill;   // window open but full → may run on into the delivery buffer (late)
 
-    // Saved bars → busy intervals + the run (product|style) each line ends with
+    // Saved bars → busy intervals + the runs (product|style, when they end)
+    // on the line's timeline — a new run ramps when the run that ENDS right
+    // before it on the line is another product / style
     for (const b of unit.busy || []) {
         const L = lineById.get(String(b.lineId));
         if (!L) continue;
         const s = new Date(b.start), e = new Date(b.end);
         if (Number.isNaN(+s) || Number.isNaN(+e) || e <= s) continue;
         L.busy.push([s.getTime(), e.getTime()]);
-        if (e.getTime() > L.lastEnd) { L.lastEnd = e.getTime(); L.runKey = runKeyOf(b.productType, b.style); }
+        L.runs.push({ s : s.getTime(), e : e.getTime(), key : runKeyOf(b.productType, b.style) });
     }
     for (const L of lines) L.busy = mergeIntervals(L.busy);
+    // the run the line finished last by the end of day d (null = idle before)
+    function prevKeyAt(L, d) {
+        const limit = d.getTime() + DAY_MS;
+        let best = null;
+        for (const r of L.runs) if (r.e <= limit && (!best || r.e > best.e)) best = r;
+        return best ? best.key : null;
+    }
 
     // One line's day: minutes the line works that date and the part of them
     // no saved bar covers (mutable — placements consume it)
@@ -205,14 +223,17 @@ export function simulateUnit(unit, today) {
     // working days (an off day does not break it, a day the line has no free
     // time left does): the earliest run that finishes the order wins, else
     // the run that fits the most. Returns its days, pieces fitted, finish day.
+    // A run that ramps but cannot finish the order must at least outlive the
+    // ramp (curve days + 1 full-speed day) — a 1-day scrap of a changed style
+    // costs more line time in Build up than it makes, no planner books it
+    const minRampDays = curve ? curve.pct.length + 1 : 1;
     function trial(L, o, rem0, wStart, wEnd) {
         const eff = effFor(L, o);
-        const ramp = curve && L.runKey != null && L.runKey !== o.runKey;
         const rate = L.manpower * eff / 100 / o.smv;        // pieces per free line minute at 100 % curve
         let best = null, run = null;
         const close = () => {
-            if (run && run.days.length) {
-                const cand = { L, eff, ramp, days : run.days, fitted : rem0 - run.rem, finish : run.finish };
+            if (run && run.days.length && (run.finish || !run.ramp || run.days.length >= minRampDays)) {
+                const cand = { L, eff, ramp : run.ramp, days : run.days, fitted : rem0 - run.rem, finish : run.finish };
                 if (!best) best = cand;
                 else if (cand.finish && (!best.finish || cand.finish < best.finish)) best = cand;
                 else if (!cand.finish && !best.finish && cand.fitted > best.fitted) best = cand;
@@ -222,7 +243,11 @@ export function simulateUnit(unit, today) {
         for (let d = new Date(wStart), g = 0; d <= wEnd && g < MAX_WIN; d = addDays(d, 1), g++) {
             const info = dayOf(L, d);
             if (info.off) continue;
-            if (!run) run = { days : [], rem : rem0, k : 0, finish : null };
+            if (!run) {
+                const prev = prevKeyAt(L, d);
+                run = { days : [], rem : rem0, k : 0, finish : null, ramp : !!(curve && prev != null && prev !== o.runKey) };
+            }
+            const { ramp } = run;
             const factor = ramp && run.k < curve.pct.length ? curve.pct[run.k] / 100 : 1;
             const cap = Math.floor(info.freeMin * rate * factor);
             if (cap <= 0) { close(); continue; }            // a full day ends the run
@@ -235,7 +260,7 @@ export function simulateUnit(unit, today) {
             if (run.rem <= 0) { run.finish = new Date(d); close(); break; }   // scanning forward: the first finish is the earliest
         }
         close();
-        return best || { L, eff, ramp, days : [], fitted : 0, finish : null };
+        return best || { L, eff, ramp : false, days : [], fitted : 0, finish : null };
     }
 
     const orders = (unit.orders || []).map(o => {
@@ -275,68 +300,89 @@ export function simulateUnit(unit, today) {
 
     const out = [];
     for (const o of orders) {
-        const res = { key : o.key, qty : o.qty, planQty : o.planQty, placed : 0, left : o.qty, late : false, past : false,
+        const res = { key : o.key, qty : o.qty, planQty : o.planQty, placed : 0, left : o.qty, late : false, latePcs : 0, past : false,
             noSmv : !(o.smv > 0), noDates : !o.ship || !o.pcd, days : {}, lines : [], start : null, end : null };
         out.push(res);
         if (res.noSmv || res.noDates) continue;
         let wStart = addDays(o.pcd, -SEW_START_BEFORE_PCD);
         let wEnd   = addDays(o.ship, -SEW_END_BEFORE_SHIP);
         if (wStart < t0) wStart = new Date(t0);
+        let closed = false;
         if (wEnd < wStart) {
             // window closed: plan late, up to the delivery day itself
-            res.late = true;
+            closed = true;
             wEnd = new Date(o.ship);
             if (wEnd < wStart) { res.past = true; continue; }
         }
         let rem = o.planQty;
         const used = new Set();
         const planDays = new Map();   // ymd → plan pieces
-        while (rem > 0) {
-            let best = null;
-            for (const L of lines) {
-                if (used.has(L.id)) continue;
-                const t = trial(L, o, rem, wStart, wEnd);
-                if (!t.fitted) continue;
-                if (!best) { best = t; continue; }
-                const bDone = best.fitted >= rem, tDone = t.fitted >= rem;
-                if (tDone !== bDone) { if (tDone) best = t; continue; }
-                if (tDone) {   // both finish: earliest finish, then no ramp, then line order
-                    if (t.finish < best.finish || (+t.finish === +best.finish && (best.ramp && !t.ramp))) best = t;
-                    continue;
+        // Place `rem` between wS and wE: wholeOnly = only a line that finishes
+        // the order (one run, one ramp); else the line that fits the most,
+        // again and again (spill-over). Returns true when something was placed
+        const fill = (wS, wE, wholeOnly) => {
+            let any = false;
+            while (rem > 0) {
+                let best = null;
+                for (const L of lines) {
+                    if (used.has(L.id)) continue;
+                    const t = trial(L, o, rem, wS, wE);
+                    if (!t.fitted) continue;
+                    if (!best) { best = t; continue; }
+                    const bDone = best.fitted >= rem, tDone = t.fitted >= rem;
+                    if (tDone !== bDone) { if (tDone) best = t; continue; }
+                    if (tDone) {   // both finish: earliest finish, then no ramp, then line order
+                        if (t.finish < best.finish || (+t.finish === +best.finish && (best.ramp && !t.ramp))) best = t;
+                        continue;
+                    }
+                    if (t.fitted > best.fitted || (t.fitted === best.fitted && best.ramp && !t.ramp)) best = t;
                 }
-                if (t.fitted > best.fitted || (t.fitted === best.fitted && best.ramp && !t.ramp)) best = t;
+                if (!best || (wholeOnly && best.fitted < rem)) break;
+                // commit: consume the free minutes, the run joins the line's timeline
+                const L = best.L;
+                let lineQty = 0;
+                for (const x of best.days) {
+                    const info = dayOf(L, x.d);
+                    info.freeMin = Math.max(0, info.freeMin - x.min);
+                    const key = ymdOf(x.d);
+                    planDays.set(key, (planDays.get(key) || 0) + x.q);
+                    lineQty += x.q;
+                    const c = capacity[key.slice(0, 7)];
+                    if (c) c.curveManMin += x.loss * L.manpower;
+                }
+                const first = best.days[0].d, last = best.days[best.days.length - 1].d;
+                L.runs.push({ s : first.getTime(), e : last.getTime() + DAY_MS, key : o.runKey });
+                used.add(L.id);
+                res.lines.push({ id : L.id, name : L.name, planQty : lineQty, eff : best.eff, ramp : best.ramp });
+                rem -= best.fitted;
+                any = true;
             }
-            if (!best) break;
-            // commit: consume the free minutes, the line now runs this order
-            const L = best.L;
-            let lineQty = 0;
-            for (const x of best.days) {
-                const info = dayOf(L, x.d);
-                info.freeMin = Math.max(0, info.freeMin - x.min);
-                const key = ymdOf(x.d);
-                planDays.set(key, (planDays.get(key) || 0) + x.q);
-                lineQty += x.q;
-                const c = capacity[key.slice(0, 7)];
-                if (c) c.curveManMin += x.loss * L.manpower;
-            }
-            L.runKey = o.runKey;
-            used.add(L.id);
-            res.lines.push({ id : L.id, name : L.name, planQty : lineQty, eff : best.eff, ramp : best.ramp });
-            rem -= best.fitted;
-        }
+            return any;
+        };
+        // 1. one line that finishes the order inside the window
+        // 2. (lateFill) one line that finishes it by the delivery day — one
+        //    run on into the buffer rather than shreds over many lines
+        // 3. spill-over inside the window   4. (lateFill) spill-over up to the delivery
+        fill(wStart, wEnd, true);
+        if (rem > 0 && lateFill && !closed) fill(wStart, o.ship, true);
+        if (rem > 0) fill(wStart, wEnd, false);
+        if (rem > 0 && lateFill && !closed) fill(wStart, o.ship, false);
         // plan pieces → order pieces (the +3 % comes off again): whole numbers
         // by cumulative rounding, so the days add up to round(total × scale)
         const scale = o.qty / o.planQty;
         const keys = [...planDays.keys()].sort();
+        const lateFrom = closed ? null : ymdOf(addDays(o.ship, -SEW_END_BEFORE_SHIP + 1));
         let placed = 0, cum = 0;
         for (const k of keys) {
             cum += planDays.get(k);
             const q = Math.min(o.qty, Math.round(cum * scale)) - placed;
-            if (q > 0) { res.days[k] = q; placed += q; }
+            if (q > 0) { res.days[k] = q; placed += q; if (lateFrom && k >= lateFrom) res.latePcs += q; }
         }
         for (const l of res.lines) l.qty = Math.round(l.planQty * scale);
         res.placed = placed;
         res.left   = o.qty - placed;
+        if (closed) res.latePcs = placed;
+        res.late   = closed || res.latePcs > 0;
         res.start  = keys[0] || null;
         res.end    = keys[keys.length - 1] || null;
     }

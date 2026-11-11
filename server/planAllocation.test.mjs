@@ -80,6 +80,63 @@ test('learning curve: a product / style changeover ramps the first 3 working day
     assert.notEqual(runKeyOf('Shirt', 'OLD-black'), runKeyOf('shirt', 'OLD-blue'));           // a short code keeps its full text
 });
 
+test('changeover is read on the line\'s timeline: the run that ends right before, not the last one booked', () => {
+    const curve = { name : '2 Days', period : 3, pct : [25, 55, 100] };
+    const f = q => Math.round(q * 100000 / 103000);
+    // a saved bar of another style in the FUTURE (10 → 15 Nov) is not the run before a run on 1 Nov …
+    const unit = { unitId : 3, lines : [LINE], calendar : cal(), profiles : {}, curve,
+        busy : [{ lineId : 1, start : '2026-11-10T08:00:00', end : '2026-11-15T18:00:00', productType : 'Shirt', style : 'OLD' }] };
+    const early = simulateUnit({ ...unit, orders : [{ key : 'A', qty : 100000, smv : 10, pcd : '2026-11-09', ship : '2026-11-12', productType : 'Pant', style : 'NEW' }] }, TODAY).orders[0];
+    assert.equal(early.lines[0].ramp, false);
+    near(early.days['2026-11-01'], f(1800));
+    // … but it is the run before a run that starts after it (16 Nov → ramp)
+    const after = simulateUnit({ ...unit, orders : [{ key : 'B', qty : 100000, smv : 10, pcd : '2026-11-24', ship : '2026-11-30', productType : 'Pant', style : 'NEW' }] }, TODAY).orders[0];
+    assert.equal(after.lines[0].ramp, true);
+    near(after.days['2026-11-16'], f(450));
+    // a planned run joins the timeline: C (Pant NEW) on 16–17 Nov, then D (Pant NEW) right after it continues without a ramp
+    const r = simulateUnit({ ...unit, orders : [
+        { key : 'C', qty : 3000, smv : 10, pcd : '2026-11-24', ship : '2026-11-30', productType : 'Pant', style : 'NEW' },
+        { key : 'D', qty : 1000, smv : 10, pcd : '2026-11-25', ship : '2026-11-30', productType : 'Pant', style : 'NEW' }
+    ] }, TODAY);
+    const by = Object.fromEntries(r.orders.map(o => [o.key, o]));
+    assert.equal(by.C.lines[0].ramp, true);
+    assert.equal(by.D.lines[0].ramp, false);
+    assert.equal(by.D.left, 0);
+});
+
+test('a ramping run that cannot finish the order must outlive the ramp: a 1-day scrap of a changed style is not booked', () => {
+    const curve = { name : '2 Days', period : 3, pct : [25, 55, 100] };
+    // the line is free on 1 Nov only (bar 2 → 30 Nov, other style); the order needs ~6 days
+    const unit = { unitId : 3, lines : [LINE], calendar : cal(), profiles : {},
+        busy : [{ lineId : 1, start : '2026-10-25T08:00:00', end : '2026-10-31T18:00:00', productType : 'Shirt', style : 'OLD' },
+                { lineId : 1, start : '2026-11-02T08:00:00', end : '2026-11-30T18:00:00', productType : 'Shirt', style : 'OLD' }],
+        orders : [{ key : 'S', qty : 10000, smv : 10, pcd : '2026-11-09', ship : '2026-11-20', productType : 'Pant', style : 'NEW' }] };
+    const withCurve = simulateUnit({ ...unit, curve }, TODAY).orders[0];
+    assert.equal(withCurve.placed, 0);          // the scrap would run its only day at 25 % — left empty
+    assert.equal(withCurve.left, 10000);
+    const noCurve = simulateUnit({ ...unit, curve : null }, TODAY).orders[0];
+    assert.ok(noCurve.placed > 0);              // no changeover cost → the free day is used
+    // a continuation of the SAME style may use a 1-day scrap
+    const same = simulateUnit({ ...unit, curve, orders : [{ ...unit.orders[0], productType : 'Shirt', style : 'OLD' }] }, TODAY).orders[0];
+    assert.ok(same.placed > 0);
+});
+
+test('lateFill: an open window that is full may run on into the delivery buffer, the pieces after delivery − 7 are latePcs', () => {
+    // window 1 → 3 Nov (ship 10 − 7); 10,000 pcs ≈ 5.7 days: without lateFill 3 days fit, with it the run goes on to 7 Nov
+    const order = { key : 'L', qty : 10000, smv : 10, pcd : '2026-11-09', ship : '2026-11-10', productType : 'Pant' };
+    const base = { unitId : 3, lines : [LINE], calendar : cal(), busy : [], profiles : {}, orders : [order] };
+    const off = simulateUnit(base, TODAY).orders[0];
+    assert.equal(off.late, false);
+    assert.equal(off.latePcs, 0);
+    assert.ok(off.left > 0);
+    const on = simulateUnit({ ...base, lateFill : true }, TODAY).orders[0];
+    assert.equal(on.left, 0);
+    assert.equal(on.late, true);
+    assert.equal(on.latePcs, 10000 - Object.entries(on.days).filter(([d]) => d <= '2026-11-03').reduce((a, [, q]) => a + q, 0));
+    assert.ok(on.latePcs > 0);
+    assert.equal(on.end, '2026-11-07');
+});
+
 test('an order spills over to a second line when one cannot hold it, lines in board order on a tie', () => {
     const L2 = { ...LINE, id : 2, name : 'Line 02' };
     const r = simulateUnit({ unitId : 3, lines : [LINE, L2], calendar : cal(), busy : [], profiles : {},
@@ -110,6 +167,7 @@ test('late order (window closed) is planned from today up to its delivery; a pas
     const by = Object.fromEntries(r.orders.map(o => [o.key, o]));
     assert.equal(by.late.late, true);
     assert.equal(by.late.placed, 1000);
+    assert.equal(by.late.latePcs, 1000);
     assert.equal(by.past.past, true);
     assert.equal(by.past.placed, 0);
     assert.equal(by.past.left, 1000);

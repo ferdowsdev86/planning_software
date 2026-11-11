@@ -6394,7 +6394,7 @@ const availByTab = computed(() => {
         // the simulation's day-wise pieces of this order, summed per
         // production (calendar) month — where the plan actually lands
         const sim = alloc.get(availKey(r, i));
-        const a   = { placed : sim ? sim.placed : 0, left : sim ? sim.left : 0, late : sim?.late ? sim.placed : 0, byMonth : {} };
+        const a   = { placed : sim ? sim.placed : 0, left : sim ? sim.left : 0, late : sim ? (sim.latePcs ?? (sim.late ? sim.placed : 0)) : 0, byMonth : {} };
         if (sim) for (const [d, q] of Object.entries(sim.days || {})) { const ym = d.slice(0, 7); a.byMonth[ym] = (a.byMonth[ym] || 0) + q; }
         for (const t of AVAIL_TABS) {
             const o = out[t.key];
@@ -13236,7 +13236,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         line capacity = manpower × working hours × efficiency (buyer rule → line profile per product → line efficiency) ÷ SMV ·
                         factory calendar: weekly off days, changed-hours dates (0 = off), per-line hours ·
                         the bars already saved on a line keep their time, only the free part of a day is used ·
-                        Build up curve on a product / style change · capacity is taken at the plan qty (+3 %), figures are order pieces ·
+                        Build up curve when the run that ends right before on the line (saved bar or planned run) is another product / style — a changed-style run that cannot finish the order must outlive the ramp, 1-day scraps are not booked ·
+                        capacity is taken at the plan qty (+3 %), figures are order pieces ·
                         orders are planned in the board's order (PCD, then delivery), on the line that finishes earliest, spilling over to other lines when one cannot hold them ·
                         each <b>Made in</b> column = the pieces the simulation makes in that calendar month (where the orders of the row's planning month actually land, PCD-wise) —
                         green = the planning month itself, blue = ahead of it, orange = after it ·
