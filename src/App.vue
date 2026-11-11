@@ -6453,10 +6453,17 @@ function allocMonthTip(m, uid, ym, isTotal = false) {
     const who  = isTotal ? `all available orders of ${unit}` : `${unit} orders of planning month ${m.label}`;
     const rel  = isTotal || m.label === '—' ? '' : ym === m.label ? ' — the planning month itself' : ym < m.label ? ' — ahead of the planning month' : ' — after the planning month';
     let tip = q ? `${fmtQty(q)} pcs of ${who} are made in ${ym}${rel}` : `nothing of ${who} is made in ${ym}`;
+    const all = allocMonthQty(allocPivot.value.total, uid, ym);
+    if (!isTotal && all) tip += `\norders of EVERY planning month made in ${ym}: ${fmtQty(all)} pcs (the Total row)`;
     const k = availCapacity(uid, ym);
-    if (k) tip += `\nline capacity of ${unit} in ${ym}: ${fmtQty(k.pcs)} pcs · gone before today: ${fmtQty(k.pastPcs)} · held by saved bars: ${fmtQty(k.busyPcs)}`
-        + ` · free for new plan: ${fmtQty(k.freePcs)} · this plan uses: ${fmtQty(k.usedPcs)}`
-        + (k.curvePcs ? ` (Build up curve costs ${fmtQty(k.curvePcs)})` : '');
+    if (k) {
+        const still = Math.max(0, k.freePcs - k.usedPcs);
+        tip += `\nline capacity of ${unit} in ${ym}: ${fmtQty(k.pcs)} pcs · gone before today: ${fmtQty(k.pastPcs)} · held by saved bars: ${fmtQty(k.busyPcs)}`
+            + ` · free for new plan: ${fmtQty(k.freePcs)}`
+            + `\nthis plan uses: ${fmtQty(k.usedPcs)} = pieces made${k.curvePcs ? ` + Build up curve (style changes) ${fmtQty(k.curvePcs)}` : ''}`
+            + ` · still free after this plan: ${fmtQty(still)} (${k.freePcs ? Math.round(100 * still / k.freePcs) : 0} %)`
+            + `\n(capacity figures are at the unit's order-mix SMV and mean line efficiency, so they compare with the pieces only approximately)`;
+    }
     return tip;
 }
 const allocLeftTip = cell => (cell.left
