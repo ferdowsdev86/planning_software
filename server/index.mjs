@@ -811,8 +811,17 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
             );
         }
 
+        // A row re-used by an ADD of this same batch (same event_code: the
+        // planner blanked the board and re-planned the order — the upsert
+        // above reactivated the old row with the new dates) must not be
+        // cancelled again by the REMOVE of the old bar: skipping it keeps the
+        // re-planned bar live (before: 472 of 586 re-planned bars vanished)
+        const addedCodes = new Set((events.added || []).map(e => String(e.eventCode || '')).filter(Boolean));
+        const reusedIds = new Set(mapped.filter(m => m.eventId != null && addedCodes.has(String(m.eventCode || ''))).map(m => Number(m.eventId)));
         for (const ev of events.removed || []) {
-            const [[gone]] = await conn.query('SELECT planning_order_id, notes FROM planning_events WHERE id = ?', [ev.id]);
+            if (reusedIds.has(Number(ev.id))) continue;
+            const [[gone]] = await conn.query('SELECT planning_order_id, notes, event_code FROM planning_events WHERE id = ?', [ev.id]);
+            if (gone && addedCodes.has(String(gone.event_code || ''))) continue;
             await conn.query("UPDATE planning_events SET event_status = 'cancelled', updated_at = NOW() WHERE id = ?", [ev.id]);
             if (gone) {
                 let ng = {};

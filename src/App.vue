@@ -1036,10 +1036,23 @@ async function runLiveOrderPlan(s, {
                 const desired = startOfWorkDay(p.start);
                 deriveLcForPlacement(s, raw, p.line.id, desired);
                 applyLineFormulaDuration(s, raw, p.line.id);
-                const ins = computeInsertStart(s, p.line.id, desired, raw.dur || p.dur || 1, rec.id);
-                const start = ins.start;
-                let end = ins.end;
-                try { const sim = simulateStrip(s, raw, p.line.id, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* the formula end stays */ }
+                // slot for the FORMULA length, then the production model's real
+                // finish; a longer real length is re-slotted (the gap found may
+                // be too short for it — the bar must never overlap a neighbour)
+                let dur = raw.dur || p.dur || 1, start = null, end = null;
+                for (let k = 0; k < 5; k++) {
+                    const ins = computeInsertStart(s, p.line.id, desired, dur, rec.id);
+                    start = ins.start; end = ins.end;
+                    let fin = null;
+                    try { const sim = simulateStrip(s, raw, p.line.id, start); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
+                    if (!fin) break;
+                    // any spill past the slot (even the last 10 minutes of a
+                    // day's pieces) would overlap the next bar's start: widen
+                    // the slot and look again
+                    if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
+                    end = fin;
+                    break;
+                }
                 const latest = endOfWorkDay(p.back?.latestSewEnd ? new Date(p.back.latestSewEnd) : addCalDays(new Date(o.ship), -SEW_END_BEFORE_SHIP));
                 if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || end > latest) {
                     const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(rec.id)) || [];
@@ -3073,17 +3086,38 @@ async function runAutoPlanAvail() {
         // (the orders' PCDs decide, October starts included); strict delivery
         r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
             profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60) });
-        // (the Build up curve of every bar was derived at placement — a second
-        // pass here would lengthen bars and push followers past their delivery)
-        // Settle NOW (the same re-fit the board runs on its own a moment later)
-        // and drop every bar that ended up past its delivery − 7 days: the
-        // rule is "never a late bar", whatever the re-fit did
-        let dropped = 0;
+        // Settle NOW (the board's own deferred passes) and drop every bar that
+        // ended up past its delivery − 7 days — then a SECOND planning pass
+        // offers the dropped / still-unplanned orders the line time that the
+        // settle freed (appended after each line's last bar), settled again
+        let dropped = settleStrictBoard(s, r);
+        setBoardLoad(true, 'Second pass — re-trying the orders left unplanned…', 0);
+        try {
+            const r2 = await runLiveOrderPlan(s, { showToasts : false, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
+                profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60) });
+            if (r2 && !r2.skipped && r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
+            dropped += settleStrictBoard(s, r);
+        }
+        catch (e) { console.warn('[auto plan] second pass skipped:', e.message); }
+        syncOrdersListFromBoard();
+        recalcCapacity(s);
+        markBoardDirty();
+        touchBoardCache(s);
+        s.refreshRows?.();
+    }
+    catch (e) { toast(`Auto plan failed: ${e.message} — Undo restores the board`, 'error'); }
+    finally { setBoardLoad(false); apBusy.value = false; }
+    const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, r?.unplacedLate ? 'warn' : 'ok');
+}
+// The board's own deferred passes (Build up curves, re-fit to the production
+// schedule, the save-time no-overlap nudge), run here and now until nothing
+// changes any more — and every bar that ends up past its delivery − 7 days is
+// taken off (its order back to the unplanned pool): never a late bar
+function settleStrictBoard(s, r) {
+    let dropped = 0;
         try {
             const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
-            // settle and drop, again and again: taking a bar off opens a gap,
-            // the next settle pulls followers flush / re-fits them, which may
-            // push another bar past its delivery — repeat until nothing is late
             const lineIds = s.resourceStore.records.filter(x => x.data?.lineRow).map(x => x.id);
             for (let pass = 0; pass < 10; pass++) {
             // the board's own deferred passes, run here and now: the Build up
@@ -3092,6 +3126,12 @@ async function runAutoPlanAvail() {
             // its new dates next time), so repeat until nothing changes
             try { applyLearningCurves(s, { lineIds }); } catch { /* no curves */ }
             const rr = resizeBars(s, open, { dirty : true }) || {};
+            // the save-time rule too (a bar's real finish spills a few minutes
+            // into the next bar's first morning → that bar is nudged forward):
+            // run it here so the late check sees the bars where Save puts them
+            let nudged = 0;
+            try { nudged = enforceNoOverlapBeforeSave(s) || 0; } catch { /* no nudge */ }
+            if (nudged) rr.pushed = (rr.pushed || 0) + nudged;
             const lateBars = s.eventStore.records.filter(ev => {
                 const x = ev.data?.raw;
                 if (!x || x.stage || x.status === 'completed' || Number(x.made) > 0 || !x.ship) return false;
@@ -3119,16 +3159,7 @@ async function runAutoPlanAvail() {
             }
         }
         catch (e) { console.warn('[auto plan] settle / late check skipped:', e.message); }
-        syncOrdersListFromBoard();
-        recalcCapacity(s);
-        markBoardDirty();
-        touchBoardCache(s);
-        s.refreshRows?.();
-    }
-    catch (e) { toast(`Auto plan failed: ${e.message} — Undo restores the board`, 'error'); }
-    finally { setBoardLoad(false); apBusy.value = false; }
-    const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, r?.unplacedLate ? 'warn' : 'ok');
+    return dropped;
 }
 
 // Next start after a bar for whole-day planning: a bar that ends at (or
