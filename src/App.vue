@@ -12167,15 +12167,18 @@ const act = name => {
 // colour), Buyer → the ERP buyer short name, Item → the ERP garment type
 // (5 Pocket, Chino, Cargo…), Product/Order → the style (plan-state colours),
 // Late strip qty → the usual buyer : style : order line
+// `hint` is the second line of the footer legend's first cell, which names
+// the selected mode (what the bar colour / text stands for)
 const colorModes = [
-    { icon : '🚚', label : 'Product delivery', mode : 'delivery' },
-    { icon : '👕', label : 'Buyer',            mode : 'buyer' },
-    { icon : '👖', label : 'Item',             mode : 'product' },
-    { icon : '🏷', label : 'Product/Order',    mode : 'ptype' },
-    { icon : '⏱', label : 'Late strip qty',   mode : 'latesplit' }
+    { icon : '🚚', label : 'Product delivery', mode : 'delivery',  hint : 'Colour · delivery month' },
+    { icon : '👕', label : 'Buyer',            mode : 'buyer',     hint : 'Colour · buyer' },
+    { icon : '👖', label : 'Item',             mode : 'product',   hint : 'Colour · garment type' },
+    { icon : '🏷', label : 'Product/Order',    mode : 'ptype',     hint : 'Qty made, Started' },
+    { icon : '⏱', label : 'Late strip qty',   mode : 'latesplit', hint : 'Blue part · pcs after delivery' }
 ];
 const planStateLegend = Object.entries(PLAN_STATE_COLORS).map(([key, c]) => ({ key, ...c }));
 const colorModeLabel = computed(() => colorModes.find(c => c.mode === colorMode.value)?.label || '');
+const colorModeHint  = computed(() => colorModes.find(c => c.mode === colorMode.value)?.hint  || '');
 // the palette button steps through the modes: Product delivery → Buyer → Item → Product/Order → Late strip qty → …
 function cycleColorMode() {
     const i = colorModes.findIndex(c => c.mode === colorMode.value);
@@ -12975,7 +12978,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
             </template>
             <template v-else>
-                <div class="fr-leg-col"><i class="fr-leg-dot fr-leg-red"></i><b>Product/Order</b><span>Qty made, Started</span></div>
+                <div class="fr-leg-col" title="Colour by — the mode picked in the palette menu"><i class="fr-leg-dot fr-leg-red"></i><b>{{ colorModeLabel || 'Product/Order' }}</b><span>{{ colorModeHint || 'Qty made, Started' }}</span></div>
                 <div class="fr-leg-col"><b>Order Quantity</b><span>Plan qty · Order qty, SMV</span></div>
                 <div class="fr-leg-col"><b>Product</b><span>Customer</span></div>
                 <div class="fr-leg-col"><b>Earliest load</b><span>Delivery date</span></div>
