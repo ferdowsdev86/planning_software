@@ -400,8 +400,15 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         masters = PLANNING_MASTERS,
         efficiencyOf = () => 0,
         workMinPerDay = 600,
-        snapStart
+        snapStart,
+        // profileFirst: a line whose efficiency profile lists the order's
+        // product always beats a line that does not (the planner's line ×
+        // product sheet is the first rule); other lines take the order only
+        // when no listed line exists
+        profileFirst = false
     } = ctx;
+    // the product name the profile knows (ERP garment type) when the order carries one
+    const profType = o => o.profileType || o.productType;
 
     const todayStart = snapStart
         ? snapStart(today)
@@ -457,7 +464,7 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             // Line efficiency is the floor: a product-profile efficiency only
             // applies when it is higher than the line's own efficiency
             const planEff = Math.max(
-                Number(efficiencyOf(line.id, o.productType)) || 0,
+                Number(efficiencyOf(line.id, profType(o))) || 0,
                 Number(line.eff) || 0
             ) || 50;
             // Per-line working hours (planning_resources.working_hours_per_day)
@@ -482,9 +489,9 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             const back = backwardPass(o.ship, dur, o.qty, isWorking, masters);
             const feas = feasibility(back.latestSewStart, start, isWorking, masters);
             const lateness = workingDaysBetween(back.latestSewEnd, endDate, isWorking);
-            const typeFit = ctx.lineHasProductType?.(line.id, o.productType) ? 0 : 1;
+            const typeFit = ctx.lineHasProductType?.(line.id, profType(o)) ? 0 : 1;
             const clubPcd = line.lastPcd && sameDay(line.lastPcd, o.pcd) ? 0 : 1;
-            const clubType = line.lastProductType && line.lastProductType === o.productType ? 0 : 1;
+            const clubType = line.lastProductType && line.lastProductType === profType(o) ? 0 : 1;
             // How many days this line PUSHES the order past its ideal start.
             // 0 = the line can take it exactly on time (e.g. an empty line).
             const delayDays = Math.max(0, Math.round((start - idealStart) / 86400000));
@@ -495,6 +502,9 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         });
 
         candidates.sort((a, b) => {
+            // profile rule first: a line listed for the product beats every
+            // unlisted line, however early the unlisted one is free
+            if (profileFirst && a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;
             // NEVER push an order later when a line can take it earlier —
             // a free line beats clubbing preferences outright
             if (a.delayDays !== b.delayDays) return a.delayDays - b.delayDays;
@@ -515,7 +525,7 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         best.line.freeFrom = best.endDate;
         best.line.lastEnd = best.endDate;
         best.line.lastPcd = o.pcd;
-        best.line.lastProductType = o.productType;
+        best.line.lastProductType = profType(o);
 
         placements.push({ order : o, ...best });
     }
