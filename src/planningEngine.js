@@ -411,8 +411,11 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         // − dispatch); when no line can, it stays unplanned — never a late bar
         strictDelivery = false,
         // sewStartOf(order) → Date: the earliest sewing start to use instead of
-        // the forward pass (PCD + pre-production days), e.g. PCD − 8 days
-        sewStartOf = null
+        // the forward pass (PCD + pre-production days), e.g. PCD + 8 working days
+        sewStartOf = null,
+        // latestSewEndOf(order) → Date: the latest sewing finish to use instead
+        // of the backward pass (e.g. delivery − 6 days for washing + finishing)
+        latestSewEndOf = null
     } = ctx;
     // the product name the profile knows (ERP garment type) when the order carries one
     const profType = o => o.profileType || o.productType;
@@ -504,6 +507,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
 
             const endDate = addWorkingDays(start, dur, isWorking);
             const back = backwardPass(o.ship, dur, o.qty, isWorking, masters);
+            if (latestSewEndOf) {
+                const l = latestSewEndOf(o);
+                if (l && !Number.isNaN(+l)) { back.latestSewEnd = new Date(l); back.latestSewStart = backWorkingDays(new Date(l), dur, isWorking); }
+            }
             const feas = feasibility(back.latestSewStart, start, isWorking, masters);
             const lateness = workingDaysBetween(back.latestSewEnd, endDate, isWorking);
             const typeFit = ctx.lineHasProductType?.(line.id, profType(o)) ? 0 : 1;
@@ -531,6 +538,9 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             // NEVER push an order later when a line can take it earlier —
             // a free line beats clubbing preferences outright
             if (a.delayDays !== b.delayDays) return a.delayDays - b.delayDays;
+            // strict runs: same start → the line with the highest expected
+            // output for this product (profile efficiency) takes it
+            if (strictDelivery && a.planEff !== b.planEff) return b.planEff - a.planEff;
             if (a.clubPcd !== b.clubPcd) return a.clubPcd - b.clubPcd;
             if (a.clubType !== b.clubType) return a.clubType - b.clubType;
             if (a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;

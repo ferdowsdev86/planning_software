@@ -4,7 +4,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
@@ -796,7 +796,15 @@ async function runLiveOrderPlan(s, {
     // late bar), and the sewing start follows the chosen PCD rule
     earliestStart = null,
     strictDelivery = false,
-    sewStartRule = 'criteria'          // 'criteria' = PCD + 5 pre-production working days · 'pcd+8' = PCD + 8 working days (sewing output starts 8 working days after the planned cut date)
+    sewStartRule = 'criteria',         // 'criteria' = PCD + 5 pre-production working days · 'pcd+8' = PCD + 8 working days (sewing output starts 8 working days after the planned cut date)
+    // delivery on / before this date (with shipAfter: the delivery window)
+    shipBefore = null,
+    // latestFinishOf(order) → Date: the latest sewing finish (delivery − the
+    // washing + finishing buffer) instead of the engine's backward pass
+    latestFinishOf = null,
+    // strict runs: an order no single line can finish in time is split across
+    // compatible lines (up to 3), the exact quantity preserved
+    splitAcrossLines = false
 } = {}) {
     const typeFilter = orderTypes?.length ? new Set(orderTypes) : null;
     const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -872,6 +880,7 @@ async function runLiveOrderPlan(s, {
         if (qty <= 0) continue;
         if (!(Number(u.smv) > 0)) continue;                        // no SMV → nothing to size
         if (shipGate && (!u.ship || dayStart(u.ship) <= shipGate)) { windowSkipped++; continue; }
+        if (shipBefore && (!u.ship || dayStart(u.ship) > dayStart(shipBefore))) { windowSkipped++; continue; }
         if (pcdGate  && (!u.pcd  || dayStart(u.pcd)  <  pcdGate))  { windowSkipped++; continue; }
         const lidHint = u.suitable?.[0] || lineStates[0].id;
         const code = u.mbmOrder || mbmOrderNo(u.po, u.mbmOrder);
@@ -888,7 +897,11 @@ async function runLiveOrderPlan(s, {
         toast(`${noPcdCount} order(s) skipped — cannot auto-plan (missing PCD or zero order quantity)`, 'warn');
     }
     if (windowSkipped && showToasts) {
-        toast(`${windowSkipped} order(s) outside the window (delivery after ${fmtDateDdMonRr(shipGate)}, PCD from ${fmtDateDdMonRr(pcdGate)}) left unplanned`, 'ok');
+        const win = [
+            shipGate ? `delivery ${shipBefore ? `${fmtDateDdMonRr(addCalDays(shipGate, 1))} → ${fmtDateDdMonRr(shipBefore)}` : `after ${fmtDateDdMonRr(shipGate)}`}` : (shipBefore ? `delivery up to ${fmtDateDdMonRr(shipBefore)}` : ''),
+            pcdGate ? `PCD from ${fmtDateDdMonRr(pcdGate)}` : ''
+        ].filter(Boolean).join(', ');
+        toast(`${windowSkipped} order(s) outside the window (${win}) left unplanned`, 'ok');
     }
 
     if (!orders.length) {
@@ -918,8 +931,10 @@ async function runLiveOrderPlan(s, {
         snapStart : snapToWorkStart,
         profileFirst,
         strictDelivery,
-        sewStartOf : sewStartRule === 'pcd+8' ? o => addWorkDays(new Date(o.pcd), AP_SEW_START_AFTER_PCD) : null
+        sewStartOf : sewStartRule === 'pcd+8' ? o => addWorkDays(new Date(o.pcd), AP_SEW_START_AFTER_PCD) : null,
+        latestSewEndOf : latestFinishOf
     };
+    const latestOf = o => latestFinishOf ? latestFinishOf(o) : endOfWorkDay(addCalDays(new Date(o.ship), -SEW_END_BEFORE_SHIP));
 
     // Calculate in small slices so the main thread stays responsive
     const placements = [];
@@ -1017,6 +1032,43 @@ async function runLiveOrderPlan(s, {
     // after the order's latest sewing end is taken off again: that order
     // stays unplanned, never a late bar. Nothing is repacked or re-fitted
     // afterwards, so the bars stay exactly where this put them.
+    // One bar placed exactly on the real board: slot for the formula length,
+    // then the production model's real finish (a longer real length is
+    // re-slotted — the gap found may be too short, the bar must never overlap
+    // a neighbour); a bar that would end after `latest` is taken off again
+    const removeRec = rec => {
+        const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(rec.id)) || [];
+        if (asgn.length) s.assignmentStore.remove(asgn);
+        s.eventStore.remove(rec);
+    };
+    const placeExactBar = (e, lineId, desiredStart, latest) => {
+        const raw = e.raw;
+        const [rec] = s.eventStore.add(e);
+        if (!rec) return { ok : false, reason : 'store refused the bar' };
+        assignEventToLine(s, rec, lineId);
+        const desired = startOfWorkDay(desiredStart);
+        deriveLcForPlacement(s, raw, lineId, desired);
+        applyLineFormulaDuration(s, raw, lineId);
+        let dur = raw.dur || 1, start = null, end = null;
+        for (let k = 0; k < 5; k++) {
+            const ins = computeInsertStart(s, lineId, desired, dur, rec.id);
+            start = ins.start; end = ins.end;
+            let fin = null;
+            try { const sim = simulateStrip(s, raw, lineId, start); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
+            if (!fin) break;
+            if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
+            end = fin;
+            break;
+        }
+        if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || (latest && end > latest)) {
+            removeRec(rec);
+            return { ok : false, rec : null, start, end, reason : 'would end after the latest sewing finish on the real board' };
+        }
+        rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : lineId });
+        rec.data.resourceId = lineId;
+        raw.start = start; raw.end = end; raw.latePlan = false;
+        return { ok : true, rec, start, end };
+    };
     if (events.length && strictDelivery) {
         if (showToasts) toast(`Placing ${events.length} order(s) on the board…`, 'ok');
         const byId = new Map(placements.map(p => [`ev-${p.order.id}`, p]));
@@ -1029,41 +1081,8 @@ async function runLiveOrderPlan(s, {
                 const p = byId.get(e.id);
                 if (!p) continue;
                 const o = p.order;
-                const raw = e.raw;
-                const [rec] = s.eventStore.add(e);
-                if (!rec) continue;
-                assignEventToLine(s, rec, p.line.id);
-                const desired = startOfWorkDay(p.start);
-                deriveLcForPlacement(s, raw, p.line.id, desired);
-                applyLineFormulaDuration(s, raw, p.line.id);
-                // slot for the FORMULA length, then the production model's real
-                // finish; a longer real length is re-slotted (the gap found may
-                // be too short for it — the bar must never overlap a neighbour)
-                let dur = raw.dur || p.dur || 1, start = null, end = null;
-                for (let k = 0; k < 5; k++) {
-                    const ins = computeInsertStart(s, p.line.id, desired, dur, rec.id);
-                    start = ins.start; end = ins.end;
-                    let fin = null;
-                    try { const sim = simulateStrip(s, raw, p.line.id, start); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
-                    if (!fin) break;
-                    // any spill past the slot (even the last 10 minutes of a
-                    // day's pieces) would overlap the next bar's start: widen
-                    // the slot and look again
-                    if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
-                    end = fin;
-                    break;
-                }
-                const latest = endOfWorkDay(p.back?.latestSewEnd ? new Date(p.back.latestSewEnd) : addCalDays(new Date(o.ship), -SEW_END_BEFORE_SHIP));
-                if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || end > latest) {
-                    const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(rec.id)) || [];
-                    if (asgn.length) s.assignmentStore.remove(asgn);
-                    s.eventStore.remove(rec);
-                    unplaced.push({ order : o, reason : 'would end after the latest sewing end on the real board' });
-                    continue;
-                }
-                rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : p.line.id });
-                rec.data.resourceId = p.line.id;
-                raw.start = start; raw.end = end; raw.latePlan = false;
+                const r = placeExactBar(e, p.line.id, p.start, latestOf(o));
+                if (!r.ok) { unplaced.push({ order : o, reason : r.reason, raw : e.raw }); continue; }
                 kept.push(p);
                 if (++n % 25 === 0) {
                     onProgress?.({ phase : 'add', done : n, total : events.length, message : `Placing orders on board… ${n} / ${events.length}` });
@@ -1076,6 +1095,89 @@ async function runLiveOrderPlan(s, {
         placements.push(...kept);
         late = 0;
         if (kept.length) expandTimeAxisForEvents(s);
+    }
+    // Split across compatible lines: an order no single line can finish in
+    // time is cut into up to 3 pieces (exact total kept) — each piece on the
+    // line with the most output by the latest sewing finish, placed exactly
+    let splitOrders = 0, splitPieces = 0;
+    if (strictDelivery && splitAcrossLines && unplaced.length) {
+        const todo = unplaced.splice(0);
+        const profOf = o => o.profileType || o.productType;
+        const lineLastEnd = lid => {
+            let m = null;
+            for (const ev of s.eventStore.records) { const x = ev.data?.raw; if (!x || x.stage) continue; if (lineIdOf(s, ev) !== lid) continue; if (!m || ev.endDate > m) m = ev.endDate; }
+            return m;
+        };
+        beginBoardInteraction(s, 'batch');
+        s.suspendRefresh?.();
+        try {
+            for (const u of todo) {
+                const o = u.order;
+                const qty = Number(o.qty) || 0;
+                if (!(qty > 1) || !o.ship) { unplaced.push(u); continue; }
+                const latest = latestOf(o);
+                const earliest = planCtx.sewStartOf ? planCtx.sewStartOf(o) : (o.pcd ? addWorkDays(new Date(o.pcd), 5) : today);
+                const desired0 = clampIntoWorkWindow(new Date(Math.max(+earliest, +today)));
+                // template raw of the whole order (the pieces copy it)
+                const base = u.raw || { ...o, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color, risk : calcRisk({ start : desired0, end : desired0, ship : o.ship, matReady : o.matReady || o.pcd, lineUtil : 0, status : 'draft' }) };
+                let cands = lineStates.filter(l => planCtx.lineHasProductType(l.id, profOf(o)));
+                if (!cands.length) cands = lineStates;
+                const caps = [];
+                for (const l of cands) {
+                    const lastEnd = lineLastEnd(l.id);
+                    let st = desired0;
+                    if (lastEnd) { const after = nextDayStartAfter(lastEnd); if (after > st) st = after; }
+                    if (st > latest) continue;
+                    const tmp = { ...base, qty, lc : undefined };
+                    try {
+                        deriveLcForPlacement(s, tmp, l.id, st);
+                        applyLineFormulaDuration(s, tmp, l.id);
+                        const sim = simulateStrip(s, tmp, l.id, st);
+                        let cap = 0;
+                        for (const d of sim?.days || []) { if (endOfWorkDay(new Date(d.date)) <= latest) cap += Number(d.q) || 0; }
+                        if (cap > 0) caps.push({ line : l, start : st, cap : Math.min(cap, qty), finish : sim?.finish || null });
+                    }
+                    catch { /* line skipped */ }
+                }
+                caps.sort((a, b) => b.cap - a.cap);
+                let pick = [], sum = 0;
+                for (const c of caps) { pick.push(c); sum += c.cap; if (sum >= qty || pick.length === 3) break; }
+                if (sum < qty || pick.length < 2) {
+                    const best = caps[0];
+                    unplaced.push({ ...u, reason : `no single line finishes it in time and the ${pick.length || 1} best compatible line(s) make only ${fmtQty(sum)} of ${fmtQty(qty)} pcs by the latest sewing finish`,
+                        qtyAtRisk : Math.max(0, qty - sum), bestFinish : best?.finish || null, bestLine : best?.line?.name || null });
+                    continue;
+                }
+                // proportional pieces, exact total
+                const parts = pick.map(c => Math.floor(qty * c.cap / sum));
+                let rest = qty - parts.reduce((a, b) => a + b, 0);
+                for (let i = 0; rest > 0; i = (i + 1) % parts.length) { parts[i]++; rest--; }
+                const baseCode = String(o.id).startsWith('proj:') ? `ev-${o.id}` : poBaseEventCode(o.po);
+                const orderQty0 = Number(base.orderQty ?? qty) || qty;
+                const placed = [];
+                let ok = true;
+                for (let i = 0; i < pick.length; i++) {
+                    const q = parts[i];
+                    if (!(q > 0)) continue;
+                    const code = i === 0 ? baseCode : nextStripEventCode(s, o.po, baseCode);
+                    const raw = { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), orderQty : Math.round(orderQty0 * q / qty), baseQty : Number(base.baseQty) > 0 ? Math.round(Number(base.baseQty) * q / qty) : base.baseQty,
+                        eventCode : code, id : i === 0 ? o.id : (code.startsWith('ev-') ? code.slice(3) : code), keepSeparate : true, lc : undefined, dur : undefined, start : pick[i].start, end : pick[i].start, split : { of : o.id, part : i + 1, parts : pick.length } };
+                    const e = { id : i === 0 ? `ev-${o.id}` : `ev-${o.id}-sp${i + 1}`, resourceId : pick[i].line.id, startDate : pick[i].start, endDate : endOfWork(pick[i].start, 1), duration : 1, durationUnit : 'day', manuallyScheduled : true, name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : true, raw };
+                    const r = placeExactBar(e, pick[i].line.id, pick[i].start, latest);
+                    if (!r.ok) { ok = false; break; }
+                    placed.push(r.rec);
+                }
+                if (!ok) {
+                    for (const rec of placed) removeRec(rec);
+                    unplaced.push({ ...u, reason : 'split pieces did not all fit before the latest sewing finish' });
+                    continue;
+                }
+                splitOrders++; splitPieces += placed.length;
+                placements.push({ order : o, line : pick[0].line, start : pick[0].start, split : placed.length });
+            }
+        }
+        finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
+        if (splitOrders && showToasts) toast(`${splitOrders} order(s) split across lines (${splitPieces} pieces) to meet their delivery`, 'ok');
     }
     if (unplaced.length && showToasts) toast(`${unplaced.length} order(s) cannot finish before their delivery on any line — left unplanned (never planned late)`, 'warn');
 
@@ -1135,7 +1237,7 @@ async function runLiveOrderPlan(s, {
     scrollBoardToToday(s);
     touchBoardCache(s);
 
-    return { planned : placements.length, late, tight, skipped : false, unplacedLate : unplaced.length };
+    return { planned : placements.length, late, tight, skipped : false, unplacedLate : unplaced.length, unplaced, splitOrders, splitPieces };
 }
 
 function disableStmIfLarge(s) {
@@ -2998,7 +3100,14 @@ const apKeepStarted = ref(true);           // keep completed / production-starte
 // Sewing output starts 8 WORKING days after the planned cut date (planner
 // rule 2026-11-12: PCD 15/10 → 25/10, the Fridays 16 and 23 do not count)
 const AP_SEW_START_AFTER_PCD = 8;
+// Washing + finishing after sewing: the latest sewing finish = PO delivery −
+// 6 days (planner spec 2026-11-12); projected shipment-ready = sewing end + 6
+const AP_FINISH_BUFFER_DAYS = 6;
+const apTo          = ref('2026-11-30');   // delivery on / before this date (the delivery window)
+const apReviewOpen  = ref(false);
+const apReview      = shallowRef(null);    // the run's review: summary, shipment check, infeasible POs, idle time
 const apSewRule     = ref('pcd+8');        // 'pcd+8' = PCD + 8 working days (default) · 'criteria' = PCD + 5 pre-production working days
+const apLatestFinishOf = raw => (raw?.ship ? endOfWorkDay(addCalDays(new Date(raw.ship), -AP_FINISH_BUFFER_DAYS)) : null);
 const apBusy        = ref(false);
 const apStats       = computed(() => {
     const s = getInstance();
@@ -3065,10 +3174,13 @@ async function runAutoPlanAvail() {
     if (boardReadOnly.value) { toast('🔒 Read only — this board cannot be planned', 'warn'); return; }
     const from = apFrom.value ? new Date(`${apFrom.value}T00:00:00`) : null;
     if (!from || Number.isNaN(+from)) { toast('Delivery-from date is missing', 'warn'); return; }
+    const to = apTo.value ? new Date(`${apTo.value}T00:00:00`) : null;
+    if (to && (Number.isNaN(+to) || to < from)) { toast('Delivery-to date must not be before the from date', 'warn'); return; }
     const st = apStats.value;
     const ok = window.confirm(`Auto plan ${currentBoard.value.unitName} board from the available orders?\n\n`
         + `• ${st.blank} bar(s) leave the board${st.keep ? ` (${st.keep} completed / production-started bar(s) stay)` : ''}\n`
-        + `• every available order with delivery on / after ${fmtDate(from)} is planned on this unit's lines by its PCD (bars may start before today) — efficiency profile line × product first\n`
+        + `• every available order with delivery ${to ? `${fmtDate(from)} → ${fmtDate(to)}` : `on / after ${fmtDate(from)}`} is planned on this unit's lines by its PCD (bars may start before today) — efficiency profile line × product first, highest output line when several meet the date\n`
+        + `• latest sewing finish = delivery − ${AP_FINISH_BUFFER_DAYS} days (washing + finishing) · an order no single line can finish in time is split across up to 3 compatible lines (exact total kept)\n`
         + `• sewing start = ${apSewRule.value === 'pcd+8' ? 'PCD + 8 working days' : 'PCD + 5 pre-production working days'} · every bar must finish before its delivery (latest sewing end) — an order that cannot is left unplanned, never planned late\n`
         + `• no gaps: bars are pulled flush one after another (never before their PCD rule start), the freed time goes to the orders still unplanned\n\n`
         + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
@@ -3088,8 +3200,14 @@ async function runAutoPlanAvail() {
         // delivery strictly after (from − 1 day) = on / after `from`; no PCD
         // gate; bars may start up to 60 days before the delivery-from date
         // (the orders' PCDs decide, October starts included); strict delivery
-        r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
-            profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60) });
+        const runOpts = { mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), shipBefore : to, pcdFrom : null,
+            profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60),
+            latestFinishOf : apLatestFinishOf, splitAcrossLines : true };
+        const infeasible = new Map();   // order id → the last reason it could not be placed
+        const noteUnplaced = rr => { for (const u of rr?.unplaced || []) infeasible.set(String(u.order?.id), u); };
+        const notePlaced = rr => { for (const p of rr?.placed || []) infeasible.delete(String(p)); };
+        r = await runLiveOrderPlan(s, { showToasts : true, ...runOpts });
+        noteUnplaced(r);
         // Settle NOW (the board's own deferred passes) and drop every bar that
         // ended up past its delivery − 7 days — then a SECOND planning pass
         // offers the dropped / still-unplanned orders the line time that the
@@ -3111,16 +3229,18 @@ async function runAutoPlanAvail() {
         for (let pass = 2; pass <= 4; pass++) {
             setBoardLoad(true, `Pass ${pass} — re-trying the orders left unplanned…`, 0);
             let r2 = null;
-            try {
-                r2 = await runLiveOrderPlan(s, { showToasts : false, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
-                    profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : floor });
-            }
+            try { r2 = await runLiveOrderPlan(s, { showToasts : false, ...runOpts }); }
             catch (e) { console.warn(`[auto plan] pass ${pass} skipped:`, e.message); break; }
-            if (!r2 || r2.skipped || !(r2.planned > 0)) break;
-            if (r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
+            if (!r2 || r2.skipped || !(r2.planned > 0)) { noteUnplaced(r2); break; }
+            if (r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.splitOrders = (r.splitOrders || 0) + (r2.splitOrders || 0); r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
+            noteUnplaced(r2);
             dropped += settleStrictBoard(s, r);
             pullAndSettle();
         }
+        // Review for the planner (nothing is saved yet): shipment check per
+        // bar, infeasible POs with the binding constraint, idle time per line
+        try { apReview.value = buildAutoPlanReview(s, { from, to, floor, infeasible : [...infeasible.values()], blanked, r, dropped }); apReviewOpen.value = true; }
+        catch (e) { console.warn('[auto plan] review skipped:', e.message); }
         syncOrdersListFromBoard();
         recalcCapacity(s);
         markBoardDirty();
@@ -3131,6 +3251,82 @@ async function runAutoPlanAvail() {
     finally { setBoardLoad(false); apBusy.value = false; }
     const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
     toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, r?.unplacedLate ? 'warn' : 'ok');
+}
+// The run's review (planner spec 2026-11-12): line plan is the board itself;
+// here the shipment check per bar (PCD, earliest sewing start, latest sewing
+// finish, planned finish, projected shipment-ready, status), the POs that
+// could not be placed with the binding constraint, the summary and the idle
+// working time per line with the reason for each gap.
+function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropped }) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const index = buildLineIndex(s);
+    const bars = s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage);
+    const rows = [];
+    const byLine = new Map();
+    for (const ev of bars) {
+        const x = ev.data.raw;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;
+        (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
+        const earliest = apEarliestStartOf(x);
+        const latest = apLatestFinishOf(x);
+        const end = new Date(ev.endDate);
+        const ready = addCalDays(end, AP_FINISH_BUFFER_DAYS);
+        const slackDays = latest ? Math.floor((latest - end) / 864e5) : null;
+        // a bar the blank kept (completed / production already reported) was
+        // not placed by this run — shown as such, never counted as a late plan
+        const kept = x.status === 'completed' || Number(x.made) > 0;
+        const status = kept ? (end > latest ? 'Kept — in production (late)' : 'Kept — in production') : !latest ? 'No delivery' : end > latest ? 'Late' : slackDays <= 1 ? 'At Risk' : 'On Time';
+        rows.push({ id : String(ev.id), line : s.resourceStore.getById(lid)?.name || lid, unit : x.unitId ?? '', order : x.mbmOrder || '', po : x.po || '', style : x.style || '', color : x.color || '',
+            qty : Number(x.qty) || 0, pcd : x.pcd ? new Date(x.pcd) : null, earliest, latest, start : new Date(ev.startDate), end, ready, status, slackDays, kept,
+            pastStart : ev.startDate < today && !(Number(x.made) > 0), split : x.split || null, made : Number(x.made) || 0 });
+    }
+    rows.sort((a, b) => a.line.localeCompare(b.line, undefined, { numeric : true }) || (a.start - b.start));
+    // idle time per line: gaps between consecutive bars (and before the first
+    // bar, from today) in working hours, with the reason
+    const unit = currentUnitId.value;
+    const pool = unplanned.value.filter(u => !(unit && u.unitId && u.unitId !== unit) && u.status !== 'completed' && Number(u.smv) > 0 && (Number(u.qty ?? u.orderQty) || 0) > 0);
+    const idle = [];
+    const hoursBetween = (lid, a, b) => { let h = 0; const d = new Date(a); d.setHours(0, 0, 0, 0); for (let g = 0; g < 400 && d < b; g++, d.setDate(d.getDate() + 1)) { if (d >= a && !isOffDay(d)) h += Number(s.resourceStore.getById(lid)?.data?.hours) || 10; } return Math.round(h); };
+    for (const res of s.resourceStore.records) {
+        if (!res.data?.lineRow) continue;
+        const list = (byLine.get(res.id) || []).slice().sort((a, b) => a.startDate - b.startDate);
+        let cursor = new Date(Math.max(+today, floor ? +floor : 0));
+        const gaps = [];
+        const seq = list.map(ev => ({ s : new Date(ev.startDate), e : new Date(ev.endDate) }));
+        seq.push(null);
+        for (const seg of seq) {
+            const gapEnd = seg ? seg.s : null;
+            if (gapEnd && gapEnd - cursor > 864e5) {
+                const h = hoursBetween(res.id, cursor, gapEnd);
+                if (h >= 8) {
+                    // why is it empty? a still-unplanned order that could start by then?
+                    const compat = pool.filter(u => { const lo = apEarliestStartOf(u); return lo && lo <= gapEnd; });
+                    const prodOk = compat.filter(u => Number(profileOfLine(res.id)?.values?.[erpOrderInfo[u.mbmOrder]?.gmt || u.productType]) > 0);
+                    const reason = !compat.length ? 'no order is ready (PCD rule) before the gap' : !prodOk.length ? 'no ready order of a product this line runs' : h < 24 ? 'gap too short for a run' : 'the ready orders would not finish by their delivery here';
+                    gaps.push({ from : new Date(cursor), to : new Date(gapEnd), hours : h, reason });
+                }
+            }
+            if (seg) cursor = seg.e > cursor ? new Date(seg.e) : cursor;
+        }
+        const totalH = gaps.reduce((a, g) => a + g.hours, 0);
+        if (gaps.length) idle.push({ line : res.name, hours : totalH, gaps });
+    }
+    const plannedQty = rows.reduce((a, x) => a + x.qty, 0);
+    const onTimeQty = rows.filter(x => !x.kept && x.status !== 'Late').reduce((a, x) => a + x.qty, 0);
+    const unplannedQty = pool.reduce((a, u) => a + (Number(u.qty ?? u.orderQty) || 0), 0);
+    const inf = (infeasible || []).map(u => {
+        const o = u.order || {};
+        const latest = apLatestFinishOf(o);
+        const fin = u.bestFinish ? new Date(u.bestFinish) : null;
+        const daysLate = fin && latest ? Math.max(0, Math.ceil((fin - latest) / 864e5)) : null;
+        return { order : o.mbmOrder || '', po : o.po || '', qty : Number(o.qty) || 0, ship : o.ship ? new Date(o.ship) : null, pcd : o.pcd ? new Date(o.pcd) : null,
+            earliest : apEarliestStartOf(o), latest, projected : fin, daysLate, qtyAtRisk : u.qtyAtRisk ?? (Number(o.qty) || 0), line : u.bestLine || '', reason : u.reason || '' };
+    });
+    return { unit : currentBoard.value?.unitName || '', from, to, at : new Date(), rows, idle, infeasible : inf,
+        summary : { bars : rows.length, orders : new Set(rows.map(x => x.order + '|' + x.po)).size, plannedQty, onTimeQty, unplannedQty, unplannedOrders : pool.length,
+            late : rows.filter(x => x.status === 'Late').length, atRisk : rows.filter(x => x.status === 'At Risk').length, pastStart : rows.filter(x => x.pastStart).length,
+            splitPieces : rows.filter(x => x.split).length, idleHours : idle.reduce((a, l) => a + l.hours, 0), removed : blanked?.gone || 0, kept : blanked?.kept || 0, dropped : dropped || 0 } };
 }
 // earliest sewing start of a bar's order under the auto-plan rule
 function apEarliestStartOf(raw) {
@@ -3205,7 +3401,7 @@ function settleStrictBoard(s, r) {
             const lateBars = s.eventStore.records.filter(ev => {
                 const x = ev.data?.raw;
                 if (!x || x.stage || x.status === 'completed' || Number(x.made) > 0 || !x.ship) return false;
-                return new Date(ev.endDate) > endOfWorkDay(addCalDays(new Date(x.ship), -SEW_END_BEFORE_SHIP));
+                return new Date(ev.endDate) > apLatestFinishOf(x);
             });
             if (!lateBars.length && !(rr.grown || rr.shrunk || rr.pushed || rr.pulled)) break;
             if (lateBars.length) {
@@ -15060,7 +15256,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <fieldset class="pf-dates">
                             <legend>Orders</legend>
                             <label>Delivery from <input type="date" v-model="apFrom" class="cal-in"></label>
-                            <div class="pf-line-hint">Every available order of {{ currentBoard?.unitName }} (unplanned + replaced, in the Orders list) whose delivery is on / after this date · orders without SMV, qty or dates stay unplanned</div>
+                            <label style="margin-top:4px">Delivery to <input type="date" v-model="apTo" class="cal-in"></label>
+                            <div class="pf-line-hint">Every available order of {{ currentBoard?.unitName }} (unplanned + replaced, in the Orders list) whose delivery falls in this window · orders without SMV, qty or dates stay unplanned</div>
                             <label style="margin-top:6px">Sewing start
                                 <select v-model="apSewRule" class="cal-in st-select">
                                     <option value="pcd+8">PCD + 8 working days (sewing output starts 8 working days after the cut date)</option>
@@ -15084,6 +15281,74 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn st-btn" @click="apOpen = false">Close</button>
                     </div>
                     <div class="st-hint">কিছুই save হয় না যতক্ষণ না Save চাপেন · Undo দিলে board আগের অবস্থায় ফেরে · plan হওয়ার পর Orders list-এ unplanned গুলোই বাকি থাকবে</div>
+                </div>
+            </div>
+        </div>
+        </Teleport>
+
+        <!-- Auto plan review: shipment check, infeasible POs, idle time (before Save) -->
+        <Teleport to="body">
+        <div v-if="apReviewOpen && apReview" class="cal-overlay" @click.self="apReviewOpen = false">
+            <div class="cal-dialog pf-dialog ap-review">
+                <div class="cal-title">
+                    ⚡ Auto plan review — {{ apReview.unit }} · delivery {{ fmtDate(apReview.from) }}{{ apReview.to ? ' → ' + fmtDate(apReview.to) : '' }}
+                    <span class="cal-title-btns"><span class="cal-x" @click="apReviewOpen = false">✕</span></span>
+                </div>
+                <div class="st-body">
+                    <div class="pf-sum">
+                        Planned <b>{{ fmtQty(apReview.summary.plannedQty) }}</b> pcs on <b>{{ apReview.summary.bars }}</b> bars ({{ apReview.summary.orders }} PO / colour) ·
+                        on time <b>{{ fmtQty(apReview.summary.onTimeQty) }}</b> · late bars <b>{{ apReview.summary.late }}</b> · at risk (≤ 1 day slack) <b>{{ apReview.summary.atRisk }}</b>{{ apReview.summary.kept ? ` · kept in-production bars ${apReview.summary.kept} (not placed by the run)` : '' }} ·
+                        unplanned <b>{{ fmtQty(apReview.summary.unplannedQty) }}</b> pcs / {{ apReview.summary.unplannedOrders }} order(s) ·
+                        split pieces <b>{{ apReview.summary.splitPieces }}</b> · bars starting before today (no output recorded) <b>{{ apReview.summary.pastStart }}</b> ·
+                        idle <b>{{ fmtQty(apReview.summary.idleHours) }}</b> h · board: {{ apReview.summary.removed }} bar(s) removed, {{ apReview.summary.kept }} kept
+                        · <i>nothing is saved yet — review the board, then Save (Undo reverses the run)</i>
+                    </div>
+                    <div v-if="apReview.infeasible.length" class="st-hint ap-rev-h">⚠ Cannot meet delivery on any line ({{ apReview.infeasible.length }}) — left unplanned</div>
+                    <div v-if="apReview.infeasible.length" class="pf-table ap-rev-tbl">
+                        <table>
+                            <thead><tr><th>Order</th><th>PO</th><th>Qty</th><th>PCD</th><th>Earliest sew start</th><th>Delivery</th><th>Latest sew finish</th><th>Best projected finish</th><th>Days late</th><th>Qty at risk</th><th>Binding constraint</th></tr></thead>
+                            <tbody>
+                                <tr v-for="(x, i) in apReview.infeasible" :key="i">
+                                    <td><b>{{ x.order }}</b></td><td>{{ x.po }}</td><td class="msh-num">{{ fmtQty(x.qty) }}</td>
+                                    <td>{{ x.pcd ? fmtDate(x.pcd) : '—' }}</td><td>{{ x.earliest ? fmtDate(x.earliest) : '—' }}</td><td>{{ x.ship ? fmtDate(x.ship) : '—' }}</td>
+                                    <td>{{ x.latest ? fmtDate(x.latest) : '—' }}</td><td>{{ x.projected ? fmtDate(x.projected) + (x.line ? ' · ' + x.line : '') : '—' }}</td>
+                                    <td class="msh-num">{{ x.daysLate ?? '—' }}</td><td class="msh-num">{{ fmtQty(x.qtyAtRisk) }}</td><td>{{ x.reason }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint ap-rev-h">Shipment check — every planned bar ({{ apReview.rows.length }})</div>
+                    <div class="pf-table ap-rev-tbl">
+                        <table>
+                            <thead><tr><th>Line</th><th>Order</th><th>PO</th><th>Style · colour</th><th>Qty</th><th>PCD</th><th>Earliest sew start</th><th>Start</th><th>Planned finish</th><th>Latest sew finish</th><th>Ship-ready</th><th>Status</th></tr></thead>
+                            <tbody>
+                                <tr v-for="x in apReview.rows" :key="x.id" :class="{ 'ap-late' : x.status === 'Late', 'ap-risk' : x.status === 'At Risk', 'ap-kept' : x.kept }">
+                                    <td>{{ x.line }}</td><td><b>{{ x.order }}</b>{{ x.split ? ` · piece ${x.split.part}/${x.split.parts}` : '' }}</td><td>{{ x.po }}</td><td>{{ x.style }}{{ x.color ? ' · ' + x.color : '' }}</td>
+                                    <td class="msh-num">{{ fmtQty(x.qty) }}</td><td>{{ x.pcd ? fmtDate(x.pcd) : '—' }}</td><td>{{ x.earliest ? fmtDate(x.earliest) : '—' }}</td>
+                                    <td>{{ fmtDate(x.start) }}{{ x.pastStart ? ' ⚠' : '' }}</td><td>{{ fmtDate(x.end) }}</td><td>{{ x.latest ? fmtDate(x.latest) : '—' }}</td><td>{{ fmtDate(x.ready) }}</td>
+                                    <td><b>{{ x.status }}</b>{{ x.slackDays != null ? ` (${x.slackDays} d slack)` : '' }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-hint ap-rev-h">Idle working time by line ({{ fmtQty(apReview.summary.idleHours) }} h) — gaps of a working day or more, from today</div>
+                    <div class="pf-table ap-rev-tbl">
+                        <table>
+                            <thead><tr><th>Line</th><th>Idle hours</th><th>Gap</th><th>Hours</th><th>Reason</th></tr></thead>
+                            <tbody>
+                                <template v-for="l in apReview.idle" :key="l.line">
+                                    <tr v-for="(g, i) in l.gaps" :key="l.line + i">
+                                        <td><b v-if="i === 0">{{ l.line }}</b></td><td class="msh-num"><span v-if="i === 0">{{ fmtQty(l.hours) }}</span></td>
+                                        <td>{{ fmtDate(g.from) }} → {{ fmtDate(g.to) }}</td><td class="msh-num">{{ fmtQty(g.hours) }}</td><td>{{ g.reason }}</td>
+                                    </tr>
+                                </template>
+                                <tr v-if="!apReview.idle.length"><td colspan="5" class="ls-dim">No idle working day on any line</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="st-actions">
+                        <button class="cal-btn st-btn" @click="apReviewOpen = false">Close — review the board, then Save</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -18421,6 +18686,13 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 
 /* Plan Pull Forward */
 .pf-dialog { width : 760px; max-width : 96vw; max-height : 90vh; overflow-y : auto; }
+.ap-review { width : 1240px; }
+.ap-rev-h { margin-top : 8px; font-weight : 700; color : #17356b; }
+.ap-rev-tbl { max-height : 260px; overflow : auto; }
+.ap-rev-tbl table td, .ap-rev-tbl table th { white-space : nowrap; }
+.ap-late td { background : #fde2e0; }
+.ap-risk td { background : #fff4d6; }
+.ap-kept td { background : #eef0f3; color : #556; }
 .pf-top { display : flex; gap : 14px; margin-bottom : 10px; }
 .pf-scope, .pf-dates { border : 1px solid #b9c4d0; border-radius : 4px; padding : 8px 12px; flex : 1; }
 .pf-scope legend, .pf-dates legend { font-weight : 700; font-size : 12px; padding : 0 6px; }

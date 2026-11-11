@@ -1430,7 +1430,7 @@ function poBaseEventCode(po) {
     return `EV-${String(po || 'NEW').replace(/[^A-Za-z0-9]/g, '')}-SEW`;
 }
 
-function nextStripEventCode(scheduler, po, parentCode = null) {
+export function nextStripEventCode(scheduler, po, parentCode = null) {
     // Base on the parent's own event code when it has one — projection bars
     // have an empty po, and poBaseEventCode('') would give every projection
     // the SAME 'EV-NEW-SEW' base, colliding across different orders
