@@ -796,7 +796,7 @@ async function runLiveOrderPlan(s, {
     // late bar), and the sewing start follows the chosen PCD rule
     earliestStart = null,
     strictDelivery = false,
-    sewStartRule = 'criteria'          // 'criteria' = PCD + 5 pre-production working days · 'pcd-8' = PCD − 8 days
+    sewStartRule = 'criteria'          // 'criteria' = PCD + 5 pre-production working days · 'pcd+8' = PCD + 8 working days (sewing output starts 8 working days after the planned cut date)
 } = {}) {
     const typeFilter = orderTypes?.length ? new Set(orderTypes) : null;
     const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -918,7 +918,7 @@ async function runLiveOrderPlan(s, {
         snapStart : snapToWorkStart,
         profileFirst,
         strictDelivery,
-        sewStartOf : sewStartRule === 'pcd-8' ? o => addCalDays(new Date(o.pcd), -SEW_START_BEFORE_PCD) : null
+        sewStartOf : sewStartRule === 'pcd+8' ? o => addWorkDays(new Date(o.pcd), AP_SEW_START_AFTER_PCD) : null
     };
 
     // Calculate in small slices so the main thread stays responsive
@@ -2995,7 +2995,10 @@ function openPullForward() {
 const apOpen        = ref(false);
 const apFrom        = ref('2026-11-01');   // delivery on / after this date
 const apKeepStarted = ref(true);           // keep completed / production-started bars
-const apSewRule     = ref('pcd-8');        // 'pcd-8' = PCD − 8 days (the Plan allocation rule, default) · 'criteria' = PCD + 5 pre-production working days
+// Sewing output starts 8 WORKING days after the planned cut date (planner
+// rule 2026-11-12: PCD 15/10 → 25/10, the Fridays 16 and 23 do not count)
+const AP_SEW_START_AFTER_PCD = 8;
+const apSewRule     = ref('pcd+8');        // 'pcd+8' = PCD + 8 working days (default) · 'criteria' = PCD + 5 pre-production working days
 const apBusy        = ref(false);
 const apStats       = computed(() => {
     const s = getInstance();
@@ -3066,7 +3069,8 @@ async function runAutoPlanAvail() {
     const ok = window.confirm(`Auto plan ${currentBoard.value.unitName} board from the available orders?\n\n`
         + `• ${st.blank} bar(s) leave the board${st.keep ? ` (${st.keep} completed / production-started bar(s) stay)` : ''}\n`
         + `• every available order with delivery on / after ${fmtDate(from)} is planned on this unit's lines by its PCD (bars may start before today) — efficiency profile line × product first\n`
-        + `• sewing start = ${apSewRule.value === 'pcd-8' ? 'PCD − 8 days' : 'PCD + 5 pre-production working days'} · every bar must finish before its delivery (latest sewing end) — an order that cannot is left unplanned, never planned late\n\n`
+        + `• sewing start = ${apSewRule.value === 'pcd+8' ? 'PCD + 8 working days' : 'PCD + 5 pre-production working days'} · every bar must finish before its delivery (latest sewing end) — an order that cannot is left unplanned, never planned late\n`
+        + `• no gaps: bars are pulled flush one after another (never before their PCD rule start), the freed time goes to the orders still unplanned\n\n`
         + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
     if (!ok) return;
     apBusy.value = true;
@@ -3090,15 +3094,33 @@ async function runAutoPlanAvail() {
         // ended up past its delivery − 7 days — then a SECOND planning pass
         // offers the dropped / still-unplanned orders the line time that the
         // settle freed (appended after each line's last bar), settled again
+        const floor = addCalDays(from, -60);
         let dropped = settleStrictBoard(s, r);
-        setBoardLoad(true, 'Second pass — re-trying the orders left unplanned…', 0);
-        try {
-            const r2 = await runLiveOrderPlan(s, { showToasts : false, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
-                profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60) });
-            if (r2 && !r2.skipped && r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
+        // No gaps: pull every bar flush after the one before it (never before
+        // its PCD rule start), settle again — repeat until nothing moves
+        const pullAndSettle = () => {
+            for (let k = 0; k < 4; k++) {
+                const moved = pullFlushStrict(s, floor);
+                dropped += settleStrictBoard(s, r);
+                if (!moved) break;
+            }
+        };
+        pullAndSettle();
+        // More passes: the orders left unplanned get the line time the pull
+        // freed at the end of every line — until a pass places nothing
+        for (let pass = 2; pass <= 4; pass++) {
+            setBoardLoad(true, `Pass ${pass} — re-trying the orders left unplanned…`, 0);
+            let r2 = null;
+            try {
+                r2 = await runLiveOrderPlan(s, { showToasts : false, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
+                    profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : floor });
+            }
+            catch (e) { console.warn(`[auto plan] pass ${pass} skipped:`, e.message); break; }
+            if (!r2 || r2.skipped || !(r2.planned > 0)) break;
+            if (r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
             dropped += settleStrictBoard(s, r);
+            pullAndSettle();
         }
-        catch (e) { console.warn('[auto plan] second pass skipped:', e.message); }
         syncOrdersListFromBoard();
         recalcCapacity(s);
         markBoardDirty();
@@ -3109,6 +3131,54 @@ async function runAutoPlanAvail() {
     finally { setBoardLoad(false); apBusy.value = false; }
     const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
     toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, r?.unplacedLate ? 'warn' : 'ok');
+}
+// earliest sewing start of a bar's order under the auto-plan rule
+function apEarliestStartOf(raw) {
+    const pcd = raw.pcd ? new Date(raw.pcd) : (raw.ship ? addCalDays(new Date(raw.ship), -30) : null);
+    if (!pcd || Number.isNaN(+pcd)) return null;
+    return apSewRule.value === 'pcd+8' ? addWorkDays(pcd, AP_SEW_START_AFTER_PCD) : addWorkDays(pcd, 5);
+}
+// No gap between one order and the next on a line: every bar is pulled
+// forward to right after the bar before it (the first bar of a line to its
+// own earliest start) — but never before its order's earliest sewing start
+// (PCD rule) and never before the run's floor date. Returns bars moved.
+function pullFlushStrict(s, floor) {
+    let moved = 0;
+    const index = buildLineIndex(s);
+    const byLine = new Map();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;
+        (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
+    }
+    for (const [lid, bars] of byLine) {
+        bars.sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
+        let prevEnd = null;
+        for (const ev of bars) {
+            const raw = ev.data.raw;
+            const fixed = raw.status === 'completed' || Number(raw.made) > 0;
+            if (!fixed) {
+                let lo = apEarliestStartOf(raw);
+                if (!lo || (floor && lo < floor)) lo = floor ? new Date(floor) : lo;
+                let target = prevEnd ? nextDayStartAfter(prevEnd) : (lo ? clampIntoWorkWindow(new Date(lo)) : null);
+                if (lo && target && target < lo) target = clampIntoWorkWindow(new Date(lo));
+                if (target && ev.startDate.getTime() - target.getTime() > 5 * 60000) {
+                    const start = target;
+                    deriveLcForPlacement(s, raw, lid, start);
+                    applyLineFormulaDuration(s, raw, lid);
+                    let end = endOfWork(start, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
+                    try { const sim = simulateStrip(s, raw, lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
+                    ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+                    raw.start = start; raw.end = end;
+                    moved++;
+                }
+            }
+            if (!prevEnd || ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
+        }
+    }
+    return moved;
 }
 // The board's own deferred passes (Build up curves, re-fit to the production
 // schedule, the save-time no-overlap nudge), run here and now until nothing
@@ -14993,11 +15063,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div class="pf-line-hint">Every available order of {{ currentBoard?.unitName }} (unplanned + replaced, in the Orders list) whose delivery is on / after this date · orders without SMV, qty or dates stay unplanned</div>
                             <label style="margin-top:6px">Sewing start
                                 <select v-model="apSewRule" class="cal-in st-select">
-                                    <option value="pcd-8">PCD − 8 days (Plan allocation rule)</option>
+                                    <option value="pcd+8">PCD + 8 working days (sewing output starts 8 working days after the cut date)</option>
                                     <option value="criteria">PCD + 5 pre-production working days (plan criteria)</option>
                                 </select>
                             </label>
-                            <div class="pf-line-hint">Bars start by their PCD, before today when the PCD says so (up to 60 days before the delivery-from date) · a bar must finish before its delivery (latest sewing end = delivery − dispatch − finishing − wash) — an order that cannot on any line is left unplanned, never planned late</div>
+                            <div class="pf-line-hint">Bars start by their PCD, before today when the PCD says so (up to 60 days before the delivery-from date) · a bar must finish before its delivery (latest sewing end = delivery − dispatch − finishing − wash) — an order that cannot on any line is left unplanned, never planned late · no gap between one order and the next: every bar is pulled flush after the one before it (never before its PCD rule start) and the freed line time is offered to the orders still unplanned, pass after pass</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Board</legend>
