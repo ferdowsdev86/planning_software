@@ -6303,10 +6303,13 @@ function openAvailableOrders() {
 //                     profile ÷ SMV), the factory calendar with its off days
 //                     and changed-hours dates, the saved bars already on the
 //                     lines, the Build up (learning) curve on a product change,
-//                     +3 % plan qty. Plan Qty = the pieces the simulation makes
-//                     inside the plan window (1st → last day of the planning
-//                     month), Excess = the rest: made before the 1st / after
-//                     the last day, or not plannable at all (no capacity)
+//                     +3 % plan qty. The tab is a pivot for ONE unit (or every
+//                     unit): row = the orders' planning month, one column per
+//                     production month = the pieces the simulation makes in
+//                     that calendar month (where the plan actually lands,
+//                     PCD-wise), Planned = Σ of them, Not planned = the pieces
+//                     no line can make (no capacity before the delivery, no
+//                     dates, no SMV)
 const AVAIL_ORDER_OK       = r => r.status !== 'completed' && r.status !== 'planned';
 const SEW_START_BEFORE_PCD = 8;   // sewing start = PCD − 8 days   (server/planAllocation.mjs)
 const SEW_END_BEFORE_SHIP  = 7;   // sewing end   = order delivery − 7 days
@@ -6316,17 +6319,15 @@ const AVAIL_TABS = [
       cols : [{ key : 'orders', label : 'Orders' }, { key : 'qty', label : 'Order Qty' },
               { key : 'sah', label : 'SAH', cls : 'av-sah', round : true }],
       xnote : 'SAH = order qty × SMV / 60' },
-    { key : 'alloc', label : 'Plan allocation', hint : 'Board simulation: lines · calendar · capacity', headline : 'plan',
-      left : [{ key : 'window', label : 'Plan Window' }],
-      cols : [{ key : 'qty', label : 'Order Qty' }, { key : 'plan', label : 'Plan Qty', cls : 'av-plan', capTip : true },
-              { key : 'sah', label : 'Plan SAH', cls : 'av-sah', round : true },
-              { key : 'excess', label : 'Excess', cls : 'av-excess', tip : true }],
-      xnote : `board simulation — sewing start = PCD − ${SEW_START_BEFORE_PCD} days, sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
+    { key : 'alloc', label : 'Plan allocation', hint : 'Board simulation: which month the orders land in', headline : 'placed',
+      left : [], cols : [],
+      xnote : `board simulation — sewing start = PCD − ${SEW_START_BEFORE_PCD} days (never before today), sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
             + 'each unit\'s lines (manpower × hours × efficiency ÷ SMV), factory calendar (off days, changed hours), saved bars, '
-            + 'Build up curve, +3 % plan qty · Plan Qty = pieces made inside the plan window (1st → last day), '
-            + 'Plan SAH = Plan Qty × SMV / 60 · Excess = made before the 1st / after the last day, or no capacity' }
+            + 'Build up curve, +3 % plan qty · a production-month column = pieces the simulation makes in that calendar month · '
+            + 'Planned = Σ of the months, Plan SAH = Planned × SMV / 60 · Not planned = pieces no line can make (no capacity before the delivery, no dates, no SMV)' }
 ];
-const availTab = ref('open');
+const availTab   = ref('open');
+const allocUnit  = ref('all');   // the Plan allocation pivot shows one unit (or 'all')
 
 // Plan allocation = the server's board-rule simulation of the available
 // orders (POST /plan-allocation): per order the pieces made on each day,
@@ -6374,7 +6375,7 @@ function runPlanAllocation(rows) {
 }
 
 const availByTab = computed(() => {
-    const blank = () => ({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0, nocap : 0, late : 0 });
+    const blank = () => ({ orders : 0, qty : 0, sah : 0, placed : 0, left : 0, late : 0, byMonth : {} });
     const { cur, from } = availWindowFrom();
     const out  = {};
     for (const t of AVAIL_TABS) {
@@ -6390,22 +6391,15 @@ const availByTab = computed(() => {
         const uid = Number(r.prodUnit) || 0;
         const key = pm?.label || '—';
         const smv = Number(r.smv) || 0;
-        // plan window = the calendar month of the planning month label (1st → last day)
-        const calStart = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth(), 1) : null;
-        const calEnd   = pm ? new Date(pm.start.getFullYear(), pm.start.getMonth() + 1, 0) : null;
-        // the simulation's day-wise pieces of this order, split by the plan window
+        // the simulation's day-wise pieces of this order, summed per
+        // production (calendar) month — where the plan actually lands
         const sim = alloc.get(availKey(r, i));
-        const a   = { plan : 0, before : 0, after : 0, nocap : sim ? sim.left : 0, late : sim?.late ? sim.placed : 0 };
-        if (sim && calStart) {
-            const cs = ymdOf(calStart), ce = ymdOf(calEnd);
-            for (const [d, q] of Object.entries(sim.days || {})) {
-                if (d < cs) a.before += q; else if (d > ce) a.after += q; else a.plan += q;
-            }
-        }
+        const a   = { placed : sim ? sim.placed : 0, left : sim ? sim.left : 0, late : sim?.late ? sim.placed : 0, byMonth : {} };
+        if (sim) for (const [d, q] of Object.entries(sim.days || {})) { const ym = d.slice(0, 7); a.byMonth[ym] = (a.byMonth[ym] || 0) + q; }
         for (const t of AVAIL_TABS) {
             const o = out[t.key];
             if (!o.units.some(u => u.id === uid)) o.units.push({ id : uid, name : r.prodUnitName || `Unit ${uid}` });
-            if (!o.months.has(key)) o.months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, calStart, calEnd, cells : {}, all : blank() });
+            if (!o.months.has(key)) o.months.set(key, { label : key, start : pm?.start || null, end : pm?.end || null, cells : {}, all : blank() });
             const m = o.months.get(key);
             if (!(smv > 0)) o.noSmv++;
             if (t.key === 'alloc') {
@@ -6413,11 +6407,11 @@ const availByTab = computed(() => {
                 if (sim && (sim.noDates || sim.past)) o.noWindow++;
                 if (sim?.late) o.lateOrders++;
             }
-            const sahQty = t.key === 'alloc' ? a.plan : qty;
+            const sahQty = t.key === 'alloc' ? a.placed : qty;
             for (const c of [m.cells[uid] ||= blank(), m.all, o.total.cells[uid] ||= blank(), o.total.all]) {
                 c.orders++; c.qty += qty; c.sah += sahQty * smv / 60;
-                c.plan += a.plan; c.before += a.before; c.after += a.after; c.nocap += a.nocap; c.late += a.late;
-                c.excess += a.before + a.after + a.nocap;
+                c.placed += a.placed; c.left += a.left; c.late += a.late;
+                for (const [ym, q] of Object.entries(a.byMonth)) c.byMonth[ym] = (c.byMonth[ym] || 0) + q;
             }
         }
     });
@@ -6432,13 +6426,42 @@ const availSummary = computed(() => availByTab.value[availTab.value] || availByT
 const availTabInfo = computed(() => AVAIL_TABS.find(t => t.key === availTab.value) || AVAIL_TABS[0]);
 
 const availPeriod = m => (m.start ? `${fmtDateDdMonRr(m.start)} → ${fmtDateDdMonRr(m.end)}` : '—');
-const availWindow = m => (m.calStart ? `${fmtDateDdMonRr(m.calStart)} → ${fmtDateDdMonRr(m.calEnd)}` : '—');
-const availLeft   = (m, key) => (key === 'window' ? availWindow(m) : availPeriod(m));
-const AVAIL_BLANK = Object.freeze({ orders : 0, qty : 0, sah : 0, plan : 0, excess : 0, before : 0, after : 0, nocap : 0, late : 0 });
+const availLeft   = (m, key) => availPeriod(m);
+const AVAIL_BLANK = Object.freeze({ orders : 0, qty : 0, sah : 0, placed : 0, left : 0, late : 0, byMonth : Object.freeze({}) });
 const availCell   = (m, uid) => (uid === 'all' ? m.all : m.cells[uid]) || AVAIL_BLANK;
 const fmtSah      = v => (v ? fmtQty(Math.round(v)) : '—');
 const fmtAvQty    = v => (v ? fmtQty(v) : '—');
 const availFmt    = (c, v) => (c.round ? fmtSah(v) : fmtAvQty(v));
+
+// Plan allocation pivot of the selected unit: one column per production
+// month in which the simulation makes pieces (plus the running month)
+const allocUnits = computed(() => [...availByTab.value.alloc.units, { id : 'all', name : 'Total' }]);
+const allocPivot = computed(() => {
+    const s   = availByTab.value.alloc;
+    const uid = allocUnit.value;
+    const set = new Set(s.current ? [s.current] : []);
+    for (const m of s.rows) for (const [ym, q] of Object.entries(availCell(m, uid).byMonth)) if (q > 0) set.add(ym);
+    return { months : [...set].sort(), rows : s.rows, total : s.total, unitName : allocUnits.value.find(u => u.id === uid)?.name || '' };
+});
+const allocMonthQty = (m, uid, ym) => availCell(m, uid).byMonth[ym] || 0;
+// a production-month cell against its planning month: the month itself,
+// earlier (made ahead) or later (made after the planning month)
+const allocMonthCls = (m, ym) => (m.label === '—' ? '' : ym === m.label ? 'av-diag' : ym < m.label ? 'av-ahead' : 'av-behind');
+function allocMonthTip(m, uid, ym, isTotal = false) {
+    const q    = allocMonthQty(m, uid, ym);
+    const unit = allocPivot.value.unitName === 'Total' ? 'every unit' : allocPivot.value.unitName;
+    const who  = isTotal ? `all available orders of ${unit}` : `${unit} orders of planning month ${m.label}`;
+    const rel  = isTotal || m.label === '—' ? '' : ym === m.label ? ' — the planning month itself' : ym < m.label ? ' — ahead of the planning month' : ' — after the planning month';
+    let tip = q ? `${fmtQty(q)} pcs of ${who} are made in ${ym}${rel}` : `nothing of ${who} is made in ${ym}`;
+    const k = availCapacity(uid, ym);
+    if (k) tip += `\nline capacity of ${unit} in ${ym}: ${fmtQty(k.pcs)} pcs · gone before today: ${fmtQty(k.pastPcs)} · held by saved bars: ${fmtQty(k.busyPcs)}`
+        + ` · free for new plan: ${fmtQty(k.freePcs)} · this plan uses: ${fmtQty(k.usedPcs)}`
+        + (k.curvePcs ? ` (Build up curve costs ${fmtQty(k.curvePcs)})` : '');
+    return tip;
+}
+const allocLeftTip = cell => (cell.left
+    ? `pieces no line can make before the delivery (no capacity in the window / window closed), or orders without dates / SMV`
+      + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)} pcs` : '') : '');
 // Line capacity of a unit (or every unit) in a calendar month, as the
 // simulation counted it — the Plan Qty cell's tooltip
 function availCapacity(uid, ym) {
@@ -6454,21 +6477,7 @@ function availCapacity(uid, ym) {
     }
     return sum.n ? sum : null;
 }
-const availTip = (c, cell, m = null, uid = null) => {
-    if (c.tip && cell.excess) {
-        return `made before the 1st: ${fmtQty(cell.before)} · made after the last day: ${fmtQty(cell.after)} · no capacity in the window: ${fmtQty(cell.nocap)}`
-            + (cell.late ? ` · planned late (window already closed): ${fmtQty(cell.late)}` : '');
-    }
-    if (c.capTip && m) {
-        const k = availCapacity(uid, m.label);
-        if (!k) return '';
-        return `line capacity in ${m.label} (lines' manpower × hours × efficiency ÷ order-mix SMV): ${fmtQty(k.pcs)} pcs`
-            + ` · already gone before today: ${fmtQty(k.pastPcs)} · held by the bars saved on the board: ${fmtQty(k.busyPcs)}`
-            + ` · free for new plan: ${fmtQty(k.freePcs)} · this plan uses: ${fmtQty(k.usedPcs)} (orders of every planning month)`
-            + (k.curvePcs ? `, of which the Build up curve (product / style change) costs ${fmtQty(k.curvePcs)}` : '');
-    }
-    return '';
-};
+const availTip = () => '';
 // Click a unit × month cell: the report minimises to the window bar and the
 // Orders list filters to exactly those orders — projected rows of that
 // production unit and planning month that are neither planned nor completed
@@ -6507,13 +6516,28 @@ function exportAvailExcel() {
     const tab = availTabInfo.value;
     if (!s.rows.length) { toast('No orders to export', 'warn'); return; }
     const num  = v => `<td style="text-align:right">${v ? Math.round(v) : ''}</td>`;
-    const grp  = c => tab.cols.map(k => num(c[k.key])).join('');
-    const line = (m, lead) => `<tr>${lead}${s.units.map(u => grp(availCell(m, u.id))).join('')}${grp(m.all)}</tr>`;
-    const head1 = `<tr><th rowspan="2">Planning Month</th>${tab.left.map(c => `<th rowspan="2">${c.label}</th>`).join('')}`
-        + [...s.units.map(u => u.name), 'Total'].map(n => `<th colspan="${tab.cols.length}">${n}</th>`).join('') + '</tr>';
-    const head2 = `<tr>${[...s.units, 0].map(() => tab.cols.map(c => `<th>${c.label}</th>`).join('')).join('')}</tr>`;
-    const body  = s.rows.map(m => line(m, `<td style="mso-number-format:'\\@'">${m.label}</td>${tab.left.map(c => `<td>${availLeft(m, c.key)}</td>`).join('')}`)).join('');
-    const foot  = line(s.total, `<th colspan="${1 + tab.left.length}">Total</th>`);
+    const mLbl = m => `<td style="mso-number-format:'\\@'">${m.label}</td>`;
+    let head1, head2 = '', body, foot, title;
+    if (tab.key === 'alloc') {
+        // the pivot of the selected unit: planning month × production month
+        const p   = allocPivot.value, uid = allocUnit.value;
+        const row = m => { const c = availCell(m, uid);
+            return num(c.orders) + num(c.qty) + p.months.map(ym => num(allocMonthQty(m, uid, ym))).join('') + num(c.placed) + num(c.sah) + num(c.left); };
+        head1 = `<tr><th>Planning Month</th><th>Orders</th><th>Order Qty</th>${p.months.map(ym => `<th>made in ${ym}</th>`).join('')}<th>Planned</th><th>Plan SAH</th><th>Not planned</th></tr>`;
+        body  = p.rows.map(m => `<tr>${mLbl(m)}${row(m)}</tr>`).join('');
+        foot  = `<tr><th>Total</th>${row(p.total)}</tr>`;
+        title = `${p.unitName === 'Total' ? 'every unit' : p.unitName} — planning month × production month`;
+    }
+    else {
+        const grp  = c => tab.cols.map(k => num(c[k.key])).join('');
+        const line = (m, lead) => `<tr>${lead}${s.units.map(u => grp(availCell(m, u.id))).join('')}${grp(m.all)}</tr>`;
+        head1 = `<tr><th rowspan="2">Planning Month</th>${tab.left.map(c => `<th rowspan="2">${c.label}</th>`).join('')}`
+            + [...s.units.map(u => u.name), 'Total'].map(n => `<th colspan="${tab.cols.length}">${n}</th>`).join('') + '</tr>';
+        head2 = `<tr>${[...s.units, 0].map(() => tab.cols.map(c => `<th>${c.label}</th>`).join('')).join('')}</tr>`;
+        body  = s.rows.map(m => line(m, `${mLbl(m)}${tab.left.map(c => `<td>${availLeft(m, c.key)}</td>`).join('')}`)).join('');
+        foot  = line(s.total, `<th colspan="${1 + tab.left.length}">Total</th>`);
+        title = 'unit × planning month';
+    }
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <head><meta charset="UTF-8">
 <style>
@@ -6523,7 +6547,7 @@ function exportAvailExcel() {
 </style>
 </head>
 <body>
-<h2 style="margin:0">Available Order — ${tab.label} (${tab.hint}) — unit × planning month</h2>
+<h2 style="margin:0">Available Order — ${tab.label} (${tab.hint}) — ${title}</h2>
 <div style="margin:4px 0 8px;font-size:9pt">${tab.xnote} · planning month = month of (order delivery − 10 days), 11th → 10th · from ${s.from || 'the first month'}</div>
 <table><thead>${head1}${head2}</thead><tbody>${body}${foot}</tbody></table>
 </body></html>`;
@@ -13115,6 +13139,57 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div v-else-if="availTabInfo.key === 'alloc' && allocError" class="av-empty">Could not simulate the plan — {{ allocError }}</div>
                     <div v-else-if="availTabInfo.key === 'alloc' && allocLoading" class="av-empty">⏳ Planning the available orders on every unit's lines (board rules)…</div>
                     <div v-else-if="!availSummary.rows.length" class="av-empty">No available orders for these months.</div>
+                    <template v-else-if="availTabInfo.key === 'alloc'">
+                        <div class="av-units">
+                            <span class="av-units-lbl">Unit</span>
+                            <span v-for="u in allocUnits" :key="u.id" class="av-unit" :class="{ 'av-unit-on' : allocUnit === u.id }"
+                                @click="allocUnit = u.id">{{ u.name }}</span>
+                            <span class="av-units-hint">row = the orders' planning month · column = the month the simulation makes the pieces in · green = the planning month itself</span>
+                        </div>
+                        <table class="st-table av-table av-pivot">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" class="av-l">Planning Month</th>
+                                    <th rowspan="2">Orders</th>
+                                    <th rowspan="2">Order Qty</th>
+                                    <th :colspan="allocPivot.months.length" class="av-grp">Made in (production month)</th>
+                                    <th rowspan="2" class="av-grp-start">Planned</th>
+                                    <th rowspan="2">Plan SAH</th>
+                                    <th rowspan="2">Not planned</th>
+                                </tr>
+                                <tr>
+                                    <th v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0, 'av-cur-col' : ym === availSummary.current }">{{ ym }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="m in allocPivot.rows" :key="m.label" :class="{ 'av-cur' : m.label === availSummary.current }">
+                                    <td class="av-l av-month" :title="availPeriod(m)">{{ m.label }}<span v-if="m.label === availSummary.current" class="av-cur-tag">running</span></td>
+                                    <td :class="{ 'av-click' : availCell(m, allocUnit).qty > 0 }" :title="availDrillTip(m, allocUnit)"
+                                        @click="availCell(m, allocUnit).qty > 0 && availDrill(m, allocUnit)">{{ fmtAvQty(availCell(m, allocUnit).orders) }}</td>
+                                    <td :class="{ 'av-click' : availCell(m, allocUnit).qty > 0 }" :title="availDrillTip(m, allocUnit)"
+                                        @click="availCell(m, allocUnit).qty > 0 && availDrill(m, allocUnit)">{{ fmtAvQty(availCell(m, allocUnit).qty) }}</td>
+                                    <td v-for="(ym, i) in allocPivot.months" :key="ym"
+                                        :class="[allocMonthQty(m, allocUnit, ym) ? allocMonthCls(m, ym) : '', { 'av-grp-start' : i === 0 }]"
+                                        :title="allocMonthTip(m, allocUnit, ym)">{{ fmtAvQty(allocMonthQty(m, allocUnit, ym)) }}</td>
+                                    <td class="av-plan av-grp-start">{{ fmtAvQty(availCell(m, allocUnit).placed) }}</td>
+                                    <td class="av-sah">{{ fmtSah(availCell(m, allocUnit).sah) }}</td>
+                                    <td class="av-excess" :title="allocLeftTip(availCell(m, allocUnit))">{{ fmtAvQty(availCell(m, allocUnit).left) }}</td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td class="av-l">Total</td>
+                                    <td>{{ fmtAvQty(availCell(allocPivot.total, allocUnit).orders) }}</td>
+                                    <td>{{ fmtAvQty(availCell(allocPivot.total, allocUnit).qty) }}</td>
+                                    <td v-for="(ym, i) in allocPivot.months" :key="ym" :class="{ 'av-grp-start' : i === 0 }"
+                                        :title="allocMonthTip(allocPivot.total, allocUnit, ym, true)">{{ fmtAvQty(allocMonthQty(allocPivot.total, allocUnit, ym)) }}</td>
+                                    <td class="av-plan av-grp-start">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).placed) }}</td>
+                                    <td class="av-sah">{{ fmtSah(availCell(allocPivot.total, allocUnit).sah) }}</td>
+                                    <td class="av-excess" :title="allocLeftTip(availCell(allocPivot.total, allocUnit))">{{ fmtAvQty(availCell(allocPivot.total, allocUnit).left) }}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </template>
                     <table v-else class="st-table av-table">
                         <thead>
                             <tr>
@@ -13163,10 +13238,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         the bars already saved on a line keep their time, only the free part of a day is used ·
                         Build up curve on a product / style change · capacity is taken at the plan qty (+3 %), figures are order pieces ·
                         orders are planned in the board's order (PCD, then delivery), on the line that finishes earliest, spilling over to other lines when one cannot hold them ·
-                        <b>Plan Qty</b> = pieces the simulation makes inside the plan window (1st → last day of the planning month) · Plan SAH = Plan Qty × SMV / 60 ·
-                        <b>Excess</b> = pieces made before the 1st / after the last day + pieces no line can make in the window (hover a cell for the split) ·
-                        hover a Plan Qty cell for the month's line capacity: whole month, gone before today, held by saved bars, free, used by this plan ·
-                        planning month = month of (order delivery − 10 days), 11th → 10th
+                        each <b>Made in</b> column = the pieces the simulation makes in that calendar month (where the orders of the row's planning month actually land, PCD-wise) —
+                        green = the planning month itself, blue = ahead of it, orange = after it ·
+                        <b>Planned</b> = Σ of the months · Plan SAH = Planned × SMV / 60 ·
+                        <b>Not planned</b> = pieces no line can make before the delivery (no capacity in the window / window closed) + orders without dates or SMV ·
+                        hover a month cell for that month's line capacity: whole month, gone before today, held by saved bars, free, used by this plan ·
+                        click Orders / Order Qty → the orders in the list · planning month = month of (order delivery − 10 days), 11th → 10th
                         <span v-if="allocInfoText"> · {{ allocInfoText }}</span>
                         <span v-if="availSummary.lateOrders" class="av-warn"> · ⚠ {{ availSummary.lateOrders }} order(s) whose window already closed (delivery − 7 before today) are planned late, up to their delivery date</span>
                         <span v-if="availSummary.pcdFallback" class="av-warn"> · ⚠ {{ availSummary.pcdFallback }} order(s) have no ERP PCD — PCD taken as delivery − 30</span>
@@ -15573,6 +15650,26 @@ body {
 .av-table td.av-click { cursor : pointer; }
 .av-table td.av-click:hover { background : #ffe082 !important; }
 .av-table td.av-excess { color : #c62828; }
+/* Plan allocation pivot: unit selector + production-month cells */
+.av-units { display : flex; align-items : center; gap : 6px; padding : 0 0 8px; font-size : 12px; }
+.av-units-lbl { color : #6b7a94; margin-right : 2px; }
+.av-unit {
+    padding       : 3px 12px;
+    border        : 1px solid #c5cede;
+    border-radius : 12px;
+    background    : #eef1f6;
+    color         : #17356b;
+    font-weight   : bold;
+    cursor        : pointer;
+}
+.av-unit:hover { background : #e0e7f3; }
+.av-unit.av-unit-on { background : #17356b; border-color : #17356b; color : #fff; }
+.av-units-hint { margin-left : 10px; color : #6b7a94; font-size : 11px; }
+.av-pivot thead th.av-cur-col { background : #2e7d32; }
+.av-pivot td.av-diag   { background : #dcedc8; color : #1b5e20; font-weight : bold; }
+.av-pivot td.av-ahead  { color : #0d47a1; }
+.av-pivot td.av-behind { color : #e65100; font-weight : bold; }
+.av-pivot tfoot td { font-weight : bold; background : #f4f6fa; }
 .av-dialog .cal-title-btns { display : flex; align-items : center; gap : 8px; }
 .av-xls { padding : 4px 10px; font-size : 12px; font-weight : normal; }
 .av-tabs { display : flex; gap : 4px; padding : 8px 12px 0; background : #fff; border-bottom : 2px solid #17356b; }
