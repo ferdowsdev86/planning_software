@@ -789,7 +789,14 @@ async function runLiveOrderPlan(s, {
     // the efficiency profile's line × product sheet decides the line first
     // (Auto plan from available orders); the product the profile knows is
     // the ERP garment type when the order carries one
-    profileFirst = false
+    profileFirst = false,
+    // Auto plan from available orders: bars may start before today (from
+    // earliestStart on — the orders' PCDs decide), an order that cannot
+    // finish by its latest sewing end on any line stays unplanned (never a
+    // late bar), and the sewing start follows the chosen PCD rule
+    earliestStart = null,
+    strictDelivery = false,
+    sewStartRule = 'criteria'          // 'criteria' = PCD + 5 pre-production working days · 'pcd-8' = PCD − 8 days
 } = {}) {
     const typeFilter = orderTypes?.length ? new Set(orderTypes) : null;
     const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -812,7 +819,7 @@ async function runLiveOrderPlan(s, {
         for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
     }
 
-    const today = snapToWorkStart(new Date());
+    const today = snapToWorkStart(earliestStart ? new Date(earliestStart) : new Date());
     const lineStates = s.resourceStore.records
         .filter(r => r.data.lineRow)
         .map(r => {
@@ -909,11 +916,14 @@ async function runLiveOrderPlan(s, {
         },
         workMinPerDay : WORK_MIN_PER_DAY,
         snapStart : snapToWorkStart,
-        profileFirst
+        profileFirst,
+        strictDelivery,
+        sewStartOf : sewStartRule === 'pcd-8' ? o => addCalDays(new Date(o.pcd), -SEW_START_BEFORE_PCD) : null
     };
 
     // Calculate in small slices so the main thread stays responsive
     const placements = [];
+    const unplaced = [];
     const CALC_CHUNK = 25;
     for (let i = 0; i < orders.length; i += CALC_CHUNK) {
         const chunk = orders.slice(i, i + CALC_CHUNK);
@@ -925,10 +935,10 @@ async function runLiveOrderPlan(s, {
             message : `Calculating plan… ${done} / ${orders.length}`
         });
         await yieldUi();
-        const { placements : part } = autoPlanOrders(chunk, lineStates, planCtx);
+        const { placements : part, unplaced : skipped = [] } = autoPlanOrders(chunk, lineStates, planCtx);
         placements.push(...part);
+        unplaced.push(...skipped);
     }
-
     const events = [];
     let late = 0, tight = 0;
     for (const p of placements) {
@@ -939,8 +949,11 @@ async function runLiveOrderPlan(s, {
         const verdict = p.feas?.verdict;
         // No slot met the criteria, so the order was appended after the line's
         // last bar — flag it so the strip renders yellow
-        const latePlan = startOfWorkDay(start) > startOfWorkDay(o.pcd || start)
-            || verdict === 'INFEASIBLE' || p.lateness > 0;
+        // strict-delivery runs: a bar is late only when it misses the delivery
+        // (never, by construction) — not for starting after the PCD
+        const latePlan = strictDelivery
+            ? p.lateness > 0
+            : (startOfWorkDay(start) > startOfWorkDay(o.pcd || start) || verdict === 'INFEASIBLE' || p.lateness > 0);
         if (latePlan) late++;
         else if (verdict === 'TIGHT' || verdict === 'NO_BUFFER') tight++;
 
@@ -951,7 +964,8 @@ async function runLiveOrderPlan(s, {
             progress : 0,
             status   : 'draft',
             latePlan,
-            userPinned : false,
+            // strict-delivery bars sit where the plan put them — no load-time repack
+            userPinned : !!strictDelivery,
             manualGap  : false,
             smv      : o.smv,
             pcd      : o.pcd,
@@ -996,7 +1010,63 @@ async function runLiveOrderPlan(s, {
         });
     }
 
-    if (events.length) {
+    // Strict delivery (Auto plan from available orders): every bar is placed on
+    // the REAL board one by one — its length from the board's own production
+    // model (simulateStrip: calendar, line hours, profile efficiency, Build up
+    // curve), its slot from computeInsertStart — and a bar that would end
+    // after the order's latest sewing end is taken off again: that order
+    // stays unplanned, never a late bar. Nothing is repacked or re-fitted
+    // afterwards, so the bars stay exactly where this put them.
+    if (events.length && strictDelivery) {
+        if (showToasts) toast(`Placing ${events.length} order(s) on the board…`, 'ok');
+        const byId = new Map(placements.map(p => [`ev-${p.order.id}`, p]));
+        const kept = [];
+        beginBoardInteraction(s, 'batch');
+        s.suspendRefresh?.();
+        try {
+            let n = 0;
+            for (const e of events) {
+                const p = byId.get(e.id);
+                if (!p) continue;
+                const o = p.order;
+                const raw = e.raw;
+                const [rec] = s.eventStore.add(e);
+                if (!rec) continue;
+                assignEventToLine(s, rec, p.line.id);
+                const desired = startOfWorkDay(p.start);
+                deriveLcForPlacement(s, raw, p.line.id, desired);
+                applyLineFormulaDuration(s, raw, p.line.id);
+                const ins = computeInsertStart(s, p.line.id, desired, raw.dur || p.dur || 1, rec.id);
+                const start = ins.start;
+                let end = ins.end;
+                try { const sim = simulateStrip(s, raw, p.line.id, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* the formula end stays */ }
+                const latest = endOfWorkDay(p.back?.latestSewEnd ? new Date(p.back.latestSewEnd) : addCalDays(new Date(o.ship), -SEW_END_BEFORE_SHIP));
+                if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || end > latest) {
+                    const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(rec.id)) || [];
+                    if (asgn.length) s.assignmentStore.remove(asgn);
+                    s.eventStore.remove(rec);
+                    unplaced.push({ order : o, reason : 'would end after the latest sewing end on the real board' });
+                    continue;
+                }
+                rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : p.line.id });
+                rec.data.resourceId = p.line.id;
+                raw.start = start; raw.end = end; raw.latePlan = false;
+                kept.push(p);
+                if (++n % 25 === 0) {
+                    onProgress?.({ phase : 'add', done : n, total : events.length, message : `Placing orders on board… ${n} / ${events.length}` });
+                    await yieldUi();
+                }
+            }
+        }
+        finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
+        placements.length = 0;
+        placements.push(...kept);
+        late = 0;
+        if (kept.length) expandTimeAxisForEvents(s);
+    }
+    if (unplaced.length && showToasts) toast(`${unplaced.length} order(s) cannot finish before their delivery on any line — left unplanned (never planned late)`, 'warn');
+
+    if (events.length && !strictDelivery) {
         if (showToasts) toast(`Planning ${events.length} order(s)...`, 'ok');
         const CHUNK = 40;
         s.eventStore?.suspendEvents?.();
@@ -1039,11 +1109,12 @@ async function runLiveOrderPlan(s, {
     beginBoardInteraction(s, 'batch');
     try {
         replaceProjectionsWithConfirms(s);
-        packBoardGaps(s);
+        if (!strictDelivery) packBoardGaps(s);          // strict bars stay where their PCD put them
     }
     finally { endBoardInteraction(s); }
-    // Engine-settled pass: bars must sit strictly one after another
-    await enforceSequentialLines(s);
+    // Engine-settled pass: bars must sit strictly one after another (the
+    // strict placement already inserted every bar into a free slot)
+    if (!strictDelivery) await enforceSequentialLines(s);
     recalcCapacity(s);
     refreshGrandTotals(s);
     s.refreshRows?.();
@@ -1051,7 +1122,7 @@ async function runLiveOrderPlan(s, {
     scrollBoardToToday(s);
     touchBoardCache(s);
 
-    return { planned : placements.length, late, tight, skipped : false };
+    return { planned : placements.length, late, tight, skipped : false, unplacedLate : unplaced.length };
 }
 
 function disableStmIfLarge(s) {
@@ -2911,6 +2982,7 @@ function openPullForward() {
 const apOpen        = ref(false);
 const apFrom        = ref('2026-11-01');   // delivery on / after this date
 const apKeepStarted = ref(true);           // keep completed / production-started bars
+const apSewRule     = ref('pcd-8');        // 'pcd-8' = PCD − 8 days (the Plan allocation rule, default) · 'criteria' = PCD + 5 pre-production working days
 const apBusy        = ref(false);
 const apStats       = computed(() => {
     const s = getInstance();
@@ -2980,8 +3052,9 @@ async function runAutoPlanAvail() {
     const st = apStats.value;
     const ok = window.confirm(`Auto plan ${currentBoard.value.unitName} board from the available orders?\n\n`
         + `• ${st.blank} bar(s) leave the board${st.keep ? ` (${st.keep} completed / production-started bar(s) stay)` : ''}\n`
-        + `• every available order with delivery on / after ${fmtDate(from)} is planned on this unit's lines — efficiency profile line × product first, then PCD / delivery\n`
-        + `• orders no line can take stay unplanned\n\nNothing is saved until you click Save (Undo reverses the run). Continue?`);
+        + `• every available order with delivery on / after ${fmtDate(from)} is planned on this unit's lines by its PCD (bars may start before today) — efficiency profile line × product first\n`
+        + `• sewing start = ${apSewRule.value === 'pcd-8' ? 'PCD − 8 days' : 'PCD + 5 pre-production working days'} · every bar must finish before its delivery (latest sewing end) — an order that cannot is left unplanned, never planned late\n\n`
+        + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
     if (!ok) return;
     apBusy.value = true;
     apOpen.value = false;
@@ -2995,9 +3068,57 @@ async function runAutoPlanAvail() {
         s.refreshRows?.();
         await yieldUi();
         setBoardLoad(true, 'Auto-planning the available orders…', 0);
-        // delivery strictly after (from − 1 day) = on / after `from`; no PCD gate
-        r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null, profileFirst : true });
-        applyLearningCurves(s, { lineIds : s.resourceStore.records.filter(x => x.data?.lineRow).map(x => x.id) });
+        // delivery strictly after (from − 1 day) = on / after `from`; no PCD
+        // gate; bars may start up to 60 days before the delivery-from date
+        // (the orders' PCDs decide, October starts included); strict delivery
+        r = await runLiveOrderPlan(s, { showToasts : true, mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), pcdFrom : null,
+            profileFirst : true, strictDelivery : true, sewStartRule : apSewRule.value, earliestStart : addCalDays(from, -60) });
+        // (the Build up curve of every bar was derived at placement — a second
+        // pass here would lengthen bars and push followers past their delivery)
+        // Settle NOW (the same re-fit the board runs on its own a moment later)
+        // and drop every bar that ended up past its delivery − 7 days: the
+        // rule is "never a late bar", whatever the re-fit did
+        let dropped = 0;
+        try {
+            const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
+            // settle and drop, again and again: taking a bar off opens a gap,
+            // the next settle pulls followers flush / re-fits them, which may
+            // push another bar past its delivery — repeat until nothing is late
+            const lineIds = s.resourceStore.records.filter(x => x.data?.lineRow).map(x => x.id);
+            for (let pass = 0; pass < 10; pass++) {
+            // the board's own deferred passes, run here and now: the Build up
+            // curves follow the neighbours (a dropped bar changes them), then
+            // the re-fit — not idempotent (a pushed follower is re-fitted on
+            // its new dates next time), so repeat until nothing changes
+            try { applyLearningCurves(s, { lineIds }); } catch { /* no curves */ }
+            const rr = resizeBars(s, open, { dirty : true }) || {};
+            const lateBars = s.eventStore.records.filter(ev => {
+                const x = ev.data?.raw;
+                if (!x || x.stage || x.status === 'completed' || Number(x.made) > 0 || !x.ship) return false;
+                return new Date(ev.endDate) > endOfWorkDay(addCalDays(new Date(x.ship), -SEW_END_BEFORE_SHIP));
+            });
+            if (!lateBars.length && !(rr.grown || rr.shrunk || rr.pushed || rr.pulled)) break;
+            if (lateBars.length) {
+                const back = [];
+                for (const ev of lateBars) {
+                    const x = ev.data.raw;
+                    const sid = String(ev.id);
+                    const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+                    if (asgn.length) s.assignmentStore.remove(asgn);
+                    back.push({ id : x.id || `proj:${x.mbmOrder || x.po}`, mbmOrder : x.mbmOrder || '', po : x.po || '', poList : x.poList, buyer : x.buyer || '', style : x.style || '',
+                        color : x.color || '', productType : x.productType || '', orderType : x.orderType, qty : Number(x.qty) || 0, baseQty : x.baseQty,
+                        orderQty : Number(x.orderQty ?? x.qty) || 0, smv : Number(x.smv) || 0, pcd : x.pcd || null, ship : x.ship || null, matReady : x.matReady || null,
+                        unitId : x.unitId ?? currentUnitId.value ?? null, dbId : x.dbId, status : 'unplanned', parked : false, suitable : x.suitable });
+                }
+                s.eventStore.remove(lateBars);
+                const have = new Set(unplanned.value.map(u => String(u.id)));
+                unplanned.value = [...unplanned.value, ...back.filter(u => !have.has(String(u.id)))];
+                dropped += lateBars.length;
+                if (r) r.unplacedLate = (r.unplacedLate || 0) + lateBars.length;
+            }
+            }
+        }
+        catch (e) { console.warn('[auto plan] settle / late check skipped:', e.message); }
         syncOrdersListFromBoard();
         recalcCapacity(s);
         markBoardDirty();
@@ -3007,7 +3128,7 @@ async function runAutoPlanAvail() {
     catch (e) { toast(`Auto plan failed: ${e.message} — Undo restores the board`, 'error'); }
     finally { setBoardLoad(false); apBusy.value = false; }
     const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight, ${r?.late || 0} late) · ${left} still unplanned — Save to keep, Undo to go back`, r?.late ? 'warn' : 'ok');
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, r?.unplacedLate ? 'warn' : 'ok');
 }
 
 // Next start after a bar for whole-day planning: a bar that ends at (or
@@ -14839,6 +14960,13 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <legend>Orders</legend>
                             <label>Delivery from <input type="date" v-model="apFrom" class="cal-in"></label>
                             <div class="pf-line-hint">Every available order of {{ currentBoard?.unitName }} (unplanned + replaced, in the Orders list) whose delivery is on / after this date · orders without SMV, qty or dates stay unplanned</div>
+                            <label style="margin-top:6px">Sewing start
+                                <select v-model="apSewRule" class="cal-in st-select">
+                                    <option value="pcd-8">PCD − 8 days (Plan allocation rule)</option>
+                                    <option value="criteria">PCD + 5 pre-production working days (plan criteria)</option>
+                                </select>
+                            </label>
+                            <div class="pf-line-hint">Bars start by their PCD, before today when the PCD says so (up to 60 days before the delivery-from date) · a bar must finish before its delivery (latest sewing end = delivery − dispatch − finishing − wash) — an order that cannot on any line is left unplanned, never planned late</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Board</legend>
@@ -14847,7 +14975,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Rules</legend>
-                            <div class="pf-line-hint">1. Line: the efficiency profile's line × product sheet first (a line listed for the order's product beats every other line) · 2. PCD → earliest sewing start, delivery → latest finish (critical path) · 3. factory calendar, per-line hours, manpower, efficiency, +3 % plan qty · 4. bars strictly one after another, Build up curve on a product / style change · 5. what no line can take stays unplanned</div>
+                            <div class="pf-line-hint">1. Line: the efficiency profile's line × product sheet first (a line listed for the order's product beats every other line) · 2. orders in PCD order; PCD → earliest sewing start (may be in the past), delivery → latest sewing end — never crossed · 3. factory calendar, per-line hours, manpower, efficiency, +3 % plan qty · 4. bars strictly one after another, Build up curve on a product / style change · 5. what no line can finish before its delivery stays unplanned</div>
                         </fieldset>
                     </div>
                     <div class="st-actions">

@@ -405,10 +405,18 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         // product always beats a line that does not (the planner's line ×
         // product sheet is the first rule); other lines take the order only
         // when no listed line exists
-        profileFirst = false
+        profileFirst = false,
+        // strictDelivery: an order is placed ONLY where its sewing ends by the
+        // latest sewing end of the backward pass (delivery − finishing − wash
+        // − dispatch); when no line can, it stays unplanned — never a late bar
+        strictDelivery = false,
+        // sewStartOf(order) → Date: the earliest sewing start to use instead of
+        // the forward pass (PCD + pre-production days), e.g. PCD − 8 days
+        sewStartOf = null
     } = ctx;
     // the product name the profile knows (ERP garment type) when the order carries one
     const profType = o => o.profileType || o.productType;
+    const unplaced = [];
 
     const todayStart = snapStart
         ? snapStart(today)
@@ -455,7 +463,16 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         // today, never before material). An order must not start before this —
         // but once this date is due (expired PCD), a free line must take it
         // NOW; it may only slip later when no line is available.
-        const fwdIdeal = forwardPass(o.pcd, todayStart, isWorking, masters);
+        // earliest sewing start of the order: the forward pass, or the caller's rule
+        const earliestSew = lineFree => {
+            if (!sewStartOf) return forwardPass(o.pcd, lineFree, isWorking, masters);
+            const e = new Date(sewStartOf(o));
+            let actual = lineFree && lineFree > e ? new Date(lineFree) : new Date(e);
+            let guard = 0;
+            while (!isWorking(actual) && guard++ < 60) actual = addDays(actual, 1);
+            return { earliestSewStart : e, actualSewStart : actual };
+        };
+        const fwdIdeal = earliestSew(todayStart);
         let idealStart = new Date(fwdIdeal.actualSewStart);
         if (o.matReady && new Date(o.matReady) > idealStart) idealStart = new Date(o.matReady);
         if (idealStart < todayStart) idealStart = new Date(todayStart);
@@ -475,7 +492,7 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             );
             const dur = sewingDurationDays(o.qty, o.smv, availMin);
             const lineFree = line.freeFrom > todayStart ? new Date(line.freeFrom) : new Date(todayStart);
-            const fwd = forwardPass(o.pcd, lineFree, isWorking, masters);
+            const fwd = earliestSew(lineFree);
             let start = new Date(fwd.actualSewStart);
             if (o.matReady && new Date(o.matReady) > start) start = new Date(o.matReady);
             if (start < todayStart) start = new Date(todayStart);
@@ -501,7 +518,13 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             };
         });
 
-        candidates.sort((a, b) => {
+        // strict delivery: only lines where the bar ends by the latest sewing end
+        const pool = strictDelivery ? candidates.filter(c => c.lateness <= 0) : candidates;
+        if (strictDelivery && !pool.length) {
+            unplaced.push({ order : o, reason : 'no line can finish before the delivery (latest sewing end)' });
+            continue;
+        }
+        pool.sort((a, b) => {
             // profile rule first: a line listed for the product beats every
             // unlisted line, however early the unlisted one is free
             if (profileFirst && a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;
@@ -519,7 +542,7 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             return String(a.line.id).localeCompare(String(b.line.id));
         });
 
-        const best = candidates[0];
+        const best = pool[0];
         if (!best) continue;
 
         best.line.freeFrom = best.endDate;
@@ -530,5 +553,5 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         placements.push({ order : o, ...best });
     }
 
-    return { placements };
+    return { placements, unplaced };
 }
