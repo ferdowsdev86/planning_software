@@ -2838,12 +2838,19 @@ function openPullForward() {
         toast('Open a planning board first', 'warn');
         return;
     }
+    // The toolbar button while pick mode is on = leave pick mode (the
+    // button stays lit until then)
+    if (pfPickActive.value) { pfEndPick(); return; }
     pfPrev.value = null;
     const s = getInstance();
     pfLineList.value = (s?.resourceStore.records || [])
         .filter(r => r.data?.lineRow || LINE_BY_ID[r.id])
         .map(r => ({ id : r.id, name : r.data?.name || r.name || r.id }));
-    if (pfLine.value !== 'all' && !pfLineList.value.some(l => l.id === pfLine.value)) pfLine.value = 'all';
+    // Defaults every time the dialog opens: Entire plan · All lines · Move
+    // to mouse position ticked
+    pfScope.value = 'entire';
+    pfLine.value  = 'all';
+    pfMouse.value = true;
     pfOpen.value = true;
 }
 
@@ -2956,10 +2963,9 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
         toast(mouse ? `Nothing to pull on ${mouse.lineName} after ${fmtDate(mouse.date)}` : 'No gaps to remove — nothing moved', 'ok');
         return;
     }
-    const ask = mouse
-        ? `Pull ${p.changes.length} bar(s) on ${mouse.lineName} up to ${fmtClock(mouse.date)}? Bars after that point close up from there.`
-        : `This action will pull ${p.changes.length} planning bars forward and remove available gaps. Continue?`;
-    if (!window.confirm(ask)) return;
+    // Pick mode (mouse): no question per click — the planner pulls line
+    // after line and confirms ONCE, when leaving pick mode or saving
+    if (!mouse && !window.confirm(`This action will pull ${p.changes.length} planning bars forward and remove available gaps. Continue?`)) return;
     // One undoable step + all-or-nothing: any failure rolls every move back
     const stm = s.project?.stm;
     let stmTx = false;
@@ -3004,6 +3010,14 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
     touchBoardCache(s);
     s.refreshRows?.();
     pfOpen.value = false;
+    if (mouse) {
+        // stay in pick mode: the next click pulls another line; nothing is
+        // saved until the planner saves or leaves pick mode
+        pfPulls.bars += p.changes.length;
+        pfPulls.lines.add(mouse.lineId);
+        toast(`Pulled ${p.changes.length} bar(s) on ${mouse.lineName} up to ${fmtClock(mouse.date)} · so far ${pfPulls.bars} bar(s) on ${pfPulls.lines.size} line(s) — click another point, or the ⇤ button / Esc to finish`, 'ok');
+        return;
+    }
     if (boardReadOnly.value) {
         toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s) — NOT saved (this board is read only for you)`, 'warn');
         return;
@@ -3020,24 +3034,49 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
 }
 let pfSaveNoConfirm = false;
 
-// Move to mouse position (FastReact): tick the box, Save and Apply closes
-// the dialog, the cursor turns into a crosshair, and the next click on a
-// line pulls every bar planned after that point on THAT line up to it —
-// the first bar lands on the clicked time, the rest follow flush. Esc
-// leaves pick mode.
-const pfMouse      = ref(false);
+// Move to mouse position (FastReact, the default): Save and Apply closes
+// the dialog, the pointer becomes the ⇤ pull-forward icon and the toolbar
+// button stays lit. Every click on a line pulls the bars planned after that
+// point on THAT line up to it — the first bar lands on the clicked time,
+// the rest follow flush — with no question per click, line after line.
+// Pick mode ends with the toolbar button or Esc: THEN the planner is asked
+// once whether to save what was pulled (No = the moves stay on the board,
+// unsaved, for the normal Save button).
+const pfMouse      = ref(true);
 const pfPickActive = ref(false);
+const pfPulls      = { bars : 0, lines : new Set() };   // moved in this pick session
 
 function pfStartPick() {
     pfOpen.value = false;
     if (carried.value) cancelCarry();
     pfPickActive.value = true;
+    pfPulls.bars = 0;
+    pfPulls.lines.clear();
     document.body.classList.add('mb-pf-pick');
-    toast('Pull forward: click the point on a line — every bar after it on that line moves up to there · Esc = cancel', 'ok');
+    toast('Pull forward: click a point on a line — every bar after it on that line moves up to there. Repeat on other lines; the ⇤ button or Esc finishes', 'ok');
 }
 function pfStopPick() {
     pfPickActive.value = false;
     document.body.classList.remove('mb-pf-pick');
+}
+// Leaving pick mode: one confirmation for everything pulled meanwhile
+function pfEndPick() {
+    pfStopPick();
+    const n = pfPulls.bars, l = pfPulls.lines.size;
+    if (!n) { toast('Pull forward finished — nothing was moved', 'ok'); return; }
+    // the unsaved counter is refreshed on a timer — read the pending list now
+    let pending = 0;
+    try { pending = collectPendingChanges(getInstance()).length; } catch { pending = unsavedCount.value; }
+    if (pending <= 0) { toast(`Pull forward finished — ${n} bar(s) on ${l} line(s) already saved`, 'ok'); return; }
+    if (boardReadOnly.value) { toast(`Pull forward finished: ${n} bar(s) on ${l} line(s) moved — NOT saved (this board is read only for you)`, 'warn'); return; }
+    const ok = window.confirm(`Plan Pull Forward: ${n} bar(s) on ${l} line(s) were pulled forward.\n\nSave these changes to the DB now?\n\nCancel = keep them on the board unsaved (Save button later, or Undo).`);
+    if (!ok) { toast(`${n} pulled bar(s) stay on the board unsaved — Save when ready, or Undo`, 'warn'); return; }
+    pfPulls.bars = 0; pfPulls.lines.clear();
+    setTimeout(async () => {
+        pfSaveNoConfirm = true;
+        try { await saveToDb(); }
+        finally { pfSaveNoConfirm = false; }
+    }, 50);
 }
 // a click on the board while picking: { resource, date } from Bryntum's
 // event or resolved from the DOM event
@@ -3056,7 +3095,6 @@ function pfPickAt({ resource = null, date = null, domEvent = null } = {}) {
         toast('Click inside a sewing line row (not the Holding Row / header)', 'warn');
         return;
     }
-    pfStopPick();
     const lineName = res.data?.name || res.name || res.id;
     const plan = computePullForward({ line : res.id, from : d, anchorStart : d });
     applyPullForward(plan, { mouse : { lineId : res.id, lineName, date : new Date(d) } });
@@ -10082,8 +10120,7 @@ function resetUndoHistory() {
 function boardUndoKeys(e) {
     // Esc while picking a pull-forward point = leave pick mode
     if (e.key === 'Escape' && pfPickActive.value) {
-        pfStopPick();
-        toast('Pull forward cancelled', 'ok');
+        pfEndPick();
         return;
     }
     // Esc with nothing carried = drop the Ctrl+click selection
@@ -12792,7 +12829,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </div>
                     </div>
                 </span>
-                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)), 'fr-tb-locked-me' : b.dyn === 'planLock' && planLockedByMe, 'fr-tb-locked-other' : b.dyn === 'planLock' && planLockedByOther, 'fr-tb-dirty' : b.action === 'save' && unsavedCount > 0 }]" :disabled="b.action === 'save' && !unsavedCount" :title="b.dyn === 'planLock' ? (planLock ? `Plan locked by ${planLock.name || planLock.username}${planLockedByMe ? ' (you) — click to open it to other users' : ''}` : b.title) : (b.action === 'save' ? (unsavedCount ? `Save plan to fastreact DB — ${unsavedCount} unsaved change(s) on the board` : 'Save plan — no change on the board yet') : b.title)" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
+                <button v-else class="fr-tb-btn" :class="[b.cls, { 'fr-tb-on' : (b.toggle === 'consolidate' && consolidate) || (b.toggle === 'find' && (findOpen || findIds)) || (b.action === 'pullForward' && pfPickActive), 'fr-tb-locked-me' : b.dyn === 'planLock' && planLockedByMe, 'fr-tb-locked-other' : b.dyn === 'planLock' && planLockedByOther, 'fr-tb-dirty' : b.action === 'save' && unsavedCount > 0 }]" :disabled="b.action === 'save' && !unsavedCount" :title="b.dyn === 'planLock' ? (planLock ? `Plan locked by ${planLock.name || planLock.username}${planLockedByMe ? ' (you) — click to open it to other users' : ''}` : b.title) : (b.action === 'save' ? (unsavedCount ? `Save plan to fastreact DB — ${unsavedCount} unsaved change(s) on the board` : 'Save plan — no change on the board yet') : b.title)" :aria-label="b.tip || b.title" :aria-pressed="b.toggle === 'consolidate' ? String(consolidate) : (b.toggle === 'find' ? String(findOpen) : undefined)" @click="b.action && act(b.action)">
                     <i class="fa-solid fr-tb-fa" :class="b.dyn === 'planLock' ? (planLock ? 'fa-lock' : 'fa-key') : b.fa" aria-hidden="true"></i>
                     <span v-if="b.action === 'save' && unsavedCount" class="fr-tb-badge" aria-hidden="true">{{ unsavedCount > 99 ? '99+' : unsavedCount }}</span>
                 </button>
@@ -14542,7 +14579,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label class="pf-radio"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
                             <label class="pf-radio"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
                             <label class="pf-radio pf-mouse"><input type="checkbox" v-model="pfMouse"> Move to mouse position</label>
-                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → তারপর board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে (Esc = cancel)</div>
+                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → cursor হবে ⇤ icon, toolbar-এর ⇤ button lit থাকবে · board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে — একাধিক line-এ পরপর করা যায়, প্রতিবার কোনো confirmation নয় · শেষে ⇤ button আবার click বা Esc → একবার save confirmation</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Selected dates</legend>
@@ -14594,7 +14631,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">
                         প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
                         কোনো bar কখনো পরে যায় না, line/sequence বদলায় না · শুধু completed bar স্থির থাকে
-                        (production চলা bar-ও টেনে আনা হয়) · Save and Apply = সরানোর পর সাথে সাথে DB-তে save হয়
+                        (production চলা bar-ও টেনে আনা হয়) · Save and Apply (scope mode) = সরানোর পর সাথে সাথে DB-তে save হয় · mouse mode = pick mode শেষে একবার save confirmation
                     </div>
                 </div>
             </div>
@@ -16337,7 +16374,15 @@ body {
    FastReact "|<=" shape: a bar on the left with a hollow block arrow
    pointing at it; hotspot on the bar = the point the plan is pulled to */
 .mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched *, .mb-pf-pick .mb-sched-wrap {
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect x='2.5' y='5' width='3' height='22' fill='%23000'/><rect x='2' y='4.5' width='4' height='23' fill='none' stroke='%23fff' stroke-width='1'/><path d='M9 16L18 7V12H29V20H18V25Z' fill='%23fff' stroke='%23000' stroke-width='2' stroke-linejoin='round'/></svg>") 4 16, crosshair !important;
+    /* the toolbar's ⇤ icon as the pointer: blue long arrow to the left with
+       the "from-line" bar on the right, white halo; hotspot = the arrow tip */
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><rect x='24' y='4.5' width='7' height='23' rx='2' fill='%23fff'/><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%231d5fa7' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><rect x='26' y='6' width='3' height='20' rx='1' fill='%231d5fa7'/></svg>") 4 16, crosshair !important;
+}
+/* the toolbar button stays lit while pick mode is on */
+.fr-tb-btn.fr-tb-pull.fr-tb-on {
+    background : #cfe0ff;
+    border-color : #1b52ad;
+    box-shadow : inset 0 0 0 1.5px #1b52ad, 0 0 0 2px rgba(27, 82, 173, 0.25);
 }
 .pf-mouse { margin-top : 8px; padding-top : 8px; border-top : 1px dashed #c9c5b8; display : block; }
 
