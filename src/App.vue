@@ -16373,10 +16373,14 @@ body {
 /* Pull forward: picking the point on the board — the pointer becomes the
    FastReact "|<=" shape: a bar on the left with a hollow block arrow
    pointing at it; hotspot on the bar = the point the plan is pulled to */
-.mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched *, .mb-pf-pick .mb-sched-wrap {
-    /* the toolbar's ⇤ icon as the pointer: blue long arrow to the left with
+/* …on the wrapper AND everything inside it (bars, cells, rows carry their
+   own grab / pointer cursors — the Bryntum root does not get the .fr-sched
+   class, so the wrapper's descendants are the reliable target) */
+.mb-pf-pick .mb-sched-wrap, .mb-pf-pick .mb-sched-wrap *,
+.mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched * {
+    /* the toolbar's ⇤ icon as the pointer: BLACK long arrow to the left with
        the "from-line" bar on the right, white halo; hotspot = the arrow tip */
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><rect x='24' y='4.5' width='7' height='23' rx='2' fill='%23fff'/><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%231d5fa7' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><rect x='26' y='6' width='3' height='20' rx='1' fill='%231d5fa7'/></svg>") 4 16, crosshair !important;
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><rect x='24' y='4.5' width='7' height='23' rx='2' fill='%23fff'/><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23000' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><rect x='26' y='6' width='3' height='20' rx='1' fill='%23000'/></svg>") 4 16, crosshair !important;
 }
 /* the toolbar button stays lit while pick mode is on */
 .fr-tb-btn.fr-tb-pull.fr-tb-on {
