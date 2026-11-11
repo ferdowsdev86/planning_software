@@ -17,7 +17,7 @@ import {
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff
 } from './planningData.js';
-import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, hoursToHm as hoursToHmPd, productTypeFor, erpOrderInfo } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo } from './planningData.js';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -2170,7 +2170,8 @@ async function chApplyToOtherUnit(from, to, timeH) {
 // hours; the weekday's calendar hours when the line has none) → plain white;
 // a date given more than that (Change working hours, unit-wide or for the
 // line) → light grey; less → light red; a Friday / 0-hour day → grey "off".
-// The figure is printed in the cell when it differs from normal.
+// Only the colour marks the cell — the hours figure is NOT printed on the
+// board (the day header / Change working hours dialog carry the figures).
 function lineNormalHours(res, d) {
     const own = Number(res.data.hours);
     return own > 0 ? own : hmToHours(calendarState.days[d.getDay()]?.hours || '0');
@@ -2203,7 +2204,7 @@ function applyLineHourRanges(s = getInstance()) {
             else if (h > normal + 0.01) cls = 'mb-lh-more';
             else if (h < normal - 0.01) cls = 'mb-lh-less';
             if (!cls) continue;
-            ranges.push({ id : `lh-${res.id}-${ymd}`, resourceId : res.id, startDate : day, endDate : next, name : h > 0 ? hoursToHmPd(h) : '', cls });
+            ranges.push({ id : `lh-${res.id}-${ymd}`, resourceId : res.id, startDate : day, endDate : next, name : '', cls });
         }
     }
     if (ranges.length) st.add(ranges);
@@ -18018,19 +18019,20 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 }
 .mb-bar-l2 { white-space : nowrap; font-size : 9.5px; }
 
-/* Order bars: one line of buyer/order info, centred in the bar */
+/* Order bars: one line of buyer/order info, starting at the bar's LEFT edge
+   (vertically centred) — the text begins where the bar begins, not mid-bar */
 .mb-bar-center {
     height          : 100%;
     display         : flex;
     align-items     : center;
-    justify-content : center;
-    padding         : 0 4px;
+    justify-content : flex-start;
+    padding         : 0 4px 0 6px;
 }
 .mb-bar-center .mb-bar-l1 { text-overflow : ellipsis; overflow : hidden; }
-/* Colour by: Product — the product type as a pill in the middle of the bar,
-   above the LC hatch / badge, readable on any bar colour */
+/* Colour by: Product — the product type as a pill at the start of the bar,
+   above the LC hatch / marker, readable on any bar colour */
 .mb-bar-product { position : relative; z-index : 3; }
-.mb-bar-product .mb-bar-l1 { display : flex; align-items : center; justify-content : center; gap : 6px; overflow : hidden; }
+.mb-bar-product .mb-bar-l1 { display : flex; align-items : center; justify-content : flex-start; gap : 6px; overflow : hidden; }
 .mb-ptype {
     flex          : 0 0 auto;
     padding       : 1px 8px;
