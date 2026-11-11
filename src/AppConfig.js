@@ -2460,10 +2460,11 @@ export const schedulerProConfig = {
         const compact = w > 0 && w < full.length * 6.8 + 12;
         const text = compact ? line(rr, true) : full;
         // Learning-curve ramp: hatched overlay on the bar's head — a shade on
-        // top of (never replacing) the status/risk colour
+        // top of (never replacing) the status/risk colour — plus a small
+        // purple corner triangle at the bar's top-left as the marker
         const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
         const lcHtml = lcFrac > 0.005
-            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-badge" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}">LC</span>`
+            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-mark" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}"></span>`
             : '';
         // Multiple strip handling: live-linked bars carry a small link badge
         const lk = r.lcLink;
@@ -2472,7 +2473,7 @@ export const schedulerProConfig = {
                 `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
             : '';
         // Product mode: the type sits in the MIDDLE of the bar as a pill that
-        // stays readable over the learning-curve hatch and its LC badge
+        // stays readable over the learning-curve hatch and its corner marker
         let inner = StringHelper.encodeHtml(text);
         if (colorState.mode === 'product') {
             inner = `<span class="mb-ptype">${StringHelper.encodeHtml(full)}</span>`;

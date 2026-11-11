@@ -17631,18 +17631,18 @@ body {
     border-right   : 2px dashed rgba(0,0,0,.55);
 }
 
-.mb-lc-badge {
+/* Learning-curve marker: a small purple corner triangle at the bar's top-left
+   (replaces the old "LC" text badge) */
+.mb-lc-mark {
     position       : absolute;
-    top            : 1px;
-    left           : 2px;
+    top            : 0;
+    left           : 0;
     z-index        : 2;
-    padding        : 0 3px;
-    border-radius  : 2px;
-    background     : rgba(0,0,0,.55);
-    color          : #ffe082;
-    font-size      : 8px;
-    font-weight    : bold;
-    letter-spacing : .5px;
+    width          : 0;
+    height         : 0;
+    border-top     : 10px solid #4a148c;
+    border-right   : 10px solid transparent;
+    filter         : drop-shadow(0 0 0.6px #fff);
     pointer-events : none;
 }
 
