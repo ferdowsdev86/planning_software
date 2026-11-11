@@ -4191,6 +4191,11 @@ app.post(`${BASE}/production-sync`, async (req, res) => {
 // --------------------------------------------------------------------------
 app.post(`${BASE}/plan-allocation`, async (req, res) => {
     const orders = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    // ignoreBoard: the prediction uses the lines' WHOLE capacity for the
+    // available orders alone — the bars already saved on the board are not
+    // looked at (planner rule 2026-11-11: "what % of the capacity do the
+    // available orders fill, what stays free")
+    const ignoreBoard = !!req.body?.ignoreBoard;
     try {
         const [[lineRows], [calRows], [ovRows], [evRows], [profRows], [lcRows], [replRows], completed] = await Promise.all([
             pool.query(
@@ -4274,7 +4279,7 @@ app.post(`${BASE}/plan-allocation`, async (req, res) => {
             lines    : lineRows.filter(l => Number(l.unit_id) === uid)
                 .map(l => ({ id : Number(l.id), name : l.name, manpower : Number(l.manpower), eff : Number(l.eff), hours : Number(l.hours) })),
             calendar : calByUnit[uid] || blankCal(),
-            busy     : busyByUnit[uid] || [],
+            busy     : ignoreBoard ? [] : (busyByUnit[uid] || []),
             profiles,
             curve    : pickCurve(lcRows, uid),
             orders   : orders.filter(o => Number(o.unit) === uid)

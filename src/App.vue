@@ -6428,8 +6428,10 @@ function openAvailableOrders() {
 //                     start = PCD − 8 days, sewing end = order delivery − 7
 //                     days, each unit's lines (manpower × hours × efficiency
 //                     profile ÷ SMV), the factory calendar with its off days
-//                     and changed-hours dates, the saved bars already on the
-//                     lines, the Build up (learning) curve on a product change,
+//                     and changed-hours dates — the saved bars already on the
+//                     lines are NOT considered (ignoreBoard: the available
+//                     orders alone against the lines' whole capacity) —
+//                     the Build up (learning) curve on a product change,
 //                     +3 % plan qty. The tab is a pivot for ONE unit (or every
 //                     unit): row = the orders' planning month, one column per
 //                     production month = the pieces the simulation makes in
@@ -6446,10 +6448,10 @@ const AVAIL_TABS = [
       cols : [{ key : 'orders', label : 'Orders' }, { key : 'qty', label : 'Order Qty' },
               { key : 'sah', label : 'SAH', cls : 'av-sah', round : true }],
       xnote : 'SAH = order qty × SMV / 60' },
-    { key : 'alloc', label : 'Plan allocation', hint : 'Board simulation: which month the orders land in', headline : 'placed',
+    { key : 'alloc', label : 'Plan allocation', hint : 'Prediction: available orders vs. line capacity (board bars ignored)', headline : 'placed',
       left : [], cols : [],
-      xnote : `board simulation — sewing start = PCD − ${SEW_START_BEFORE_PCD} days (never before today), sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
-            + 'each unit\'s lines (manpower × hours × efficiency ÷ SMV), factory calendar (off days, changed hours), saved bars, '
+      xnote : `prediction from the available orders alone (the bars already on the board are NOT considered) — sewing start = PCD − ${SEW_START_BEFORE_PCD} days (never before today), sewing end = order delivery − ${SEW_END_BEFORE_SHIP} days, `
+            + 'each unit\'s lines (manpower × hours × efficiency ÷ SMV), factory calendar (off days, changed hours), '
             + 'Build up curve, +3 % plan qty · a production-month column = pieces the simulation makes in that calendar month · '
             + 'Planned = Σ of the months, Plan SAH = Planned × SMV / 60 · Not planned = pieces no line can make (no capacity before the delivery, no dates, no SMV)' }
 ];
@@ -6491,7 +6493,9 @@ function runPlanAllocation(rows) {
     allocError.value   = '';
     allocByKey.value   = new Map();
     allocInfo.value    = null;
-    loadPlanAllocation(orders).then(j => {
+    // prediction from the available orders ALONE: the bars already on the
+    // board are not considered (whole line capacity vs. the available orders)
+    loadPlanAllocation(orders, { ignoreBoard : true }).then(j => {
         allocByKey.value   = new Map((j.orders || []).map(o => [o.key, o]));
         allocInfo.value    = { today : j.today, units : j.units || [], capacity : j.capacity || {} };
         allocLoading.value = false;
@@ -6585,10 +6589,10 @@ function allocMonthTip(m, uid, ym, isTotal = false) {
     const k = availCapacity(uid, ym);
     if (k) {
         const still = Math.max(0, k.freePcs - k.usedPcs);
-        tip += `\nline capacity of ${unit} in ${ym}: ${fmtQty(k.pcs)} pcs · gone before today: ${fmtQty(k.pastPcs)} · held by saved bars: ${fmtQty(k.busyPcs)}`
-            + ` · free for new plan: ${fmtQty(k.freePcs)}`
-            + `\nthis plan uses: ${fmtQty(k.usedPcs)} = pieces made${k.curvePcs ? ` + Build up curve (style changes) ${fmtQty(k.curvePcs)}` : ''}`
-            + ` · still free after this plan: ${fmtQty(still)} (${k.freePcs ? Math.round(100 * still / k.freePcs) : 0} %)`
+        tip += `\nline capacity of ${unit} in ${ym}: ${fmtQty(k.pcs)} pcs${k.pastPcs ? ` · gone before today: ${fmtQty(k.pastPcs)}` : ''}`
+            + ` · available for the plan: ${fmtQty(k.freePcs)} (board bars not considered)`
+            + `\nthe available orders use: ${fmtQty(k.usedPcs)} = pieces made${k.curvePcs ? ` + Build up curve (style changes) ${fmtQty(k.curvePcs)}` : ''}`
+            + ` · still free after them: ${fmtQty(still)} (${k.freePcs ? Math.round(100 * still / k.freePcs) : 0} %)`
             + `\n(capacity figures are at the unit's order-mix SMV and mean line efficiency, so they compare with the pieces only approximately)`;
     }
     return tip;
@@ -6605,23 +6609,21 @@ const capHow = k => `${fmtQty(k.lines)} active line(s) · manpower ${fmtQty(k.ma
 const ALLOC_CAP_ROWS = [
     { key : 'whole', label : 'Line capacity (whole month)', cls : 'av-cap-whole', note : 'active lines × working days × hours × manpower × eff ÷ order-mix SMV (plan qty +3 %)',
       tip : k => `${fmtQty(k.pcs)} pcs — ${capHow(k)}` },
-    { key : 'saved', label : 'Held by saved bars', cls : 'av-cap-saved', pct : 'whole', note : '% of the whole month · bars already on the board',
-      tip : k => `line time the bars saved on the board already take in this month — ${fmtQty(k.busyPcs)} of ${fmtQty(k.pcs)} pcs` },
     { key : 'gone',  label : 'Gone before today', cls : 'av-cap-gone', pct : 'whole', note : 'running month only',
       tip : k => `line time of the month's days before today — ${fmtQty(k.pastPcs)} of ${fmtQty(k.pcs)} pcs` },
-    { key : 'free',  label : 'Free for this plan', cls : 'av-cap-free', pct : 'whole', note : '= whole month − saved bars − gone',
-      tip : k => `whole month ${fmtQty(k.pcs)} − held by saved bars ${fmtQty(k.busyPcs)} − gone before today ${fmtQty(k.pastPcs)} = ${fmtQty(k.freePcs)} pcs` },
-    { key : 'used',  label : 'Utilised by this plan', cls : 'av-cap-used', pct : 'free', note : '% of the free capacity',
-      tip : k => `pieces made + Build up curve loss — ${fmtQty(k.usedPcs)} of ${fmtQty(k.freePcs)} free` },
+    { key : 'free',  label : 'Available for plan', cls : 'av-cap-free', pct : 'whole', note : '= whole month − gone · the bars already on the board are NOT considered',
+      tip : k => `whole month ${fmtQty(k.pcs)} − gone before today ${fmtQty(k.pastPcs)} = ${fmtQty(k.freePcs)} pcs (board bars ignored)` },
+    { key : 'used',  label : 'Filled by the available orders', cls : 'av-cap-used', pct : 'free', note : '% of the available capacity',
+      tip : k => `pieces made + Build up curve loss — ${fmtQty(k.usedPcs)} of ${fmtQty(k.freePcs)} available` },
     { key : 'curve', label : 'Lost to Build up curve', cls : 'av-cap-curve', pct : 'free', note : '',
       tip : k => `line time the style-change ramps (${allocInfoText.value.match(/Build up curve: ([^·]+)/)?.[1]?.trim() || 'curve'}) cost, in pieces — ${fmtQty(k.curvePcs)} of ${fmtQty(k.freePcs)} free` },
     { key : 'still', label : 'Still free', cls : 'av-cap-still', pct : 'free', note : '',
-      tip : k => `free − utilised: ${fmtQty(Math.max(0, k.freePcs - k.usedPcs))} pcs no order of the window could take` }
+      tip : k => `available − filled: ${fmtQty(Math.max(0, k.freePcs - k.usedPcs))} pcs no available order of the window could take` }
 ];
 function allocCapVal(row, uid, ym) {
     const k = availCapacity(uid, ym);
     if (!k) return null;
-    const v = row.key === 'whole' ? k.pcs : row.key === 'saved' ? k.busyPcs : row.key === 'gone' ? k.pastPcs
+    const v = row.key === 'whole' ? k.pcs : row.key === 'gone' ? k.pastPcs
         : row.key === 'free' ? k.freePcs : row.key === 'used' ? k.usedPcs : row.key === 'curve' ? k.curvePcs : Math.max(0, k.freePcs - k.usedPcs);
     const base = row.pct === 'whole' ? k.pcs : row.pct === 'free' ? k.freePcs : 0;
     return { v, pct : row.pct && base ? Math.round(100 * v / base) : null, k };
@@ -13512,19 +13514,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tfoot>
                     </table>
                     <div v-if="availTabInfo.key === 'alloc'" class="av-note">
-                        <b>Plan allocation</b> tab: the available orders (unplanned + replaced) planned by a simulation of the planning board on every unit's own lines —
+                        <b>Plan allocation</b> tab: a PREDICTION from the available orders alone (unplanned + replaced) — the bars already on the planning board are <b>not</b> considered;
+                        the orders are placed by PCD and delivery on every unit's own lines against their whole capacity —
                         sewing start = PCD − {{ SEW_START_BEFORE_PCD }} days (never before today) · sewing end = order delivery − {{ SEW_END_BEFORE_SHIP }} days ·
-                        line capacity = manpower × working hours × efficiency (buyer rule → line profile per product → line efficiency) ÷ SMV ·
+                        line capacity = active lines × working days × hours × manpower × efficiency (buyer rule → line profile per product → line efficiency) ÷ SMV ·
                         factory calendar: weekly off days, changed-hours dates (0 = off), per-line hours ·
-                        the bars already saved on a line keep their time, only the free part of a day is used ·
-                        Build up curve when the run that ends right before on the line (saved bar or planned run) is another product / style — a changed-style run that cannot finish the order must outlive the ramp, 1-day scraps are not booked ·
+                        Build up curve when the run planned right before on the line is another product / style — a changed-style run that cannot finish the order must outlive the ramp, 1-day scraps are not booked ·
                         capacity is taken at the plan qty (+3 %), figures are order pieces ·
                         orders are planned in the board's order (PCD, then delivery), on the line that finishes earliest, spilling over to other lines when one cannot hold them ·
                         each <b>Made in</b> column = the pieces the simulation makes in that calendar month (where the orders of the row's planning month actually land, PCD-wise) —
                         green = the planning month itself, blue = ahead of it, orange = after it ·
                         <b>Planned</b> = Σ of the months · Plan SAH = Planned × SMV / 60 ·
                         <b>Not planned</b> = pieces no line can make before the delivery (no capacity in the window / window closed) + orders without dates or SMV ·
-                        hover a month cell for that month's line capacity: whole month, gone before today, held by saved bars, free, used by this plan ·
+                        the capacity rows under the table: whole month, gone before today, available for plan, filled by the available orders (%), lost to Build up curve, still free ·
                         click Orders / Order Qty → the orders in the list · planning month = month of (order delivery − 10 days), 11th → 10th
                         <span v-if="allocInfoText"> · {{ allocInfoText }}</span>
                         <span v-if="availSummary.lateOrders" class="av-warn"> · ⚠ {{ availSummary.lateOrders }} order(s) whose window already closed (delivery − 7 before today) are planned late, up to their delivery date</span>

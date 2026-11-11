@@ -439,14 +439,16 @@ export const saveEffProfilesDb     = rows => postRows('/efficiency-profiles', ro
 // Plan allocation (Available Order report): the server lays the posted
 // available orders on every unit's lines by the board's rules and answers
 // the day-wise pieces per order — nothing is written
-export async function loadPlanAllocation(orders) {
+// opts.ignoreBoard = true: the saved bars are not looked at — the available
+// orders alone against the lines' whole capacity
+export async function loadPlanAllocation(orders, opts = {}) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 90000);
     try {
         const res = await apiFetch(`${API_BASE}/plan-allocation`, {
             method  : 'POST',
             headers : { 'Content-Type' : 'application/json' },
-            body    : JSON.stringify({ orders }),
+            body    : JSON.stringify({ orders, ...opts }),
             signal  : ctl.signal
         });
         const data = await res.json();
