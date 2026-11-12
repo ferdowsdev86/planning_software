@@ -964,6 +964,7 @@ async function runLiveOrderPlan(s, {
         const raw = {
             ...o,
             reqMin, dur : p.dur, start, end,
+            eventCode : strictDelivery ? codeOf(o) : o.eventCode,
             orderQty : o.orderQty ?? o.qty,
             progress : 0,
             status   : 'draft',
@@ -1082,6 +1083,12 @@ async function runLiveOrderPlan(s, {
     // needs has not yet gone to a later delivery.
     let splitOrders = 0, splitPieces = 0;
     const profOf = o => o.profileType || o.productType;
+    // the bar's event code: one per planned ROW — a confirm row by its DB id
+    // (EV-C<id>-SEW, as the confirm-replacement path does), a projection by
+    // its order. The PO-based code (EV-<po>-SEW) is NOT unique: one PO has a
+    // row per colour, and two bars with the same code map to the same DB row
+    // at save ("Attempt to set item ev-dbo-… to already existing member's id")
+    const codeOf = o => String(o.id).startsWith('proj:') ? `ev-${o.id}` : (o.dbId ? `EV-C${o.dbId}-SEW` : poBaseEventCode(o.po));
     // whole pieces in proportion to the weights, exact total
     const proportionalParts = (qty, weights) => {
         const sum = weights.reduce((a, b) => a + b, 0) || 1;
@@ -1102,7 +1109,7 @@ async function runLiveOrderPlan(s, {
     const placePieces = (o, base, picks, parts, latest) => {
         const qty = Number(o.qty) || 0;
         const many = picks.filter((c, i) => parts[i] > 0).length > 1;
-        const baseCode = String(o.id).startsWith('proj:') ? `ev-${o.id}` : poBaseEventCode(o.po);
+        const baseCode = codeOf(o);
         const orderQty0 = Number(base.orderQty ?? qty) || qty;
         const placed = [];
         let ok = true, k = 0;
@@ -1113,7 +1120,7 @@ async function runLiveOrderPlan(s, {
             const raw = many
                 ? { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), orderQty : Math.round(orderQty0 * q / qty), baseQty : Number(base.baseQty) > 0 ? Math.round(Number(base.baseQty) * q / qty) : base.baseQty,
                     eventCode : code, id : k === 0 ? o.id : (code.startsWith('ev-') ? code.slice(3) : code), keepSeparate : true, lc : undefined, dur : undefined, start : picks[i].start, end : picks[i].start, split : { of : o.id, part : k + 1, parts : picks.filter((c, j) => parts[j] > 0).length } }
-                : { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), lc : undefined, dur : undefined, start : picks[i].start, end : picks[i].start };
+                : { ...base, qty : q, reqMin : Math.round(q * (Number(o.smv) || 0)), eventCode : baseCode, lc : undefined, dur : undefined, start : picks[i].start, end : picks[i].start };
             const e = { id : k === 0 ? `ev-${o.id}` : `ev-${o.id}-sp${k + 1}`, resourceId : picks[i].line.id, startDate : picks[i].start, endDate : endOfWork(picks[i].start, 1), duration : 1, durationUnit : 'day', manuallyScheduled : true, name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : true, raw };
             const r = placeExactBar(e, picks[i].line.id, picks[i].start, latest);
             if (!r.ok) { ok = false; break; }
