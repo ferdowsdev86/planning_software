@@ -571,6 +571,14 @@ export function isBoardInteracting() {
 function invalidateBarsCache() {
     barsByLineCache = null;
 }
+// A planning pass that adds / removes bars INSIDE a board batch must call
+// this after each change: the bars-by-line cache is built once when the batch
+// opens, so computeInsertStart would otherwise not see the bars the pass just
+// placed (two bars in one slot → the save-time nudge slides one of them to
+// the end of the line) nor forget the ones it took off again
+export function invalidateBarsByLine() {
+    invalidateBarsCache();
+}
 
 function rebuildBarsCache(scheduler) {
     const byLine = {};

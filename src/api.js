@@ -1271,8 +1271,12 @@ export async function loadFromApi(unitId = null) {
             priority : o.priority,
             suitable : (typeof o.suitable_lines === 'string' ? JSON.parse(o.suitable_lines) : o.suitable_lines || [])
                 .map(code => CODE_TO_ID[code] || code),
-            unitId   : o.unit_id != null ? Number(o.unit_id) : null,
-            unitName : o.unit_name || unitLabel(o.unit_id)
+            // the board unit is the PRODUCTION unit (mr_order_entry.prod_unit):
+            // a PO entered under MBM but produced in AQL belongs to the AQL
+            // board — the auto planner skipped such rows as "another unit's"
+            unitId      : o.prod_unit != null ? Number(o.prod_unit) : (o.unit_id != null ? Number(o.unit_id) : null),
+            entryUnitId : o.unit_id != null ? Number(o.unit_id) : null,
+            unitName : o.unit_name || unitLabel(o.prod_unit ?? o.unit_id)
         };
     }),
         ...extraUnplanned.filter(u => !unplannedPos.has(String(u.po || '')))

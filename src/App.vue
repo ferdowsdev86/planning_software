@@ -4,7 +4,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
@@ -1029,6 +1029,7 @@ async function runLiveOrderPlan(s, {
         const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(rec.id)) || [];
         if (asgn.length) s.assignmentStore.remove(asgn);
         s.eventStore.remove(rec);
+        invalidateBarsByLine();
     };
     const placeExactBar = (e, lineId, desiredStart, latest) => {
         const raw = e.raw;
@@ -1042,6 +1043,8 @@ async function runLiveOrderPlan(s, {
         const [rec] = s.eventStore.add(eventData);
         if (!rec) return { ok : false, reason : 'store refused the bar' };
         assignEventToLine(s, rec, lineId);
+        // the slot search below must see every bar placed so far in this batch
+        invalidateBarsByLine();
         const desired = startOfWorkDay(desiredStart);
         deriveLcForPlacement(s, raw, lineId, desired);
         applyLineFormulaDuration(s, raw, lineId);
@@ -1087,6 +1090,12 @@ async function runLiveOrderPlan(s, {
         for (let i = 0; rest > 0; i = (i + 1) % parts.length) { parts[i]++; rest--; }
         return parts;
     };
+    // Balanced pieces: every piece of a split order FINISHES AT THE SAME TIME
+    // (the order ships together) — a line that starts later gets fewer pieces.
+    // items: [{ start : Date, rate : pcs per working day }] → whole pieces,
+    // exact total; a line that could not start before the common finish gets 0
+    const workDaysFrom = apWorkDaysFrom;
+    const balancedParts = apBalancedParts;
     // the order's bar(s) placed exactly on the given lines — one bar when a
     // single pick, else split pieces (event codes EV-…-2/-3 via
     // nextStripEventCode, raw.split); all or nothing
@@ -1165,8 +1174,8 @@ async function runLiveOrderPlan(s, {
                     qtyAtRisk : Math.max(0, qty - sum), bestFinish : best?.finish || null, bestLine : best?.line?.name || null });
                 continue;
             }
-            // proportional pieces, exact total
-            const parts = proportionalParts(qty, pick.map(c => c.cap));
+            // balanced pieces (same finish on every line), exact total
+            const parts = balancedParts(qty, pick.map(c => ({ start : c.start, rate : c.cap / Math.max(1, workDaysFrom(c.start, latest)) })));
             const { ok, placed } = placePieces(o, base, pick, parts, latest);
             if (!ok) {
                 unplaced.push({ ...u, reason : 'split pieces did not all fit before the latest sewing finish' });
@@ -1239,7 +1248,8 @@ async function runLiveOrderPlan(s, {
                 pick = ranked.slice(0, 3).map(c => ({ ...c, start : slotOn(c.line, c.days / 3) }));
             }
             const base = u.raw || { ...o, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color, risk : calcRisk({ start : pick[0].start, end : pick[0].start, ship : o.ship, matReady : o.matReady || o.pcd, lineUtil : 0, status : 'draft' }) };
-            const parts = proportionalParts(qty, pick.map(c => outPerDay(c.line, o)));
+            // balanced pieces: every line finishes the order at the same time
+            const parts = balancedParts(qty, pick.map(c => ({ start : c.start, rate : outPerDay(c.line, o) })));
             const { ok, placed } = placePieces(o, base, pick, parts, null);
             if (!ok) { unplaced.push({ ...u, reason : 'could not be placed on any line (board refused the bar)' }); continue; }
             let anyLate = false;
@@ -3356,13 +3366,13 @@ async function runAutoPlanAvail() {
         // offers the dropped / still-unplanned orders the line time that the
         // settle freed (appended after each line's last bar), settled again
         const floor = addCalDays(from, -60);
-        let dropped = settleStrictBoard(s, r);
+        let dropped = settleStrictBoard(s, r, { floor });
         // No gaps: pull every bar flush after the one before it (never before
         // its PCD rule start), settle again — repeat until nothing moves
         const pullAndSettle = () => {
             for (let k = 0; k < 4; k++) {
                 const moved = pullFlushStrict(s, floor);
-                dropped += settleStrictBoard(s, r);
+                dropped += settleStrictBoard(s, r, { floor });
                 if (!moved) break;
             }
         };
@@ -3377,7 +3387,7 @@ async function runAutoPlanAvail() {
             if (!r2 || r2.skipped || !(r2.planned > 0)) { noteUnplaced(r2); break; }
             if (r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.splitOrders = (r.splitOrders || 0) + (r2.splitOrders || 0); r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
             noteUnplaced(r2);
-            dropped += settleStrictBoard(s, r);
+            dropped += settleStrictBoard(s, r, { floor });
             pullAndSettle();
         }
         // Fill every line (planner's choice): pull every bar flush down to its
@@ -3389,7 +3399,7 @@ async function runAutoPlanAvail() {
             await yieldUi();
             for (let k = 0; k < 4; k++) {
                 const moved = pullFlushStrict(s, floor, { toPcd : true });
-                settleStrictBoard(s, r, { dropLate : false });
+                settleStrictBoard(s, r, { dropLate : false, floor, toPcd : true });
                 if (!moved) break;
             }
             let r3 = null;
@@ -3404,13 +3414,21 @@ async function runAutoPlanAvail() {
             infeasible.clear();
             noteUnplaced(r3);
             for (let k = 0; k < 4; k++) {
-                settleStrictBoard(s, r, { dropLate : false });
+                settleStrictBoard(s, r, { dropLate : false, floor, toPcd : true });
                 const moved = pullFlushStrict(s, floor, { toPcd : true });
                 if (!moved) break;
             }
-            settleStrictBoard(s, r, { dropLate : false });
+            settleStrictBoard(s, r, { dropLate : false, floor, toPcd : true });
             // the late count as the board stands now (the settle may have moved bars)
             if (r) r.filledLate = s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw.latePlan && ev.data.raw.status !== 'completed' && !(Number(ev.data.raw.made) > 0)).length;
+        }
+        // The pieces of a split order finish TOGETHER: re-cut their quantities
+        // from where the settle left each piece, settle again (lengths
+        // changed) — until nothing moves
+        for (let k = 0; k < 3; k++) {
+            const ch = rebalanceSplitPieces(s);
+            if (!ch) break;
+            settleStrictBoard(s, r, apFillAll.value ? { dropLate : false, floor, toPcd : true } : { floor });
         }
         // Review for the planner (nothing is saved yet): shipment check per
         // bar, infeasible POs with the binding constraint, idle time per line
@@ -3506,6 +3524,98 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
             late : rows.filter(x => x.status === 'Late').length, atRisk : rows.filter(x => x.status === 'At Risk').length, pastStart : rows.filter(x => x.pastStart).length,
             splitPieces : rows.filter(x => x.split).length, idleHours : idle.reduce((a, l) => a + l.hours, 0), removed : blanked?.gone || 0, kept : blanked?.kept || 0, dropped : dropped || 0 } };
 }
+// working days from a to b (b exclusive)
+function apWorkDaysFrom(a, b) {
+    let n = 0;
+    const d = new Date(a); d.setHours(0, 0, 0, 0);
+    const e = new Date(b); e.setHours(0, 0, 0, 0);
+    for (let g = 0; g < 400 && d < e; g++, d.setDate(d.getDate() + 1)) if (!isOffDay(d)) n++;
+    return n;
+}
+// Balanced pieces: every piece of a split order FINISHES AT THE SAME TIME
+// (the order ships together) — a line that starts later gets fewer pieces.
+// items: [{ start : Date, rate : pcs per working day }] → whole pieces,
+// exact total; a line that could not start before the common finish gets 0
+function apBalancedParts(qty, items) {
+    if (!items.length) return [];
+    const t0 = items.reduce((m, it) => it.start < m ? it.start : m, items[0].start);
+    const rows = items.map((it, i) => ({ i, s : apWorkDaysFrom(t0, it.start), r : Math.max(0.01, Number(it.rate) || 0.01) })).sort((a, b) => a.s - b.s);
+    let T = 0, k = rows.length;
+    for (let n = 1; n <= rows.length; n++) {
+        const sub = rows.slice(0, n);
+        const sumR = sub.reduce((a, x) => a + x.r, 0);
+        const t = (qty + sub.reduce((a, x) => a + x.r * x.s, 0)) / sumR;
+        if (n === rows.length || t <= rows[n].s) { T = t; k = n; break; }
+    }
+    const parts = items.map(() => 0);
+    for (const x of rows.slice(0, k)) parts[x.i] = Math.max(0, Math.floor(x.r * (T - x.s)));
+    let rest = qty - parts.reduce((a, b) => a + b, 0);
+    const order = rows.slice(0, k).map(x => x.i);
+    for (let j = 0; rest > 0 && order.length; j = (j + 1) % order.length) { parts[order[j]]++; rest--; }
+    if (rest < 0) for (let j = 0; rest < 0; j = (j + 1) % order.length) { if (parts[order[j]] > 0) { parts[order[j]]--; rest++; } }
+    return parts;
+}
+// pieces per working day a line makes of this order (profile / line efficiency)
+function apLineRatePerDay(s, lid, raw) {
+    const res = s.resourceStore.getById(lid);
+    const base = LINE_BY_ID[lid] || {};
+    const manpower = Number(res?.data?.manpower) || base.manpower || 50;
+    const hours = Number(res?.data?.hours) || base.hours || 0;
+    const eff = Math.max(Number(lineEfficiencyOf(lid, raw.profileType || raw.productType)) || 0, Number(res?.data?.eff) || base.eff || 0) || 50;
+    const mins = manpower * (hours > 0 ? hours * 60 : WORK_MIN_PER_DAY) * eff / 100;
+    return Math.max(1, mins / (Number(raw.smv) > 0 ? Number(raw.smv) : 18));
+}
+// After the settle moved bars around, the pieces of a split order no longer
+// finish together: re-cut the quantities between the pieces from where each
+// one now starts (exact total kept), re-fit their lengths. A piece that gets
+// nothing is taken off. Returns the pieces changed.
+function rebalanceSplitPieces(s) {
+    const index = buildLineIndex(s);
+    const groups = new Map();
+    for (const ev of s.eventStore.records) {
+        const x = ev.data?.raw;
+        if (!x || x.stage || !x.split?.of || x.status === 'completed' || Number(x.made) > 0) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;
+        (groups.get(x.split.of) || groups.set(x.split.of, []).get(x.split.of)).push({ ev, lid });
+    }
+    let changed = 0;
+    for (const [, pieces] of groups) {
+        if (pieces.length < 2) continue;
+        const total = pieces.reduce((a, p) => a + (Number(p.ev.data.raw.qty) || 0), 0);
+        const orderTotal = pieces.reduce((a, p) => a + (Number(p.ev.data.raw.orderQty) || 0), 0);
+        const baseTotal = pieces.reduce((a, p) => a + (Number(p.ev.data.raw.baseQty) || 0), 0);
+        if (!(total > 0)) continue;
+        const parts = apBalancedParts(total, pieces.map(p => ({ start : p.ev.startDate, rate : apLineRatePerDay(s, p.lid, p.ev.data.raw) })));
+        const keep = pieces.filter((p, i) => parts[i] > 0);
+        pieces.forEach((p, i) => {
+            const q = parts[i];
+            const raw = p.ev.data.raw;
+            if (q <= 0) {
+                const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(p.ev.id)) || [];
+                if (asgn.length) s.assignmentStore.remove(asgn);
+                s.eventStore.remove(p.ev);
+                changed++;
+                return;
+            }
+            if (q === Number(raw.qty)) return;
+            raw.qty = q;
+            raw.reqMin = Math.round(q * (Number(raw.smv) || 0));
+            if (orderTotal > 0) raw.orderQty = Math.round(orderTotal * q / total);
+            if (baseTotal > 0) raw.baseQty = Math.round(baseTotal * q / total);
+            const start = new Date(p.ev.startDate);
+            try { applyLineFormulaDuration(s, raw, p.lid); } catch { /* keep dur */ }
+            let end = endOfWork(start, raw.dur || elapsedDays(p.ev.startDate, p.ev.endDate) || 1);
+            try { const sim = simulateStrip(s, raw, p.lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
+            p.ev.set({ endDate : end, duration : elapsedDays(start, end) });
+            raw.end = end;
+            changed++;
+        });
+        if (keep.length !== pieces.length) keep.forEach((p, i) => { p.ev.data.raw.split = { ...p.ev.data.raw.split, part : i + 1, parts : keep.length }; });
+    }
+    if (changed) invalidateBarsByLine();
+    return changed;
+}
 // the order's PCD (cut date) — the absolute floor of any pull: sewing never precedes cutting
 function apPcdOf(raw) {
     const pcd = raw.pcd ? new Date(raw.pcd) : (raw.ship ? addCalDays(new Date(raw.ship), -30) : null);
@@ -3538,23 +3648,47 @@ function pullFlushStrict(s, floor, { toPcd = false } = {}) {
     for (const [lid, bars] of byLine) {
         bars.sort((a, b) => (a.startDate - b.startDate) || (a.endDate - b.endDate));
         let prevEnd = null;
-        for (const ev of bars) {
+        const isFixedBar = ev => ev.data.raw.status === 'completed' || Number(ev.data.raw.made) > 0;
+        for (let i = 0; i < bars.length; i++) {
+            const ev = bars[i];
             const raw = ev.data.raw;
-            const fixed = raw.status === 'completed' || Number(raw.made) > 0;
-            if (!fixed) {
+            if (!isFixedBar(ev)) {
                 let lo = toPcd ? apPcdOf(raw) : apEarliestStartOf(raw);
                 if (!lo || (floor && lo < floor)) lo = floor ? new Date(floor) : lo;
                 let target = prevEnd ? nextDayStartAfter(prevEnd) : (lo ? clampIntoWorkWindow(new Date(lo)) : null);
                 if (lo && target && target < lo) target = clampIntoWorkWindow(new Date(lo));
-                if (target && ev.startDate.getTime() - target.getTime() > 5 * 60000) {
-                    const start = target;
+                // the bar's real end when it starts at `start` (production model)
+                const endFor = start => {
                     deriveLcForPlacement(s, raw, lid, start);
                     applyLineFormulaDuration(s, raw, lid);
                     let end = endOfWork(start, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
                     try { const sim = simulateStrip(s, raw, lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
-                    ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
-                    raw.start = start; raw.end = end;
-                    moved++;
+                    return end;
+                };
+                if (target) {
+                    // a FIXED bar ahead (completed / production started — never
+                    // moved) that this bar would run into: this bar goes behind it
+                    let end = null;
+                    for (let j = i + 1; j < bars.length; j++) {
+                        const nx = bars[j];
+                        if (!isFixedBar(nx)) break;
+                        if (nx.endDate <= target) continue;
+                        if (end === null) end = endFor(target);
+                        if (end.getTime() <= nx.startDate.getTime() + 60000) break;
+                        target = nextDayStartAfter(nx.endDate);
+                        end = null;
+                    }
+                    // pulled forward to close a gap — or PUSHED back when it overlaps
+                    // the bar before it (a re-fit lengthened that one): the line stays
+                    // strictly sequential in its current order, no bar ever cascades
+                    // to the end of the line
+                    if (Math.abs(ev.startDate.getTime() - target.getTime()) > 5 * 60000) {
+                        const start = target;
+                        if (end === null) end = endFor(start);
+                        ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+                        raw.start = start; raw.end = end;
+                        moved++;
+                    }
                 }
             }
             if (!prevEnd || ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
@@ -3566,7 +3700,7 @@ function pullFlushStrict(s, floor, { toPcd = false } = {}) {
 // schedule, the save-time no-overlap nudge), run here and now until nothing
 // changes any more — and every bar that ends up past its delivery − 7 days is
 // taken off (its order back to the unplanned pool): never a late bar
-function settleStrictBoard(s, r, { dropLate = true } = {}) {
+function settleStrictBoard(s, r, { dropLate = true, floor = null, toPcd = false } = {}) {
     // dropLate false (fill every line): nothing is taken off — a bar that ends
     // past its latest sewing finish is flagged late instead (planner's choice)
     let dropped = 0;
@@ -3585,11 +3719,13 @@ function settleStrictBoard(s, r, { dropLate = true } = {}) {
             // its new dates next time), so repeat until nothing changes
             try { applyLearningCurves(s, { lineIds }); } catch { /* no curves */ }
             const rr = resizeBars(s, open, { dirty : true }) || {};
-            // the save-time rule too (a bar's real finish spills a few minutes
-            // into the next bar's first morning → that bar is nudged forward):
-            // run it here so the late check sees the bars where Save puts them
+            // no overlap, no gap: every bar sits right after the one before it
+            // on its line — pulled forward or pushed back IN ORDER (the
+            // save-time nudge would instead drop an overlapping bar into the
+            // next free slot, i.e. the end of a packed line: split pieces lost
+            // their sisters by months that way)
             let nudged = 0;
-            try { nudged = enforceNoOverlapBeforeSave(s) || 0; } catch { /* no nudge */ }
+            try { nudged = pullFlushStrict(s, floor, { toPcd }) || 0; } catch { /* no flush */ }
             if (nudged) rr.pushed = (rr.pushed || 0) + nudged;
             const lateBars = dropLate ? s.eventStore.records.filter(isLate) : [];
             if (!lateBars.length && !(rr.grown || rr.shrunk || rr.pushed || rr.pulled)) break;
@@ -12335,6 +12471,7 @@ onMounted(() => {
     // Dev-console access for diagnostics
     window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges,
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
+        unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
