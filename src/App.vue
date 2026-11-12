@@ -838,11 +838,11 @@ async function runLiveOrderPlan(s, {
     // strict runs: a pool row is "already on the board" by its OWN row (DB id,
     // its PO ids, order + colour) — never by the PO number alone: one PO has
     // a row per colour, and the PO key let only the first colour be planned
+    // (not order + colour either: two POs of one order can share a colour)
     const strictRowKeys = u => [
         u.id != null ? String(u.id) : null,
         u.dbId ? `dbo-${u.dbId}` : null,
-        ...(Array.isArray(u.idList) ? u.idList.map(i => `dbo-${i}`) : []),
-        u.mbmOrder && u.color ? `ck:${u.mbmOrder}:${u.color}` : null
+        ...(Array.isArray(u.idList) ? u.idList.map(i => `dbo-${i}`) : [])
     ].filter(Boolean);
 
     const today = snapToWorkStart(earliestStart ? new Date(earliestStart) : new Date());
@@ -1258,8 +1258,11 @@ async function runLiveOrderPlan(s, {
             if (!(qty > 0)) { unplaced.push(u); continue; }
             const latest = latestOf(o);
             const pcd = o.pcd ? new Date(o.pcd) : null;
-            let cands = lineStates.filter(l => planCtx.lineHasProductType(l.id, profOf(o)));
-            if (!cands.length) cands = lineStates;
+            // fill phase: EVERY line is a candidate — an idle line takes any
+            // product (planner's rule: no line stays empty while an order
+            // waits); a line listed for the product only breaks a tie
+            const cands = lineStates;
+            const listed = l => planCtx.lineHasProductType(l.id, profOf(o)) ? 0 : 1;
             // earliest slot on the line from the order's PCD on (an idle gap
             // between two bars when the run fits in it, else after the last bar)
             const desired = clampIntoWorkWindow(new Date(Math.max(+today, pcd && !Number.isNaN(+pcd) ? +pcd : 0)));
@@ -1274,7 +1277,7 @@ async function runLiveOrderPlan(s, {
                 const days = qty / outPerDay(l, o);
                 const st = slotOn(l, days);
                 return { line : l, start : st, days, finish : addWorkDays(st, Math.max(1, Math.ceil(days))) };
-            }).sort((a, b) => (a.finish - b.finish) || (a.days - b.days));
+            }).sort((a, b) => (a.finish - b.finish) || (listed(a.line) - listed(b.line)) || (a.days - b.days));
             let pick = [ranked[0]];
             if (ranked[0].days > 10 && ranked.length > 1) {
                 // shared run: each line's slot for its share
@@ -3356,8 +3359,11 @@ function blankBoardForAutoPlan(s, keepStarted) {
             id, mbmOrder : r.mbmOrder || '', po : r.po || '', poList : r.poList, buyer : r.buyer || '', style : r.style || '',
             color : r.color || '', productType : r.productType || '', orderType : r.orderType,
             qty : Number(r.qty) || 0, baseQty : r.baseQty, orderQty : Number(r.orderQty ?? r.qty) || 0, smv : Number(r.smv) || 0,
-            pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : r.unitId ?? currentUnitId.value ?? null,
-            dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable
+            // the bar was on THIS board, so the order is this unit's production
+            // (raw.unitId is the ERP entry unit — with it the row was skipped
+            // afterwards as "another unit's" and never re-planned)
+            pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : currentUnitId.value ?? r.unitId ?? null,
+            dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable, idList : r.idList
         });
     }
     s.eventStore.remove(gone);
@@ -3544,7 +3550,8 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
                     // fill mode: a bar may be pulled down to its PCD (cut date), so "ready" = PCD before the gap
                     const readyAt = apFillAll.value ? apPcdOf : apEarliestStartOf;
                     const compat = pool.filter(u => { const lo = readyAt(u); return lo && lo <= gapEnd; });
-                    const prodOk = compat.filter(u => Number(profileOfLine(res.id)?.values?.[erpOrderInfo[u.mbmOrder]?.gmt || u.productType]) > 0);
+                    // fill mode: an idle line takes any product, so the profile never explains a gap
+                    const prodOk = apFillAll.value ? compat : compat.filter(u => Number(profileOfLine(res.id)?.values?.[erpOrderInfo[u.mbmOrder]?.gmt || u.productType]) > 0);
                     const reason = !compat.length ? (apFillAll.value ? 'waiting for cutting — no unplanned order has its PCD before the gap' : 'no order is ready (PCD rule) before the gap')
                         : !prodOk.length ? 'no ready order of a product this line runs' : h < 24 ? 'gap too short for a run' : (apFillAll.value ? 'the ready orders are all planned; the next bar waits for its PCD' : 'the ready orders would not finish by their delivery here');
                     gaps.push({ from : new Date(cursor), to : new Date(gapEnd), hours : h, reason });
@@ -3793,7 +3800,7 @@ function settleStrictBoard(s, r, { dropLate = true, floor = null, toPcd = false 
                 const recordOf = (x, id) => ({ id, mbmOrder : x.mbmOrder || '', po : x.po || '', poList : x.poList, buyer : x.buyer || '', style : x.style || '',
                     color : x.color || '', productType : x.productType || '', orderType : x.orderType, qty : Number(x.qty) || 0, baseQty : x.baseQty,
                     orderQty : Number(x.orderQty ?? x.qty) || 0, smv : Number(x.smv) || 0, pcd : x.pcd || null, ship : x.ship || null, matReady : x.matReady || null,
-                    unitId : x.unitId ?? currentUnitId.value ?? null, dbId : x.dbId, status : 'unplanned', parked : false, suitable : x.suitable });
+                    unitId : currentUnitId.value ?? x.unitId ?? null, dbId : x.dbId, status : 'unplanned', parked : false, suitable : x.suitable, idList : x.idList });
                 for (const ev of lateBars) {
                     const x = ev.data.raw;
                     const sid = String(ev.id);
