@@ -3339,8 +3339,27 @@ function blankBoardForAutoPlan(s, keepStarted) {
         if (r.status === 'completed' || (keepStarted && Number(r.made) > 0)) { kept.push(ev); continue; }
         gone.push(ev);
     }
-    if (!gone.length) return { gone : 0, kept : kept.length };
+    if (!gone.length) return { gone : 0, kept : kept.length, dupParked : 0 };
     const have = new Set(unplanned.value.map(u => String(u.id)));
+    // A bar parked on the Holding Row whose order is ALSO in the unplanned
+    // pool (its confirm rows, or the same POs under another order code —
+    // e.g. the subcontract mirror of a JCP order) is a leftover of an older
+    // projection replacement: it leaves the board and is cancelled on Save,
+    // the pool rows are planned in its place — never both
+    const unit = currentUnitId.value;
+    const poolOrders = new Set(), poolPos = new Set();
+    for (const u of unplanned.value) {
+        if (unit && u.unitId && u.unitId !== unit) continue;
+        if (u.status === 'completed') continue;
+        if (u.mbmOrder) poolOrders.add(String(u.mbmOrder));
+        if (u.po) poolPos.add(String(u.po));
+        if (Array.isArray(u.poList)) for (const p of u.poList) poolPos.add(String(p));
+    }
+    const isDupParked = r => !!r.parked && (
+        (r.mbmOrder && poolOrders.has(String(r.mbmOrder)))
+        || (r.po && poolPos.has(String(r.po)))
+        || (Array.isArray(r.poList) && r.poList.some(p => poolPos.has(String(p)))));
+    let dupParked = 0;
     const back = [];
     for (const ev of gone) {
         const r = ev.data.raw;
@@ -3351,6 +3370,7 @@ function blankBoardForAutoPlan(s, keepStarted) {
         }
         const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
         if (asgn.length) s.assignmentStore.remove(asgn);
+        if (isDupParked(r)) { dupParked++; continue; }
         // the order as an unplanned source (plan qty, dates, SMV, product)
         const id = r.id || `proj:${r.mbmOrder || r.po}`;
         if (have.has(String(id))) continue;
@@ -3369,7 +3389,7 @@ function blankBoardForAutoPlan(s, keepStarted) {
     s.eventStore.remove(gone);
     if (boardDbState) for (const ev of gone) delete boardDbState[String(ev.id)];
     unplanned.value = [...unplanned.value, ...back];
-    return { gone : gone.length, kept : kept.length };
+    return { gone : gone.length, kept : kept.length, dupParked };
 }
 async function runAutoPlanAvail() {
     const s = getInstance();
@@ -3496,7 +3516,7 @@ async function runAutoPlanAvail() {
     catch (e) { toast(`Auto plan failed: ${e.message} — Undo restores the board`, 'error'); }
     finally { setBoardLoad(false); apBusy.value = false; }
     const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filled ? ` · ${r.filled} planned after the lines' last bars (${r.filledLate || 0} late, flagged)` : ''}${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, (r?.unplacedLate || r?.filledLate) ? 'warn' : 'ok');
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filled ? ` · ${r.filled} planned after the lines' last bars (${r.filledLate || 0} late, flagged)` : ''}${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, (r?.unplacedLate || r?.filledLate) ? 'warn' : 'ok');
 }
 // The run's review (planner spec 2026-11-12): line plan is the board itself;
 // here the shipment check per bar (PCD, earliest sewing start, latest sewing
