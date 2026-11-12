@@ -824,11 +824,26 @@ async function runLiveOrderPlan(s, {
     // New orders are always appended after the last bar on each line.
 
     const onBoard = new Set();
+    // strict runs: orders whose CONFIRM rows are on the board already (a
+    // projection of such an order is never planned — the confirms replace it)
+    const confirmOrders = new Set();
+    const isProjRow = u => String(u.id || '').startsWith('proj:') || orderTypeOf(u.po, u.orderType) === 'projection';
     for (const ev of s.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
         for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
+        if (Array.isArray(raw.idList)) for (const i of raw.idList) onBoard.add(`dbo-${i}`);
+        if (raw.mbmOrder && !isProjRow(raw)) confirmOrders.add(String(raw.mbmOrder));
     }
+    // strict runs: a pool row is "already on the board" by its OWN row (DB id,
+    // its PO ids, order + colour) — never by the PO number alone: one PO has
+    // a row per colour, and the PO key let only the first colour be planned
+    const strictRowKeys = u => [
+        u.id != null ? String(u.id) : null,
+        u.dbId ? `dbo-${u.dbId}` : null,
+        ...(Array.isArray(u.idList) ? u.idList.map(i => `dbo-${i}`) : []),
+        u.mbmOrder && u.color ? `ck:${u.mbmOrder}:${u.color}` : null
+    ].filter(Boolean);
 
     const today = snapToWorkStart(earliestStart ? new Date(earliestStart) : new Date());
     const lineStates = s.resourceStore.records
@@ -864,8 +879,18 @@ async function runLiveOrderPlan(s, {
     const seen = new Set(onBoard);
     const orders = [];
     let noPcdCount = 0;
+    // strict runs: the orders that have confirm rows in this unit's pool —
+    // their projection is left to the confirms (planned → projection "replaced")
+    if (strictDelivery) {
+        for (const u of source) {
+            if (isProjRow(u) || !u.mbmOrder || u.status === 'completed' || u.replaced || u.status === 'replaced') continue;
+            if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
+            confirmOrders.add(String(u.mbmOrder));
+        }
+    }
+    const projLeft = [];   // projections skipped for their confirm rows
     for (const u of source) {
-        const keys = orderKeysOf(u);
+        const keys = strictDelivery ? strictRowKeys(u) : orderKeysOf(u);
         if (keys.some(k => seen.has(k))) continue;
         const key = keys[0] || String(u.id || `${u.mbmOrder || ''}:${u.po || ''}:${u.style || ''}`);
         if (seen.has(key)) continue;
@@ -875,6 +900,7 @@ async function runLiveOrderPlan(s, {
         if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
         if (!String(u.buyer || '').trim()) continue;
         if (u.replaced || u.status === 'replaced') continue;
+        if (strictDelivery && isProjRow(u) && u.mbmOrder && confirmOrders.has(String(u.mbmOrder))) { projLeft.push(u); continue; }
         if (typeFilter && !typeFilter.has(orderTypeOf(u.po, u.orderType))) continue;
         // No invented dates: an order without a valid effective PCD stays
         // visible in the unplanned data but is never auto-planned.
@@ -1365,6 +1391,20 @@ async function runLiveOrderPlan(s, {
 
     const plannedIds = new Set(placements.map(p => String(p.order.id)));
     unplanned.value = unplanned.value.filter(u => !plannedIds.has(String(u.id)));
+    // a projection left to its confirm rows shows "replaced" as soon as a
+    // confirm bar of its order is on the board (the server derives the same)
+    let projReplaced = 0;
+    if (projLeft.length) {
+        const confirmNow = new Set();
+        for (const ev of s.eventStore.records) { const x = ev.data?.raw; if (x && !x.stage && x.mbmOrder && !isProjRow(x)) confirmNow.add(String(x.mbmOrder)); }
+        for (const u of projLeft) {
+            if (!confirmNow.has(String(u.mbmOrder))) continue;
+            u.replaced = true; u.status = 'replaced'; u.planned = false;
+            try { rememberReplaced(u, { mbmOrder : u.mbmOrder }); } catch { /* list only */ }
+            projReplaced++;
+        }
+        if (projReplaced && showToasts) toast(`${projReplaced} projection(s) replaced by their confirm orders (the confirm colour rows were planned instead)`, 'ok');
+    }
 
     onProgress?.({
         phase   : 'finish',
