@@ -1032,7 +1032,14 @@ async function runLiveOrderPlan(s, {
     };
     const placeExactBar = (e, lineId, desiredStart, latest) => {
         const raw = e.raw;
-        const [rec] = s.eventStore.add(e);
+        // the line goes through the assignment store ONLY: an event added or
+        // set with a resourceId flips Bryntum's stores into single-assignment
+        // mode and the next board load in this tab throws ("Data loading into
+        // AssignmentStore (multi-assignment mode) cannot be combined with
+        // EventStore data containing resourceId") → every later run fails
+        // with "Unknown identifier …$.startDate"
+        const { resourceId : _lineHint, ...eventData } = e;
+        const [rec] = s.eventStore.add(eventData);
         if (!rec) return { ok : false, reason : 'store refused the bar' };
         assignEventToLine(s, rec, lineId);
         const desired = startOfWorkDay(desiredStart);
@@ -1053,8 +1060,7 @@ async function runLiveOrderPlan(s, {
             removeRec(rec);
             return { ok : false, rec : null, start, end, reason : 'would end after the latest sewing finish on the real board' };
         }
-        rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end), resourceId : lineId });
-        rec.data.resourceId = lineId;
+        rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
         raw.start = start; raw.end = end; raw.latePlan = false;
         return { ok : true, rec, start, end };
     };
@@ -1740,6 +1746,11 @@ function loadBoardInline(s, data) {
     };
     const events = Array.isArray(data.events) ? data.events.map(strip)
         : (data.events?.rows ? { ...data.events, rows : data.events.rows.map(strip) } : data.events);
+    // Any event added with a resourceId since the last load (a planning pass,
+    // a copy) flips the stores into single-assignment mode, and this load
+    // would then throw ("…cannot be combined with EventStore data containing
+    // resourceId") and leave the board half-loaded — back to multi mode first
+    try { if (s.eventStore?.usesSingleAssignment) s.eventStore.usesSingleAssignment = false; } catch { /* older builds */ }
     s.project.loadInlineData({
         resources          : data.resources,
         events,
