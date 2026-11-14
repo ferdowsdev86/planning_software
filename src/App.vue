@@ -12429,18 +12429,51 @@ function setMultiCls(rec, on) {
     if (on) cls.push(MULTI_CLS);
     rec.set('cls', cls.join(' '));
 }
+// the last Ctrl+clicked bar: the next Ctrl+click on ANOTHER bar of the same
+// line selects every bar between the two (first bar … last bar of a run)
+let multiAnchor = null;
 function toggleMultiSelect(rec) {
     const raw = rec?.data?.raw;
     if (!raw || raw.stage) return;
     const id = String(rec.id);
-    if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); }
-    else { multiSel.add(id); setMultiCls(rec, true); }
+    if (multiSel.has(id)) { multiSel.delete(id); setMultiCls(rec, false); multiAnchor = null; }
+    else { multiSel.add(id); setMultiCls(rec, true); multiAnchor = id; }
     uiHooks.multiSelCount = multiSel.size;
     toast(multiSel.size
-        ? `${multiSel.size} bar(s) selected — Ctrl+click more, then click one of them and move the group · Esc = clear`
+        ? `${multiSel.size} bar(s) selected — Ctrl+click more (Ctrl+click the last bar of the line to take every bar in between), then click one of them and move the group · Esc = clear`
         : 'Selection cleared', 'ok');
 }
+// Ctrl+click on a second bar of the SAME line: every bar from the first
+// clicked bar to this one joins the selection (nothing is deselected)
+function rangeMultiSelect(rec) {
+    const s = getInstance();
+    const raw = rec?.data?.raw;
+    if (!s || !raw || raw.stage || !multiAnchor) return false;
+    const a = s.eventStore.getById(multiAnchor);
+    if (!a || a === rec || !multiSel.has(String(a.id))) return false;
+    const idx = buildLineIndex(s);
+    const la = lineIdOf(s, a, idx), lb = lineIdOf(s, rec, idx);
+    if (!la || la !== lb) return false;
+    const lo = Math.min(+a.startDate, +rec.startDate), hi = Math.max(+a.startDate, +rec.startDate);
+    let added = 0;
+    for (const ev of s.eventStore.records) {
+        const x = ev.data?.raw;
+        if (!x || x.stage) continue;
+        if (lineIdOf(s, ev, idx) !== la) continue;
+        const t = +ev.startDate;
+        if (t < lo || t > hi) continue;
+        const id = String(ev.id);
+        if (multiSel.has(id)) continue;
+        multiSel.add(id); setMultiCls(ev, true); added++;
+    }
+    uiHooks.multiSelCount = multiSel.size;
+    multiAnchor = String(rec.id);
+    const lineName = s.resourceStore.getById(la)?.name || 'the line';
+    toast(`${multiSel.size} bar(s) selected — ${added} more between the two clicks on ${lineName} · click one of them and move the group · Esc = clear`, 'ok');
+    return true;
+}
 function clearMultiSelect() {
+    multiAnchor = null;
     if (!multiSel.size) return;
     const s = getInstance();
     for (const id of multiSel) {
@@ -12770,7 +12803,8 @@ function handleBarMouseDown(ev) {
         const now = performance.now();
         if (lastMultiToggle.id !== id || now - lastMultiToggle.t > 300) {
             lastMultiToggle = { id, t : now };
-            toggleMultiSelect(ev.eventRecord);
+            // second bar of the same line → the whole run between the two
+            if (!rangeMultiSelect(ev.eventRecord)) toggleMultiSelect(ev.eventRecord);
         }
         skipNextBarClick = true;
         return;
