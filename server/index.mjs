@@ -192,6 +192,54 @@ app.get(`${BASE}/erp-order-info`, async (req, res) => {
     res.json({ success : true, erpByOrder, buyerShort });
 });
 
+// A confirm bar stands for PO rows (its anchor row, or the rows of its colour
+// group in notes.idList); several bars — the pieces of a split order — share
+// one anchor. Every bar gets the quantity those rows hold NOW (group_qty, ERP
+// qty) and the plan quantity of pieces that left the board with production on
+// record (group_done: finished strips). The board uses them when it re-plans:
+// the pieces must add up to the rows' quantity — a piece that was lost on the
+// way (cancelled without any production) is planned again, a finished strip
+// is not.
+async function attachGroupTotals(events) {
+    const noteOf = e => { try { return JSON.parse(e.notes || '{}') || {}; } catch { return {}; } };
+    const byAnchor = new Map();   // anchor planning_orders.id → Set of the row ids its bars stand for
+    for (const e of events) {
+        const a = Number(e.planning_order_id);
+        if (!a) continue;
+        if (!byAnchor.has(a)) byAnchor.set(a, new Set([a]));
+        const n = noteOf(e);
+        if (Array.isArray(n.idList)) for (const i of n.idList) { if (Number(i) > 0) byAnchor.get(a).add(Number(i)); }
+    }
+    if (!byAnchor.size) return;
+    const all = [...new Set([...byAnchor.values()].flatMap(x => [...x]))];
+    const ph = all.map(() => '?').join(',');
+    const [[rows], [gone]] = await Promise.all([
+        pool.query(`SELECT id, order_quantity FROM planning_orders
+                     WHERE id IN (${ph}) AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
+                       AND planning_status != 'cancelled'`, all),
+        pool.query(`SELECT e.planning_order_id, MAX(e.planned_quantity) AS planned_quantity, SUM(d.prod_qty) AS made
+                      FROM planning_events e
+                      JOIN day_production_update_plan d ON d.event_id = e.id
+                     WHERE e.event_status = 'cancelled' AND e.planning_order_id IN (${ph})
+                     GROUP BY e.id, e.planning_order_id
+                    HAVING SUM(d.prod_qty) > 0`, all)
+    ]);
+    const qtyOf = new Map(rows.map(r => [Number(r.id), Number(r.order_quantity) || 0]));
+    const doneOf = new Map();
+    for (const g of gone) {
+        const k = Number(g.planning_order_id);
+        doneOf.set(k, (doneOf.get(k) || 0) + Math.max(Number(g.planned_quantity) || 0, Number(g.made) || 0));
+    }
+    for (const e of events) {
+        const ids = byAnchor.get(Number(e.planning_order_id));
+        if (!ids) continue;
+        let q = 0, d = 0;
+        for (const i of ids) { q += qtyOf.get(i) || 0; d += doneOf.get(i) || 0; }
+        e.group_qty  = q;
+        e.group_done = d;
+    }
+}
+
 app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
     try {
         const projectId = Number(req.params.id);
@@ -384,6 +432,13 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
                 if (u == null) u = 3;
                 return Number(u) === Number(effUnit);
             });
+        }
+
+        // the PO-row quantity behind every confirm bar (see attachGroupTotals);
+        // a What-if copy shows that day's plan as it was
+        if (!whatIf) {
+            try { await attachGroupTotals(events); }
+            catch (e) { console.warn(`[scheduler-data] group totals skipped: ${e.message}`); }
         }
 
         // ERP labels for the bars on this board (Item / Buyer colour modes)

@@ -1877,6 +1877,10 @@ function applyApiBoardData(s, data) {
         // as soon as this planner holds the edit lock (see syncBoardLock)
         autoCompleteAfterLock = true;
         autoSyncBarLengths(s);
+        // full quantity: the confirm colour groups still missing from orders
+        // that are on a line — into free slots of the bars' REAL spans
+        try { replaceProjectionsWithConfirms(s, { complete : true, onlyComplete : true }); }
+        catch (e) { console.warn('[full quantity] completion skipped:', e.message); }
         packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
@@ -1884,6 +1888,18 @@ function applyApiBoardData(s, data) {
         markBoardDirty();
         toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
     }
+    if (lastConfirmCompletion.groups) {
+        const c = lastConfirmCompletion;
+        markBoardDirty();
+        toast(`Full quantity: ${c.groups} confirm colour group(s) of ${c.orders.length} planned order(s) were not on the board — planned in the first free slot, their order's line first (${fmtQty(c.qty)} pcs${c.late ? `, ${c.late} late — flagged` : ''}): ${c.orders.slice(0, 4).join(', ')}${c.orders.length > 4 ? '…' : ''} — Save to keep it`, c.late ? 'warn' : 'ok');
+    }
+    try {
+        const short = shortConfirmGroups(s);
+        if (short.length) {
+            toast(`⚠ ${short.length} confirm order group(s) on this board hold less than their PO quantity — ${fmtQty(short.reduce((t, g) => t + g.missing, 0))} pcs an earlier auto-plan run left out (${short.slice(0, 3).map(g => `${g.order} ${g.color} −${fmtQty(g.missing)}`).join(' · ')}${short.length > 3 ? ' …' : ''}). The next Auto plan from available orders plans them in full again.`, 'warn');
+        }
+    }
+    catch { /* a hint only */ }
     syncOrdersListFromBoard();
     scheduleConsolidation();
     // Engine-settled pass (async): bars must sit strictly one after another.
@@ -3339,7 +3355,7 @@ function blankBoardForAutoPlan(s, keepStarted) {
         if (r.status === 'completed' || (keepStarted && Number(r.made) > 0)) { kept.push(ev); continue; }
         gone.push(ev);
     }
-    if (!gone.length) return { gone : 0, kept : kept.length, dupParked : 0 };
+    if (!gone.length) return { gone : 0, kept : kept.length, dupParked : 0, restored : 0, restoredQty : 0 };
     const have = new Set(unplanned.value.map(u => String(u.id)));
     // A bar parked on the Holding Row whose order is ALSO in the unplanned
     // pool (its confirm rows, or the same POs under another order code —
@@ -3361,6 +3377,13 @@ function blankBoardForAutoPlan(s, keepStarted) {
         || (Array.isArray(r.poList) && r.poList.some(p => poolPos.has(String(p)))));
     let dupParked = 0;
     const back = [];
+    // The PIECES of a split order share one order row (raw.id): they return
+    // to the pool TOGETHER, as one row with their summed quantity. (Only the
+    // first piece used to return — the quantity of the other pieces left the
+    // plan with every re-run: a 25,000-pc order cut in three came back as
+    // 8,334.)
+    const backById = new Map();
+    const union = (a, b) => { const out = [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])]; return out.length ? out : undefined; };
     for (const ev of gone) {
         const r = ev.data.raw;
         const sid = String(ev.id);
@@ -3373,9 +3396,18 @@ function blankBoardForAutoPlan(s, keepStarted) {
         if (isDupParked(r)) { dupParked++; continue; }
         // the order as an unplanned source (plan qty, dates, SMV, product)
         const id = r.id || `proj:${r.mbmOrder || r.po}`;
+        const prev = backById.get(String(id));
+        if (prev) {
+            prev.qty      += Number(r.qty) || 0;
+            prev.orderQty += Number(r.orderQty ?? r.qty) || 0;
+            prev.baseQty   = prev.baseQty != null && r.baseQty != null ? Number(prev.baseQty) + Number(r.baseQty) : undefined;
+            prev.idList    = union(prev.idList, r.idList);
+            prev.poList    = union(prev.poList, r.poList);
+            continue;
+        }
         if (have.has(String(id))) continue;
         have.add(String(id));
-        back.push({
+        const row = {
             id, mbmOrder : r.mbmOrder || '', po : r.po || '', poList : r.poList, buyer : r.buyer || '', style : r.style || '',
             color : r.color || '', productType : r.productType || '', orderType : r.orderType,
             qty : Number(r.qty) || 0, baseQty : r.baseQty, orderQty : Number(r.orderQty ?? r.qty) || 0, smv : Number(r.smv) || 0,
@@ -3384,12 +3416,39 @@ function blankBoardForAutoPlan(s, keepStarted) {
             // afterwards as "another unit's" and never re-planned)
             pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : currentUnitId.value ?? r.unitId ?? null,
             dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable, idList : r.idList
-        });
+        };
+        // what the row's POs hold now / what left the board finished (server)
+        if (Number(r.groupQty) > 0) Object.defineProperty(row, '_group', { value : { qty : Number(r.groupQty), done : Number(r.groupDone) || 0 }, enumerable : false });
+        backById.set(String(id), row);
+        back.push(row);
+    }
+    // FULL quantity: a confirm order is planned for what its PO rows hold —
+    // minus the pieces that stay on the board (completed / in production) and
+    // the strips that left it finished. Quantity an earlier run lost comes
+    // back here; a row that already carries more is left alone.
+    const keptQty = new Map();
+    for (const ev of kept) {
+        const r = ev.data.raw;
+        const id = String(r.id || '');
+        if (id) keptQty.set(id, (keptQty.get(id) || 0) + (Number(r.qty) || 0));
+    }
+    let restored = 0, restoredQty = 0;
+    for (const row of back) {
+        const g = row._group;
+        if (!g) continue;
+        const fullPlan = planQtyOf(g.qty);
+        const want = fullPlan - g.done - (keptQty.get(String(row.id)) || 0);
+        if (!(want > row.qty + Math.max(1, row.qty * 0.005))) continue;
+        restored++;
+        restoredQty += want - row.qty;
+        row.qty      = want;
+        row.baseQty  = fullPlan > 0 ? Math.round(want * g.qty / fullPlan) : want;
+        row.orderQty = row.baseQty;
     }
     s.eventStore.remove(gone);
     if (boardDbState) for (const ev of gone) delete boardDbState[String(ev.id)];
     unplanned.value = [...unplanned.value, ...back];
-    return { gone : gone.length, kept : kept.length, dupParked };
+    return { gone : gone.length, kept : kept.length, dupParked, restored, restoredQty };
 }
 async function runAutoPlanAvail() {
     const s = getInstance();
@@ -3413,6 +3472,7 @@ async function runAutoPlanAvail() {
     if (!ok) return;
     apBusy.value = true;
     apOpen.value = false;
+    apReview.value = null;
     pushUndo(s, 'auto plan from available orders');
     setBoardLoad(true, 'Blanking the board…', 0);
     let r = null, blanked = { gone : 0, kept : 0 };
@@ -3515,8 +3575,10 @@ async function runAutoPlanAvail() {
     }
     catch (e) { toast(`Auto plan failed: ${e.message} — Undo restores the board`, 'error'); }
     finally { setBoardLoad(false); apBusy.value = false; }
-    const left = unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filled ? ` · ${r.filled} planned after the lines' last bars (${r.filledLate || 0} late, flagged)` : ''}${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned — Save to keep, Undo to go back`, (r?.unplacedLate || r?.filledLate) ? 'warn' : 'ok');
+    // rows still waiting in the run's delivery window (a replaced projection is planned as its confirm POs)
+    const left = apReview.value?.summary ? apReview.value.summary.unplannedOrders
+        : unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed' && !u.replaced && u.status !== 'replaced').length;
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filled ? ` · ${r.filled} planned after the lines' last bars (${r.filledLate || 0} late, flagged)` : ''}${r?.unplacedLate ? ` · ${r.unplacedLate} cannot meet delivery → unplanned` : ''} · ${left} still unplanned in the delivery window — Save to keep, Undo to go back`, (r?.unplacedLate || r?.filledLate) ? 'warn' : 'ok');
 }
 // The run's review (planner spec 2026-11-12): line plan is the board itself;
 // here the shipment check per bar (PCD, earliest sewing start, latest sewing
@@ -3584,7 +3646,17 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
     }
     const plannedQty = rows.reduce((a, x) => a + x.qty, 0);
     const onTimeQty = rows.filter(x => !x.kept && x.status !== 'Late').reduce((a, x) => a + x.qty, 0);
-    const unplannedQty = pool.reduce((a, u) => a + (Number(u.qty ?? u.orderQty) || 0), 0);
+    // "unplanned" = the rows of THIS run's delivery window that got no bar. A
+    // projection replaced by its confirm POs is planned (as those POs), and a
+    // row outside the window was never part of the run — both were counted
+    // here before, so a complete run read "500,823 pcs unplanned".
+    const isReplaced = u => !!u.replaced || u.status === 'replaced';
+    const inWindow = u => !!u.ship && new Date(u.ship) >= from && (!to || new Date(u.ship) <= to);
+    const qtySum = list => list.reduce((a, u) => a + (Number(u.qty ?? u.orderQty) || 0), 0);
+    const waiting = pool.filter(u => !isReplaced(u));
+    const unplIn  = waiting.filter(inWindow);
+    const unplOut = waiting.filter(u => !inWindow(u));
+    const unplannedQty = qtySum(unplIn);
     const inf = (infeasible || []).map(u => {
         const o = u.order || {};
         const latest = apLatestFinishOf(o);
@@ -3594,7 +3666,9 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
             earliest : apEarliestStartOf(o), latest, projected : fin, daysLate, qtyAtRisk : u.qtyAtRisk ?? (Number(o.qty) || 0), line : u.bestLine || '', reason : u.reason || '' };
     });
     return { unit : currentBoard.value?.unitName || '', from, to, at : new Date(), rows, idle, infeasible : inf,
-        summary : { bars : rows.length, orders : new Set(rows.map(x => x.order + '|' + x.po)).size, plannedQty, onTimeQty, unplannedQty, unplannedOrders : pool.length,
+        summary : { bars : rows.length, orders : new Set(rows.map(x => x.order + '|' + x.po)).size, plannedQty, onTimeQty, unplannedQty, unplannedOrders : unplIn.length,
+            outsideQty : qtySum(unplOut), outsideOrders : unplOut.length, replacedProj : pool.filter(isReplaced).length,
+            restored : blanked?.restored || 0, restoredQty : blanked?.restoredQty || 0,
             late : rows.filter(x => x.status === 'Late').length, atRisk : rows.filter(x => x.status === 'At Risk').length, pastStart : rows.filter(x => x.pastStart).length,
             splitPieces : rows.filter(x => x.split).length, idleHours : idle.reduce((a, l) => a + l.hours, 0), removed : blanked?.gone || 0, kept : blanked?.kept || 0, dropped : dropped || 0 } };
 }
@@ -7817,7 +7891,35 @@ function rememberReplaced(raw, confirm) {
 
 // FastReact: when a confirm exists for the same MBM order / style, it takes
 // the projection's slot on the board and the projection is flagged replaced
-function replaceProjectionsWithConfirms(s) {
+// Confirm orders whose bars hold LESS than their PO rows (plan qty): the
+// pieces of a split order share one order row (raw.id) and carry what the rows
+// hold now (raw.groupQty) and what left the board finished (raw.groupDone).
+// A shortfall is quantity an earlier auto-plan run left out — the next Auto
+// plan restores it (blankBoardForAutoPlan); the board says so when it loads.
+function shortConfirmGroups(s) {
+    const by = new Map();
+    for (const ev of s?.eventStore?.records || []) {
+        const r = ev.data?.raw;
+        if (!r || r.stage || !(Number(r.groupQty) > 0) || r.orderType === 'projection' || String(r.eventCode || '').startsWith('ev-proj')) continue;
+        const id = String(r.id || '');
+        if (!id) continue;
+        const g = by.get(id) || { order : r.mbmOrder || '', color : r.color || '', rows : Number(r.groupQty), done : Number(r.groupDone) || 0, onBoard : 0, bars : 0 };
+        g.onBoard += Number(r.qty) || 0;
+        g.bars++;
+        by.set(id, g);
+    }
+    const out = [];
+    for (const g of by.values()) {
+        const missing = planQtyOf(g.rows) - g.done - g.onBoard;
+        if (missing > Math.max(10, planQtyOf(g.rows) * 0.01)) out.push({ ...g, missing });
+    }
+    return out.sort((a, b) => b.missing - a.missing);
+}
+
+// what the last load's completion pass put on the board (toast / tests)
+let lastConfirmCompletion = { groups : 0, qty : 0, late : 0, orders : [] };
+function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = false } = {}) {
+    lastConfirmCompletion = { groups : 0, qty : 0, late : 0, orders : [] };
     if (!AUTO_REPLACE_WITH_CONFIRMS) return 0;
     if (!s) return 0;
     // Match projection ↔ confirm by ORDER CODE — it is unique per order and
@@ -7961,7 +8063,7 @@ function replaceProjectionsWithConfirms(s) {
     // it is: each piece takes its share of the confirmed quantity (by its
     // own quantity), sized for that share — nothing migrates to one place.
     const piecesByKey = new Map();
-    for (const ev of s.eventStore.records) {
+    for (const ev of onlyComplete ? [] : s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage || raw.orderType !== 'projection') continue;
         const key = reconKey(raw);
@@ -8046,6 +8148,139 @@ function replaceProjectionsWithConfirms(s) {
             n++;
         });
         for (const g of grpList) dropUnplanned.add(String(g.id));
+    }
+
+    // RULE (planner, 2026-11-14): a confirmed order is planned for its FULL
+    // quantity. An order whose confirm bars are on a line (its projection was
+    // replaced) but which still has confirm colour groups in the unplanned
+    // pool gets those groups planned too — on a line the order already runs
+    // on, in the first free slot after the order's bars there (the line that
+    // finishes the group earliest). No saved bar moves; a group that ends
+    // after its delivery is flagged late. Left to the planner: a group whose
+    // delivery date has passed, and an order that still has a projection bar
+    // on the board (the swap above / the quantity-mismatch highlight).
+    if (complete && !whatIfActive.value) {
+        const dropped = new Set(dropEvents);
+        const projStill = new Set();
+        const occ = new Map();          // line → [{ start, end }]
+        const idx = buildLineIndex(s);
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data?.raw;
+            if (!raw || raw.stage || dropped.has(ev)) continue;
+            if (raw.orderType === 'projection') projStill.add(reconKey(raw));
+            const lid = lineIdOf(s, ev, idx);
+            if (!lid || isHoldId(lid)) continue;
+            if (!occ.has(lid)) occ.set(lid, []);
+            occ.get(lid).push({ start : ev.startDate, end : ev.endDate });
+        }
+        const freeSlot = (lid, desired, dur) => {
+            const bars = occ.get(lid) || [];
+            let start = clampIntoWorkWindow(new Date(desired));
+            for (let guard = 0; guard < 400; guard++) {
+                const end = endOfWork(start, dur);
+                const obst = bars.find(b => b.start < end && b.end > start);
+                if (!obst) return { start, end };
+                start = nextStartAfter(obst.end);
+            }
+            return { start, end : endOfWork(start, dur) };
+        };
+        const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+        const unit = currentUnitId.value;
+        for (const [key, groups] of confirmGroups) {
+            if (projStill.has(key)) continue;
+            const lineBars = new Map();   // line → the order's bars on it
+            for (const ev of confirmEvents.get(key) || []) {
+                const raw = ev.data?.raw;
+                if (!raw || dropped.has(ev) || raw.status === 'completed') continue;
+                const lid = lineIdOf(s, ev, idx);
+                if (!lid || isHoldId(lid) || !s.resourceStore.getById(lid)?.data?.lineRow) continue;
+                if (!lineBars.has(lid)) lineBars.set(lid, []);
+                lineBars.get(lid).push(ev);
+            }
+            if (!lineBars.size) continue;
+            for (const g of groups) {
+                if (dropUnplanned.has(String(g.id)) || g.status === 'completed') continue;
+                if (unit && g.unitId && g.unitId !== unit) continue;
+                const qty = Number(g.qty ?? g.orderQty) || 0;
+                if (!(qty > 0) || !(Number(g.smv) > 0)) continue;
+                const ship = g.ship ? new Date(g.ship) : null;
+                if (!ship || Number.isNaN(+ship) || ship < day0) continue;
+                const evId = `ev-${g.id}`;
+                if (s.eventStore.getById(evId)) continue;
+                // never before now, never before the group's PCD
+                const pcd = g.pcd ? new Date(g.pcd) : null;
+                const floor = new Date(Math.max(Date.now(), pcd && !Number.isNaN(+pcd) ? +pcd : 0));
+                const anyRef = [...lineBars.values()][0][0];
+                const tryLine = (lid, evs) => {
+                    const ref = evs.length ? evs.reduce((a, b) => (b.endDate > a.endDate ? b : a)) : anyRef;
+                    const raw2 = confirmRawFor(g, ref.data.raw);
+                    raw2.qty = qty;
+                    raw2.orderQty = Number(g.orderQty ?? g.baseQty ?? qty) || qty;
+                    raw2.baseQty = Number(g.baseQty) > 0 ? Number(g.baseQty) : undefined;
+                    raw2.unitId = unit ?? g.unitId ?? null;
+                    raw2.completedOrder = true;       // placed by the full-quantity rule
+                    const after = evs.length ? nextStartAfter(ref.endDate) : floor;
+                    const desired = after > floor ? after : floor;
+                    try { deriveLcForPlacement(s, raw2, lid, desired); } catch { /* no curve */ }
+                    applyLineFormulaDuration(s, raw2, lid);
+                    let dur = Number(raw2.dur) > 0 ? Number(raw2.dur) : 1;
+                    let slot = null, end = null;
+                    for (let k = 0; k < 5; k++) {
+                        slot = freeSlot(lid, desired, dur);
+                        end = slot.end;
+                        let fin = null;
+                        try { const sim = simulateStrip(s, raw2, lid, slot.start); if (sim?.finish && sim.finish > slot.start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
+                        if (!fin) break;
+                        if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(slot.start, fin)) + 0.05; continue; }
+                        end = fin;
+                        break;
+                    }
+                    if (!slot || !(end > slot.start)) return null;
+                    return { lid, raw : raw2, start : slot.start, end };
+                };
+                let best = null;
+                for (const [lid, evs] of lineBars) {
+                    const c = tryLine(lid, evs);
+                    if (c && (!best || c.end < best.end)) best = c;
+                }
+                // the order's own lines cannot make the delivery: any sewing
+                // line of the board that finishes the group earlier takes it
+                if (!best || best.end > ship) {
+                    for (const res of s.resourceStore.records) {
+                        if (!res.data?.lineRow || lineBars.has(res.id)) continue;
+                        const c = tryLine(res.id, []);
+                        if (c && (!best || c.end < best.end)) best = c;
+                    }
+                }
+                if (!best) continue;
+                const raw2 = best.raw;
+                raw2.start = best.start; raw2.end = best.end;
+                raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
+                raw2.latePlan = best.end > ship;
+                const [rec] = s.eventStore.add({
+                    id : evId,
+                    startDate : best.start, endDate : best.end,
+                    duration : elapsedDays(best.start, best.end), durationUnit : 'day',
+                    manuallyScheduled : true,
+                    name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
+                    percentDone : 0,
+                    raw : raw2
+                });
+                if (!rec) continue;
+                assignEventToLine(s, rec, best.lid);
+                invalidateBarsByLine();
+                pendingSwapIds.add(evId);
+                if (!occ.has(best.lid)) occ.set(best.lid, []);
+                occ.get(best.lid).push({ start : best.start, end : best.end });
+                if (!lineBars.has(best.lid)) lineBars.set(best.lid, []);
+                lineBars.get(best.lid).push(rec);
+                dropUnplanned.add(String(g.id));
+                lastConfirmCompletion.groups++;
+                lastConfirmCompletion.qty += qty;
+                if (raw2.latePlan) lastConfirmCompletion.late++;
+                if (!lastConfirmCompletion.orders.includes(raw2.mbmOrder)) lastConfirmCompletion.orders.push(raw2.mbmOrder);
+            }
+        }
     }
 
     // Unplanned projections that merely have a linked Confirm Order are NOT
@@ -12563,7 +12798,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges,
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
@@ -15753,7 +15988,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="pf-sum">
                         Planned <b>{{ fmtQty(apReview.summary.plannedQty) }}</b> pcs on <b>{{ apReview.summary.bars }}</b> bars ({{ apReview.summary.orders }} PO / colour) ·
                         on time <b>{{ fmtQty(apReview.summary.onTimeQty) }}</b> · late bars <b>{{ apReview.summary.late }}</b> · at risk (≤ 1 day slack) <b>{{ apReview.summary.atRisk }}</b>{{ apReview.summary.kept ? ` · kept in-production bars ${apReview.summary.kept} (not placed by the run)` : '' }} ·
-                        unplanned <b>{{ fmtQty(apReview.summary.unplannedQty) }}</b> pcs / {{ apReview.summary.unplannedOrders }} order(s) ·
+                        unplanned in the delivery window <b>{{ fmtQty(apReview.summary.unplannedQty) }}</b> pcs / {{ apReview.summary.unplannedOrders }} order(s){{ apReview.summary.outsideOrders ? ` · outside the window (not part of this run) ${fmtQty(apReview.summary.outsideQty)} pcs / ${apReview.summary.outsideOrders}` : '' }}{{ apReview.summary.replacedProj ? ` · ${apReview.summary.replacedProj} projection(s) replaced by their confirm POs` : '' }} ·
+                        <template v-if="apReview.summary.restored"><b>{{ apReview.summary.restored }}</b> order(s) back to their full PO quantity (+{{ fmtQty(apReview.summary.restoredQty) }} pcs an earlier run had left out) · </template>
                         split pieces <b>{{ apReview.summary.splitPieces }}</b> · bars starting before today (no output recorded) <b>{{ apReview.summary.pastStart }}</b> ·
                         idle <b>{{ fmtQty(apReview.summary.idleHours) }}</b> h · board: {{ apReview.summary.removed }} bar(s) removed, {{ apReview.summary.kept }} kept
                         · <i>nothing is saved yet — review the board, then Save (Undo reverses the run)</i>

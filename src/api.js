@@ -353,6 +353,11 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         sopDur       : Number(noteGroup.sop?.dur) > 0 ? Number(noteGroup.sop.dur) : undefined,
         sop          : noteGroup.sop && typeof noteGroup.sop === 'object' ? noteGroup.sop : undefined,
         dbId     : orderId,
+        // what the bar's PO rows hold NOW (ERP qty; every piece of a split
+        // order carries the same figure) and the plan qty of its pieces that
+        // left the board finished — the re-plan restores the difference
+        groupQty  : orderId && Number(e.group_qty) > 0 ? Number(e.group_qty) : undefined,
+        groupDone : orderId ? (Number(e.group_done) || 0) : undefined,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
         // Consolidated bars restore their full PO group from the saved notes
