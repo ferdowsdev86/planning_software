@@ -2018,6 +2018,36 @@ export function invalidateBarHistory(ids) {
     if (ids) barHistCache.delete(ids); else barHistCache.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Order-wide lateness: the bars of one order (same order code — its split
+// pieces, its colours) across the lines. When any of them ends after the
+// order's delivery, every other bar of the order gets a blue dot. The map
+// is rebuilt at most every 300 ms (a repaint renders hundreds of bars).
+// ---------------------------------------------------------------------------
+let lateOrderMap = { at : 0, count : -1, map : new Map() };
+const lateOrderKey = r => String(r?.split?.of || r?.mbmOrder || mbmOrderNo(r?.po, r?.mbmOrder) || r?.po || '');
+function lateSiblingOf(scheduler, e, r) {
+    const st = scheduler?.eventStore;
+    if (!st || !r || r.stage) return null;
+    const key = lateOrderKey(r);
+    if (!key) return null;
+    const now = Date.now();
+    if (now - lateOrderMap.at > 300 || lateOrderMap.count !== st.count) {
+        const map = new Map();
+        for (const ev of st.records) {
+            const x = ev.data?.raw;
+            if (!x || x.stage || x.status === 'completed' || !x.ship) continue;
+            if (!isLateVsDelivery(ev.endDate || x.end, x.ship)) continue;
+            const k = lateOrderKey(x);
+            if (!k || map.has(k)) continue;
+            map.set(k, { id : String(ev.id), label : x.po || x.mbmOrder || ev.name, end : ev.endDate, ship : x.ship });
+        }
+        lateOrderMap = { at : now, count : st.count, map };
+    }
+    const hit = lateOrderMap.map.get(key);
+    return hit && hit.id !== String(e.id) ? hit : null;
+}
+
 // Bar tooltip tabs (Info / Purchase Orders / Learning Curve / SOP / Raw
 // Material): one delegated click handler for every tooltip instance
 let tip4TabsInstalled = false;
@@ -2581,6 +2611,11 @@ export const schedulerProConfig = {
 
         const pastDelivery = r.status !== 'completed'
             && isLateVsDelivery(e.endDate || r.end, r.ship);
+        // An order planned on several lines: when ONE of its bars is late, every
+        // other bar of the order wears a blue dot (bottom-right) — the planner
+        // sees from any piece that the order as a whole will not ship on time
+        const lateSib = pastDelivery ? null : lateSiblingOf(this, e, r);
+        if (lateSib) renderData.cls.add('mb-order-late');
         const colorKey =
             r.status === 'completed' ? 'grey'
           : pastDelivery ? 'late'
@@ -2698,8 +2733,11 @@ export const schedulerProConfig = {
                 lateHtml = `<div class="mb-late-part" style="left:${(frac * 100).toFixed(2)}%" title="after the desired sewing finish ${StringHelper.encodeHtml(fmtDate(shipEnd))} (delivery ${StringHelper.encodeHtml(fmtDate(r.ship))} − ${lead} days, ${wash ? 'wash' : 'non-wash'}): ${StringHelper.encodeHtml(fmtQty(lateQty))} pcs">${wide && lateQty ? `<span class="mb-late-qty">late ${StringHelper.encodeHtml(fmtQty(lateQty))}</span>` : ''}</div>`;
             }
         }
+        const sibHtml = lateSib
+            ? `<span class="mb-order-late-dot" title="${StringHelper.encodeHtml(`Another bar of this order is late: ${lateSib.label} ends ${fmtDate(lateSib.end)} — delivery ${fmtDate(lateSib.ship)}`)}"></span>`
+            : '';
         return `
-            ${lateHtml}${lcHtml}${linkHtml}${consolHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
+            ${lateHtml}${lcHtml}${linkHtml}${consolHtml}${sibHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
                 <div class="mb-bar-l1">${inner}</div>
             </div>`;
     },
