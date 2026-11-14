@@ -10,6 +10,7 @@ import compression from 'compression';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
+import { reconcileSewingOutput, sewKeyOfRow, sewingOutputSql } from './sewingOutput.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
 import { simulateAllocation, pickCurve } from './planAllocation.mjs';
 import { buildCalendar, simulateBar, prevRunKey } from './prodDayBars.mjs';
@@ -192,6 +193,32 @@ app.get(`${BASE}/erp-order-info`, async (req, res) => {
     res.json({ success : true, erpByOrder, buyerShort });
 });
 
+// Actual sewing output of planning rows (sewingOutput.mjs): the ERP's
+// daily_productions (sewing, status out) aggregated per PO identity, then
+// reconciled with the rows — Map(row id → { sewn, remaining, issue }).
+// rows: [{ id, erp_po_id, order_quantity, prod_unit, unit_id, shipment_date }]
+async function sewingOutputForRows(rows, q = pool) {
+    const chunks = (list, n = 1500) => { const out = []; for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n)); return out; };
+    const keys  = rows.map(sewKeyOfRow);
+    const ocIds = [...new Set(keys.filter(k => k.ocId).map(k => k.ocId))];
+    const osColor = new Map();
+    for (const part of chunks(ocIds)) {
+        const [oc] = await q.query(`SELECT id, po_id, clr_id FROM \`${OS_DB}\`.os_order_color WHERE id IN (${part.map(() => '?').join(',')})`, part);
+        for (const r of oc) osColor.set(Number(r.id), r);
+    }
+    const poIds = [...new Set([...keys.map(k => k.poId), ...[...osColor.values()].map(o => Number(o.po_id))].filter(v => Number(v) > 0))];
+    const poMaster = new Map(), output = [];
+    for (const part of chunks(poIds)) {
+        const [[pos], [outRows]] = await Promise.all([
+            q.query(`SELECT po_id, clr_id, mr_order_entry_order_id AS order_id FROM \`${ERP_DB}\`.mr_purchase_order WHERE po_id IN (${part.map(() => '?').join(',')})`, part),
+            q.query(sewingOutputSql(ERP_DB, part.length), part)
+        ]);
+        for (const r of pos) poMaster.set(Number(r.po_id), r);
+        output.push(...outRows);
+    }
+    return reconcileSewingOutput(rows, poMaster, osColor, output);
+}
+
 // A confirm bar stands for PO rows (its anchor row, or the rows of its colour
 // group in notes.idList); several bars — the pieces of a split order — share
 // one anchor. Every bar gets the quantity those rows hold NOW (group_qty, ERP
@@ -214,7 +241,7 @@ async function attachGroupTotals(events) {
     const all = [...new Set([...byAnchor.values()].flatMap(x => [...x]))];
     const ph = all.map(() => '?').join(',');
     const [[rows], [gone]] = await Promise.all([
-        pool.query(`SELECT id, order_quantity FROM planning_orders
+        pool.query(`SELECT id, order_quantity, erp_po_id, po_number, prod_unit, unit_id, shipment_date FROM planning_orders
                      WHERE id IN (${ph}) AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
                        AND planning_status != 'cancelled'`, all),
         pool.query(`SELECT e.planning_order_id, MAX(e.planned_quantity) AS planned_quantity, SUM(d.prod_qty) AS made
@@ -230,13 +257,27 @@ async function attachGroupTotals(events) {
         const k = Number(g.planning_order_id);
         doneOf.set(k, (doneOf.get(k) || 0) + Math.max(Number(g.planned_quantity) || 0, Number(g.made) || 0));
     }
+    // actual sewing output of those rows (ERP daily_productions) — what is
+    // still to sew is the rows' quantity minus it; a PO whose output cannot
+    // be reconciled is named (group_issue) and takes no new allocation
+    let sew = new Map();
+    try { sew = await sewingOutputForRows(rows); }
+    catch (e) { console.warn(`[scheduler-data] sewing output skipped: ${e.message}`); }
+    const poNoOf = new Map(rows.map(r => [Number(r.id), r.po_number]));
     for (const e of events) {
         const ids = byAnchor.get(Number(e.planning_order_id));
         if (!ids) continue;
-        let q = 0, d = 0;
-        for (const i of ids) { q += qtyOf.get(i) || 0; d += doneOf.get(i) || 0; }
-        e.group_qty  = q;
-        e.group_done = d;
+        let q = 0, d = 0, sewn = 0;
+        const issues = [];
+        for (const i of ids) {
+            q += qtyOf.get(i) || 0; d += doneOf.get(i) || 0;
+            const so = sew.get(i);
+            if (so) { sewn += so.sewn; if (so.issue) issues.push(`PO ${poNoOf.get(i) || i}: ${so.issue}`); }
+        }
+        e.group_qty   = q;
+        e.group_done  = d;
+        e.group_sewn  = sewn;
+        e.group_issue = issues.length ? issues.slice(0, 3).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '') : null;
     }
 }
 
@@ -529,7 +570,9 @@ function unplannedQuery(unitId, limit, offset, loserCodes = []) {
                     'qty',       CAST(order_quantity AS DECIMAL(14,2)),
                     'remaining', CAST(remaining_quantity AS DECIMAL(14,2)),
                     'id',        id,
-                    'ship',      shipment_date
+                    'ship',      shipment_date,
+                    'erp',       erp_po_id,
+                    'pu',        COALESCE(prod_unit, unit_id)
                 ) ORDER BY shipment_date)                          AS po_details
             FROM planning_orders
             WHERE planning_status = 'unplanned'
@@ -557,7 +600,9 @@ function unplannedQuery(unitId, limit, offset, loserCodes = []) {
                     'qty',       CAST(order_quantity AS DECIMAL(14,2)),
                     'remaining', CAST(remaining_quantity AS DECIMAL(14,2)),
                     'id',        id,
-                    'ship',      shipment_date
+                    'ship',      shipment_date,
+                    'erp',       erp_po_id,
+                    'pu',        COALESCE(prod_unit, unit_id)
                 ))                   AS po_details
             FROM planning_orders
             WHERE planning_status = 'unplanned'
@@ -617,6 +662,34 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
             const idList = [...new Set(idRaw.map(Number))];
             return { ...r, po_list : poList, id_list : idList, po_count : poList.length, po_details : detRaw, unit_name : unitLabel(r.unit_id) };
         });
+        // Remaining sewing quantity: PO qty − actual sewing output (ERP
+        // daily_productions), per PO row, deducted once per PO identity. The
+        // pool row's remaining_quantity is what is still to sew; a row whose
+        // output cannot be reconciled carries sew_issue (no new allocation).
+        try {
+            const flat = [];
+            for (const g of enriched) for (const d of g.po_details) {
+                if (d && d.id != null) flat.push({ id : Number(d.id), erp_po_id : d.erp, order_quantity : Number(d.qty) || 0, prod_unit : d.pu, shipment_date : d.ship });
+            }
+            const sew = await sewingOutputForRows(flat);
+            for (const g of enriched) {
+                let sewn = 0, rem = 0, any = false;
+                const issues = [];
+                for (const d of g.po_details) {
+                    const so = d && d.id != null ? sew.get(Number(d.id)) : null;
+                    if (!so) { rem += Number(d?.remaining ?? d?.qty) || 0; continue; }
+                    any = true;
+                    d.sewn = so.sewn; d.remaining = so.remaining;
+                    sewn += so.sewn; rem += so.remaining;
+                    if (so.issue) issues.push(`PO ${d.po || d.id}: ${so.issue}`);
+                }
+                if (!any) continue;
+                g.sewn_quantity      = sewn;
+                g.remaining_quantity = rem;
+                g.sew_issue          = issues.length ? issues.slice(0, 3).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '') : null;
+            }
+        }
+        catch (e) { console.warn(`[unplanned-orders] sewing output skipped: ${e.message}`); }
         const erpByOrder = await erpOrderInfo(enriched.map(r => r.order_code));
         res.json({ success : true, rows : enriched, total, limit, offset, unitId, erpByOrder });
     }
@@ -783,6 +856,17 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     const projectId = Number(req.params.id);
     const { events = {}, requestId = null, allowConfirmPlanning = false } = req.body || {};
     const visibleIds = Array.isArray(req.body?.visibleIds) ? new Set(req.body.visibleIds.map(String)) : null;
+    // 10-day plan lock (Auto Plan): the bars the run had to preserve. This
+    // save never rewrites or cancels them — whatever the client sends for
+    // them is dropped, so their line, dates and quantity stay as saved.
+    const planLock = new Set((Array.isArray(req.body?.planLock) ? req.body.planLock : []).map(String));
+    let lockedSkipped = 0;
+    if (planLock.size) {
+        const keep = e => { if (planLock.has(String(e.id ?? ''))) { lockedSkipped++; return false; } return true; };
+        if (Array.isArray(events.updated)) events.updated = events.updated.filter(keep);
+        if (Array.isArray(events.removed)) events.removed = events.removed.filter(keep);
+        if (lockedSkipped) console.warn(`[scheduler-sync] 10-day plan lock: ${lockedSkipped} change(s) to locked bar(s) ignored`);
+    }
 
     // Initial projection-planning stage: NEW board blocks for Confirm Orders
     // (rows carrying a planning_orders orderId) are rejected at backend level.
@@ -913,7 +997,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
         if (adjusted.length) {
             console.warn(`[scheduler-sync] ${adjusted.length} event(s) shifted forward to avoid overlap with saved bars`);
         }
-        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped, adjusted });
+        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped, adjusted, lockedSkipped });
     }
     catch (e) {
         try {

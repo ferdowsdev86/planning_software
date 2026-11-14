@@ -330,6 +330,32 @@ export function isLateVsDelivery(end, ship) {
     s.setHours(0, 0, 0, 0);
     return e > s;
 }
+// Sewing window of an order (Auto Plan spec 2026-11-14, calendar days):
+//   earliest sewing start = PCD + 8          — a hard floor, never earlier
+//   target sewing end     = delivery − 7     — later is a LATE plan (yellow)
+export const SEW_START_AFTER_PCD_DAYS = 8;
+export const SEW_END_BEFORE_DELIVERY_DAYS = 7;
+const calDay = (d, add) => {
+    if (!d) return null;
+    const x = new Date(d);
+    if (Number.isNaN(x.getTime())) return null;
+    x.setHours(0, 0, 0, 0);
+    x.setDate(x.getDate() + add);
+    return x;
+};
+/** first calendar day sewing may start (00:00) */
+export const earliestSewStart = pcd => calDay(pcd, SEW_START_AFTER_PCD_DAYS);
+/** last calendar day sewing should end (00:00 of that day) */
+export const sewTargetDay = ship => calDay(ship, -SEW_END_BEFORE_DELIVERY_DAYS);
+/** the planned sewing end is after the target sewing end (calendar day) */
+export function isLateVsTarget(end, ship) {
+    const t = sewTargetDay(ship);
+    if (!end || !t) return false;
+    const e = new Date(end);
+    if (Number.isNaN(e.getTime())) return false;
+    e.setHours(0, 0, 0, 0);
+    return e > t;
+}
 export const fmtDate = d => {
     if (!d) return '';
     const x = d instanceof Date ? d : new Date(d);

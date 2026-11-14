@@ -8,7 +8,7 @@ import {
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
     mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
-    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery,
+    formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery, isLateVsTarget, earliestSewStart, sewTargetDay,
     dayCapacityFactor, hmToHours, calendarState,
     workDayUnits, planQtyOf, workingMinutesBetween,
     buyerDefaultEff, deliveryMonthColor
@@ -609,8 +609,10 @@ function isPinnedBar(ev) {
 // Bars NOTHING may displace: explicitly locked or completed. Pinned bars are
 // protected from AUTO-repacking only — a deliberate user drop or an insert
 // pushes them later like any other follower ("porer bar pichabe").
+// (raw.apLocked: a bar an unsaved Auto Plan run must preserve — the 10-day
+// plan lock; the flag lives only until that run is saved or the board reloads)
 function lockedBar(ev) {
-    return ev.draggable === false || ev.data?.raw?.status === 'completed';
+    return ev.draggable === false || ev.data?.raw?.status === 'completed' || !!ev.data?.raw?.apLocked;
 }
 
 // Suspend Bryntum refresh / STM while many strips move at once (drag-drop,
@@ -985,6 +987,13 @@ export function pullFlushFollowers(scheduler, lineId, shrunk, oldEnd) {
         if (Math.abs(ev.startDate.getTime() - nextStartAfter(prevOldEnd).getTime()) > MANUAL_GAP_MS) break;
         let ns = nextStartAfter(prevNewEnd);
         if (isLineOffDay(ns, lineId)) ns = startOfWorkDay(nextLineWorkingDay(ns, lineId));
+        // HARD floor: no bar is pulled forward to before its earliest sewing
+        // start (PCD + 8 calendar days) — not even to close a gap
+        const sewFloor = earliestSewStart(raw.pcd);
+        if (sewFloor && ns < sewFloor) {
+            ns = clampIntoWorkWindow(new Date(sewFloor));
+            if (isLineOffDay(ns, lineId)) ns = startOfWorkDay(nextLineWorkingDay(ns, lineId));
+        }
         if (ns.getTime() >= ev.startDate.getTime()) break;   // nothing to close
         const myOldEnd = new Date(ev.endDate);
         raw.start = ns;
@@ -3082,6 +3091,16 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>`)}
           ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
+          ${(() => {
+              // sewing window: earliest start = PCD + 8, target end = delivery − 7
+              // (calendar days); a split order is late by its LAST piece
+              if (!deliv || r.status === 'completed') return '';
+              const proj = r.projSewEnd ? new Date(r.projSewEnd) : (e.endDate || r.end);
+              const late = isLateVsTarget(proj, deliv);
+              return R('Sew start ≥', enc(ddMon(earliestSewStart(pcd))))
+                  + R('Target sew end', enc(ddMon(sewTargetDay(deliv))))
+                  + R('Projected sew end', `${enc(ddMon(proj))}${late ? ' <b style="color:#b45309" title="after the target sewing end (delivery − 7 days)">· late plan</b>' : ''}`);
+          })()}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
           ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
           ${R('Stage', enc(stage))}

@@ -7,7 +7,7 @@ import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
     addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
-    workingMinutesBetween, planQtyOf, mergeErpInfo
+    workingMinutesBetween, planQtyOf, mergeErpInfo, isLateVsTarget
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds, isHoldId, floorLabelOf } from './AppConfig.js';
 
@@ -329,7 +329,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         progress : Number(e.percent_done) || 0,
         status,
         // Sewing that runs past the shipment date is a late plan (yellow strip)
-        latePlan : !!(ship && end && end > ship),
+        latePlan : isLateVsTarget(end, ship),
         userPinned : !!parseEventNotes(e.notes).userPinned,
         // Shadow copy of the DB pin: load-time processing (auto-plan,
         // reconciliation, repack) must never unpin a SAVED bar, whatever
@@ -358,6 +358,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // left the board finished — the re-plan restores the difference
         groupQty  : orderId && Number(e.group_qty) > 0 ? Number(e.group_qty) : undefined,
         groupDone : orderId ? (Number(e.group_done) || 0) : undefined,
+        // actual sewing output of those PO rows (ERP daily_productions) and
+        // the POs whose output could not be reconciled (no new allocation)
+        groupSewn  : orderId ? (Number(e.group_sewn) || 0) : undefined,
+        groupIssue : orderId && e.group_issue ? String(e.group_issue) : undefined,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
         // Consolidated bars restore their full PO group from the saved notes
@@ -834,6 +838,8 @@ function mapUnplannedRow(o) {
         qty      : planQtyOf(o.remaining_quantity ?? o.order_quantity),
         baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
         orderQty : Number(o.order_quantity ?? o.remaining_quantity),
+        sewn     : Number(o.sewn_quantity) || 0,
+        sewIssue : o.sew_issue || null,
         smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
         smvMissing : !(Number(o.smv) > 0),
         pcd      : asDate(o.pcd) || (ship ? addCalDays(ship, -30) : null),
@@ -1274,9 +1280,12 @@ export async function loadFromApi(unitId = null) {
             poCount  : Number(o.po_count) || 1,
             poDetails : Array.isArray(o.po_details) ? o.po_details : [],
             productType : productTypeFor(o.po_number, o.product_category),
+            // remaining sewing quantity = PO qty − actual sewing output (server)
             qty      : planQtyOf(o.remaining_quantity ?? o.order_quantity),
             baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
             orderQty : Number(o.order_quantity ?? o.remaining_quantity),
+            sewn     : Number(o.sewn_quantity) || 0,
+            sewIssue : o.sew_issue || null,
             smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
             smvMissing : !(Number(o.smv) > 0),
             pcd      : asDate(o.pcd) || (ship ? addCalDays(ship, -30) : null),
@@ -1400,7 +1409,7 @@ export async function pingApi(timeoutMs = 10000) {
     catch { return await get('/health', timeoutMs); }
 }
 
-export async function syncToApi(scheduler, { eventIds = null, unitId = null } = {}) {
+export async function syncToApi(scheduler, { eventIds = null, unitId = null, planLock = null } = {}) {
     const updated = [];
     const added   = [];
     // a What-if copy on screen: the WHOLE board goes into the copy (its own
@@ -1512,6 +1521,10 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null } = 
                 .filter(e => e.data?.raw && !e.data.raw.stage)
                 .map(e => e.data.dbId ?? (String(e.id).startsWith('db-') ? Number(String(e.id).slice(3)) : null))
                 .filter(v => v != null),
+            // 10-day plan lock of an Auto Plan run: these bars are never
+            // rewritten or cancelled by this save (the server drops any
+            // change to them)
+            planLock  : Array.isArray(planLock) && planLock.length ? planLock : undefined,
             events    : { updated, added, removed }
         })
     });
