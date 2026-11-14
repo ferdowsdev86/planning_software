@@ -12453,7 +12453,11 @@ function multiSelectMembers(s, rec) {
 }
 
 const WI_VIEW_MSG = '🗄 What-if copy — production updates and strip notes are not kept in a copy; open the normal plan for those. Bars can be moved here and Save keeps them in the copy.';
-function pickUp(rec, domEvent, { grab = false } = {}) {
+// group : the bars that ride WITH the picked bar, given by the caller — the
+//         piece just cut off a strip rides alone ([]), or with the rest of its
+//         consolidated run to the right of the cut. Not given: the Ctrl+click
+//         selection, else (Consolidate orders ON) the bar's whole order group.
+function pickUp(rec, domEvent, { grab = false, group = null } = {}) {
     if (carried.value) return;
     if (planLockedByOther.value) { toast(planLockFrozenMsg(), 'warn'); return; }
     const raw = rec?.data?.raw;
@@ -12476,9 +12480,15 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     const els = ensureCarryDom();
     // A Ctrl+click selection travels with the bar; else (Consolidate orders
     // ON) the bar's order group. Picking an unselected bar drops the selection.
-    if (multiSel.size && !multiSel.has(String(rec.id))) clearMultiSelect();
-    carryGroup = multiSelectMembers(s, rec);
-    if (!carryGroup.length && consolidate.value) carryGroup = groupMembersOf(s, rec);
+    if (group) {
+        if (multiSel.size) clearMultiSelect();
+        carryGroup = group.filter(m => m && m !== rec && m.data?.raw && !m.data.raw.stage && m.data.raw.status !== 'completed' && m.draggable !== false);
+    }
+    else {
+        if (multiSel.size && !multiSel.has(String(rec.id))) clearMultiSelect();
+        carryGroup = multiSelectMembers(s, rec);
+        if (!carryGroup.length && consolidate.value) carryGroup = groupMembersOf(s, rec);
+    }
     for (const m of carryGroup) {
         const r = m.data.raw;
         r._carryGroup = true;
@@ -12490,6 +12500,9 @@ function pickUp(rec, domEvent, { grab = false } = {}) {
     carried.value = rec;
     pickStamp     = performance.now();
     uiHooks.boardUserActive = true;
+    // a cut-off part leaves its consolidated run: what stays is drawn at its
+    // own length right away (not still stretched over the part that left)
+    if (group && consolidate.value) rebuildConsolidation(s);
     // no bar tooltip under the pointer while a bar is carried (it would sit
     // between the pointer and the line at release)
     setBarTooltipEnabled(s, false);
@@ -12555,6 +12568,8 @@ function cancelCarry() {
     stopEdgeScroll();
     detachCarryScroll();
     detachCarryListeners();
+    // a part carried out of its consolidated run is back / placed: regroup
+    scheduleConsolidation();
 }
 
 // Fallback row resolution from the pointer Y position - guarantees the bar
@@ -13244,14 +13259,16 @@ onMounted(() => {
     // A piece just cut off a bar rides on the pointer at once (line or
     // Holding Row alike). Whatever was carried before (a bar clicked earlier,
     // a stale carry) is put back first — otherwise the new piece stays put
-    uiHooks.onCarryNew = rec => {
+    // ONLY the cut-off part rides — never the whole bar / order group it was
+    // cut from (followers = the rest of a consolidated run right of the cut)
+    uiHooks.onCarryNew = (rec, followers = []) => {
         if (carried.value) cancelCarry();
         ignorePickUntil = 0;
         // next tick: the menu has closed and a quantity prompt's blur/focus
         // pair has been dispatched — nothing left to knock the carry off
         setTimeout(() => {
             if (carried.value) cancelCarry();
-            pickUp(rec, null);
+            pickUp(rec, null, { group : followers });
             if (!carried.value) toast(`${rec?.data?.raw?.po || rec?.name || 'Piece'} is on the board — press and drag it to move`, 'ok');
         }, 50);
     };

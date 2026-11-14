@@ -1527,6 +1527,16 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
         sop2 = { sopDur : t2.sopDur, sop : t2.sop };
     }
 
+    // Part 1 of a quantity split on a line ends where its OWN schedule has made
+    // its quantity (learning ramp, changed hours, part days) — the very moment
+    // the board's settle would re-fit it to. Set here, at once: the cut shows
+    // where it was made (the cursor) and nothing shifts a moment later.
+    if (qty2 !== null && !onHold && !sop1) {
+        const t1 = { ...orig, qty : q1, start : new Date(rec.startDate), dur : null };
+        fitDurToProduction(scheduler, t1, line.id, lineCalcParams(scheduler, orig, line.id).mins);
+        if (Number(t1.dur) > 0) d1 = t1.dur;
+    }
+
     const start1 = new Date(rec.startDate);
     const end1   = endOfWork(start1, d1);
     const start2 = nextStartAfter(end1);
@@ -1780,6 +1790,43 @@ export function lineCursorSplit(scheduler, rec, raw, date) {
     // no usable schedule: the cursor's share of the bar's span
     if (!days.length) days = [{ q : (Number(raw.qty) || 0) - already, ws : t0, we : lim }];
     return cursorSplit({ qty : raw.qty, already, days, t : date });
+}
+
+// Where "Split strip at …" cuts, and what rides away on the pointer.
+//   one bar            → the bar is cut at the cursor; the new piece rides alone
+//   Consolidate orders → the bar under the menu is a run of same-order bars
+//                        drawn as ONE: the cut is made in the member the cursor
+//                        stands in, and everything of the run to the RIGHT of
+//                        the cut rides with the new piece — the part left of
+//                        the cursor stays where it is. A cursor on the joint
+//                        of two members needs no split: the run is simply
+//                        parted there.
+// → { rec, cut : { q1, q2 } | null, carry, followers, left, right } or null
+//   rec / cut   the bar to split and its two quantities (cut null = joint)
+//   carry       joint only: the bar that rides on the pointer
+//   followers   the bars that ride with it
+//   left/right  quantity staying / riding (the menu label)
+export function cursorCut(scheduler, rec, raw, date) {
+    const cg = uiHooks.consol?.get(String(rec.id));
+    const run = cg?.head && Array.isArray(cg.members)
+        ? cg.members.map(m => scheduler.eventStore.getById(m.id)).filter(m => m?.data?.raw).sort((a, b) => a.startDate - b.startDate)
+        : [];
+    if (run.length < 2) {
+        const cut = lineCursorSplit(scheduler, rec, raw, date);
+        return cut ? { rec, cut, carry : null, followers : [], left : cut.q1, right : cut.q2 } : null;
+    }
+    const t = new Date(date).getTime();
+    const sum = list => list.reduce((a, m) => a + (Number(m.data.raw.qty) || 0), 0);
+    let i = -1;
+    for (let k = 0; k < run.length; k++) if (run[k].startDate.getTime() <= t) i = k;
+    if (i < 0) return null;                                   // before the run
+    const m = run[i];
+    const cut = lineCursorSplit(scheduler, m, m.data.raw, date);
+    if (cut) return { rec : m, cut, carry : null, followers : run.slice(i + 1), left : sum(run.slice(0, i)) + cut.q1, right : cut.q2 + sum(run.slice(i + 1)) };
+    // on a joint: before this member's first piece, or after its last one
+    const j = t < (m.startDate.getTime() + m.endDate.getTime()) / 2 ? i : i + 1;
+    if (j <= 0 || j >= run.length) return null;               // the run's own edge — nothing on one side
+    return { rec : null, cut : null, carry : run[j], followers : run.slice(j + 1), left : sum(run.slice(0, j)), right : sum(run.slice(j)) };
 }
 
 // ---------------------------------------------------------------------------
@@ -2190,20 +2237,37 @@ export const schedulerProConfig = {
                     const raw = rec?.data?.raw || rec?.raw || menuSplitCtx?.raw;
                     if (!rec || !raw) return;
                     const date = menuSplitCtx?.rec === rec ? menuSplitCtx.date : rec.startDate;
-                    uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
-                    // Holding Row: split by the cursor's share of the bar's qty.
-                    // Line: split at the cursor's MOMENT — part 1 keeps what the
-                    // schedule has made by then (not the whole of that day)
-                    const onHold = isHoldId(lineIdOf(uiHooks.instance, rec));
-                    const cut = onHold ? null : lineCursorSplit(uiHooks.instance, rec, raw, date);
-                    if (!onHold && !cut) { uiHooks.onToast?.('Nothing to split at that point — right-click inside the bar', 'warn'); return; }
-                    const res = splitBar(uiHooks.instance, rec, { qty2 : onHold ? raw.qty - holdCursorQty(rec, raw, date) : cut.q2 });
+                    const inst = uiHooks.instance;
+                    // Holding Row: split by the cursor's share of the bar's qty
+                    if (isHoldId(lineIdOf(inst, rec))) {
+                        uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
+                        const res = splitBar(inst, rec, { qty2 : raw.qty - holdCursorQty(rec, raw, date) });
+                        uiHooks.onToast?.(
+                            res.ok
+                                ? `${raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
+                                : res.msg,
+                            res.ok ? 'ok' : 'error');
+                        if (res.ok && res.rec2) uiHooks.onCarryNew?.(res.rec2);
+                        return;
+                    }
+                    // Line: the cut is the cursor's MOMENT — the part left of
+                    // it stays, ONLY the part right of it rides on the pointer
+                    const c = cursorCut(inst, rec, raw, date);
+                    if (!c) { uiHooks.onToast?.('Nothing to split at that point — right-click inside the bar', 'warn'); return; }
+                    if (!c.cut) {
+                        // on the joint of two bars of a consolidated order: no split, the run parts there
+                        uiHooks.onToast?.(`${raw.po || rec.name} parted into ${fmtQty(c.left)} + ${fmtQty(c.right)} pcs — click where the right part should go`, 'ok');
+                        uiHooks.onCarryNew?.(c.carry, c.followers);
+                        return;
+                    }
+                    uiHooks.onBeforeEdit?.(`split ${c.rec.data.raw.po || c.rec.name}`);
+                    const res = splitBar(inst, c.rec, { qty2 : c.cut.q2 });
                     uiHooks.onToast?.(
                         res.ok
-                            ? `${raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
+                            ? `${raw.po} split into ${fmtQty(c.left)} + ${fmtQty(c.right)} pcs — click where the new bar should go`
                             : res.msg,
                         res.ok ? 'ok' : 'error');
-                    if (res.ok && res.rec2) uiHooks.onCarryNew?.(res.rec2);
+                    if (res.ok && res.rec2) uiHooks.onCarryNew?.(res.rec2, c.followers);
                 }
             },
             stripProps : {
@@ -2389,8 +2453,9 @@ export const schedulerProConfig = {
             else if (items.splitAtCursor) {
                 // the cut is where the cursor stands (also inside a day) — the
                 // label shows exactly what the click will do
-                const cut = lineCursorSplit(s, rec, raw, date);
-                if (cut) items.splitAtCursor.text = `Split strip at ${fmtQty(cut.q1)} + ${fmtQty(cut.q2)}`;
+                // (a consolidated order: the whole run, cut where the cursor stands)
+                const c = cursorCut(s, rec, raw, date);
+                if (c) items.splitAtCursor.text = `Split strip at ${fmtQty(c.left)} + ${fmtQty(c.right)}`;
                 else items.splitAtCursor = false;
             }
         }
