@@ -1741,11 +1741,11 @@ function autoSyncBarLengths(s) {
 // under the earlier rule (pulled down to their PCD) — or pulled there by
 // hand — are moved to their earliest sewing start; the bars behind them on
 // the line move back in order (push only, never a pull). Completed bars,
-// bars with production, locked bars and bars inside the 10-day lock stay.
+// bars with production and locked bars stay — past or near-term bars with
+// no production are moved too (a plan that never ran is not history).
 // A real change: the board goes dirty and Save keeps it.
 function enforceSewStartFloor(s) {
     if (!s || boardReadOnly.value) return 0;
-    const lockEnd = new Date(); lockEnd.setHours(0, 0, 0, 0); lockEnd.setDate(lockEnd.getDate() + 10);
     const index = buildLineIndex(s);
     const byLine = new Map();
     for (const ev of s.eventStore.records) {
@@ -1755,9 +1755,13 @@ function enforceSewStartFloor(s) {
         if (!lid || isHoldId(lid)) continue;
         (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
     }
+    // every bar without production — a past or near-term bar that was never
+    // sewn is a plan that did not happen, not history: the PCD + 8 rule holds
+    // for it too (the 10-day lock protects what the floor is running, i.e.
+    // bars with production, not bars that break the rule)
     const movable = ev => {
         const r = ev.data.raw;
-        return r.status !== 'completed' && !(Number(r.made) > 0) && ev.draggable !== false && !r.apLocked && ev.startDate >= lockEnd;
+        return r.status !== 'completed' && !(Number(r.made) > 0) && ev.draggable !== false && !r.apLocked;
     };
     const endFor = (ev, lid, start) => {
         const raw = ev.data.raw;
