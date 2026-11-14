@@ -13,6 +13,7 @@ import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
 import { simulateAllocation, pickCurve } from './planAllocation.mjs';
 import { buildCalendar, simulateBar, prevRunKey } from './prodDayBars.mjs';
+import { mrSourceOkSql, mrSourceOkRow, sqlNotIn, pickSourceWinners, osPoColorQtySql, osColorKeySql } from './orderSources.mjs';
 
 const {
     DB_HOST = '10.135.50.27',
@@ -337,12 +338,17 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
             // while the list kept showing them as Planned
             const [completedSet, [erpRows], [osKnown]] = await Promise.all([
                 completedOrderCodes(),
-                pool.query(`SELECT order_code, MAX(${erpOrderOk('')}) AS ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, evCodes),
+                pool.query(`SELECT order_code, MAX(${erpOrderOk('')}) AS ok, MAX(${mrSourceOkSql('')}) AS src_ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, evCodes),
                 pool.query(`SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, evCodes)
             ]);
             const inErp = new Set(erpRows.map(r => r.order_code));
             // dropped (qty 0) / sample / 2nd-quality orders: not a production order
-            const notProd = new Set(erpRows.filter(r => !Number(r.ok)).map(r => r.order_code));
+            // (ORDER_SOURCE_RETIRE=1: nor an order whose source no longer qualifies)
+            const notProd = new Set(erpRows.filter(r => !Number(r.ok) || (ORDER_SOURCE_RETIRE && !Number(r.src_ok))).map(r => r.order_code));
+            if (ORDER_SOURCE_RETIRE) {
+                try { const l = await sourceLosers(); for (const c of [...l.mrCodes, ...l.osCodes]) notProd.add(c); }
+                catch { /* winner lookup failed: no extra filter */ }
+            }
             for (const r of osKnown) inErp.add(r.os_order_code);
             events = events.filter(e => {
                 const oc = evOrderCode(e);
@@ -429,12 +435,19 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
 // Build the consolidated unplanned-orders query.
 // Confirm orders (have order_code + color) are grouped by order_code+color so that
 // multiple POs of the same color appear as ONE bar. po_list / id_list carry the detail.
-function unplannedQuery(unitId, limit, offset) {
+function unplannedQuery(unitId, limit, offset, loserCodes = []) {
     // A PO belongs to a board by its PRODUCTION unit (mr_order_entry.prod_unit)
     // — the order-entry unit_id is only a fallback for rows synced before the
     // prod_unit column existed. (e.g. 25SUBOR438: entered under unit 1 but
     // produced in AQL/prod_unit 3.)
-    const uf   = unitId ? 'AND COALESCE(prod_unit, unit_id) = ?' : '';
+    // One source per business order (orderSources.mjs): a row of an
+    // mr_order_entry order that no longer qualifies (os_status ≠ 0 or outside
+    // MBM / CEIL / AQL) and every row of an order kept from its OTHER source
+    // stay out of the pool, whether or not the sync has retired them yet.
+    const codes = [...new Set(loserCodes.map(c => String(c || '')).filter(Boolean))];
+    const sf   = `AND ${planningRowSourceOkSql('planning_orders')}`
+        + (codes.length ? ` AND (order_code IS NULL OR order_code NOT IN (${codes.map(c => pool.escape(c)).join(',')}))` : '');
+    const uf   = (unitId ? 'AND COALESCE(prod_unit, unit_id) = ?' : '') + `\n              ${sf}`;
     const base = unitId ? [unitId] : [];
     const cut  = ERP_CUTOFF;
 
@@ -533,7 +546,10 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
         const offset = Number(req.query.offset) || 0;
         const unitId = req.query.unit_id ? Number(req.query.unit_id) : null;
 
-        const { sql, countSql, params, countParams } = unplannedQuery(unitId, limit, offset);
+        let loserCodes = [];
+        try { const l = await sourceLosers(); loserCodes = [...l.mrCodes, ...l.osCodes]; }
+        catch (e) { console.warn(`[order-sources] winner lookup skipped: ${e.message}`); }
+        const { sql, countSql, params, countParams } = unplannedQuery(unitId, limit, offset, loserCodes);
         const [[{ total }]] = await pool.query(countSql, countParams);
         const [rows]        = await pool.query(sql, params);
 
@@ -1426,9 +1442,74 @@ const erpListOk = (alias = 'oe') => {
 const erpListOkRow = o => Number(o.order_qty) > 0
     && ERP_LIST_TYPES.includes(Number(o.order_type ?? 1))
     && Number(o.is_tba ?? 0) === 0
-    && ERP_LIST_UNITS.includes(Number(o.prod_unit));
+    && ERP_LIST_UNITS.includes(Number(o.prod_unit))
+    && mrSourceOkRow(o);
 
-const ERP_QUERY = (cutoff) => [`
+// --------------------------------------------------------------------------
+// ONE SOURCE PER BUSINESS ORDER (planner spec 2026-11-14, orderSources.mjs).
+// mr_order_entry orders count only with os_status = 0 and a planning unit
+// (mrSourceOkSql); os_orders orders only for os_units 19 / 48 / 20. An order
+// eligible in BOTH (os_orders.mr_order_id + mr_order_code = mr_order_entry
+// order_id + order_code) is kept from one source: sourceLosers() names the
+// records of the losing source, and every order query excludes them.
+// Cached for a minute — every list / board request needs it.
+// --------------------------------------------------------------------------
+const ERP_PO_LIVE = (a = 'po') => `${a}.po_qty > 0 AND (${a}.status IS NULL OR ${a}.status != 3) AND (${a}.po_status IS NULL OR ${a}.po_status != 3)`;
+let sourceLoserCache = { at : 0, value : null };
+async function sourceLosers(q = pool, { fresh = false } = {}) {
+    if (!fresh && sourceLoserCache.value && Date.now() - sourceLoserCache.at < 60000) return sourceLoserCache.value;
+    const ph = OS_UNIT_IDS.map(() => '?').join(',');
+    const [pairs] = await q.query(`
+        SELECT oe.order_id AS mrOrderId, oe.order_code AS mrOrderCode,
+               o.id AS osOrderId, o.os_order_code AS osOrderCode,
+               EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_purchase_order po
+                        WHERE po.mr_order_entry_order_id = oe.order_id AND ${ERP_PO_LIVE('po')}) AS mrHasConfirm,
+               (EXISTS (SELECT 1 FROM \`${OS_DB}\`.os_order_color_size x WHERE x.os_order_id = o.id AND x.qty > 0)
+                OR EXISTS (SELECT 1 FROM \`${OS_DB}\`.os_order_color c WHERE c.os_order_id = o.id AND c.status = 1 AND c.clr_qty > 0)) AS osHasConfirm
+          FROM \`${OS_DB}\`.os_orders o
+          JOIN \`${OS_DB}\`.os_units u ON u.id = o.os_unit_id
+          JOIN \`${ERP_DB}\`.mr_order_entry oe
+            ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+         WHERE o.os_unit_id IN (${ph})
+           AND o.order_status NOT IN ('Closed','Inactive') AND o.order_qty > 0 AND o.odd >= ?
+           AND oe.order_status NOT IN ('Closed','Inactive')
+           AND ${erpOrderOk('oe')} AND ${mrSourceOkSql('oe')}`,
+        [...OS_UNIT_IDS, ERP_CUTOFF]);
+    const w = pickSourceWinners(pairs);
+    const value = {
+        mrIds   : [...w.mrLosers],
+        osIds   : [...w.osLosers],
+        mrCodes : new Set(w.decisions.filter(d => d.winner === 'os').map(d => d.mrOrderCode).filter(Boolean)),
+        osCodes : new Set(w.decisions.filter(d => d.winner === 'mr').flatMap(d => d.osOrders.map(x => x.code)).filter(Boolean)),
+        decisions : w.decisions
+    };
+    if (w.decisions.length) {
+        console.log(`[order-sources] ${w.decisions.length} order(s) eligible in both sources — `
+            + w.decisions.map(d => `${d.mrOrderCode} ↔ ${d.osOrders.map(x => x.code).join('+')} → ${d.winner} (${d.rule})`).join('; '));
+    }
+    sourceLoserCache = { at : Date.now(), value };
+    return value;
+}
+// Rows already in planning_orders whose SOURCE no longer qualifies (their
+// order was handed to the OS system, or is produced outside the three
+// planning units) are hidden from every order list at once. Their rows and
+// the bars planned on them are RETIRED by the sync only when
+// ORDER_SOURCE_RETIRE=1 is set — that deletes plan data, so it is the
+// planner's decision (GET /order-sources/audit lists what would go).
+const ORDER_SOURCE_RETIRE = process.env.ORDER_SOURCE_RETIRE === '1';
+// planning_orders rows of an ineligible mr_order_entry order, as a WHERE
+// fragment for a planning_orders alias (confirm rows carry the ERP po_id,
+// projection rows 'proj-<order_id>'; OS rows are keyed 'os-c-…' / 'proj-os-…')
+const planningRowSourceOkSql = (p = 'planning_orders') => `
+    NOT EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_purchase_order xpo
+                  JOIN \`${ERP_DB}\`.mr_order_entry xoe ON xoe.order_id = xpo.mr_order_entry_order_id
+                 WHERE ${p}.erp_po_id REGEXP '^[0-9]+$'
+                   AND xpo.po_id = CAST(${p}.erp_po_id AS UNSIGNED)
+                   AND NOT (${mrSourceOkSql('xoe')}))`;
+
+// Source B confirm rows: the POs of the SELECTED mr_order_entry orders only
+// (os_status = 0, planning unit, not lost to its os_orders twin)
+const ERP_QUERY = (cutoff, mrLoserIds = []) => [`
     SELECT
         po.po_id                                          AS src_id,
         po.po_no                                          AS po_number,
@@ -1458,6 +1539,7 @@ const ERP_QUERY = (cutoff) => [`
       AND (po.po_status IS NULL OR po.po_status != 3)
       AND oe.order_status NOT IN ('Closed','Inactive')
       AND ${erpOrderOk('oe')}
+      AND ${mrSourceOkSql('oe')}${sqlNotIn('oe.order_id', mrLoserIds)}
     ORDER BY COALESCE(po.po_ex_fty, oe.order_delivery_date)
 `, [cutoff]];
 
@@ -1761,12 +1843,23 @@ async function findHiddenEvents(conn) {
     // orders that stopped being production orders in ERP (qty 0 = dropped,
     // sample, SMS, sample courier, 2nd quality) — their bars go, confirm or projection
     const notProd = new Set();
+    // ORDER_SOURCE_RETIRE=1: orders whose source no longer qualifies (handed
+    // to the OS system, produced outside MBM / CEIL / AQL, or lost to their
+    // twin in the other source) — their bars go as well
+    const notSource = new Set();
     if (allCodes.length) {
         try {
             const ph = allCodes.map(() => '?').join(',');
             const [erp] = await conn.query(
-                `SELECT order_code, MAX(${erpOrderOk('')}) AS ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, allCodes);
-            for (const r of erp) if (!Number(r.ok)) notProd.add(r.order_code);
+                `SELECT order_code, MAX(${erpOrderOk('')}) AS ok, MAX(${mrSourceOkSql('')}) AS src_ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, allCodes);
+            for (const r of erp) {
+                if (!Number(r.ok)) notProd.add(r.order_code);
+                else if (ORDER_SOURCE_RETIRE && !Number(r.src_ok)) notSource.add(r.order_code);
+            }
+            if (ORDER_SOURCE_RETIRE) {
+                const losers = await sourceLosers(conn);
+                for (const c of [...losers.mrCodes, ...losers.osCodes]) notSource.add(c);
+            }
             const erpSet = new Set(erp.map(r => r.order_code));
             if (projCodes.length) {
                 const ph2 = projCodes.map(() => '?').join(',');
@@ -1799,6 +1892,7 @@ async function findHiddenEvents(conn) {
         else if (code && completed.has(code)) reason = 'order marked complete';
         else if (ship && ymdStr(ship) < ERP_CUTOFF) reason = `delivery ${ymdStr(ship)} before the cut-off ${ERP_CUTOFF}`;
         else if (code && notProd.has(code)) reason = 'order dropped in ERP (qty 0) or sample / 2nd quality';
+        else if (code && notSource.has(code)) reason = 'order source no longer qualifies (handed to OS, outside MBM / CEIL / AQL, or kept from its other source)';
         else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
         else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
         else if (e.o_id != null && e.line_unit != null && e.order_unit != null
@@ -1850,6 +1944,63 @@ async function retireHiddenEvents(conn, tag = 'sync') {
     return hidden;
 }
 
+// One source per business order — read-only audit of the rule
+// (orderSources.mjs): the orders eligible in both sources and which source
+// each is kept from, the OS orders without size rows, and the planning rows
+// / bars of mr_order_entry orders whose source no longer qualifies (hidden
+// from the lists now; retired by the sync only with ORDER_SOURCE_RETIRE=1).
+app.get(`${BASE}/order-sources/audit`, async (req, res) => {
+    try {
+        const losers = await sourceLosers(pool, { fresh : true });
+        const ph = OS_UNIT_IDS.map(() => '?').join(',');
+        const [noSize] = await pool.query(`
+            SELECT o.id, o.os_unit_id, o.os_order_code, o.mr_order_code, o.order_qty, o.odd
+              FROM \`${OS_DB}\`.os_orders o
+             WHERE o.os_unit_id IN (${ph}) AND o.order_status NOT IN ('Closed','Inactive')
+               AND o.order_qty > 0 AND o.odd >= ?
+               AND NOT EXISTS (SELECT 1 FROM \`${OS_DB}\`.os_order_color_size x WHERE x.os_order_id = o.id)
+             ORDER BY o.odd, o.os_order_code`, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        const [unmapped] = await pool.query(`
+            SELECT o.id, o.os_order_code, o.mr_order_id, o.mr_order_code
+              FROM \`${OS_DB}\`.os_orders o
+              LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
+                     ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+             WHERE o.os_unit_id IN (${ph}) AND o.order_status NOT IN ('Closed','Inactive')
+               AND o.order_qty > 0 AND o.odd >= ? AND oe.order_id IS NULL`, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        const [stale] = await pool.query(`
+            SELECT x.kind, x.why, COUNT(*) AS planning_rows, SUM(x.bars) AS live_bars FROM (
+                SELECT 'confirm' AS kind,
+                       CASE WHEN COALESCE(oe.os_status, 0) <> 0 THEN CONCAT('os_status ', oe.os_status) ELSE CONCAT('prod_unit ', oe.prod_unit) END AS why,
+                       (SELECT COUNT(*) FROM planning_events pe WHERE pe.planning_order_id = p.id AND pe.event_status != 'cancelled') AS bars
+                  FROM planning_orders p
+                  JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = CAST(p.erp_po_id AS UNSIGNED)
+                  JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = po.mr_order_entry_order_id
+                 WHERE p.erp_po_id REGEXP '^[0-9]+$' AND (p.shipment_date IS NULL OR p.shipment_date >= ?)
+                   AND NOT (${mrSourceOkSql('oe')})
+                UNION ALL
+                SELECT 'projection',
+                       CASE WHEN COALESCE(oe.os_status, 0) <> 0 THEN CONCAT('os_status ', oe.os_status) ELSE CONCAT('prod_unit ', oe.prod_unit) END,
+                       (SELECT COUNT(*) FROM planning_events pe
+                         WHERE (pe.event_code = CONCAT('ev-proj:', p.order_code) OR pe.event_code LIKE CONCAT('ev-proj:', p.order_code, '-%'))
+                           AND pe.event_status != 'cancelled')
+                  FROM planning_orders p
+                  JOIN \`${ERP_DB}\`.mr_order_entry oe ON CONCAT('proj-', oe.order_id) = p.erp_po_id
+                 WHERE p.erp_po_id LIKE 'proj-%' AND p.erp_po_id NOT LIKE 'proj-os-%'
+                   AND (p.shipment_date IS NULL OR p.shipment_date >= ?)
+                   AND NOT (${mrSourceOkSql('oe')})
+            ) x GROUP BY x.kind, x.why`, [ERP_CUTOFF, ERP_CUTOFF]);
+        res.json({ success : true,
+            identity : 'os_orders.mr_order_id = mr_order_entry.order_id AND os_orders.mr_order_code = mr_order_entry.order_code',
+            precedence : 'eligible Confirm data beats Projection only; a tie falls back to os_orders',
+            retire : ORDER_SOURCE_RETIRE,
+            bothEligible : losers.decisions,
+            osWithoutSizeRows : noSize,
+            osWithoutErpOrder : unmapped,
+            staleMrSource : stale.map(r => ({ ...r, planning_rows : Number(r.planning_rows), live_bars : Number(r.live_bars) })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
 // What the rule above would retire right now — read only
 app.get(`${BASE}/board-hygiene`, async (req, res) => {
     try {
@@ -1872,6 +2023,9 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
     const puf        = prodUnitId ? 'AND oe.prod_unit = ?' : '';
     const pbp        = prodUnitId ? [prodUnitId] : [];
     try {
+        // one source per business order: the records of the losing source of
+        // an order eligible in both (orderSources.mjs)
+        const losers = await sourceLosers();
         // Order codes that already have synced POs (projection→confirm link)
         const [ploRows] = await pool.query(
             `SELECT erp_order_id, COUNT(*) AS po_count FROM planning_orders
@@ -1920,7 +2074,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
-                  AND o.odd >= ?
+                  AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}
                 ORDER BY shipment_date, order_code
             `, [...units, cutoff]);
             const completedOs = await completedOrderCodes();
@@ -1979,6 +2133,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                    ON po.mr_order_entry_order_id = oe.order_id AND po.po_qty > 0
             WHERE oe.order_status NOT IN ('Closed','Inactive')
               AND ${erpOrderOk('oe')}
+              AND ${mrSourceOkSql('oe')}${sqlNotIn('oe.order_id', losers.mrIds)}
               ${puf}
             GROUP BY oe.order_id, oe.order_code, oe.order_status, b.b_name, s.stl_no,
                      pt.prd_type_name, s.stl_type, oe.unit_id, oe.prod_unit, oe.order_qty,
@@ -2047,6 +2202,11 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
     const pbp        = prodUnitId ? [prodUnitId] : [];
 
     try {
+        // one source per business order: the records of the losing source of
+        // an order eligible in both (orderSources.mjs) — the same exclusion
+        // for the Projection rows and the Confirm rows, so filtering one view
+        // never brings the order back from the other source
+        const losers = await sourceLosers();
         // Order codes whose confirm POs are ACTUALLY planned on the board
         // (have live planning events). Merely-synced POs do NOT replace the
         // projection — its status stays planned/unplanned until a confirm
@@ -2078,14 +2238,14 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
 
         // Pre-fetch order_code → {prod_unit, unit_id, order_qty} from mr_order_entry (for confirm rows)
         const [puRows] = await pool.query(
-            `SELECT order_code, prod_unit, unit_id, order_qty, order_delivery_date, order_type, is_tba
+            `SELECT order_code, prod_unit, unit_id, order_qty, order_delivery_date, order_type, is_tba, os_status
              FROM \`${ERP_DB}\`.mr_order_entry
              WHERE order_code IS NOT NULL AND order_code != ''`
         );
         const erpOrderMap = new Map(puRows.map(r => [r.order_code, {
             prod_unit : r.prod_unit, unit_id : r.unit_id, order_qty : r.order_qty,
             order_delivery_date : r.order_delivery_date,
-            order_type : r.order_type, is_tba : r.is_tba, erp : true
+            order_type : r.order_type, is_tba : r.is_tba, os_status : r.os_status, erp : true
         }]));
 
         // OS order codes (GSL-…) resolve to their MAPPED unit (os 20 → AQL/3)
@@ -2144,7 +2304,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
-                  AND o.odd >= ?
+                  AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}
                 ORDER BY shipment_date, order_code
             `, [...units, cutoff]);
             // os_unit_id → planning prod unit (os_units 20 = AQL/3)
@@ -2179,6 +2339,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                    ON po.mr_order_entry_order_id = oe.order_id AND po.po_qty > 0
             WHERE oe.order_status NOT IN ('Closed','Inactive')
               AND ${erpListOk('oe')}
+              AND ${mrSourceOkSql('oe')}${sqlNotIn('oe.order_id', losers.mrIds)}
               ${puf}
             GROUP BY oe.order_id, oe.order_code, b.b_name, s.stl_no,
                      pt.prd_type_name, s.stl_type, oe.unit_id, oe.prod_unit, oe.order_qty,
@@ -2467,7 +2628,11 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         // apply the list rule to confirm groups of ERP orders (type / TBA / unit)
         const filteredConf = groupedConf.filter(r => {
             if (prodUnitId && r.prod_unit !== prodUnitId) return false;
+            // an order kept from its OTHER source contributes no confirm row here
+            if (losers.mrCodes.has(r.order_code) || losers.osCodes.has(r.order_code)) return false;
             const erpInfo = erpOrderMap.get(r.order_code);
+            // an mr_order_entry order: the list rule incl. the source rule
+            // (os_status = 0, MBM / CEIL / AQL); an OS order is judged by its unit
             return !erpInfo?.erp || erpListOkRow(erpInfo);
         });
 
@@ -2481,7 +2646,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
 app.get(`${BASE}/sync-erp-orders`, async (req, res) => {
     try {
         const since = req.query.since || ERP_CUTOFF;
-        const [sql, params] = ERP_QUERY(since);
+        const [sql, params] = ERP_QUERY(since, (await sourceLosers()).mrIds);
         const [rows] = await pool.query(sql, params);
         res.json({ success : true, count : rows.length, rows });
     }
@@ -2897,7 +3062,12 @@ async function runAutoSync() {
         return null;
     }
     syncRunning = true;
-    const [sql, params] = ERP_QUERY(ERP_CUTOFF);
+    // one source per business order: resolved once, at the order level, before
+    // any PO / colour / size row of either source is read
+    let losers = { mrIds : [], osIds : [], mrCodes : new Set(), osCodes : new Set(), decisions : [] };
+    try { losers = await sourceLosers(pool, { fresh : true }); }
+    catch (e) { console.warn(`[order-sources] winner lookup skipped: ${e.message}`); }
+    const [sql, params] = ERP_QUERY(ERP_CUTOFF, losers.mrIds);
     const conn = await pool.getConnection();
     try {
         const [rows] = await conn.query(sql, params);
@@ -2917,15 +3087,24 @@ async function runAutoSync() {
         // unit(s) only. Keyed 'os-c-<os_order_color.id>'. po_number = the
         // master order's PO, order_code = the OS order (GSL-…), qty = the
         // colour's share. They ride the SAME confirm upsert/lifecycle below.
+        // Quantity = the size rows of os_order_color_size, reduced to one row
+        // per (os_order_id, po_id, clr_id, mr_product_size_id) and summed ONCE
+        // to the PO–colour total BEFORE any join (osPoColorQtySql); an order
+        // without size rows falls back to its os_order_color totals. The unit
+        // is the ORDER's (os_orders.os_unit_id → os_units.id: 19 MBM, 48 CEIL,
+        // 20 AQL). The colour row still gives the stable key and the colour's
+        // delivery date, so existing rows / bars keep their identity.
         const osConfPh = OS_UNIT_IDS.map(() => '?').join(',');
         const [osConf] = await conn.query(`
             SELECT
-                CONCAT('os-c-', oc.id)                              AS src_id,
+                COALESCE(CONCAT('os-c-', oc.id),
+                         CONCAT('os-cs-', q.os_order_id, '-', q.po_id, '-', COALESCE(q.clr_id, 0))) AS src_id,
                 COALESCE(po.po_no, oc.po_no)                        AS po_number,
                 o.os_order_code                                     AS order_code,
                 COALESCE(ob.b_name, b.b_name)                       AS buyer_name,
                 o.style                                             AS style_no,
-                oc.clr_qty                                          AS order_quantity,
+                q.qty                                               AS order_quantity,
+                q.qty_src, q.size_count,
                 COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)            AS smv,
                 COALESCE(NULLIF(o.product_type, ''), pt.prd_type_name, s.stl_type) AS product_category,
                 COALESCE(oc.delivery_date, po.po_ex_fty, o.odd)     AS shipment_date,
@@ -2934,23 +3113,27 @@ async function runAutoSync() {
                 mc.clr_name                                         AS color,
                 oe.unit_id                                          AS unit_id,
                 o.os_unit_id                                        AS prod_unit
-            FROM \`${OS_DB}\`.os_order_color oc
-            JOIN \`${OS_DB}\`.os_orders o ON o.id = oc.os_order_id
-            LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = oc.po_id
+            FROM (${osPoColorQtySql(OS_DB)}) q
+            JOIN \`${OS_DB}\`.os_orders o ON o.id = q.os_order_id
+            JOIN \`${OS_DB}\`.os_units u ON u.id = o.os_unit_id
+            LEFT JOIN (${osColorKeySql(OS_DB)}) oc
+                   ON oc.os_order_id = q.os_order_id AND oc.po_id = q.po_id AND oc.clr_id <=> q.clr_id
+            LEFT JOIN \`${ERP_DB}\`.mr_purchase_order po ON po.po_id = q.po_id
             LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe
                    ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
             LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
             LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
             LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
             LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
-            LEFT JOIN \`${ERP_DB}\`.mr_material_color mc ON mc.clr_id = oc.clr_id
-            WHERE oc.os_unit_id IN (${osConfPh})
-              AND oc.status = 1
-              AND oc.clr_qty > 0
+            LEFT JOIN \`${ERP_DB}\`.mr_material_color mc ON mc.clr_id = q.clr_id
+            WHERE o.os_unit_id IN (${osConfPh})
+              AND q.qty > 0
               AND o.order_status NOT IN ('Closed','Inactive')
               AND o.order_qty > 0
-              AND o.odd >= ?
+              AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}
         `, [...OS_UNIT_IDS, ERP_CUTOFF]);
+        const osNoSize = new Set(osConf.filter(r => r.qty_src === 'colour').map(r => r.order_code));
+        if (osNoSize.size) console.log(`[order-sources] ${osNoSize.size} OS order(s) have no os_order_color_size rows — PO–colour qty taken from os_order_color: ${[...osNoSize].join(', ')}`);
         // ↑ window = the PROJECTION's own rule (o.odd >= cutoff, qty > 0):
         // a confirm appears ONLY for orders whose projection is in the list —
         // an order dropped by the cutoff never shows confirm-only rows.
@@ -3003,6 +3186,11 @@ async function runAutoSync() {
                 VALUES ${values.join(',')}
                 ON DUPLICATE KEY UPDATE
                     erp_order_id       = VALUES(erp_order_id),
+                    -- the row's business order follows the PO: ERP moves a PO to
+                    -- another order (26H1LEV763 → 26H1LEV1060), and a row left
+                    -- under its OLD order code is listed — and judged by the
+                    -- source rule — as an order it no longer belongs to
+                    order_code         = COALESCE(VALUES(order_code), order_code),
                     buyer_name         = VALUES(buyer_name),
                     style_no           = VALUES(style_no),
                     color              = VALUES(color),
@@ -3043,6 +3231,7 @@ async function runAutoSync() {
             LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
             WHERE oe.order_status NOT IN ('Closed','Inactive')
               AND ${erpOrderOk('oe')}
+              AND ${mrSourceOkSql('oe')}${sqlNotIn('oe.order_id', losers.mrIds)}
               AND oe.order_delivery_date >= ?`, [ERP_CUTOFF]);
         for (const r of projSrc) r.key = `proj-${r.src_id}`;
 
@@ -3071,7 +3260,7 @@ async function runAutoSync() {
             WHERE o.os_unit_id IN (${osPh})
               AND o.order_status NOT IN ('Closed','Inactive')
               AND o.order_qty > 0
-              AND o.odd >= ?`, [...OS_UNIT_IDS, ERP_CUTOFF]);
+              AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}`, [...OS_UNIT_IDS, ERP_CUTOFF]);
         for (const r of osSrc) {
             r.key = `proj-os-${r.src_id}`;
             // os_unit_id → planning prod unit (os_units 20 = AQL/3)
@@ -3152,14 +3341,20 @@ async function runAutoSync() {
               AND po.planning_status NOT IN ('completed', 'cancelled')`);
 
         // Projection rows whose ERP order is gone/closed leave the table
+        // (ORDER_SOURCE_RETIRE=1: a row whose SOURCE no longer qualifies —
+        // order handed to the OS system, produced outside the planning units,
+        // or lost to its twin in the other source — leaves too; without the
+        // flag such rows stay in the table and are only hidden from the lists)
         const [liveOrd] = await conn.query(
             `SELECT order_id FROM \`${ERP_DB}\`.mr_order_entry
-             WHERE order_status NOT IN ('Closed','Inactive') AND ${erpOrderOk('')}`);
+             WHERE order_status NOT IN ('Closed','Inactive') AND ${erpOrderOk('')}`
+            + (ORDER_SOURCE_RETIRE ? ` AND ${mrSourceOkSql('')}${sqlNotIn('order_id', losers.mrIds)}` : ''));
         const liveOrdKeys = new Set(liveOrd.map(r => `proj-${r.order_id}`));
         // OS-unit projections stay while their os_orders row is alive
         const [liveOs] = await conn.query(
             `SELECT id FROM \`${OS_DB}\`.os_orders
-             WHERE os_unit_id IN (${osPh}) AND order_status NOT IN ('Closed','Inactive')`,
+             WHERE os_unit_id IN (${osPh}) AND order_status NOT IN ('Closed','Inactive')`
+            + (ORDER_SOURCE_RETIRE ? sqlNotIn('id', losers.osIds) : ''),
             [...OS_UNIT_IDS]);
         for (const r of liveOs) liveOrdKeys.add(`proj-os-${r.id}`);
         const [projRows] = await conn.query(
@@ -3179,11 +3374,19 @@ async function runAutoSync() {
         // Reconcile ERP-side deletions: a PO deleted from mr_purchase_order or
         // set to status 3 must leave the Orders list — and the board — on the
         // next sync tick, mirroring how creations flow IN automatically.
-        const [liveRows] = await conn.query(
-            `SELECT po_id FROM \`${ERP_DB}\`.mr_purchase_order
+        const [liveRows] = await conn.query(ORDER_SOURCE_RETIRE
+            ? `SELECT po.po_id FROM \`${ERP_DB}\`.mr_purchase_order po
+                 JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = po.mr_order_entry_order_id
+                WHERE (po.status IS NULL OR po.status != 3)
+                  AND (po.po_status IS NULL OR po.po_status != 3)
+                  AND ${mrSourceOkSql('oe')}${sqlNotIn('oe.order_id', losers.mrIds)}`
+            : `SELECT po_id FROM \`${ERP_DB}\`.mr_purchase_order
              WHERE (status IS NULL OR status != 3)
                AND (po_status IS NULL OR po_status != 3)`);
         const liveIds = new Set(liveRows.map(r => String(r.po_id)));
+        // OS PO–colour keys read in this sync (incl. 'os-cs-…' keys of a size
+        // row that has no colour row)
+        for (const r of osConf) liveIds.add(String(r.src_id));
         // OS confirm rows stay only while their os_order_color entry is alive
         // AND the parent order still qualifies for a projection (same window)
         const [liveOsc] = await conn.query(
@@ -3192,7 +3395,7 @@ async function runAutoSync() {
              WHERE oc.os_unit_id IN (${osPh}) AND oc.status = 1
                AND o.order_status NOT IN ('Closed','Inactive')
                AND o.order_qty > 0
-               AND o.odd >= ?`,
+               AND o.odd >= ?` + (ORDER_SOURCE_RETIRE ? sqlNotIn('o.id', losers.osIds) : ''),
             [...OS_UNIT_IDS, ERP_CUTOFF]);
         for (const r of liveOsc) liveIds.add(`os-c-${r.id}`);
         const [ploRows] = await conn.query(
@@ -4332,6 +4535,12 @@ app.listen(PORT, () => {
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
         .then(() => ensureWhatIfTable())
         .catch(e => console.error('[snapshot] table init failed:', e.message));
+    // ERP_AUTO_SYNC=0: a read-only instance (validation / audit beside the
+    // main one) — it never writes the order mirror; POST /sync-erp-orders stays
+    if (process.env.ERP_AUTO_SYNC === '0') {
+        console.log('[auto-sync] ERP sync is OFF for this instance (ERP_AUTO_SYNC=0)');
+        return;
+    }
     // Run once on startup so orders are fresh immediately
     runAutoSync();
     // Then continuously, every SYNC_INTERVAL_MS
