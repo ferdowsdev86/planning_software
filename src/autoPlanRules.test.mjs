@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lockWindow, overlapsLock, holdReason, searchFrom, remainingToPlan, AP_HOLD_LOCK } from './autoPlanRules.mjs';
+import { lockWindow, overlapsLock, holdReason, searchFrom, remainingToPlan, attributeErpOutput, AP_HOLD_LOCK } from './autoPlanRules.mjs';
 
 const d = s => new Date(`${s}T00:00:00`);
 const ymd = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
@@ -98,4 +98,31 @@ test('running twice on the same inputs gives the same allocation', () => {
     const second = remainingToPlan({ ...input, bars : [...input.bars, { base : first.toPlan, made : 0, kept : false, start : d('2026-11-25'), end : d('2026-12-05') }] });
     assert.equal(first.toPlan, 4500);
     assert.equal(second.toPlan, 4500);
+});
+
+test('ERP output on the board: 26H1LEV467 — PO 5,666, 3,801 sewn, one past bar → 3,801 done, the rest remains', () => {
+    const m = attributeErpOutput({ erpSewn : 3801, now : d('2026-11-14'), bars : [{ id : 'db-3671', base : 5666, hand : 0, start : d('2026-10-18') }] });
+    assert.equal(m.get('db-3671'), 3801);
+    assert.equal(5666 - m.get('db-3671'), 1865);
+});
+
+test('ERP output on the board: planned order, started bars only, never beyond a bar, never twice with hand entries', () => {
+    const now = d('2026-11-14');
+    const bars = [
+        { id : 'a', base : 2000, hand : 0, start : d('2026-10-20') },
+        { id : 'b', base : 3000, hand : 0, start : d('2026-11-10') },
+        { id : 'c', base : 4000, hand : 0, start : d('2026-11-25') }       // not started
+    ];
+    const m = attributeErpOutput({ erpSewn : 4500, now, bars });
+    assert.deepEqual([m.get('a'), m.get('b'), m.get('c')], [2000, 2500, undefined]);
+    // more output than the started bars hold: the rest is shown on no bar (never on a future bar)
+    const big = attributeErpOutput({ erpSewn : 8000, now, bars });
+    assert.deepEqual([big.get('a'), big.get('b'), big.get('c')], [2000, 3000, undefined]);
+    // production already entered by hand is not counted again
+    const hand = attributeErpOutput({ erpSewn : 2500, now, bars : [{ id : 'a', base : 2000, hand : 1800, start : d('2026-10-20') }, { id : 'b', base : 3000, hand : 0, start : d('2026-11-10') }] });
+    assert.deepEqual([hand.get('a'), hand.get('b')], [200, 500]);
+    // the board holds more than the ERP: nothing is added
+    assert.equal(attributeErpOutput({ erpSewn : 1000, now, bars : [{ id : 'a', base : 2000, hand : 1500, start : d('2026-10-20') }] }).size, 0);
+    // a finished strip that left the board already took its share
+    assert.equal(attributeErpOutput({ erpSewn : 3000, doneRemoved : 3000, now, bars : [{ id : 'b', base : 3000, hand : 0, start : d('2026-11-10') }] }).size, 0);
 });

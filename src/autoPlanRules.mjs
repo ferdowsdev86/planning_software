@@ -86,3 +86,27 @@ export function remainingToPlan({ rowsQty, erpSewn = 0, doneRemoved = 0, bars = 
     const remaining = Math.max(0, rows - sewn);
     return { remaining, sewn, cover, toPlan : Math.max(0, remaining - cover) };
 }
+
+// ERP sewing output shown on the bars of one PO group (board display).
+// The board holds production per bar (entered by hand); the ERP holds the
+// actual sewing output per PO. What the ERP has MORE than the board is put on
+// the group's bars in their planned order — a bar that has started, each up
+// to what it still has to make (never beyond its ERP quantity). A bar that
+// starts in the future gets nothing; output no bar can take was sewn on bars
+// that are gone and is shown on none.
+// bars: [{ id, base, hand, completed, start }]  →  Map(id → pieces from the ERP)
+export function attributeErpOutput({ erpSewn = 0, doneRemoved = 0, bars = [], now = new Date() }) {
+    const out = new Map();
+    const t = +new Date(now);
+    const list = bars.map(b => ({ ...b, base : Math.max(0, Number(b.base) || 0), hand : Math.max(0, Number(b.hand) || 0) }))
+        .sort((a, b) => new Date(a.start) - new Date(b.start));
+    let extra = Math.max(0, Number(erpSewn) || 0) - Math.max(0, Number(doneRemoved) || 0)
+        - list.reduce((a, b) => a + (b.completed ? b.base : Math.min(b.base, b.hand)), 0);
+    for (const b of list) {
+        if (!(extra > 0)) break;
+        if (b.completed || !(+new Date(b.start) <= t)) continue;
+        const take = Math.min(extra, Math.max(0, b.base - b.hand));
+        if (take > 0) { out.set(b.id, take); extra -= take; }
+    }
+    return out;
+}

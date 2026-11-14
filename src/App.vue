@@ -19,7 +19,7 @@ import {
     isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS
 } from './planningData.js';
 import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo } from './planningData.js';
-import { AP_LOCK_DAYS, AP_HOLD_LOCK, lockWindow, overlapsLock, holdReason, remainingToPlan } from './autoPlanRules.mjs';
+import { AP_LOCK_DAYS, AP_HOLD_LOCK, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -7655,13 +7655,17 @@ async function saveMarkedComplete() {
 // same path as the Orders list tick. Runs after every production save.
 async function autoCompleteFinished(s) {
     if (!s?.eventStore || boardReadOnly.value) return;
-    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && Number(r.made) >= Number(r.qty);
+    // Only production entered ON THE BOARD finishes a strip by itself. Output
+    // the ERP reports (raw.erpMade) is shown on the bar, but never removes a
+    // bar or completes an order on its own — that stays the planner's step.
+    const boardMade = r => (Number(r.made) || 0) - (Number(r.erpMade) || 0);
+    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && boardMade(r) >= Number(r.qty);
     const done = s.eventStore.records.filter(ev => isDone(ev.data?.raw));
     if (!done.length) return;
     const codes = [...new Set(done.map(ev => String(ev.data.raw.mbmOrder || '')).filter(Boolean))];
     const fullyDone = codes.filter(code => s.eventStore.records.every(ev => {
         const r = ev.data?.raw;
-        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || Number(r.made) >= Number(r.qty);
+        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || boardMade(r) >= Number(r.qty);
     }));
     const fullSet = new Set(fullyDone);
     const pieces = done.filter(ev => !fullSet.has(String(ev.data.raw.mbmOrder || '')));
@@ -10170,15 +10174,76 @@ const madeOf = (store, evId) =>
 // Push saved production totals into the strips: progress % and remaining.
 // FastReact behaviour: the produced part is CUT OFF the front of the bar -
 // the bar gets shorter from the left while the future days stay unchanged.
+// Actual sewing output of the ERP on the board (planner 2026-11-14): a bar
+// shows what was really sewn of its PO, also when nobody entered production
+// on the board. The server sends the output of every confirm bar's PO rows
+// (raw.groupSewn, cuttingedgedb.daily_productions — sewing, out); what it
+// holds MORE than the board's own production is put on the order's bars in
+// their planned order (attributeErpOutput: started bars only, each up to its
+// ERP quantity). raw.erpMade = the pieces a bar takes from the ERP; nothing
+// is written — the figure is derived again on every load.
+function applyErpOutput(s, store) {
+    const index = buildLineIndex(s);
+    const groups = new Map();
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        r.erpMade = 0;
+        if (!(Number(r.groupQty) > 0) || !r.id || r.orderType === 'projection' || String(r.eventCode || '').startsWith('ev-proj')) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;          // a parked bar is not in production
+        const k = String(r.id);
+        let g = groups.get(k);
+        if (!g) { g = { sewn : Number(r.groupSewn) || 0, rows : Number(r.groupQty) || 0, done : Number(r.groupDone) || 0, bars : [] }; groups.set(k, g); }
+        g.bars.push(ev);
+    }
+    const factor = planQtyOf(1000) / 1000;
+    const now = Date.now();
+    let bars = 0, qty = 0;
+    for (const g of groups.values()) {
+        if (!(g.sewn > 0)) continue;
+        // The PO rows are sewn in FULL: every bar of the order that has started
+        // is done — its whole plan quantity, the +3 % allowance included (an
+        // allowance nobody will sew must not stay behind as "remaining")
+        if (g.sewn >= g.rows) {
+            for (const ev of g.bars) {
+                const r = ev.data.raw;
+                if (r.status === 'completed' || +(r.origStart || ev.startDate) > now) continue;
+                const take = Math.max(0, (Number(r.qty) || 0) - madeOf(store, String(ev.id)));
+                if (take > 0) { r.erpMade = take; bars++; qty += take; }
+            }
+            continue;
+        }
+        const share = attributeErpOutput({
+            erpSewn : g.sewn, doneRemoved : Math.round(g.done / factor),
+            bars : g.bars.map(ev => {
+                const r = ev.data.raw;
+                const q = Number(r.qty) || 0;
+                // the bar's ERP quantity (never more than what it carries)
+                const base = Math.min(q, Number(r.baseQty) > 0 ? Number(r.baseQty) : Math.round(q / factor));
+                return { id : String(ev.id), base, hand : madeOf(store, String(ev.id)), completed : r.status === 'completed', start : r.origStart || ev.startDate };
+            })
+        });
+        for (const ev of g.bars) {
+            const take = share.get(String(ev.id)) || 0;
+            if (take > 0) { ev.data.raw.erpMade = take; bars++; qty += take; }
+        }
+    }
+    return { bars, qty };
+}
+
 function applyProdUpdates(s) {
     if (!s) return;
     const store = loadProdStore();
+    try { applyErpOutput(s, store); }
+    catch (e) { console.warn('[production] ERP output not applied:', e.message); }
     s.eventStore?.suspendEvents?.();
     try {
         for (const ev of s.eventStore.records) {
             const raw = ev.data.raw;
             if (!raw || raw.stage) continue;
-            const made = madeOf(store, String(ev.id));
+            // board production (entered by hand) + what the ERP holds beyond it
+            const made = madeOf(store, String(ev.id)) + (Number(raw.erpMade) || 0);
             if (!made && !raw.made) continue;
             raw.made = made;
             raw.progress = raw.qty ? Math.min(100, Math.round(made / raw.qty * 100)) : 0;

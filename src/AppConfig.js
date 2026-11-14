@@ -3115,7 +3115,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
             const pct  = plan > 0 ? Math.min(100, Math.round(made / plan * 100)) : 0;
             return R('Production',
                 `<span class="t4-prod">` +
-                    `<span class="t4-done" title="quantity produced (production update / ERP)">✔ Done <b>${enc(fmtQty(made))}</b></span>` +
+                    `<span class="t4-done" title="quantity produced (production update / ERP)">✔ Done <b>${enc(fmtQty(made))}</b>${Number(r.erpMade) > 0 ? ` <span class="t4dim" title="actual sewing output of the ERP (Daily Production, sewing out) for this bar's PO — not entered on the board">· ERP ${enc(fmtQty(r.erpMade))}</span>` : ''}</span>` +
                     `<span class="t4-left${left <= 0 ? ' t4-left-zero' : ''}" title="quantity still to be sewn — the bar now stands for this">⏳ Remaining <b>${enc(fmtQty(left))}</b></span>` +
                     `<span class="t4-bar" title="${pct}% of plan qty made"><i style="width:${pct}%"></i></span><span class="t4-pct">${pct}%</span>` +
                 `</span>`, 't4-full t4-prodrow');
