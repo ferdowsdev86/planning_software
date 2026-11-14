@@ -530,6 +530,9 @@ function finishBoardLoad(uid, data, s) {
         // Load-time overlap repairs are part of that derived picture — the
         // same on every load — so they are not force-listed as changes
         pendingRepairIds.clear();
+        // after the quiet window (the lock / read-only state is known by then):
+        // bars that start before PCD + 8 move to their earliest sewing start
+        setTimeout(() => { try { if (getInstance() === s) enforceSewStartFloor(s); } catch (e) { console.warn('[sew floor] skipped:', e.message); } }, 3500);
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
@@ -1732,6 +1735,75 @@ function autoSyncBarLengths(s) {
         if (r.shrunk || r.grown) console.info(`[bar sync] ${r.shrunk} shorter, ${r.grown} longer, ${r.pushed} follower(s) shifted later, ${r.pulled} pulled flush — derived, not a change`);
     }
     catch (e) { console.warn('[bar sync] skipped:', e.message); }
+}
+
+// Planning rule on load: sewing never starts before PCD + 8 days. Bars saved
+// under the earlier rule (pulled down to their PCD) — or pulled there by
+// hand — are moved to their earliest sewing start; the bars behind them on
+// the line move back in order (push only, never a pull). Completed bars,
+// bars with production, locked bars and bars inside the 10-day lock stay.
+// A real change: the board goes dirty and Save keeps it.
+function enforceSewStartFloor(s) {
+    if (!s || boardReadOnly.value) return 0;
+    const lockEnd = new Date(); lockEnd.setHours(0, 0, 0, 0); lockEnd.setDate(lockEnd.getDate() + 10);
+    const index = buildLineIndex(s);
+    const byLine = new Map();
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid || isHoldId(lid)) continue;
+        (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
+    }
+    const movable = ev => {
+        const r = ev.data.raw;
+        return r.status !== 'completed' && !(Number(r.made) > 0) && ev.draggable !== false && !r.apLocked && ev.startDate >= lockEnd;
+    };
+    const endFor = (ev, lid, start) => {
+        const raw = ev.data.raw;
+        try { deriveLcForPlacement(s, raw, lid, start); applyLineFormulaDuration(s, raw, lid); } catch { /* keep dur */ }
+        let end = endOfWork(start, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
+        try { const sim = simulateStrip(s, raw, lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
+        return end;
+    };
+    const place = (ev, lid, start) => {
+        const end = endFor(ev, lid, start);
+        ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+        const r = ev.data.raw;
+        r.start = start; r.end = end; r.latePlan = isLateVsTarget(end, r.ship);
+    };
+    let moved = 0, pushed = 0;
+    for (const [lid, bars] of byLine) {
+        bars.sort((a, b) => a.startDate - b.startDate);
+        let touched = false;
+        for (const ev of bars) {
+            if (!movable(ev)) continue;
+            const r = ev.data.raw;
+            const floor = r.pcd ? earliestSewStart(r.pcd) : null;
+            if (!floor || ev.startDate >= floor) continue;
+            place(ev, lid, clampIntoWorkWindow(new Date(floor)));
+            moved++; touched = true;
+        }
+        if (!touched) continue;
+        // the line stays sequential IN ORDER: a bar now overlapped by the one
+        // before it goes behind it (push only)
+        bars.sort((a, b) => a.startDate - b.startDate);
+        let prevEnd = null;
+        for (const ev of bars) {
+            if (prevEnd && movable(ev) && ev.startDate.getTime() < prevEnd.getTime() - 60000) {
+                place(ev, lid, nextDayStartAfter(prevEnd));
+                pushed++;
+            }
+            if (!prevEnd || ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
+        }
+    }
+    if (moved) {
+        markBoardDirty();
+        touchBoardCache(s);
+        s.refreshRows?.();
+        toast(`${moved} bar(s) started before PCD + ${SEW_START_AFTER_PCD_DAYS} days (placed under the earlier rule) — moved to their earliest sewing start${pushed ? `, ${pushed} follower(s) shifted later` : ''} — Save to keep`, 'warn');
+    }
+    return moved;
 }
 
 // Planning menu: every open bar at once (starts stay; Save keeps the result)
@@ -4369,6 +4441,11 @@ function computePullForward(opts = {}) {
             let ns = anchorEnd === null ? clampIntoWorkWindow(new Date(anchorStart)) : nextDayStartAfter(anchorEnd);
             // Range rule: a pulled bar never crosses BEFORE the From date
             if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
+            // Planning rule: sewing never starts before PCD + 8 days — a pull
+            // stops at the order's earliest sewing start (the bar keeps its
+            // gap in front of it when it already sits there)
+            const floor = raw.pcd && !(Number(raw.made) > 0) ? earliestSewStart(raw.pcd) : null;
+            if (floor && ns < floor) ns = clampIntoWorkWindow(new Date(floor));
             if (oldStart.getTime() - ns.getTime() < 5 * 60000) {
                 // already continuous (a few minutes of rounding don't count) —
                 // and never later: pull only!
@@ -13386,7 +13463,7 @@ onMounted(() => {
     // Dev-console access for diagnostics
     window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
-        unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId,
+        unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
