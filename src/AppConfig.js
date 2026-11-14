@@ -96,6 +96,7 @@ export function sopForRaw(scheduler, raw, lineId, extra = {}) {
     catch { return null; }
 }
 import { resolveDropPosition, snapToleranceDays } from './snapService.mjs';
+import { cursorSplit } from './splitRules.mjs';
 
 // ---------------------------------------------------------------------------
 // Colour-by state (toolbar dropdown): risk (default) | buyer | status
@@ -1437,9 +1438,11 @@ function packLineNoGaps(scheduler, lineId, anchor) {
 }
 
 // ---------------------------------------------------------------------------
-// FastReact strip split: cut a bar into two at a working-day boundary.
-// Either dur1 (working days kept by part 1, from the cursor position) or
-// qty2 (exact quantity for the NEW bar) drives the split.
+// FastReact strip split: cut a bar into two.
+// qty2 (exact quantity for the NEW bar) drives the split — the right-click
+// "Split strip at …" passes the quantity not yet made at the cursor's moment
+// (lineCursorSplit), so the cut is where the cursor stands, not the day's end.
+// dur1 (whole working days kept by part 1) is the older day-boundary split.
 // ---------------------------------------------------------------------------
 let splitSeq = 0;
 
@@ -1757,6 +1760,26 @@ function holdCursorQty(rec, raw, date) {
     const frac = e0 > s0 ? Math.min(0.95, Math.max(0.05, (t - s0) / (e0 - s0))) : 0.5;
     const qty = Number(raw.qty) || 0;
     return Math.max(1, Math.min(qty - 1, Math.round(qty * frac)));
+}
+
+// Line bar: the cut is the MOMENT the cursor points at — part 1 keeps what the
+// bar's own day-by-day schedule (the Planned schedule / day chips: learning
+// curve, changed hours, part days) has made from its start up to that moment,
+// the new bar takes the rest. Never rounded to the end of the day.
+// → { q1, q2 } or null (the cursor leaves nothing on one side of the cut)
+export function lineCursorSplit(scheduler, rec, raw, date) {
+    const t0 = new Date(rec.startDate).getTime(), lim = new Date(rec.endDate).getTime();
+    const already = Math.min(Number(raw.qty) || 0, Math.max(0, Number(raw.made) || 0));
+    let days = [];
+    try {
+        days = simulateStrip(scheduler, raw, lineIdOf(scheduler, rec), rec.startDate, rec.endDate).days
+            .filter(d => !d.off && d.q > 0)
+            .map(d => ({ q : d.q, ws : Math.max(startOfWorkDay(d.date).getTime(), t0), we : Math.min(workEndOfDay(d.date).getTime(), lim) }));
+    }
+    catch { /* no schedule → the bar's span below */ }
+    // no usable schedule: the cursor's share of the bar's span
+    if (!days.length) days = [{ q : (Number(raw.qty) || 0) - already, ws : t0, we : lim }];
+    return cursorSplit({ qty : raw.qty, already, days, t : date });
 }
 
 // ---------------------------------------------------------------------------
@@ -2168,10 +2191,13 @@ export const schedulerProConfig = {
                     if (!rec || !raw) return;
                     const date = menuSplitCtx?.rec === rec ? menuSplitCtx.date : rec.startDate;
                     uiHooks.onBeforeEdit?.(`split ${raw.po || rec.name}`);
-                    // Holding Row: split by the cursor's share of the bar's qty
-                    const res = isHoldId(lineIdOf(uiHooks.instance, rec))
-                        ? splitBar(uiHooks.instance, rec, { qty2 : raw.qty - holdCursorQty(rec, raw, date) })
-                        : splitBar(uiHooks.instance, rec, { dur1 : Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date))) });
+                    // Holding Row: split by the cursor's share of the bar's qty.
+                    // Line: split at the cursor's MOMENT — part 1 keeps what the
+                    // schedule has made by then (not the whole of that day)
+                    const onHold = isHoldId(lineIdOf(uiHooks.instance, rec));
+                    const cut = onHold ? null : lineCursorSplit(uiHooks.instance, rec, raw, date);
+                    if (!onHold && !cut) { uiHooks.onToast?.('Nothing to split at that point — right-click inside the bar', 'warn'); return; }
+                    const res = splitBar(uiHooks.instance, rec, { qty2 : onHold ? raw.qty - holdCursorQty(rec, raw, date) : cut.q2 });
                     uiHooks.onToast?.(
                         res.ok
                             ? `${raw.po} split into ${fmtQty(res.q1)} + ${fmtQty(res.q2)} pcs — click where the new bar should go`
@@ -2360,14 +2386,12 @@ export const schedulerProConfig = {
                 const q1 = holdCursorQty(rec, raw, date);
                 items.splitAtCursor.text = `Split strip at ${fmtQty(q1)} + ${fmtQty(raw.qty - q1)}`;
             }
-            else if (raw.dur < 2) {
-                items.splitAtCursor = false;
-            }
             else if (items.splitAtCursor) {
-                const d1 = Math.max(1, Math.min(raw.dur - 1, workDaysBetween(rec.startDate, date)));
-                const q1 = Math.round(raw.qty * d1 / raw.dur);
-                const q2 = raw.qty - q1;
-                items.splitAtCursor.text = `Split strip at ${fmtQty(q1)} + ${fmtQty(q2)}`;
+                // the cut is where the cursor stands (also inside a day) — the
+                // label shows exactly what the click will do
+                const cut = lineCursorSplit(s, rec, raw, date);
+                if (cut) items.splitAtCursor.text = `Split strip at ${fmtQty(cut.q1)} + ${fmtQty(cut.q2)}`;
+                else items.splitAtCursor = false;
             }
         }
     },
