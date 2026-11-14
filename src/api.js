@@ -844,7 +844,11 @@ function mapUnplannedRow(o) {
 // The saved bar sits on the hidden HOLD-<unit> resource ("Holding Row"): on
 // the board, but not planned on any line
 const onHoldRes = r => /^holding\s*row/i.test(String(r.resource_name || ''));
-const isPlannedStatus = r => r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned';
+// A confirm group (order + colour + delivery date) with only SOME of its POs on
+// a line: one list row, still to plan, with the planned share noted beside the
+// status ("1,200 on Line 04"). planned_qty comes with the grouped list rows.
+const partOnLine = r => r.order_type === 'confirm' && r.planning_status === 'partially_planned' && r.planned_qty != null;
+const isPlannedStatus = r => !partOnLine(r) && (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned');
 
 // Load all ERP orders (projected from mr_order_entry + confirm from planning_orders)
 // only = 'projected' → the order book alone (one row per order, no confirm PO
@@ -892,15 +896,20 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         reqMin       : Math.round(Number(r.po_qty ?? r.order_qty ?? 0) * Number(r.smv || 0)),
         status       : r.planning_status === 'completed' ? 'completed'
                      : r.planning_status === 'replaced' ? 'replaced'
+                     : partOnLine(r) ? (r.has_holding ? 'holding' : 'unplanned')
                      : onHoldRes(r) ? 'holding'
-                     : (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned') ? 'planned'
+                     : isPlannedStatus(r) ? 'planned'
                      : 'unplanned',
         replaced     : r.planning_status === 'replaced',
-        planned      : !onHoldRes(r) && (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned'),
+        planned      : !onHoldRes(r) && isPlannedStatus(r),
         // An unplanned row never carries a line; a bar parked on the Holding Row shows "Holding"
-        line         : onHoldRes(r) ? 'Holding'
-                     : (r.planning_status === 'fully_planned' || r.planning_status === 'partially_planned') ? (r.resource_name || '—')
+        line         : partOnLine(r) ? (r.has_holding ? 'Holding' : '—')
+                     : onHoldRes(r) ? 'Holding'
+                     : isPlannedStatus(r) ? (r.resource_name || '—')
                      : '—',
+        // the share of a partly planned group that is already on a line
+        onBoardQty   : partOnLine(r) ? Number(r.planned_qty) || 0 : 0,
+        onBoardLines : partOnLine(r) ? (r.planned_lines || '') : '',
         // Dates only for a planned row — an unplanned row's simulated start/end
         // (the proposal behind "Pending Line Selection") never shows beside "unplanned"
         start        : !onHoldRes(r) && isPlannedStatus(r) && r.start_date ? new Date(r.start_date) : null,

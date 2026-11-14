@@ -74,11 +74,20 @@ export function simulateCompletion({ qty, smv, manpower, efficiency, startDate, 
 }
 
 // ---------------------------------------------------------------------------
-// Grouping + conditional split
+// Grouping: one group per order + colour + delivery date
 // ---------------------------------------------------------------------------
-// pos: [{ po_number, qty, remaining_qty, delivery, planned, cancelled }]
+// Planner rule (2026-11-14): the POs of one order that share the SAME colour
+// and the SAME delivery date are ONE group — always, whatever the line load;
+// POs of another delivery date are a group of their own. (Before, the POs of a
+// colour were joined across delivery dates and then cut apart again by a
+// capacity simulation that started at the END of the line's whole plan — so a
+// colour that was already planned fell apart into one row per PO, even its
+// POs of one delivery date.)
+// pos: [{ id, po_number, qty, remaining_qty, delivery, planned, cancelled }]
 // line: { name, manpower, efficiency, availableFrom } | null
-// Returns array of group objects (1 group when feasible, >1 when split).
+// Returns the groups in delivery order. The capacity simulation only dates
+// the groups (planned_start_at / planned_complete_at / infeasible) — it never
+// decides which POs belong together.
 export function groupAndSplit({ orderCode, color, pos, smv, line, calendar = DEFAULT_CALENDAR }) {
     // sanitise: drop cancelled, zero/negative qty, dedupe by po_number
     const seen = new Set();
@@ -106,10 +115,21 @@ export function groupAndSplit({ orderCode, color, pos, smv, line, calendar = DEF
 
     const groupKey = `${orderCode}::${color || 'NO-COLOR'}`;
 
+    // the delivery-date groups of this colour, earliest first (POs without a
+    // delivery date form one group at the end)
+    const byDay = new Map();
+    for (const p of valid) {
+        const d = toDate(p.delivery);
+        const k = d ? isoDay(d) : 'no-date';
+        if (!byDay.has(k)) byDay.set(k, []);
+        byDay.get(k).push(p);
+    }
+    const dayGroups = [...byDay.values()];
+
     const mkGroup = (members, status, splitReason, feas) => ({
-        // split suffix uses the member row id when available — po_number alone
-        // is NOT unique (ERP reuses one PO number across rows)
-        group_key        : groupKey + (status === 'split' ? `::${members[0].id ?? members[0].po_number}` : ''),
+        // the key carries the delivery date, so it stays the same row when a PO
+        // of another date joins the colour
+        group_key        : `${groupKey}::${toDate(members[0].delivery) ? isoDay(toDate(members[0].delivery)) : 'no-date'}`,
         parent_order_id  : orderCode,
         color            : color || null,
         pos              : members,
@@ -125,80 +145,41 @@ export function groupAndSplit({ orderCode, color, pos, smv, line, calendar = DEF
         validation_notes : notes.length ? notes.join('; ') : null
     });
 
-    // No line selected/proposed → provisional single group per colour, no split simulation
+    // No line selected/proposed → provisional groups, no capacity simulation
     if (!line) {
-        return [mkGroup(valid, 'provisional', null, null)];
+        return dayGroups.map(members => mkGroup(members, 'provisional', null, null));
     }
 
-    // Feasibility inputs missing → pending, never a silent wrong group
+    // Feasibility inputs missing → pending, never a silently wrong date
     const probe = simulateCompletion({
         qty : 1, smv, manpower : line.manpower, efficiency : line.efficiency,
         startDate : line.availableFrom, calendar
     });
     if (!probe.ok) {
-        const g = mkGroup(valid, 'provisional', null, null);
-        g.validation_notes = [g.validation_notes, probe.error].filter(Boolean).join('; ');
-        return [g];
+        return dayGroups.map(members => {
+            const g = mkGroup(members, 'provisional', null, null);
+            g.validation_notes = [g.validation_notes, probe.error].filter(Boolean).join('; ');
+            return g;
+        });
     }
 
-    // Greedy accumulation in delivery-date order; a member is only kept if the
-    // combined completion still meets the earliest delivery among members.
+    // The groups run one after another on the line, earliest delivery first;
+    // a group whose completion passes its delivery date is flagged infeasible.
+    // Every group is 'grouped' — a colour with several delivery dates is the
+    // normal case, not a warning ('split' is no longer produced).
     const groups = [];
     let cursor = toDate(line.availableFrom);
-    let current = [];
-
-    const simulate = (members, start) => simulateCompletion({
-        qty : members.reduce((s, p) => s + Number(p.remaining_qty ?? p.qty), 0),
-        smv, manpower : line.manpower, efficiency : line.efficiency,
-        startDate : start, calendar
-    });
-
-    const flush = (wasSplit) => {
-        if (!current.length) return;
-        const feas = simulate(current, cursor);
-        const earliest = current.reduce((min, p) => {
-            const d = toDate(p.delivery);
-            return d && (!min || d < min) ? d : min;
-        }, null);
-        const late = feas.ok && earliest && feas.completeDate > earliest;
-        const g = mkGroup(
-            current,
-            wasSplit ? 'split' : 'grouped',
-            wasSplit
-                ? 'Same-colour POs were separated because the combined sewing completion date exceeded the earliest PO delivery date.'
-                : null,
-            feas
-        );
-        g.infeasible = !!late;
+    for (const members of dayGroups) {
+        const feas = simulateCompletion({
+            qty : members.reduce((s, p) => s + Number(p.remaining_qty ?? p.qty), 0),
+            smv, manpower : line.manpower, efficiency : line.efficiency,
+            startDate : cursor, calendar
+        });
+        const delivery = toDate(members[0].delivery);
+        const g = mkGroup(members, 'grouped', null, feas);
+        g.infeasible = !!(feas.ok && delivery && feas.completeDate > delivery);
         groups.push(g);
-        if (feas.ok) cursor = new Date(feas.completeDate.getTime() + DAY_MS); // next subgroup starts after
-        current = [];
-    };
-
-    let didSplit = false;
-    for (const p of valid) {
-        const tentative = [...current, p];
-        const feas = simulate(tentative, cursor);
-        const earliest = tentative.reduce((min, x) => {
-            const d = toDate(x.delivery);
-            return d && (!min || d < min) ? d : min;
-        }, null);
-        const misses = feas.ok && earliest && feas.completeDate > earliest;
-        if (misses && current.length) {
-            didSplit = true;
-            flush(true);
-            current = [p];
-        } else {
-            current = tentative;
-        }
-    }
-    flush(didSplit);
-
-    // if never split, single group keeps status 'grouped'
-    if (groups.length === 1 && groups[0].grouping_status === 'split') {
-        groups[0].grouping_status = 'grouped';
-        groups[0].split_reason = null;
-        groups[0].group_key = groupKey;
+        if (feas.ok) cursor = new Date(feas.completeDate.getTime() + DAY_MS);   // the next group starts after
     }
     return groups;
 }

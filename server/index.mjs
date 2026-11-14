@@ -2074,6 +2074,7 @@ app.get(`${BASE}/projected-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
+                  AND o.order_qty > 0
                   AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}
                 ORDER BY shipment_date, order_code
             `, [...units, cutoff]);
@@ -2304,6 +2305,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
                 WHERE o.os_unit_id IN (${ph})
                   AND o.order_status NOT IN ('Closed','Inactive')
+                  AND o.order_qty > 0
                   AND o.odd >= ?${sqlNotIn('o.id', losers.osIds)}
                 ORDER BY shipment_date, order_code
             `, [...units, cutoff]);
@@ -2509,7 +2511,10 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             orderTotals.set(r.order_code, (orderTotals.get(r.order_code) || 0) + Number(r.po_qty || 0));
         }
 
-        // Bucket POs by order_code + colour (stable colour key: name synced from ERP clr_id)
+        // Bucket POs by order_code + colour (stable colour key: name synced from ERP clr_id);
+        // groupAndSplit then makes ONE group per delivery date of the colour —
+        // the POs of one order with the same colour and the same delivery date
+        // are one list row, whether they are planned or not
         const buckets = new Map();
         for (const r of poRows) {
             const key = `${r.order_code}::${r.color || 'NO-COLOR'}`;
@@ -2551,6 +2556,15 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                 const plannedRows  = memberRows.filter(m => m.event_id);
                 const allPlanned   = plannedRows.length === memberRows.length && memberRows.length > 0;
                 const somePlanned  = plannedRows.length > 0;
+                // The group's own share on the lines: a group that is only partly
+                // planned (a PO of the same colour and date that came later is
+                // still in the pool) is listed as ONE row — the list shows it
+                // as still to plan, with this quantity noted as already on a line.
+                // A bar parked on a Holding Row is on the board, not on a line.
+                const isHoldRow    = m => /^holding\s*row/i.test(String(m.resource_name || ''));
+                const lineRows     = plannedRows.filter(m => !isHoldRow(m));
+                const lineNames    = [...new Set(lineRows.map(m => m.resource_name).filter(Boolean))];
+                const groupLine    = lineNames.join(', ') || plannedRows[0]?.resource_name || line?.name || null;
                 // Prefer actual event dates over simulation when POs are already planned
                 const actualStart  = plannedRows.length ? plannedRows.reduce((min, m) => !min || m.start_date < min ? m.start_date : min, null) : null;
                 const actualEnd    = plannedRows.length ? plannedRows.reduce((max, m) => !max || m.end_date > max ? m.end_date : max, null) : null;
@@ -2589,10 +2603,16 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     shipment_date    : g.earliest_delivery,
                     smv              : first.smv,
                     unit_id          : first.unit_id,
-                    planning_status  : allPlanned ? 'fully_planned' : somePlanned ? 'partially_planned' : 'unplanned',
+                    // fully planned = every PO on a line (or every PO parked: the
+                    // list shows that as "holding"); a mix is partly planned
+                    planning_status  : allPlanned && (lineRows.length === memberRows.length || !lineRows.length) ? 'fully_planned'
+                                     : somePlanned ? 'partially_planned' : 'unplanned',
+                    planned_qty     : lineRows.reduce((t, m) => t + (Number(m.po_qty) || 0), 0),
+                    planned_lines    : lineNames.join(', '),
+                    has_holding      : plannedRows.length > lineRows.length,
                     start_date       : plannedStart,
                     end_date         : plannedEnd,
-                    resource_name    : line?.name || null,
+                    resource_name    : groupLine,
                     group_key        : g.group_key,
                     grouping_status  : g.grouping_status,
                     split_reason     : g.split_reason,

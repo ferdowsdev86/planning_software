@@ -27,37 +27,66 @@ test('missing SMV produces validation error, not a result', () => {
     assert.match(r.error, /SMV/);
 });
 
-test('same order+colour feasible POs are grouped; qty summed; earliest delivery kept', () => {
+test('same order + colour + delivery date: the POs are ONE group; qty summed', () => {
     const groups = groupAndSplit({
         orderCode : 'ORD-1001', color : 'BLACK', smv : 20, line : LINE,
-        pos : [po('PO-01', 500, '2026-11-10'), po('PO-02', 700, '2026-11-14')]
+        pos : [po('PO-01', 500, '2026-11-10'), po('PO-02', 700, '2026-11-10'), po('PO-03', 300, '2026-11-10 00:00:00')]
     });
     assert.equal(groups.length, 1);
     assert.equal(groups[0].grouping_status, 'grouped');
-    assert.equal(groups[0].group_quantity, 1200);
+    assert.equal(groups[0].group_quantity, 1500);
     assert.equal(isoDay(groups[0].earliest_delivery), '2026-11-10');
-    assert.deepEqual(groups[0].pos.map(p => p.po_number), ['PO-01', 'PO-02']);
+    assert.equal(groups[0].group_key, 'ORD-1001::BLACK::2026-11-10');
+    assert.deepEqual(groups[0].pos.map(p => p.po_number), ['PO-01', 'PO-02', 'PO-03']);
 });
 
-test('split when combining misses earlier delivery date', () => {
-    // huge second PO would push completion past PO-A delivery of Sep 4
+test('POs of one delivery date are never separated — not even when the line cannot meet the date', () => {
+    // the line is busy until long after the delivery (a colour that is already
+    // planned: its line's plan ends months later) — before, every PO became a
+    // row of its own
+    const busy = { ...LINE, availableFrom : '2027-02-20' };
     const groups = groupAndSplit({
-        orderCode : 'ORD-2', color : 'NAVY', smv : 30, line : LINE,
-        pos : [po('PO-A', 2000, '2026-09-04'), po('PO-B', 90000, '2026-12-20')]
+        orderCode : 'GSL-251176', color : 'CAFE STRIPE', smv : 22.5, line : busy,
+        pos : [
+            po('300137246396', 194, '2026-12-08', { id : 1 }), po('300137244718', 10304, '2026-12-08', { id : 2 }),
+            po('300137237106', 414, '2026-12-08', { id : 3 }), po('300137244750', 1458, '2026-12-08', { id : 4 }),
+            po('300137244737', 249, '2026-12-08', { id : 5 }), po('Liverpool-30000002', 652, '2026-12-15', { id : 6 }),
+            po('300137244725', 1920, '2027-01-05', { id : 7 }), po('300137244727', 858, '2027-02-02', { id : 8 })
+        ]
     });
-    assert.equal(groups.length, 2);
-    assert.equal(groups[0].grouping_status, 'split');
-    assert.match(groups[0].split_reason, /separated because the combined sewing completion date/);
-    assert.deepEqual(groups[0].pos.map(p => p.po_number), ['PO-A']);
-    assert.deepEqual(groups[1].pos.map(p => p.po_number), ['PO-B']);
-    // second subgroup starts after the first completes
-    assert.ok(groups[1].planned_start_at > groups[0].planned_complete_at);
+    assert.deepEqual(groups.map(g => [isoDay(g.earliest_delivery), g.pos.length, g.group_quantity]), [
+        ['2026-12-08', 5, 12619], ['2026-12-15', 1, 652], ['2027-01-05', 1, 1920], ['2027-02-02', 1, 858]
+    ]);
+    assert.ok(groups.every(g => g.infeasible));           // flagged late, not cut apart
+    assert.equal(new Set(groups.map(g => g.group_key)).size, 4);
 });
 
-test('no line -> single provisional group, Pending Line Selection', () => {
+test('another delivery date is another group, with or without a line', () => {
+    const pos = [po('PO-A', 2000, '2026-09-04'), po('PO-B', 900, '2026-12-20'), po('PO-C', 100, '2026-09-04')];
+    const withLine = groupAndSplit({ orderCode : 'ORD-2', color : 'NAVY', smv : 30, line : LINE, pos });
+    assert.equal(withLine.length, 2);
+    assert.ok(withLine.every(g => g.grouping_status === 'grouped' && g.split_reason === null));
+    assert.deepEqual(withLine[0].pos.map(p => p.po_number), ['PO-A', 'PO-C']);
+    assert.deepEqual(withLine[1].pos.map(p => p.po_number), ['PO-B']);
+    // the second group runs after the first on the line
+    assert.ok(withLine[1].planned_start_at > withLine[0].planned_complete_at);
+    const noLine = groupAndSplit({ orderCode : 'ORD-2', color : 'NAVY', smv : 30, line : null, pos });
+    assert.deepEqual(noLine.map(g => g.pos.map(p => p.po_number)), [['PO-A', 'PO-C'], ['PO-B']]);
+    assert.ok(noLine.every(g => g.grouping_status === 'provisional'));
+});
+
+test('one PO number on several rows of the same colour and date stays in the one group (row ids)', () => {
+    const groups = groupAndSplit({
+        orderCode : 'ORD-8', color : 'BEIGE', smv : 20, line : null,
+        pos : [po('P1', 24, '2026-10-01', { id : 11 }), po('P1', 32, '2026-10-01', { id : 12 }), po('P1', 10, null, { id : 13 })]
+    });
+    assert.deepEqual(groups.map(g => [g.group_key, g.group_quantity]), [['ORD-8::BEIGE::2026-10-01', 56], ['ORD-8::BEIGE::no-date', 10]]);
+});
+
+test('no line -> provisional group, Pending Line Selection', () => {
     const groups = groupAndSplit({
         orderCode : 'ORD-3', color : 'RED', smv : 20, line : null,
-        pos : [po('P1', 100, '2026-10-01'), po('P2', 200, '2026-10-05')]
+        pos : [po('P1', 100, '2026-10-01'), po('P2', 200, '2026-10-01')]
     });
     assert.equal(groups.length, 1);
     assert.equal(groups[0].grouping_status, 'provisional');
@@ -109,7 +138,7 @@ test('holiday between start and completion pushes completion date', () => {
 test('rerunning grouping is idempotent (pure function, same output)', () => {
     const input = {
         orderCode : 'ORD-7', color : 'BLACK', smv : 20, line : LINE,
-        pos : [po('P1', 500, '2026-11-10'), po('P2', 700, '2026-11-14')]
+        pos : [po('P1', 500, '2026-11-10'), po('P2', 700, '2026-11-14'), po('P3', 70, '2026-11-10')]
     };
     const a = JSON.stringify(groupAndSplit(input));
     const b = JSON.stringify(groupAndSplit(input));

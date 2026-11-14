@@ -4212,6 +4212,10 @@ function computeSopPlan() {
             return (pa - pb) || (shipOf(a) - shipOf(b));
         });
     const changes = [], skipped = [];
+    // The list has one row per delivery date of a colour; the pool row (the
+    // bar) is the whole colour group — it is planned once, with the first
+    // (earliest) of its list rows
+    const usedSrc = new Set();
     const firstOut = sopFirstOutput.value ? new Date(`${sopFirstOutput.value}T00:00:00`) : nextWorkingDay(new Date());
     const earliest = startOfWorkDay(isOffDay(firstOut) ? nextWorkingDay(firstOut) : firstOut);
     for (const r of rows) {
@@ -4228,6 +4232,13 @@ function computeSopPlan() {
         }
         const { src, err } = resolveCarrySource(r);
         if (err) { skipped.push({ order, po : r.po, reason : err }); continue; }
+        if (src?.id != null) {
+            if (usedSrc.has(String(src.id))) {
+                skipped.push({ order, po : r.po, reason : 'same colour group as an earlier row — planned with it' });
+                continue;
+            }
+            usedSrc.add(String(src.id));
+        }
         // No SMV → SOP §3 unconfirmed rule (10-day default run), never a guess
         const raw = {
             ...src,
@@ -7024,8 +7035,12 @@ const plannedConfQtyByOrder = computed(() => {
     const m = new Map();
     for (const r of erpAllOrders.value) {
         if (r.orderType !== 'confirm' || !r.mbmOrder) continue;
-        if (!(r.planned || r.status === 'planned')) continue;
-        m.set(r.mbmOrder, (m.get(r.mbmOrder) || 0) + (Number(r.qty) || 0));
+        const q = Number(r.qty) || 0;
+        // a partly planned group counts with its share on a line
+        const on = (r.planned || r.status === 'planned') ? q
+            : (r.status === 'unplanned' || r.status === 'holding') ? Math.min(q, Number(r.onBoardQty) || 0) : 0;
+        if (!on) continue;
+        m.set(r.mbmOrder, (m.get(r.mbmOrder) || 0) + on);
     }
     return m;
 });
@@ -7058,7 +7073,12 @@ const ordersSummary = computed(() => {
             else {
                 poQty += q;
                 if (isPlanned(r)) confPlanned += q;
-                else if (r.status === 'unplanned' || r.status === 'holding') confUnplanned += q;
+                else if (r.status === 'unplanned' || r.status === 'holding') {
+                    // a partly planned group: its share on a line is planned qty
+                    const on = Math.min(q, Number(r.onBoardQty) || 0);
+                    confPlanned   += on;
+                    confUnplanned += q - on;
+                }
             }
         }
         else {
@@ -14328,7 +14348,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     </td>
                                 </tr>
                                 <tr v-for="pd in (expandedGroups.has(row.id) ? row.poDetails : [])"
-                                    :key="row.id + '::' + pd.po" class="od-subrow"
+                                    :key="row.id + '::' + (pd.id ?? pd.po)" class="od-subrow"
                                 >
                                     <td :colspan="ORDER_COLS.indexOf('po')"></td>
                                     <td class="st-user">↳ {{ pd.po }}</td>
