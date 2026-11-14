@@ -3323,7 +3323,7 @@ function openPullForward() {
     pfPrev.value = null;
     const s = getInstance();
     pfLineList.value = (s?.resourceStore.records || [])
-        .filter(r => r.data?.lineRow || LINE_BY_ID[r.id])
+        .filter(r => r.data?.lineRow || LINE_BY_ID[r.id] || isHoldingRes(r))
         .map(r => ({ id : r.id, name : r.data?.name || r.name || r.id }));
     // Defaults every time the dialog opens: Entire plan · All lines · Move
     // to mouse position ticked
@@ -4311,22 +4311,42 @@ function pfIsFixed(ev, raw) {
     return raw.status === 'completed';
 }
 
+// name of the line the dialog is set to
+function pfLineName(id = pfLine.value) {
+    const r = getInstance()?.resourceStore?.getById?.(id);
+    return pfLineList.value.find(l => l.id === id)?.name || r?.data?.name || r?.name || id;
+}
+
+// The dialog's date range (Specify date range) as dates, or null (Entire plan).
+// It says WHICH bars a pull may move — the bars that START inside it — in
+// both modes: applied at once, and with Move to mouse position.
+function pfDialogRange() {
+    if (pfScope.value !== 'range' || !pfFrom.value || !pfTo.value) return null;
+    return { from : new Date(`${pfFrom.value}T00:00:00`), to : new Date(`${pfTo.value}T23:59:59`) };
+}
+
 // opts (Move to mouse position): { line, from, anchorStart } — only that
 // line, bars starting before `from` are anchors, the first bar at/after it
-// is pulled up to `anchorStart` (the clicked point), the rest follow flush
+// is pulled up to `anchorStart` (the clicked point), the rest follow flush.
+// The dialog's date range still holds: a bar that starts after its To date
+// (or before its From date) is never moved, whatever was clicked.
 function computePullForward(opts = {}) {
     const s = getInstance();
     if (!s) return null;
     const lineSel   = opts.line ?? pfLine.value;
-    const rangeFrom = opts.from ? new Date(opts.from) : (pfScope.value === 'range' ? new Date(`${pfFrom.value}T00:00:00`) : null);
-    const rangeTo   = opts.from ? null : (pfScope.value === 'range' ? new Date(`${pfTo.value}T23:59:59`) : null);
+    const dlg       = pfDialogRange();
+    const click     = opts.from ? new Date(opts.from) : null;
+    const rangeFrom = click ? (dlg && dlg.from > click ? dlg.from : click) : (dlg ? dlg.from : null);
+    const rangeTo   = dlg ? dlg.to : null;
     const anchorStart = opts.anchorStart ? new Date(opts.anchorStart) : null;
     const inRange   = d => !rangeFrom || (d >= rangeFrom && (!rangeTo || d <= rangeTo));
     const changes = [];
     let unchanged = 0, skipped = 0;
     const pfIndex = buildLineIndex(s);
     for (const res of s.resourceStore.records) {
-        if (!res.data?.lineRow && !LINE_BY_ID[res.id]) continue;
+        // The Holding Row joins pull forward too: parked bars compact the
+        // same way (first bar anchors, later ones pull up to the gap)
+        if (!res.data?.lineRow && !LINE_BY_ID[res.id] && !isHoldingRes(res)) continue;
         // Line scope: one chosen line, or every line
         if (lineSel !== 'all' && res.id !== lineSel) continue;
         const bars = s.eventStore.records
@@ -4401,7 +4421,7 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
     if (!plan && pfMouse.value) { pfStartPick(); return; }
     const p = plan || pfPrev.value || computePullForward();
     if (!p || !p.changes.length) {
-        toast(mouse ? `Nothing to pull on ${mouse.lineName} after ${fmtDate(mouse.date)}` : 'No gaps to remove — nothing moved', 'ok');
+        toast(mouse ? `Nothing to pull on ${mouse.lineName} after ${fmtDate(mouse.date)}${pfScope.value === 'range' ? ` (bars starting up to ${fmtDate(new Date(`${pfTo.value}T00:00:00`))} only)` : ''}` : 'No gaps to remove — nothing moved', 'ok');
         return;
     }
     // Pick mode (mouse): no question per click — the planner pulls line
@@ -4440,10 +4460,10 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
         line : c.lineName, order : c.order,
         oldStart : c.oldStart.toISOString(), newStart : c.newStart.toISOString(),
         oldEnd : c.oldEnd.toISOString(), newEnd : c.newEnd.toISOString(),
-        scope : mouse ? 'mouse' : pfScope.value,
-        lineScope : mouse ? mouse.lineName : (pfLine.value === 'all' ? 'all lines' : (pfLineList.value.find(l => l.id === pfLine.value)?.name || pfLine.value)),
+        scope : mouse ? (pfScope.value === 'range' ? 'mouse+range' : 'mouse') : pfScope.value,
+        lineScope : mouse ? mouse.lineName : (pfLine.value === 'all' ? 'all lines' : (pfLineName())),
         from : mouse ? mouse.date.toISOString() : (pfScope.value === 'range' ? pfFrom.value : null),
-        to   : mouse ? null : (pfScope.value === 'range' ? pfTo.value : null),
+        to   : pfScope.value === 'range' ? pfTo.value : null,
         user : authUser.value?.username, at : new Date().toISOString()
     })));
     recalcCapacity(s);
@@ -4494,7 +4514,13 @@ function pfStartPick() {
     pfPulls.bars = 0;
     pfPulls.lines.clear();
     document.body.classList.add('mb-pf-pick');
-    toast('Pull forward: click a point on a line — every bar after it on that line moves up to there. Repeat on other lines; the ⇤ button or Esc finishes', 'ok');
+    // what the dialog limited the pull to stays in force while picking
+    const dlg  = pfDialogRange();
+    const only = [
+        dlg ? `only bars that start ${fmtDate(dlg.from)} – ${fmtDate(dlg.to)} move` : '',
+        pfLine.value !== 'all' ? `only on ${pfLineName()}` : ''
+    ].filter(Boolean).join(', ');
+    toast(`Pull forward: click a point on a line — ${only ? `the bars after it move up to there (${only})` : 'every bar after it on that line moves up to there'}. ${pfLine.value === 'all' ? 'Repeat on other lines; the' : 'The'} ⇤ button or Esc finishes`, 'ok');
 }
 function pfStopPick() {
     pfPickActive.value = false;
@@ -4532,11 +4558,22 @@ function pfPickAt({ resource = null, date = null, domEvent = null } = {}) {
         }
         catch { /* outside the axis */ }
     }
-    if (!res || !(res.data?.lineRow || LINE_BY_ID[res.id]) || !d) {
-        toast('Click inside a sewing line row (not the Holding Row / header)', 'warn');
+    if (!res || !(res.data?.lineRow || LINE_BY_ID[res.id] || isHoldingRes(res)) || !d) {
+        toast('Click inside a sewing line or Holding Row (not the header/subtotal)', 'warn');
         return;
     }
     const lineName = res.data?.name || res.name || res.id;
+    // the dialog chose ONE line: a click on another line pulls nothing
+    if (pfLine.value !== 'all' && res.id !== pfLine.value) {
+        toast(`Pull forward is set to ${pfLineName()} only — click on that line (or reopen the dialog and choose All lines)`, 'warn');
+        return;
+    }
+    // … and a date range: the point to pull to lies inside it
+    const dlg = pfDialogRange();
+    if (dlg && (new Date(d) < dlg.from || new Date(d) > dlg.to)) {
+        toast(`Pull forward is set to ${fmtDate(dlg.from)} – ${fmtDate(dlg.to)} — click a point inside those dates`, 'warn');
+        return;
+    }
     const plan = computePullForward({ line : res.id, from : d, anchorStart : d });
     applyPullForward(plan, { mouse : { lineId : res.id, lineName, date : new Date(d) } });
 }
@@ -16652,7 +16689,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label class="pf-radio"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
                             <label class="pf-radio"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
                             <label class="pf-radio pf-mouse"><input type="checkbox" v-model="pfMouse"> Move to mouse position</label>
-                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → cursor হবে ⇤ icon, toolbar-এর ⇤ button lit থাকবে · board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে — একাধিক line-এ পরপর করা যায়, প্রতিবার কোনো confirmation নয় · শেষে ⇤ button আবার click বা Esc → একবার save confirmation</div>
+                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → cursor হবে ⇤ icon, toolbar-এর ⇤ button lit থাকবে · board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে — একাধিক line-এ পরপর করা যায়, প্রতিবার কোনো confirmation নয় · শেষে ⇤ button আবার click বা Esc → একবার save confirmation <b v-if="pfScope === 'range'">· Date range বাছাই করা আছে: শুধু From–To-র ভিতরে শুরু হওয়া bar সরবে, To-র পরের bar নড়বে না; click-ও এই তারিখের ভিতরে করতে হবে</b> <b v-if="pfLine !== 'all'">· Line বাছাই করা আছে: শুধু ওই line-এ click কাজ করবে</b></div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Selected dates</legend>
