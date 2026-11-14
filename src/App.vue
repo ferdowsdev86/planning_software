@@ -3518,20 +3518,25 @@ function apClearLockGuard(s) {
 // / order code → 'hold:<reason>' | 'nospace' | 'issue:<text>'
 const apPlanNotes = shallowRef({ rows : new Map(), orders : new Map(), at : null });
 const apBusy        = ref(false);
+// Apply the 10-day lock (default). Unticked = the FIRST full run: every bar
+// without production is planned again by all the rules (nothing frozen,
+// nothing held for the lock); the lock applies from the next run on.
+const apApplyLock   = ref(true);
 const apStats       = computed(() => {
     const s = getInstance();
     const lock = apLockWindow();
     if (!s || !apOpen.value) return { bars : 0, keep : 0, blank : 0, locked : 0, past : 0, lock };
     let bars = 0, keep = 0, lockedN = 0, pastN = 0;
     const statIndex = buildLineIndex(s);
+    const useLock = apApplyLock.value;
     for (const ev of s.eventStore.records) {
         const r = ev.data?.raw;
         if (!r || r.stage) continue;
         bars++;
         const lid = lineIdOf(s, ev, statIndex);
         const onLine = lid && !isHoldId(lid);
-        const locked = onLine && overlapsLock(ev.startDate, ev.endDate, lock);
-        const past = onLine && !locked && ev.endDate <= lock.from;       // ended before today: history, stays
+        const locked = useLock && onLine && overlapsLock(ev.startDate, ev.endDate, lock);
+        const past = useLock && onLine && !locked && ev.endDate <= lock.from;       // ended before today: history, stays
         if (locked) lockedN++;
         if (past) pastN++;
         if (locked || past || r.status === 'completed' || (apKeepStarted.value && Number(r.made) > 0)) keep++;
@@ -3766,17 +3771,21 @@ async function runAutoPlanAvail() {
     const to = apTo.value ? new Date(`${apTo.value}T00:00:00`) : null;
     if (to && (Number.isNaN(+to) || to < from)) { toast('Delivery-to date must not be before the from date', 'warn'); return; }
     const st = apStats.value;
-    const lock = apLockWindow();
+    // lock off (first full run): nothing is frozen, the search starts today
+    const lock = apApplyLock.value ? apLockWindow() : null;
+    const firstEditable = lock ? lock.firstEditable : boardToday();
     const horizonEnd = apHorizonEnd();
-    if (!horizonEnd || horizonEnd <= lock.firstEditable) { toast('The planning horizon must be after the first editable day', 'warn'); return; }
+    if (!horizonEnd || horizonEnd <= firstEditable) { toast('The planning horizon must be after the first editable day', 'warn'); return; }
     const ok = window.confirm(`Auto plan ${currentBoard.value.unitName} board from the available orders?\n\n`
-        + `• 10-DAY LOCK ${fmtDate(lock.from)} → ${fmtDate(lock.lastLocked)}: the ${st.locked} bar(s) that overlap it stay exactly as they are (line, dates, quantity); the first editable day is ${fmtDate(lock.firstEditable)}\n`
-        + `• ${st.blank} bar(s) that start on / after ${fmtDate(lock.firstEditable)} leave the board and are planned again${st.keep - st.locked > 0 ? ` (${st.keep - st.locked} more stay: ended before today, completed or production started)` : ''}\n`
+        + (lock
+            ? `• 10-DAY LOCK ${fmtDate(lock.from)} → ${fmtDate(lock.lastLocked)}: the ${st.locked} bar(s) that overlap it stay exactly as they are (line, dates, quantity); the first editable day is ${fmtDate(lock.firstEditable)}\n`
+              + `• ${st.blank} bar(s) that start on / after ${fmtDate(lock.firstEditable)} leave the board and are planned again${st.keep - st.locked > 0 ? ` (${st.keep - st.locked} more stay: ended before today, completed or production started)` : ''}\n`
+            : `• FIRST FULL RUN — 10-day lock OFF: every bar without production leaves the board and is planned again by all the rules from ${fmtDate(firstEditable)} (${st.keep} stay: completed or production started); apply the lock from the next run on\n`)
         + `• only the REMAINING sewing quantity is planned: PO qty − actual sewing output (ERP daily production) − what the staying bars still have to make\n`
         + `• every available order with delivery ${to ? `${fmtDate(from)} → ${fmtDate(to)}` : `on / after ${fmtDate(from)}`} — efficiency profile line × product first, highest output line when several meet the date\n`
         + `• earliest sewing start = PCD + ${AP_SEW_START_AFTER_PCD} calendar days — never earlier (no pull, no gap fill, no split piece before it)\n`
         + `• target sewing end = delivery − ${AP_FINISH_BUFFER_DAYS} calendar days: an order that cannot make it is planned in its earliest slot and shown as a late plan (yellow)\n`
-        + `• a new order whose earliest sewing start falls inside the lock stays in Holding ("${AP_HOLD_LOCK}") — no line, no bar\n`
+        + (lock ? `• a new order whose earliest sewing start falls inside the lock stays in Holding ("${AP_HOLD_LOCK}") — no line, no bar\n` : '')
         + `• planning horizon ${fmtDate(horizonEnd)}: an order with no line slot before it stays unplanned — "${AP_NO_SPACE}"\n\n`
         + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
     if (!ok) return;
@@ -3801,9 +3810,9 @@ async function runAutoPlanAvail() {
         // is searched from there). A row that never had a bar and whose
         // earliest sewing start falls INSIDE the lock is held, not planned.
         const runOpts = { mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), shipBefore : to, pcdFrom : null,
-            profileFirst : true, strictDelivery : true, sewStartRule : 'pcd+8', earliestStart : lock.firstEditable,
+            profileFirst : true, strictDelivery : true, sewStartRule : 'pcd+8', earliestStart : firstEditable,
             latestFinishOf : apLatestFinishOf, splitAcrossLines : true, horizonEnd,
-            holdOf : u => (u.fromBoard ? null : apHoldReasonOf(u, lock)) };
+            holdOf : lock ? (u => (u.fromBoard ? null : apHoldReasonOf(u, lock))) : (() => null) };
         const infeasible = new Map();   // order id → the last reason it could not be placed
         const noteUnplaced = rr => { for (const u of rr?.unplaced || []) infeasible.set(String(u.order?.id), u); };
         const notePlaced = rr => { for (const p of rr?.placed || []) infeasible.delete(String(p)); };
@@ -3813,7 +3822,7 @@ async function runAutoPlanAvail() {
         // ended up past its delivery − 7 days — then a SECOND planning pass
         // offers the dropped / still-unplanned orders the line time that the
         // settle freed (appended after each line's last bar), settled again
-        const floor = new Date(lock.firstEditable);
+        const floor = new Date(firstEditable);
         // bars the settle pushed past the planning horizon and took off again
         const horizonDrops = new Map();
         let dropped = settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops });
@@ -16637,9 +16646,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Board</legend>
-                            <div class="pf-line-hint"><b>10-day lock {{ fmtDate(apStats.lock.from) }} → {{ fmtDate(apStats.lock.lastLocked) }}</b> (board date, Asia/Dhaka): the <b>{{ apStats.locked }}</b> bar(s) that overlap it stay exactly as they are — line, dates, quantity. First editable day: <b>{{ fmtDate(apStats.lock.firstEditable) }}</b></div>
+                            <label class="pf-radio pf-mouse"><input type="checkbox" v-model="apApplyLock"> Apply the 10-day lock</label>
+                            <div v-if="apApplyLock" class="pf-line-hint"><b>10-day lock {{ fmtDate(apStats.lock.from) }} → {{ fmtDate(apStats.lock.lastLocked) }}</b> (board date, Asia/Dhaka): the <b>{{ apStats.locked }}</b> bar(s) that overlap it stay exactly as they are — line, dates, quantity. First editable day: <b>{{ fmtDate(apStats.lock.firstEditable) }}</b></div>
+                            <div v-else class="pf-line-hint"><b>First full run — lock OFF:</b> every bar without production leaves the board and is planned again by all the rules from today; nothing is frozen or held for the lock. Tick the lock again for the runs after this one.</div>
                             <label class="pf-radio pf-mouse" style="margin-top:8px"><input type="checkbox" v-model="apKeepStarted"> Keep bars with production already reported</label>
-                            <div class="pf-line-hint">Bars on the board now: <b>{{ apStats.bars }}</b> · leave and are planned again: <b>{{ apStats.blank }}</b> · stay: <b>{{ apStats.keep }}</b> (locked {{ apStats.locked }} + ended before today {{ apStats.past }} + completed{{ apKeepStarted ? ' + production started' : '' }})</div>
+                            <div class="pf-line-hint">Bars on the board now: <b>{{ apStats.bars }}</b> · leave and are planned again: <b>{{ apStats.blank }}</b> · stay: <b>{{ apStats.keep }}</b> ({{ apApplyLock ? `locked ${apStats.locked} + ended before today ${apStats.past} + ` : '' }}completed{{ apKeepStarted ? ' + production started' : '' }})</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Rules</legend>
