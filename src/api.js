@@ -1409,7 +1409,7 @@ export async function pingApi(timeoutMs = 10000) {
     catch { return await get('/health', timeoutMs); }
 }
 
-export async function syncToApi(scheduler, { eventIds = null, unitId = null, planLock = null } = {}) {
+export async function syncToApi(scheduler, { eventIds = null, unitId = null, planLock = null, by = null } = {}) {
     const updated = [];
     const added   = [];
     // a What-if copy on screen: the WHOLE board goes into the copy (its own
@@ -1525,6 +1525,8 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null, pla
             // rewritten or cancelled by this save (the server drops any
             // change to them)
             planLock  : Array.isArray(planLock) && planLock.length ? planLock : undefined,
+            // who saves — named in the bar history (tooltip → Notes)
+            by        : by || undefined,
             events    : { updated, added, removed }
         })
     });

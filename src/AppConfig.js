@@ -1883,8 +1883,74 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     return { ok : true, errors, warnings };
 }
 
+// ---------------------------------------------------------------------------
+// Bar history (tooltip → Notes tab, FastReact's Notes window): everything that
+// happened to the bar, oldest first — its PO as it came from the ERP, every
+// saved change (line, dates, quantity, removed / planned again), production,
+// the planners' notes, today's sewing output. Read from GET /bar-history when
+// the tab is opened; kept for a minute so switching tabs does not ask again.
+// ---------------------------------------------------------------------------
+const barHistCache = new Map();          // 'id,id' → { at, bars } | { at, error }
+const BAR_HIST_TTL = 60000;
+// DB event ids of the bar under the tooltip (every bar of a consolidated order)
+export function barHistoryIds(e) {
+    const idOf = rec => {
+        if (!rec) return null;
+        const v = rec.get?.('dbId') ?? rec.data?.dbId;
+        if (Number(v) > 0) return Number(v);
+        const sid = String(rec.id ?? '');
+        return /^db-\d+$/.test(sid) ? Number(sid.slice(3)) : null;
+    };
+    const cg = uiHooks.consol?.get(String(e.id));
+    const recs = cg?.head && Array.isArray(cg.members)
+        ? cg.members.map(m => uiHooks.instance?.eventStore?.getById(m.id)).filter(Boolean)
+        : [e];
+    return [...new Set(recs.map(idOf).filter(Boolean))];
+}
+const HIST_ICON = { import : '📥', create : '➕', plan : '✏️', remove : '✖', prod : '🧵', note : '📝', erp : '📊' };
+export function renderBarHistory(entry) {
+    const enc = v => StringHelper.encodeHtml(String(v ?? ''));
+    if (!entry) return '<div class="t4-empty">Loading the bar\'s history…</div>';
+    if (entry.error) return `<div class="t4-empty">History could not be loaded — ${enc(entry.error)}</div>`;
+    const bars = entry.bars || [];
+    if (!bars.length) return '<div class="t4-empty">No history on record for this bar.</div>';
+    const fmt = d => {                       // 'YYYY-MM-DD HH:MM' → 'YYYY-MM-DD' + time in the title
+        const m = /^(\d{4}-\d\d-\d\d)(?: (\d\d:\d\d))?/.exec(String(d || ''));
+        return m ? `<span title="${enc(m[2] || '')}">${enc(m[1])}</span><span class="t4-hist-time">${enc(m[2] || '')}</span>` : '—';
+    };
+    return bars.map(b => `
+      ${bars.length > 1 ? `<div class="t4-hist-bar">Bar ${enc(b.po || b.code || b.id)}${b.status === 'cancelled' ? ' · removed' : ''}</div>` : ''}
+      <table class="tip4-po-tbl t4-hist-tbl">
+        <tbody>
+          ${(b.rows || []).map(r => `<tr class="t4-hist-${enc(r.kind)}"><td class="t4-hist-date">${fmt(r.date)}</td><td class="t4-hist-by">${enc(r.by || '#')}</td><td class="t4-hist-txt"><span class="t4-hist-ico">${HIST_ICON[r.kind] || '•'}</span>${enc(r.text)}</td></tr>`).join('')
+            || '<tr><td colspan="3" class="t4-empty">Nothing on record.</td></tr>'}
+        </tbody>
+      </table>`).join('');
+}
+function loadBarHistory(root) {
+    const panel = root?.querySelector?.('.tip4-panel[data-panel="notes"]');
+    const body  = panel?.querySelector('.t4-hist-body');
+    const ids   = panel?.dataset.histIds || '';
+    if (!body || !ids) return;
+    const hit = barHistCache.get(ids);
+    if (hit && Date.now() - hit.at < BAR_HIST_TTL) { body.innerHTML = renderBarHistory(hit); return; }
+    if (tipOffline()) { body.innerHTML = renderBarHistory({ error : 'the planning API is not reachable' }); return; }
+    body.innerHTML = renderBarHistory(null);
+    fetch(`${tipApiBase()}/bar-history?ids=${encodeURIComponent(ids)}`)
+        .then(res => res.json())
+        .then(j => {
+            const entry = j?.success ? { at : Date.now(), bars : j.bars || [] } : { at : Date.now(), error : j?.error || 'no answer' };
+            barHistCache.set(ids, entry);
+            // the tooltip may have been re-rendered meanwhile: fill whichever panel shows these ids now
+            document.querySelectorAll(`.mb-tip4 .tip4-panel[data-panel="notes"][data-hist-ids="${ids}"] .t4-hist-body`).forEach(el => { el.innerHTML = renderBarHistory(entry); });
+        })
+        .catch(e => {
+            document.querySelectorAll(`.mb-tip4 .tip4-panel[data-panel="notes"][data-hist-ids="${ids}"] .t4-hist-body`).forEach(el => { el.innerHTML = renderBarHistory({ error : e.message }); });
+        });
+}
+
 // Bar tooltip tabs (Info / Purchase Orders / Learning Curve / SOP / Raw
-// Material): one delegated click handler for every tooltip instance
+// Material / Notes): one delegated click handler for every tooltip instance
 let tip4TabsInstalled = false;
 function installTip4Tabs() {
     if (tip4TabsInstalled) return;
@@ -1898,6 +1964,8 @@ function installTip4Tabs() {
         const key  = btn.dataset.tab;
         root.querySelectorAll('.tip4-tab').forEach(b => b.classList.toggle('tip4-tab-on', b === btn));
         root.querySelectorAll('.tip4-panel').forEach(p => p.classList.toggle('tip4-panel-on', p.dataset.panel === key));
+        // the bar's history is asked for when its tab is opened, not on every hover
+        if (key === 'notes') loadBarHistory(root);
     }, true);
 }
 
@@ -2897,10 +2965,14 @@ function refreshTip4(e, r, data) {
         const root2 = tip.element?.querySelector?.('.mb-tip4');
         root2?.querySelectorAll('.tip4-tab').forEach(b => b.classList.toggle('tip4-tab-on', b.dataset.tab === tab));
         root2?.querySelectorAll('.tip4-panel').forEach(pn => pn.classList.toggle('tip4-panel-on', pn.dataset.panel === tab));
+        if (tab === 'notes') loadBarHistory(root2);
     }
 }
 
 function renderTip4(e, r, { detail, poSummary, pending = false }) {
+    // Notes tab: the DB bars behind this tooltip; a history read a moment ago is shown at once
+    const histIds = barHistoryIds(e);
+    const histHit = (h => (h && Date.now() - h.at < BAR_HIST_TTL ? h : null))(barHistCache.get(histIds.join(',')));
             const enc  = StringHelper.encodeHtml;
             const ymd  = d => {
                 if (!d) return '';
@@ -3033,6 +3105,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
     <button type="button" class="tip4-tab" data-tab="lc" title="Learning curve">📈 Curve</button>
     <button type="button" class="tip4-tab" data-tab="sop" title="SOP timeline">📐 SOP</button>
     <button type="button" class="tip4-tab" data-tab="rm" title="Raw material">🧵 Material</button>
+    <button type="button" class="tip4-tab" data-tab="notes" title="Notes — the bar's history: ERP import, every saved change, production, planners' notes">🗒 Notes</button>
   </div>
 
   <div class="tip4-panel tip4-panel-on" data-panel="info">
@@ -3223,6 +3296,13 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       </div>
     </div>
   </div>
+  </div>
+
+  <!-- Notes: the bar's history (asked for when the tab is opened) -->
+  <div class="tip4-panel" data-panel="notes" data-hist-ids="${histIds.join(',')}">
+    <div class="t4-hist-body">${histIds.length
+        ? renderBarHistory(histHit)
+        : '<div class="t4-empty">This bar is not saved yet — its history starts with the first Save.</div>'}</div>
   </div>
 
 </div>`;

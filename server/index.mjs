@@ -11,6 +11,7 @@ import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
 import { reconcileSewingOutput, sewKeyOfRow, sewingOutputSql } from './sewingOutput.mjs';
+import { buildBarHistory } from './barHistory.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
 import { simulateAllocation, pickCurve } from './planAllocation.mjs';
 import { buildCalendar, simulateBar, prevRunKey } from './prodDayBars.mjs';
@@ -280,6 +281,73 @@ async function attachGroupTotals(events) {
         e.group_issue = issues.length ? issues.slice(0, 3).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '') : null;
     }
 }
+
+// Bar history (tooltip → Notes tab): what happened to a bar, oldest first —
+// its PO rows as they came from the ERP, every saved change (planning_change_logs),
+// the production entered on it, the planners' notes and today's sewing output.
+// Read only; several ids = the bars of a consolidated order.
+app.get(`${BASE}/bar-history`, async (req, res) => {
+    try {
+        const ids = [...new Set(String(req.query.ids || '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 12);
+        if (!ids.length) return res.json({ success : true, bars : [] });
+        const ph = ids.map(() => '?').join(',');
+        const [[events], [logs], [prod], [resources], [[clock]]] = await Promise.all([
+            pool.query(`SELECT id, event_code, planning_order_id, notes, created_at, event_status FROM planning_events WHERE id IN (${ph})`, ids),
+            pool.query(`SELECT event_id, action_type, old_data, new_data, reason, changed_at FROM planning_change_logs WHERE event_id IN (${ph}) ORDER BY id`, ids),
+            pool.query(`SELECT event_id, save_date, prod_qty AS qty, line, created_at FROM day_production_update_plan WHERE event_id IN (${ph})`, ids),
+            pool.query('SELECT id, resource_name FROM planning_resources'),
+            pool.query('SELECT NOW() AS now')
+        ]);
+        const lineName = id => resources.find(r => Number(r.id) === Number(id))?.resource_name || null;
+        // the PO rows of every bar: its anchor row + the rows of its colour group
+        const rowIdsOf = e => {
+            let n = {};
+            try { n = JSON.parse(e.notes || '{}') || {}; } catch { /* no notes */ }
+            return [...new Set([e.planning_order_id, ...(Array.isArray(n.idList) ? n.idList : [])].map(Number).filter(v => v > 0))];
+        };
+        const allRowIds = [...new Set(events.flatMap(rowIdsOf))];
+        const ORDER_COLS = 'id, erp_po_id, po_number, order_code, buyer_name, style_no, product_category, color, order_quantity, smv, pcd, shipment_date, created_at, prod_unit, unit_id';
+        const [orderRows] = allRowIds.length
+            ? await pool.query(`SELECT ${ORDER_COLS} FROM planning_orders WHERE id IN (${allRowIds.map(() => '?').join(',')})`, allRowIds)
+            : [[]];
+        // a projection bar (ev-proj:<order>) has no PO row: its projection row
+        const projCodes = [...new Set(events.filter(e => !e.planning_order_id && String(e.event_code || '').startsWith('ev-proj:'))
+            .map(e => String(e.event_code).slice(8).replace(/-\d{1,2}$/, '')))];
+        const [projRows] = projCodes.length
+            ? await pool.query(`SELECT ${ORDER_COLS} FROM planning_orders WHERE erp_po_id LIKE 'proj-%' AND order_code IN (${projCodes.map(() => '?').join(',')})`, projCodes)
+            : [[]];
+        const pos = [...new Set(orderRows.map(o => o.po_number).filter(Boolean))];
+        const [noteRows] = await pool.query(
+            `SELECT po, order_code, event_id, note, created_by, created_at FROM planning_strip_notes
+              WHERE deleted_at IS NULL AND (event_id IN (${ph})${pos.length ? ` OR po IN (${pos.map(() => '?').join(',')})` : ''})
+              ORDER BY id`, [...ids, ...pos]);
+        let sew = new Map();
+        try { sew = await sewingOutputForRows(orderRows); } catch { /* ERP unreachable: no output row */ }
+        const bars = events.map(e => {
+            const rowIds = new Set(rowIdsOf(e));
+            let orders = orderRows.filter(o => rowIds.has(Number(o.id)));
+            if (!orders.length && !e.planning_order_id) {
+                const code = String(e.event_code || '').slice(8).replace(/-\d{1,2}$/, '');
+                orders = projRows.filter(o => o.order_code === code);
+            }
+            const myPos = new Set(orders.map(o => o.po_number).filter(Boolean));
+            const sewn = orders.reduce((a, o) => { const so = sew.get(o.id); return so ? { qty : a.qty + so.sewn, of : a.of + (Number(o.order_quantity) || 0) } : a; }, { qty : 0, of : 0 });
+            return {
+                id : e.id, code : e.event_code, status : e.event_status,
+                po : [...myPos].slice(0, 3).join(', ') || null,
+                rows : buildBarHistory({
+                    event : e, orders, lineName,
+                    logs : logs.filter(l => Number(l.event_id) === Number(e.id)),
+                    production : prod.filter(p => Number(p.event_id) === Number(e.id)),
+                    notes : noteRows.filter(n => Number(n.event_id) === Number(e.id) || (n.po && myPos.has(n.po))),
+                    sewn : sewn.qty > 0 ? sewn : null, now : clock.now
+                })
+            };
+        });
+        res.json({ success : true, bars });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
 
 app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
     try {
@@ -859,6 +927,10 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     // 10-day plan lock (Auto Plan): the bars the run had to preserve. This
     // save never rewrites or cancels them — whatever the client sends for
     // them is dropped, so their line, dates and quantity stay as saved.
+    // who saves (the planner's user name) — kept with every change-log row of
+    // this save, so the bar history (tooltip → Notes) can name the user
+    const savedBy = String(req.body?.by || '').trim().slice(0, 60) || null;
+    const logData = ev => JSON.stringify(savedBy ? { ...ev, _by : savedBy } : ev);
     const planLock = new Set((Array.isArray(req.body?.planLock) ? req.body.planLock : []).map(String));
     let lockedSkipped = 0;
     if (planLock.size) {
@@ -949,7 +1021,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
             await conn.query(
                 `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, new_data, changed_by, changed_at, ip_address)
                  VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)`,
-                [projectId, eventId, action, JSON.stringify(oldRows[0] || {}), JSON.stringify(ev), req.ip]
+                [projectId, eventId, action, JSON.stringify(oldRows[0] || {}), logData(ev), req.ip]
             );
         }
 
@@ -964,7 +1036,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
             await conn.query(
                 `INSERT INTO planning_change_logs (project_id, event_id, action_type, new_data, changed_by, changed_at, ip_address)
                  VALUES (?, ?, ?, ?, 1, NOW(), ?)`,
-                [projectId, eventId, action, JSON.stringify(ev), req.ip]
+                [projectId, eventId, action, logData(ev), req.ip]
             );
         }
 
@@ -986,9 +1058,9 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
                 await releaseOrderRows(conn, [gone.planning_order_id, ...(Array.isArray(ng.idList) ? ng.idList : [])]);
             }
             await conn.query(
-                `INSERT INTO planning_change_logs (project_id, event_id, action_type, changed_by, changed_at, ip_address)
-                 VALUES (?, ?, 'remove', 1, NOW(), ?)`,
-                [projectId, ev.id, req.ip]
+                `INSERT INTO planning_change_logs (project_id, event_id, action_type, new_data, changed_by, changed_at, ip_address)
+                 VALUES (?, ?, 'remove', ?, 1, NOW(), ?)`,
+                [projectId, ev.id, savedBy ? JSON.stringify({ _by : savedBy }) : null, req.ip]
             );
         }
 

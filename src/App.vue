@@ -7691,7 +7691,7 @@ async function removeFinishedStrips(s, pieces, note) {
     s.eventStore.remove(pieces);
     s.features?.eventTooltip?.hide?.();
     s.refreshRows?.();
-    try { await syncToApi(s, { eventIds : [], unitId : currentUnitId.value }); } catch (e) { toast(`Finished strip removal not saved: ${e.message}`, 'warn'); }
+    try { await syncToApi(s, { eventIds : [], unitId : currentUnitId.value, by : authUser.value?.username }); } catch (e) { toast(`Finished strip removal not saved: ${e.message}`, 'warn'); }
     if (boardDbState) for (const ev of pieces) delete boardDbState[String(ev.id)];
     setBoardBaseline(s);
     recalcCapacity(s);
@@ -7757,7 +7757,7 @@ async function completeOrders(codes) {
                 s.refreshRows?.();
             }
             // Persist the removals (cancels the events server-side)
-            await syncToApi(s, { eventIds : [], unitId : currentUnitId.value });
+            await syncToApi(s, { eventIds : [], unitId : currentUnitId.value, by : authUser.value?.username });
             if (boardDbState) for (const ev of drop) delete boardDbState[String(ev.id)];
             setBoardBaseline(s);
             recalcCapacity(s);
@@ -12155,7 +12155,7 @@ async function applyEqualOrder() {
     markBoardDirty();
     touchBoardCache(s);
     try {
-        await syncToApi(s, { eventIds : ids, unitId : currentUnitId.value });
+        await syncToApi(s, { eventIds : ids, unitId : currentUnitId.value, by : authUser.value?.username });
         toast(`Equal Order applied — ${plan.rows.length} split(s) of ${plan.label} finish on ${fmtDate(new Date(plan.D + 'T00:00:00'))}; ${ids.length} bar(s) saved in one transaction`, 'ok');
     }
     catch (e) {
@@ -13478,7 +13478,7 @@ async function saveToDbInner(s) {
         return;
     }
     try {
-        const res = await syncToApi(s, { eventIds, unitId : currentUnitId.value, planLock : lockIds });
+        const res = await syncToApi(s, { eventIds, unitId : currentUnitId.value, planLock : lockIds, by : authUser.value?.username });
         if (res.success) {
             if (res.mapped?.length) {
                 for (const m of res.mapped) {
@@ -20881,6 +20881,27 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .tip4-po-no  { font-family : monospace; font-weight : 600; color : #1a3a7a; font-size : 12px; }
 .tip4-po-qty { font-weight : 700; color : #0d2b72; text-align : right; }
 .tip4-po-del { color : #444; }
+
+/* Notes tab: the bar's history (date · user · what happened), oldest first */
+.t4-hist-body { max-height : 300px; overflow-y : auto; overscroll-behavior : contain; }
+.t4-hist-bar {
+    margin      : 6px 0 3px;
+    font-size   : 10px;
+    font-weight : 700;
+    color       : #5572a0;
+    text-transform : uppercase;
+    letter-spacing : .3px;
+}
+.t4-hist-tbl td { vertical-align : top; padding : 3px 6px; }
+.t4-hist-date { white-space : nowrap; color : #33415c; font-variant-numeric : tabular-nums; }
+.t4-hist-time { margin-left : 5px; color : #8898b0; font-size : 10px; }
+.t4-hist-by   { white-space : nowrap; color : #5572a0; font-weight : 600; }
+.t4-hist-txt  { color : #1f2a44; word-break : break-word; }
+.t4-hist-ico  { display : inline-block; width : 16px; font-size : 10px; }
+.t4-hist-remove .t4-hist-txt { color : #b3261e; }
+.t4-hist-create .t4-hist-txt { color : #1b6e3c; font-weight : 600; }
+.t4-hist-erp .t4-hist-txt    { color : #0d2b72; font-weight : 600; }
+.t4-hist-note .t4-hist-txt   { font-style : italic; }
 
 /* Legacy single-section tooltip still works */
 .mb-tip {
