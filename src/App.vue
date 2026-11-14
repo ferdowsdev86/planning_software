@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, onMounted, toRaw } from 'vue';
 import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
-    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
+    schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
@@ -10574,6 +10574,33 @@ function snWhen(d) {
     if (Number.isNaN(x.getTime())) return '—';
     return `${fmtDate(x)} ${x.toLocaleTimeString('en-US', { hour : 'numeric', minute : '2-digit' })}`;
 }
+// The Notes window lists the bar's whole history (FastReact): ERP import,
+// bar created, every saved change with its user, production, the planners'
+// notes, today's sewing output — oldest first, read from GET /bar-history
+const snHist = ref(null);          // { bars : [{ id, po, code, status, rows : [{ date, by, kind, text }] }] } | { error } | null (loading)
+const SN_ICON = { import : '📥', create : '➕', plan : '✏️', remove : '✖', prod : '🧵', note : '📝', erp : '📊' };
+const snHistRows = computed(() => {
+    const h = snHist.value;
+    if (!h || h.error) return [];
+    const bars = h.bars || [];
+    const out = [];
+    for (const b of bars) {
+        for (const r of b.rows || []) {
+            const when = String(r.date || r.at || '');
+            const m = /^(\d{4}-\d\d-\d\d)(?:[ T](\d\d:\d\d))?/.exec(when);
+            out.push({ kind : r.kind || 'plan', day : m ? m[1] : when, time : m ? (m[2] || '') : '', by : r.by || '', text : r.text || '', bar : bars.length > 1 ? (b.po || b.code || b.id) : '' });
+        }
+    }
+    return out;
+});
+// the planners' note behind a history row (so the author / a manager can delete it)
+const snNoteOf = row => row.kind === 'note' ? snRows.value.find(n => n.note === row.text && (!row.by || n.by === row.by)) : null;
+function snLoadHistory(rec) {
+    snHist.value = null;
+    const ids = barHistoryIds(rec);
+    if (!ids.length) { snHist.value = { bars : [] }; return; }
+    fetchBarHistory(ids.join(',')).then(e => { if (snRec.value === rec) snHist.value = e; });
+}
 
 // Board open: one request brings every bar's ERP detail and PO rows into
 // the tooltip's session cache (chunks of 300) — a hover then opens the
@@ -10624,12 +10651,19 @@ async function openStripNotes(rec) {
     snRows.value = stripNotesOf(raw);
     snOpen.value = true;
     snBusy.value = true;
+    snLoadHistory(rec);
     try {
         snRows.value = await loadStripNotesDb(key);
     }
     catch (e) { toast(`Notes could not be loaded: ${e.message}`, 'error'); }
     finally { snBusy.value = false; }
-    setTimeout(() => document.querySelector('.sn-dialog textarea')?.focus(), 30);
+}
+// a note was added / deleted: read the history again (the note is one of its rows)
+function snRefreshHistory() {
+    const rec = snRec.value;
+    if (!rec) return;
+    invalidateBarHistory(barHistoryIds(rec).join(','));
+    snLoadHistory(rec);
 }
 uiHooks.onOpenStripNotes = openStripNotes;
 const snFocusNew = () => document.querySelector('.sn-dialog textarea')?.focus();
@@ -10647,6 +10681,7 @@ async function snAdd() {
         await addStripNoteDb({ po : key, orderCode : raw.mbmOrder || null, eventId : /^\d+$/.test(evId) ? Number(evId) : null, note, user : snUser() });
         snText.value = '';
         snRows.value = await loadStripNotesDb(key);
+        snRefreshHistory();
         await refreshStripNotes();
         toast('Note saved', 'ok');
     }
@@ -10661,6 +10696,7 @@ async function snDelete(n) {
     try {
         await deleteStripNoteDb(n.id, snUser());
         snRows.value = await loadStripNotesDb(noteKeyOf(snRaw.value));
+        snRefreshHistory();
         await refreshStripNotes();
     }
     catch (e) { toast(`Note not deleted: ${e.message}`, 'error'); }
@@ -10672,9 +10708,12 @@ function snPrint() {
     const w = window.open('', '_blank', 'width=760,height=600');
     if (!w) { toast('Pop-up blocked — allow pop-ups to print', 'warn'); return; }
     const enc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&' : '&amp;', '<' : '&lt;', '>' : '&gt;', '"' : '&quot;' }[c]));
-    w.document.write(`<!doctype html><title>${enc(snTitle.value)}</title><style>body{font:13px -apple-system,Segoe UI,sans-serif;padding:20px}h2{font-size:16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left;vertical-align:top}th{background:#eee}</style>` +
-        `<h2>Strip notes — ${enc(snTitle.value)}</h2><div>${enc(raw?.buyer || '')} · ${enc(raw?.style || '')} ${raw?.color ? ' : ' + enc(raw.color) : ''}</div><br>` +
-        `<table><tr><th>Date</th><th>User</th><th>Note</th></tr>${snRows.value.map(n => `<tr><td>${enc(snWhen(n.at))}</td><td>${enc(n.by || '')}</td><td>${enc(n.note)}</td></tr>`).join('') || '<tr><td colspan=3>No notes</td></tr>'}</table>`);
+    const rows = snHistRows.value.length
+        ? snHistRows.value.map(r => `<tr><td>${enc(r.day)} ${enc(r.time)}</td><td>${enc(r.by || '#')}</td><td>${enc(r.text)}</td></tr>`).join('')
+        : snRows.value.map(n => `<tr><td>${enc(snWhen(n.at))}</td><td>${enc(n.by || '')}</td><td>${enc(n.note)}</td></tr>`).join('');
+    w.document.write(`<!doctype html><title>Notes — ${enc(snTitle.value)}</title><style>body{font:13px -apple-system,Segoe UI,sans-serif;padding:20px}h2{font-size:16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left;vertical-align:top}th{background:#eee}</style>` +
+        `<h2>Notes — ${enc(snTitle.value)}</h2><div>${enc(raw?.buyer || '')} · ${enc(raw?.style || '')} ${raw?.color ? ' : ' + enc(raw.color) : ''}</div><br>` +
+        `<table><tr><th>Date</th><th>User</th><th>Note</th></tr>${rows || '<tr><td colspan=3>No notes</td></tr>'}</table>`);
     w.document.close();
     w.focus();
     w.print();
@@ -15596,14 +15635,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <div v-if="snOpen" class="cal-overlay" @click.self="snOpen = false">
             <div class="cal-dialog sn-dialog" @keydown.esc="snOpen = false">
                 <div class="cal-title">
-                    📝 {{ snTitle }}
+                    Notes
                     <span class="cal-title-btns"><span class="cal-x" @click="snOpen = false">✕</span></span>
                 </div>
                 <div class="sn-toolbar">
                     <button class="cal-btn st-btn sn-tb" @click="snFocusNew"><span class="sn-new">NEW</span> Notes</button>
-                    <button class="cal-btn st-btn sn-tb" :disabled="!snRows.length" @click="snPrint">🖨 Print</button>
+                    <button class="cal-btn st-btn sn-tb" :disabled="!snHistRows.length && !snRows.length" @click="snPrint">🖨 Print</button>
                     <button class="cal-btn st-btn sn-tb" @click="snOpen = false">✖ Close</button>
-                    <span class="sn-order"><b>Orders</b> <input class="cal-in" readonly :value="snTitle"></span>
+                    <span class="sn-order"><b>Products</b> <input class="cal-in" readonly :value="snTitle"></span>
                 </div>
                 <div class="st-body sn-body">
                     <div v-if="snRaw" class="sp-head">
@@ -15619,21 +15658,31 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <button class="cal-btn cal-btn-primary st-btn" :disabled="snBusy || !snText.trim()" @click="snAdd">＋ Add note</button>
                         </div>
                     </div>
-                    <div class="sn-list">
-                        <div v-if="!snRows.length" class="sn-none">&lt;&lt; There are no notes for this item &gt;&gt;</div>
-                        <table v-else class="st-table sn-table">
-                            <thead><tr><th>Date</th><th>User</th><th>Note</th><th></th></tr></thead>
-                            <tbody>
-                                <tr v-for="n in snRows" :key="n.id">
-                                    <td class="sn-when">{{ snWhen(n.at) }}</td>
-                                    <td class="sn-by">{{ n.by || '—' }}</td>
-                                    <td class="sn-note">{{ n.note }}</td>
-                                    <td class="sn-del"><span v-if="snCanDelete(n)" class="cal-x" title="Delete note" @click="snDelete(n)">🗑</span></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <!-- the bar's history, FastReact style: NEW · date · user · what happened -->
+                    <div class="sn-list sn-hist">
+                        <div v-if="snHist === null" class="sn-none">Loading the bar's history…</div>
+                        <div v-else-if="snHist.error" class="sn-none">History could not be loaded — {{ snHist.error }}<template v-if="snRows.length"> · the planners' notes are listed below</template></div>
+                        <template v-if="snHistRows.length">
+                            <div v-for="(r, i) in snHistRows" :key="i" class="sn-hrow" :class="'sn-h-' + r.kind">
+                                <span class="sn-new sn-hnew">NEW</span>
+                                <span class="sn-hday">{{ r.day }}<span v-if="r.time" class="sn-htime">{{ r.time }}</span></span>
+                                <span class="sn-hby" :title="r.by ? 'by ' + r.by : 'user not recorded'">{{ r.by || '#' }}</span>
+                                <span class="sn-htxt"><span class="sn-hico">{{ SN_ICON[r.kind] || '•' }}</span>{{ r.bar ? r.bar + ' · ' : '' }}{{ r.text }}</span>
+                                <span class="sn-hdel"><span v-if="snNoteOf(r) && snCanDelete(snNoteOf(r))" class="cal-x" title="Delete this note" @click="snDelete(snNoteOf(r))">🗑</span></span>
+                            </div>
+                        </template>
+                        <template v-else-if="snHist && !snHist.error">
+                            <div v-if="!snRows.length" class="sn-none">&lt;&lt; There are no notes for this item &gt;&gt;</div>
+                            <div v-for="n in snRows" :key="n.id" class="sn-hrow sn-h-note">
+                                <span class="sn-new sn-hnew">NEW</span>
+                                <span class="sn-hday">{{ snWhen(n.at) }}</span>
+                                <span class="sn-hby">{{ n.by || '#' }}</span>
+                                <span class="sn-htxt"><span class="sn-hico">📝</span>{{ n.note }}</span>
+                                <span class="sn-hdel"><span v-if="snCanDelete(n)" class="cal-x" title="Delete note" @click="snDelete(n)">🗑</span></span>
+                            </div>
+                        </template>
                     </div>
-                    <div class="st-hint">Notes are kept per PO — every piece of this PO (splits, re-plans) shows them: 📝 on the bar, a Notes card in the tooltip, and here. Only the author or a manager can delete a note.</div>
+                    <div class="st-hint">The bar's history: ERP import · bar created · every saved change with its user · production · the planners' notes (kept per PO — every piece of this PO shows them, 📝 on the bar). Only the author or a manager can delete a note.</div>
                 </div>
             </div>
         </div>
@@ -18456,6 +18505,22 @@ body {
 .sn-new-side { display : flex; flex-direction : column; justify-content : space-between; align-items : flex-end; gap : 6px; font-size : 11px; }
 .sn-list { border : 1px solid #b9c4d0; border-radius : 4px; background : #fff; min-height : 180px; max-height : 46vh; overflow : auto; }
 .sn-none { background : #c8c8c8; color : #fff; text-align : center; padding : 4px; font-size : 13px; }
+/* the bar's history rows (FastReact Notes window): NEW chip · date · user · text */
+.sn-hist { max-height : 56vh; }
+.sn-hrow { display : grid; grid-template-columns : 34px 150px 90px 1fr 22px; gap : 0 8px; align-items : baseline; padding : 5px 8px; border-bottom : 1px solid #e3e6ec; font-size : 12.5px; }
+.sn-hrow:nth-child(even) { background : #f6f8fb; }
+.sn-hrow:hover { background : #e9f0fb; }
+.sn-hnew { margin : 0; justify-self : start; }
+.sn-hday { white-space : nowrap; color : #33415c; font-variant-numeric : tabular-nums; }
+.sn-htime { margin-left : 6px; color : #8898b0; font-size : 10.5px; }
+.sn-hby { white-space : nowrap; overflow : hidden; text-overflow : ellipsis; color : #5572a0; font-weight : 600; }
+.sn-htxt { color : #1f2a44; word-break : break-word; }
+.sn-hico { display : inline-block; width : 18px; font-size : 11px; }
+.sn-hdel { text-align : right; }
+.sn-h-remove .sn-htxt { color : #b3261e; }
+.sn-h-create .sn-htxt { color : #1b6e3c; font-weight : 600; }
+.sn-h-erp .sn-htxt    { color : #0d2b72; font-weight : 600; }
+.sn-h-note .sn-htxt   { font-style : italic; }
 .sn-table { width : 100%; border-collapse : collapse; font-size : 12.5px; }
 .sn-table th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 5px 8px; font-weight : 600; }
 .sn-table td { padding : 5px 8px; border-bottom : 1px solid #eef1f5; vertical-align : top; }
