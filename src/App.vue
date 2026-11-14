@@ -20058,6 +20058,13 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 .b-sch-event.mb-qty-mismatch::before { background : none !important; }
 .b-sch-event.mb-qty-mismatch { color : inherit !important; }
 .b-sch-event.mb-late { box-shadow : inset 0 -4px 0 #ee2e24 !important; }
+/* blue dot (bottom-right): another bar of this order — on another line — is late */
+.mb-order-late-dot {
+    position : absolute; right : 3px; bottom : 2px;
+    width : 10px; height : 10px; border-radius : 50%;
+    background : #1a3fd6; border : 1px solid #fff; box-shadow : 0 0 0 1px #1a3fd6;
+    z-index : 3; pointer-events : auto;
+}
 /* Bryntum wraps the renderer's HTML in .b-sch-event-content — a sticky box
    only as wide as its text. Our full-bar overlays (late part, learning-curve
    hatch) must span the BAR, so that box is a plain static block of full
