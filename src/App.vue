@@ -5982,7 +5982,11 @@ async function syncBoardLock() {
             if (!wasReadOnly) {
                 toast(r.planLocked
                     ? planLockFrozenMsg()
-                    : `🔒 This board is in use by "${r.holder?.name || r.holder?.username}" — you can test anything, but SAVE is disabled`, 'warn');
+                    : r.viewOnly
+                        // the server knows this user has no write access to the
+                        // board: view only, the edit lock stays free for a planner
+                        ? `👁 Read access — you can look at this board but not plan or save it${r.holder ? ` (in use by "${r.holder.name || r.holder.username}")` : ''}`
+                        : `🔒 This board is in use by "${r.holder?.name || r.holder?.username}" — you can test anything, but SAVE is disabled`, 'warn');
             }
         }
         // Re-assert the interaction mode every heartbeat: something in the

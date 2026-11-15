@@ -3071,14 +3071,58 @@ function liveLockHolder(unitId) {
     return l;
 }
 
+// Who may EDIT a unit's board (planning_users.boards: "<boardId>" = write,
+// "<boardId>:read" = read only; Planning Manager = every board; Management =
+// look only). A user without write access never holds the edit lock, so a
+// viewer can never block the planner who may actually write — and a planner
+// arriving later takes the lock over from a viewer that still holds it
+// (older client). Cached per user for a minute (the lock beats every 5 s).
+const UNIT_BOARD_IDS = { 3 : ['b1', 'b2', 'b3'], 1 : ['b4'], 2 : ['b5'] };
+const boardWriteCache = new Map();   // username -> { at, boards : [], role }
+async function userBoardWrite(username, unitId) {
+    const u = String(username || '').trim().toLowerCase();
+    if (!u) return false;
+    let e = boardWriteCache.get(u);
+    if (!e || Date.now() - e.at > 60000) {
+        const [[row]] = await pool.query('SELECT role, boards FROM planning_users WHERE username = ? AND active = 1', [u]);
+        let b = [];
+        try { b = typeof row?.boards === 'string' ? JSON.parse(row.boards) : (row?.boards || []); } catch { b = []; }
+        e = { at : Date.now(), role : row?.role || null, boards : Array.isArray(b) ? b : [], exists : !!row };
+        boardWriteCache.set(u, e);
+    }
+    if (!e.exists) return true;                       // unknown to the users table (legacy / demo login): unchanged behaviour
+    if (e.role === 'Planning Manager') return true;
+    if (e.role === 'Management') return false;
+    const ids = UNIT_BOARD_IDS[Number(unitId)] || [];
+    return ids.some(id => e.boards.includes(id));
+}
+
 // Acquire doubles as heartbeat: the holder calls it periodically to stay live
-app.post(`${BASE}/board-lock/acquire`, (req, res) => {
+app.post(`${BASE}/board-lock/acquire`, async (req, res) => {
     const { unitId, username, name } = req.body || {};
     if (!unitId || !username) {
         return res.json({ success : false, error : 'unitId and username required' });
     }
     const key = String(unitId);
-    const cur = liveLockHolder(key);
+    let cur = liveLockHolder(key);
+    // read access only: never the edit lock — view only; a lock this viewer
+    // still holds (older client) is dropped so a planner can take the board
+    let canWrite = true;
+    try { canWrite = await userBoardWrite(username, key); } catch { canWrite = true; }
+    if (!canWrite) {
+        if (cur && cur.username === username) { boardLocks.delete(key); cur = null; }
+        return res.json({
+            success : true, ok : false, viewOnly : true,
+            holder  : cur ? { username : cur.username, name : cur.name } : null,
+            planLock : planLockOf(key)
+        });
+    }
+    // a viewer (no write access) holding the lock gives way to a planner
+    if (cur && cur.username !== username) {
+        let holderWrites = true;
+        try { holderWrites = await userBoardWrite(cur.username, key); } catch { holderWrites = true; }
+        if (!holderWrites) { boardLocks.delete(key); cur = null; }
+    }
     // an explicit plan lock by someone else: the board is theirs, fully
     // read-only for everyone else (no sandbox either)
     const pl = planLockOf(key);
