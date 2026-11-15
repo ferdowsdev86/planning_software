@@ -532,7 +532,11 @@ function finishBoardLoad(uid, data, s) {
         pendingRepairIds.clear();
         // after the quiet window (the lock / read-only state is known by then):
         // bars that start before PCD + 8 move to their earliest sewing start
-        setTimeout(() => { try { if (getInstance() === s) enforceSewStartFloor(s); } catch (e) { console.warn('[sew floor] skipped:', e.message); } }, 3500);
+        setTimeout(() => {
+            if (getInstance() !== s) return;
+            try { retireSewnProjections(s); } catch (e) { console.warn('[sewn projections] skipped:', e.message); }
+            try { enforceSewStartFloor(s); } catch (e) { console.warn('[sew floor] skipped:', e.message); }
+        }, 3500);
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
@@ -915,7 +919,11 @@ async function runLiveOrderPlan(s, {
         if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
         if (!String(u.buyer || '').trim()) continue;
         if (u.replaced || u.status === 'replaced') continue;
-        if (strictDelivery && isProjRow(u) && u.mbmOrder && confirmOrders.has(String(u.mbmOrder))) { projLeft.push(u); continue; }
+        // a projection whose order has confirm PO rows ANYWHERE — in this
+        // pool, on the board, finished (sewn in full, no bar left) or synced
+        // for another unit (linkedPoCount) — is replaced: the confirm rows
+        // are the order now
+        if (strictDelivery && isProjRow(u) && u.mbmOrder && (confirmOrders.has(String(u.mbmOrder)) || Number(u.linkedPoCount) > 0 || Number(u.confirmQty) > 0)) { projLeft.push(u); continue; }
         if (typeFilter && !typeFilter.has(orderTypeOf(u.po, u.orderType))) continue;
         // No invented dates: an order without a valid effective PCD stays
         // visible in the unplanned data but is never auto-planned.
@@ -1744,6 +1752,51 @@ function autoSyncBarLengths(s) {
 // bars with production and locked bars stay — past or near-term bars with
 // no production are moved too (a plan that never ran is not history).
 // A real change: the board goes dirty and Save keeps it.
+// A projection bar whose order's confirm POs are sewn IN FULL (ERP daily
+// production ≥ the confirm rows' quantity — raw.confirmSewn / confirmQty,
+// server attachProjectionTotals): the order is done, the bar plans nothing
+const isProjRaw = r => !!r && (r.orderType === 'projection' || String(r.id || '').startsWith('proj:') || String(r.eventCode || '').startsWith('ev-proj'));
+function projectionSewnOut(r) {
+    if (!isProjRaw(r)) return false;
+    const q = Number(r.confirmQty) || 0;
+    return q > 0 && (Number(r.confirmSewn) || 0) >= q;
+}
+
+// Board load: a projection bar of an order the ERP shows as sewn in full
+// leaves the board (cancelled on Save) — it was planned again after its
+// confirm bar had gone as finished (26H1LEV893: 8,750 sewn in October, the
+// projection stood on C02 for 19/11 → 30/11). Bars with production entered
+// on the board stay.
+function retireSewnProjections(s) {
+    if (!s || boardReadOnly.value) return 0;
+    const gone = [];
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage || r.status === 'completed' || Number(r.made) > 0) continue;
+        if (projectionSewnOut(r)) gone.push(ev);
+    }
+    if (!gone.length) return 0;
+    const names = [...new Set(gone.map(ev => ev.data.raw.mbmOrder || ev.data.raw.style || '').filter(Boolean))];
+    for (const ev of gone) {
+        const sid = String(ev.id);
+        if (sid.startsWith('db-') && !sid.includes('-sp')) {
+            const dbId = Number(sid.slice(3).split('-')[0]);
+            if (dbId) removedDbEventIds.add(dbId);
+        }
+        const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+        if (asgn.length) s.assignmentStore.remove(asgn);
+    }
+    s.eventStore.remove(gone);
+    if (boardDbState) for (const ev of gone) delete boardDbState[String(ev.id)];
+    invalidateBarsByLine();
+    markBoardDirty();
+    touchBoardCache(s);
+    syncOrdersListFromBoard();
+    s.refreshRows?.();
+    toast(`${gone.length} projection bar(s) removed — the order is already sewn in full in the ERP (confirm POs, Daily Production): ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''} — Save to keep`, 'warn');
+    return gone.length;
+}
+
 function enforceSewStartFloor(s) {
     if (!s || boardReadOnly.value) return 0;
     const index = buildLineIndex(s);
@@ -3682,6 +3735,9 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // afterwards as "another unit's" and never re-planned)
         pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : currentUnitId.value ?? r.unitId ?? null,
         dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable, idList : r.idList,
+        // a projection keeps what it knows of its confirm POs: with any, the
+        // planner leaves it replaced instead of planning it again
+        linkedPoCount : r.linkedPoCount, confirmQty : r.confirmQty, confirmSewn : r.confirmSewn,
         // it had a bar before this run: not a newly received order (the
         // 10-Day Plan Lock hold is for rows that never had one)
         fromBoard : true
@@ -3708,6 +3764,8 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
         if (asgn.length) s.assignmentStore.remove(asgn);
         if (isDupParked(r)) { stats.dupParked++; continue; }
+        // a projection of an order sewn in full (its confirm POs, ERP): nothing left to plan
+        if (projectionSewnOut(r)) { stats.fullySewn++; continue; }
         // the order as an unplanned source (plan qty, dates, SMV, product)
         const id = rowKey(r) || `proj:${r.mbmOrder || r.po}`;
         const prev = backById.get(String(id));
@@ -11678,6 +11736,30 @@ function floatingCarrySnap(clientX, clientY) {
     };
 }
 
+// Preview length = EXACTLY the space the bar will occupy if planned on the
+// hovered line at that point — the same sizing the real drop runs (changeover
+// ramp + the line's capacity/production model), computed on a throwaway copy
+// so nothing on the board changes. Memoised per (line, snapped start): the
+// pointer only recomputes when it crosses a 5-minute snap step.
+const carryDurMemo = new Map();
+function carryDurOnLine(s, raw, lineId, start) {
+    const key = `${lineId}|${+start}`;
+    const hit = carryDurMemo.get(key);
+    if (hit != null) return hit;
+    let dur = raw.dur || 1;
+    try {
+        // _cloneOf: the carried bar's own (still-registered) event must not
+        // count as the "previous bar on the line" in the changeover check
+        const tmp = { ...raw, start : new Date(start), _cloneOf : raw };
+        if (!isHoldId(lineId)) deriveLcForPlacement(s, tmp, lineId, tmp.start);
+        dur = applyLineFormulaDuration(s, tmp, lineId) || dur;
+    }
+    catch { /* keep the carried length */ }
+    if (carryDurMemo.size > 500) carryDurMemo.clear();
+    carryDurMemo.set(key, dur);
+    return dur;
+}
+
 // The carried bar sits exactly where it would land: the hovered line, starting
 // at that day's first working hour, so days line up edge to edge
 function computeCarryPreview(s, rec, clientX, clientY) {
@@ -11692,8 +11774,11 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     if (!pointerAt) return floatingCarrySnap(clientX, clientY);
 
     const lineId = res.id;
-    const dur = raw.dur || 1;
-    const { start, end } = previewSpanAtPointer(pointerAt, dur);
+    const { start } = previewSpanAtPointer(pointerAt, raw.dur || 1);
+    // size the ghost by THIS line at THIS point — never larger than the
+    // space the bar will really take when it is planned there
+    const dur = carryDurOnLine(s, raw, lineId, start);
+    const end = endOfWork(start, dur);
 
     const rowEl = rowElementForResource(s, res, clientX, clientY);
     if (!rowEl) return floatingCarrySnap(clientX, clientY);
@@ -12723,6 +12808,7 @@ function pickUp(rec, domEvent, { grab = false, group = null } = {}) {
     carryRecStart0 = new Date(rec.startDate);
 
     carried.value = rec;
+    carryDurMemo.clear();   // line durations depend on the board's current bars (changeover) — never reuse across carries
     pickStamp     = performance.now();
     uiHooks.boardUserActive = true;
     // a cut-off part leaves its consolidated run: what stays is drawn at its
@@ -13500,9 +13586,9 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
-        unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor,
+        unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -14406,6 +14492,11 @@ function findRowInfo(s, ev) {
         completed : raw.status === 'completed',
         hold : isHoldId(lid),
         orderQty : Number(raw.orderQty) || 0,
+        // the whole order's quantity (every PO / colour, not this strip's share)
+        fullOrderQty : Number(raw.fullOrderQty) > 0 ? Number(raw.fullOrderQty) : (Number(raw.orderQty) || 0),
+        // completed quantity of the strip: production entered on the board,
+        // or the ERP's sewing output when it is higher
+        done : Math.max(Number(raw.made) || 0, Number(raw.erpMade) || 0),
         pos : Array.isArray(raw.poList) && raw.poList.length ? raw.poList.map(String) : (raw.po ? [String(raw.po)] : [])
     };
 }
@@ -14533,6 +14624,7 @@ function findDragStart(e) {
 }
 const findPanelStyle = computed(() => (findPos.value ? { left : `${findPos.value.x}px`, top : `${findPos.value.y}px`, right : 'auto' } : {}));
 const findTotalQty = computed(() => findResults.value.reduce((a, r) => a + (Number(r.qty) || 0), 0));
+const findTotalDone = computed(() => findResults.value.reduce((a, r) => a + (Number(r.done) || 0), 0));
 // Plan summary (what the matching strips occupy) and order summary (which
 // orders they belong to) under the list — and in the report
 const findPlanSummary = computed(() => {
@@ -14557,18 +14649,24 @@ const findOrderSummary = computed(() => {
     // PO + colour piece; its split pieces share the same ERP qty, so the
     // qty counts once per PO + colour (a consolidated bar's full PO list
     // belongs to the whole order, not to these strips)
-    const orders = new Set(), pos = new Set(), pieces = new Map(), buyers = new Map();
+    // Order qty = the ORDER's quantity (the ERP order: every PO / colour),
+    // counted once per order — not the matched strips' share of it
+    const orders = new Map(), pos = new Set(), pieces = new Map(), buyers = new Map();
     for (const r of rows) {
-        orders.add(r.order);
+        orders.set(r.order, Math.max(orders.get(r.order) || 0, Number(r.fullOrderQty) || 0));
         if (r.po) pos.add(r.po);
         const key = `${r.po}|${r.color}`;
         if (!pieces.has(key)) pieces.set(key, r.orderQty);
         buyers.set(r.buyer, (buyers.get(r.buyer) || 0) + r.qty);
     }
     const ships = rows.map(r => r.ship ? +r.ship : 0).filter(Boolean);
+    const byOrder = [...orders.values()].reduce((a, q) => a + q, 0);
+    const byPiece = [...pieces.values()].reduce((a, q) => a + q, 0);
     return {
         orders : orders.size, pos : pos.size,
-        orderQty : [...pieces.values()].reduce((a, q) => a + q, 0),
+        orderQty : Math.max(byOrder, byPiece),
+        stripOrderQty : byPiece,
+        doneQty : rows.reduce((a, r) => a + (Number(r.done) || 0), 0),
         buyers : [...buyers.entries()].sort((a, b) => b[1] - a[1]).map(([b]) => b),
         shipFirst : ships.length ? fmtDate(new Date(Math.min(...ships))) : '—',
         shipLast  : ships.length ? fmtDate(new Date(Math.max(...ships))) : '—'
@@ -14592,7 +14690,7 @@ function findReportHtml() {
     const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const rows = findResults.value.map((r, i) => `<tr>
 <td style="text-align:right">${i + 1}</td><td>${esc(r.order)}</td><td>${esc(r.po)}</td><td>${esc(r.style)}${r.color ? ' : ' + esc(r.color) : ''}</td>
-<td>${esc(r.buyer)}</td><td style="text-align:right">${fmtQty(r.qty)}</td><td>${esc(r.line)}</td><td>${esc(r.floor)}</td><td>${esc(r.unit)}</td>
+<td>${esc(r.buyer)}</td><td style="text-align:right">${fmtQty(r.qty)}</td><td style="text-align:right">${r.done ? fmtQty(r.done) : '—'}</td><td>${esc(r.line)}</td><td>${esc(r.floor)}</td><td>${esc(r.unit)}</td>
 <td>${esc(fmtDate(r.start))}</td><td>${esc(fmtDate(r.rec?.endDate))}</td><td>${r.ship ? esc(fmtDate(r.ship)) : '—'}</td><td>${r.completed ? 'completed' : ''}</td></tr>`).join('');
     return `<h2 style="margin:0 0 4px">Find strips — ${esc(currentBoard.value?.name || currentBoard.value?.unitName || 'board')}</h2>
 <div style="margin:0 0 8px;font-size:9pt">${esc(findCriteriaText())} · <b>${findResults.value.length}</b> strip(s) · Plan qty <b>${fmtQty(findTotalQty.value)}</b> · ${esc(new Date().toLocaleString())}</div>
@@ -14602,8 +14700,8 @@ ${(() => { const p = findPlanSummary.value, o = findOrderSummary.value; if (!p |
 <tr><td>On lines / Holding Row</td><td style="text-align:right">${p.onLine} (${fmtQty(p.onLineQty)}) / ${p.hold} (${fmtQty(p.holdQty)})</td><td>Order qty</td><td style="text-align:right">${fmtQty(o.orderQty)}</td></tr>
 <tr><td>Lines used</td><td style="text-align:right">${p.lines}</td><td>Buyers</td><td>${esc(o.buyers.join(', '))}</td></tr>
 <tr><td>Plan span</td><td>${esc(p.first)} → ${esc(p.last)}</td><td>Shipment</td><td>${esc(o.shipFirst)} → ${esc(o.shipLast)}</td></tr></table>`; })()}
-<table><thead><tr><th>#</th><th>Order</th><th>PO</th><th>Style : Colour</th><th>Buyer</th><th>Plan Qty</th><th>Line</th><th>Floor</th><th>Unit</th><th>Start</th><th>End</th><th>Ship</th><th></th></tr></thead>
-<tbody>${rows}</tbody><tfoot><tr><td colspan="5" style="text-align:right"><b>Total plan qty</b></td><td style="text-align:right"><b>${fmtQty(findTotalQty.value)}</b></td><td colspan="7"></td></tr></tfoot></table>`;
+<table><thead><tr><th>#</th><th>Order</th><th>PO</th><th>Style : Colour</th><th>Buyer</th><th>Plan Qty</th><th>Complete</th><th>Line</th><th>Floor</th><th>Unit</th><th>Start</th><th>End</th><th>Ship</th><th></th></tr></thead>
+<tbody>${rows}</tbody><tfoot><tr><td colspan="5" style="text-align:right"><b>Total plan qty</b></td><td style="text-align:right"><b>${fmtQty(findTotalQty.value)}</b></td><td style="text-align:right"><b>${findTotalDone.value ? fmtQty(findTotalDone.value) : '—'}</b></td><td colspan="7"></td></tr></tfoot></table>`;
 }
 function findPrint() {
     if (!findResults.value.length) { toast('Run a Find first — nothing to report', 'warn'); return; }
@@ -14968,7 +15066,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
                 <div v-if="findIds" class="fnd-list">
                     <table v-if="findResults.length">
-                        <thead><tr><th>#</th><th>Order</th><th>Style : Colour</th><th>Buyer</th><th>Qty</th><th>Line</th><th>Floor</th><th>Start</th><th>Ship</th></tr></thead>
+                        <thead><tr><th>#</th><th>Order</th><th>Style : Colour</th><th>Buyer</th><th>Qty</th><th title="Completed quantity — production entered on the board or the ERP's sewing output">Complete</th><th>Line</th><th>Floor</th><th>Start</th><th>Ship</th></tr></thead>
                         <tbody>
                             <tr v-for="(r, i) in findResults" :key="r.id" :class="{ 'fnd-cur' : i === findIdx, 'fnd-done' : r.completed }" @click="findGoTo(i)">
                                 <td>{{ i + 1 }}</td>
@@ -14976,6 +15074,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td>{{ r.style }}<template v-if="r.color"> : {{ r.color }}</template></td>
                                 <td>{{ r.buyer }}</td>
                                 <td class="fnd-num">{{ fmtQty(r.qty) }}</td>
+                                <td class="fnd-num" :class="{ 'fnd-cq' : r.done > 0 }">{{ r.done ? fmtQty(r.done) : '—' }}</td>
                                 <td>{{ r.line }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ fmtDate(r.start) }}</td>
@@ -14983,7 +15082,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </tbody>
                         <tfoot>
-                            <tr class="fnd-total"><td colspan="4">Total plan qty · {{ findResults.length }} strip(s)</td><td class="fnd-num">{{ fmtQty(findTotalQty) }}</td><td colspan="4"></td></tr>
+                            <tr class="fnd-total"><td colspan="4">Total plan qty · {{ findResults.length }} strip(s)</td><td class="fnd-num">{{ fmtQty(findTotalQty) }}</td><td class="fnd-num" title="Completed in total">{{ findTotalDone ? fmtQty(findTotalDone) : '—' }}</td><td colspan="4"></td></tr>
                         </tfoot>
                     </table>
                     <div v-else class="fnd-none">No strip on this board matches. Change the criteria or press Clear.</div>
@@ -15003,7 +15102,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <div class="fnd-sum-h">Order summary</div>
                         <div><span>Orders</span><b>{{ findOrderSummary.orders }}</b></div>
                         <div><span>POs</span><b>{{ findOrderSummary.pos }}</b></div>
-                        <div><span>Order qty</span><b>{{ fmtQty(findOrderSummary.orderQty) }}</b></div>
+                        <div><span>Order qty</span><b :title="findOrderSummary.stripOrderQty !== findOrderSummary.orderQty ? `the matched strips carry ${fmtQty(findOrderSummary.stripOrderQty)} of it` : 'ERP order quantity of the matched orders'">{{ fmtQty(findOrderSummary.orderQty) }}</b></div>
+                        <div><span>Completed</span><b>{{ findOrderSummary.doneQty ? fmtQty(findOrderSummary.doneQty) : '—' }}</b></div>
                         <div><span>Buyers</span><b :title="findOrderSummary.buyers.join(', ')">{{ findOrderSummary.buyers.slice(0, 3).join(', ') }}{{ findOrderSummary.buyers.length > 3 ? ` +${findOrderSummary.buyers.length - 3}` : '' }}</b></div>
                         <div><span>Shipment</span><b>{{ findOrderSummary.shipFirst }} → {{ findOrderSummary.shipLast }}</b></div>
                     </div>
@@ -18651,6 +18751,7 @@ body {
 .fnd-total td { background : #f4f2ec; font-weight : 700; color : #17356b; border-top : 2px solid #c9c5b8; }
 .fnd-title .fa-solid { color : #0a6ed1; }
 .fnd-sum { margin-left : auto; font-weight : 600; color : #1b52ad; font-size : 12px; }
+.fnd-cq { color : #1b6e3c; font-weight : 700; }   /* completed quantity of a strip */
 .fnd-hint { padding : 4px 8px 0; color : #5b6673; font-size : 10.5px; }
 .fnd-hint code { background : #e6e9ee; padding : 0 4px; border-radius : 3px; }
 .fnd-grid { display : grid; grid-template-columns : 66px 1fr; gap : 3px 6px; align-items : center; padding : 4px 8px; }
