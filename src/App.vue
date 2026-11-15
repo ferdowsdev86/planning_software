@@ -15039,10 +15039,11 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <label class="fnd-b">Order</label>     <input v-model.trim="findForm.order"   class="cal-in" placeholder="26H1LEV474 or PO number">
                     <label class="fnd-b">Product</label>   <input v-model.trim="findForm.product" class="cal-in" placeholder="style :: colour / product type">
                     <label class="fnd-b">Buyer</label>     <input v-model.trim="findForm.buyer"   class="cal-in" placeholder="LEVI*">
+                    <!-- second line: shipment window (under Style + Order), floor, unit -->
                     <label>Shipment</label>
                     <span class="fnd-range">
-                        <input v-model="findForm.shipFrom" class="cal-in" type="date"> <span>→</span>
-                        <input v-model="findForm.shipTo"   class="cal-in" type="date">
+                        <input v-model="findForm.shipFrom" class="cal-in" type="date" title="Shipment from"> <span>→</span>
+                        <input v-model="findForm.shipTo"   class="cal-in" type="date" title="Shipment to">
                     </span>
                     <label>Floor</label>
                     <select v-model="findForm.floor" class="cal-in">
@@ -18732,7 +18733,7 @@ body {
     top        : 0;
     right      : 10px;
     z-index    : 150;
-    width      : 430px;
+    width      : 600px;
     max-width  : calc(100vw - 20px);
     max-height : calc(100% - 10px);
     overflow   : auto;
@@ -18754,11 +18755,13 @@ body {
 .fnd-cq { color : #1b6e3c; font-weight : 700; }   /* completed quantity of a strip */
 .fnd-hint { padding : 4px 8px 0; color : #5b6673; font-size : 10.5px; }
 .fnd-hint code { background : #e6e9ee; padding : 0 4px; border-radius : 3px; }
-.fnd-grid { display : grid; grid-template-columns : 66px 1fr; gap : 3px 6px; align-items : center; padding : 4px 8px; }
-.fnd-grid label { font-size : 11.5px; }
+/* two lines: Style · Order · Product · Buyer / Shipment from → to · Floor · Unit */
+.fnd-grid { display : grid; grid-template-columns : auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap : 4px 6px; align-items : center; padding : 4px 8px; }
+.fnd-grid label { font-size : 11.5px; white-space : nowrap; }
 .fnd-grid .fnd-b { font-weight : 700; }
-.fnd-grid .cal-in { width : 100%; box-sizing : border-box; font-size : 11.5px; padding : 2px 5px; }
-.fnd-range { display : flex; gap : 6px; align-items : center; }
+.fnd-grid .cal-in { width : 100%; min-width : 0; box-sizing : border-box; font-size : 11.5px; padding : 2px 5px; }
+.fnd-range { display : flex; gap : 4px; align-items : center; grid-column : span 3; min-width : 0; }
+.fnd-range .cal-in { flex : 1 1 0; }
 .fnd-btns { display : flex; gap : 4px; padding : 3px 8px 5px; flex-wrap : wrap; align-items : center; }
 .fnd-btns .cal-btn { width : auto !important; flex : 0 0 auto; margin : 0; padding : 3px 9px; font-size : 11.5px; }
 .fnd-sums { display : flex; gap : 6px; margin : 6px 8px 0; }
