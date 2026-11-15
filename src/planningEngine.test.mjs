@@ -69,3 +69,47 @@ test('strictDelivery: a line that is free later but still meets the delivery is 
     assert.equal(unplaced.length, 0);
     assert.equal(placements[0].line.id, 'l2');
 });
+
+test('free windows: a gap before the line\'s far-future bar takes the order (freeFrom alone hid it)', () => {
+    const gappy = [{
+        id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10,
+        freeFrom : day('2027-01-10'),   // after the line's LAST bar
+        windows  : [
+            { from : day('2026-11-12'), to : day('2026-12-20') },   // 5+ free weeks before that bar
+            { from : day('2027-01-10'), to : null }
+        ]
+    }];
+    const { placements } = autoPlanOrders([order], gappy, { ...ctxBase });
+    assert.equal(placements.length, 1);
+    assert.ok(placements[0].start < day('2026-12-01'), `start ${ymd(placements[0].start)} should sit in the gap, not after 10/01`);
+});
+
+test('free windows: a run too long for the gap goes after the last bar instead', () => {
+    const gappy = [{
+        id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10,
+        freeFrom : day('2026-12-01'),
+        windows  : [
+            { from : day('2026-11-12'), to : day('2026-11-13') },   // one day — too small for ~5.6 days
+            { from : day('2026-12-01'), to : null }
+        ]
+    }];
+    const { placements } = autoPlanOrders([{ ...order, qty : 10000 }], gappy, { ...ctxBase });
+    assert.equal(placements.length, 1);
+    assert.ok(placements[0].start >= day('2026-12-01'), `start ${ymd(placements[0].start)} should be after the last bar`);
+});
+
+test('pieces of one order plan together: the second piece starts parallel to the first, not days later', () => {
+    const two = [
+        { id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
+        { id : 'l2', name : 'Line 02', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
+        { id : 'l3', name : 'Line 03', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') }
+    ];
+    const pieces = [
+        { ...order, id : 'o1', po : 'P1', qty : 10000 },
+        { ...order, id : 'o2', po : 'P2', qty : 10000 }
+    ];
+    const { placements } = autoPlanOrders(pieces, two, { ...ctxBase });
+    assert.equal(placements.length, 2);
+    assert.equal(+placements[0].start, +placements[1].start, 'both pieces of the order should start together');
+    assert.notEqual(placements[0].line.id, placements[1].line.id, 'on parallel lines');
+});

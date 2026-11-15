@@ -885,15 +885,34 @@ async function runLiveOrderPlan(s, {
         return { planned : 0, late : 0, tight : 0, skipped : true };
     }
 
+    // The engine sees every FREE WINDOW of a line, not only the time after
+    // its last bar: each gap of at least 4 working hours between today and
+    // the line's last bar, then the open stretch behind it. A line whose
+    // last bar sits weeks out is no longer "busy" for the empty weeks in
+    // between (CEIL Lines 14/21/26 stood idle 25-43 days that way).
+    const apBarsByLine = new Map();
     for (const ev of s.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
         const lid = lineIdOf(s, ev);
         if (!LINE_BY_ID[lid]) continue;
-        const line = lineStates.find(l => l.id === lid);
-        if (!line) continue;
-        const nxt = nextStartAfter(ev.endDate);
-        if (nxt > line.freeFrom) line.freeFrom = nxt;
+        (apBarsByLine.get(lid) || apBarsByLine.set(lid, []).get(lid)).push(ev);
+    }
+    for (const line of lineStates) {
+        const bars = (apBarsByLine.get(line.id) || []).sort((a, b) => a.startDate - b.startDate);
+        const windows = [];
+        let cur = new Date(today);
+        for (const ev of bars) {
+            if (ev.endDate <= cur) continue;
+            if (ev.startDate > cur && (+ev.startDate - +cur) > 4 * 3600 * 1000) {
+                windows.push({ from : new Date(cur), to : new Date(ev.startDate) });
+            }
+            const nxt = nextStartAfter(ev.endDate);
+            if (nxt > cur) cur = nxt;
+        }
+        windows.push({ from : new Date(cur), to : null });   // the open stretch
+        line.windows  = windows;
+        line.freeFrom = new Date(cur);
     }
 
     const source = [...unplanned.value];
@@ -1122,6 +1141,16 @@ async function runLiveOrderPlan(s, {
         if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || (latest && end > latest)) {
             removeRec(rec);
             return { ok : false, rec : null, start, end, reason : 'would end after the latest sewing finish on the real board' };
+        }
+        // A gap slot must REALLY take the bar: the real production end may be
+        // longer than the engine's estimate — never on top of the bar behind
+        // the gap (the order falls through to the gap-aware fill instead)
+        const nxtBar = s.eventStore.records
+            .filter(e2 => e2 !== rec && e2.data?.raw && !e2.data.raw.stage && lineIdOf(s, e2) === lineId && e2.startDate >= start)
+            .sort((a2, b2) => a2.startDate - b2.startDate)[0];
+        if (nxtBar && end.getTime() > nxtBar.startDate.getTime() + 60000) {
+            removeRec(rec);
+            return { ok : false, rec : null, start, end, reason : 'the free stretch is shorter than the real production run' };
         }
         if (horizonEnd && end > horizonEnd) {
             removeRec(rec);
@@ -13792,7 +13821,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
+    window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },

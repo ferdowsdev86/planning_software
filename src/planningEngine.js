@@ -464,6 +464,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         && a.getDate() === b.getDate();
 
     const placements = [];
+    // pieces of ONE order plan together: the start of the order's first
+    // placed piece this run — later pieces prefer the same start (parallel
+    // lines) or the same line right after it (the ranking below)
+    const firstStartOf = new Map();
     for (const o of prepared) {
         // The order's IDEAL start: PCD + pre-production days (never before
         // today, never before material). An order must not start before this —
@@ -497,18 +501,42 @@ export function autoPlanOrders(orders, lineStates, ctx) {
                 (Number(line.manpower) || 50) * lineWorkMin * planEff / 100
             );
             const dur = sewingDurationDays(o.qty, o.smv, availMin);
-            const lineFree = line.freeFrom > todayStart ? new Date(line.freeFrom) : new Date(todayStart);
-            const fwd = earliestSew(lineFree);
-            let start = new Date(fwd.actualSewStart);
-            if (o.matReady && new Date(o.matReady) > start) start = new Date(o.matReady);
-            if (start < todayStart) start = new Date(todayStart);
-            if (snapStart) start = snapStart(start);
-            // Same PCD as the last bar on this line: sit flush after it
-            if (line.lastEnd && sameDay(line.lastPcd, o.pcd) && start < line.freeFrom) {
-                start = snapStart ? snapStart(line.freeFrom) : new Date(line.freeFrom);
+            // The line's free time is its WINDOWS: every gap between the bars
+            // already on the board, then the open stretch after the last one.
+            // freeFrom alone hid the gaps — a line whose last bar sits weeks
+            // out looked busy although it is empty until then, so new orders
+            // were appended at the far end while the near weeks stayed idle.
+            const windows = Array.isArray(line.windows) && line.windows.length
+                ? line.windows
+                : [{ from : line.freeFrom, to : null }];
+            const slotIn = w => {
+                const wf = w.from > todayStart ? new Date(w.from) : new Date(todayStart);
+                const f = earliestSew(wf);
+                let st = new Date(f.actualSewStart);
+                if (o.matReady && new Date(o.matReady) > st) st = new Date(o.matReady);
+                if (st < todayStart) st = new Date(todayStart);
+                if (snapStart) st = snapStart(st);
+                return { fwd : f, start : st, endDate : addWorkingDays(st, dur, isWorking) };
+            };
+            let start = null, endDate = null, fwd = null, slot = null;
+            for (const w of windows) {
+                const t = slotIn(w);
+                if (w.to && (t.start >= w.to || t.endDate > w.to)) continue;   // the run does not fit this gap
+                start = t.start; endDate = t.endDate; fwd = t.fwd; slot = w;
+                break;
             }
-
-            const endDate = addWorkingDays(start, dur, isWorking);
+            if (!start) {
+                // no gap takes it: after the line's last bar (the open stretch)
+                const w = windows[windows.length - 1];
+                const t = slotIn(w);
+                start = t.start; endDate = t.endDate; fwd = t.fwd; slot = w;
+            }
+            // Same PCD as the last bar on this line: sit flush after it (only
+            // at the tail — an earlier free gap always wins)
+            if (slot && !slot.to && line.lastEnd && sameDay(line.lastPcd, o.pcd) && start < line.freeFrom) {
+                start = snapStart ? snapStart(line.freeFrom) : new Date(line.freeFrom);
+                endDate = addWorkingDays(start, dur, isWorking);
+            }
             const back = backwardPass(o.ship, dur, o.qty, isWorking, masters);
             if (latestSewEndOf) {
                 const l = latestSewEndOf(o);
@@ -519,12 +547,19 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             const typeFit = ctx.lineHasProductType?.(line.id, profType(o)) ? 0 : 1;
             const clubPcd = line.lastPcd && sameDay(line.lastPcd, o.pcd) ? 0 : 1;
             const clubType = line.lastProductType && line.lastProductType === profType(o) ? 0 : 1;
+            // pieces of one order together: how far this start sits from the
+            // order's first placed piece (0 = parallel, same start), and
+            // whether this line's previous bar is the same order (serial)
+            const oCode = String(o.mbmOrder || o.po || '');
+            const sib = oCode ? firstStartOf.get(oCode) : null;
+            const sibGap = sib ? Math.abs(+start - +sib) : 0;
+            const clubOrder = oCode && line.lastOrder === oCode ? 0 : 1;
             // How many days this line PUSHES the order past its ideal start.
             // 0 = the line can take it exactly on time (e.g. an empty line).
             const delayDays = Math.max(0, Math.round((start - idealStart) / 86400000));
             return {
                 line, start, endDate, dur, availMin, planEff, fwd, back, feas, lateness,
-                typeFit, clubPcd, clubType, delayDays
+                typeFit, clubPcd, clubType, clubOrder, sibGap, delayDays, slot
             };
         });
 
@@ -541,6 +576,12 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             // NEVER push an order later when a line can take it earlier —
             // a free line beats clubbing preferences outright
             if (a.delayDays !== b.delayDays) return a.delayDays - b.delayDays;
+            // pieces of ONE order plan together (planner's rule): the start
+            // closest to the order's first piece wins (same start = parallel
+            // lines), then the sibling's own line (one piece after the other)
+            // — never at the cost of a later start (delayDays decides first)
+            if (a.sibGap !== b.sibGap) return a.sibGap - b.sibGap;
+            if (a.clubOrder !== b.clubOrder) return a.clubOrder - b.clubOrder;
             // strict runs: same start → the line with the highest expected
             // output for this product (profile efficiency) takes it
             if (strictDelivery && a.planEff !== b.planEff) return b.planEff - a.planEff;
@@ -558,10 +599,25 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         const best = pool[0];
         if (!best) continue;
 
-        best.line.freeFrom = best.endDate;
-        best.line.lastEnd = best.endDate;
-        best.line.lastPcd = o.pcd;
-        best.line.lastProductType = profType(o);
+        if (best.slot && best.slot.to) {
+            // a gap was (partly) used: its remainder stays a free window; the
+            // line's tail (freeFrom / lastEnd) is untouched
+            best.slot.from = new Date(best.endDate);
+            if (best.slot.from >= best.slot.to && Array.isArray(best.line.windows)) {
+                const wi = best.line.windows.indexOf(best.slot);
+                if (wi >= 0) best.line.windows.splice(wi, 1);
+            }
+        }
+        else {
+            if (best.slot) best.slot.from = new Date(best.endDate);
+            best.line.freeFrom = best.endDate;
+            best.line.lastEnd = best.endDate;
+            best.line.lastPcd = o.pcd;
+            best.line.lastProductType = profType(o);
+        }
+        best.line.lastOrder = String(o.mbmOrder || o.po || '') || best.line.lastOrder;
+        const oCode = String(o.mbmOrder || o.po || '');
+        if (oCode && !firstStartOf.has(oCode)) firstStartOf.set(oCode, new Date(best.start));
 
         placements.push({ order : o, ...best });
     }
