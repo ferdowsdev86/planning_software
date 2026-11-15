@@ -1294,6 +1294,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     // Bars already on the line that start BEFORE the placement point
     const prevBars = scheduler.eventStore.records
         .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw !== raw
+            && ev.data.raw !== raw._cloneOf   // a preview clone must not see its own bar as the previous one
             && lineIdOf(scheduler, ev) === lineId && ev.startDate < startDate)
         .sort((a, b) => b.startDate - a.startDate);
     if (!prevBars.length) {
