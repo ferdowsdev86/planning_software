@@ -1550,10 +1550,20 @@ app.post(`${BASE}/efficiency-profiles`, async (req, res) => {
 // learning_curve: build up curves - one row per curve day with efficiency %.
 // The whole set is replaced on save (curves can be renamed / deleted).
 // --------------------------------------------------------------------------
+// learning_curve.is_default: the curve a unit's board applies on a product /
+// style change (one per unit, one shared) — chosen in Build up curves →
+// ★ Default; added to the table on first use
+let lcDefaultColumnReady = false;
+async function ensureLearningCurveDefaultColumn() {
+    if (lcDefaultColumnReady) return;
+    await pool.query('ALTER TABLE learning_curve ADD COLUMN IF NOT EXISTS is_default TINYINT(1) NOT NULL DEFAULT 0');
+    lcDefaultColumnReady = true;
+}
 app.get(`${BASE}/learning-curves`, async (req, res) => {
     try {
+        await ensureLearningCurveDefaultColumn();
         const [rows] = await pool.query(
-            `SELECT id, curve_name, period_days, unit_id, day_number, efficiency_pct
+            `SELECT id, curve_name, period_days, unit_id, day_number, efficiency_pct, is_default
              FROM learning_curve ORDER BY curve_name, day_number`
         );
         res.json({ success : true, rows });
@@ -1567,18 +1577,19 @@ app.post(`${BASE}/learning-curves`, async (req, res) => {
     const rows = req.body?.rows || [];
     const conn = await pool.getConnection();
     try {
+        await ensureLearningCurveDefaultColumn();
         await conn.beginTransaction();
         await conn.query('DELETE FROM learning_curve');
         for (const r of rows) {
             await conn.query(
                 `INSERT INTO learning_curve
-                    (curve_name, period_days, unit_id, day_number, efficiency_pct,
+                    (curve_name, period_days, unit_id, day_number, efficiency_pct, is_default,
                      created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+                 VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [String(r.curveName), Number(r.periodDays) || 1,
                  // unit_id NULL = the curve serves every unit's board
                  Number(r.unitId) > 0 ? Number(r.unitId) : null,
-                 Number(r.dayNumber) || 1, Number(r.efficiency) || 0]
+                 Number(r.dayNumber) || 1, Number(r.efficiency) || 0, r.isDefault ? 1 : 0]
             );
         }
         await conn.commit();

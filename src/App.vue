@@ -6925,13 +6925,15 @@ function curvesFromDbRows(rows) {
     for (const r of rows || []) {
         const name = String(r.curve_name || '').trim();
         if (!name) continue;
-        if (!byName.has(name)) byName.set(name, { id : `bc-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name, period : Number(r.period_days) || 1, unitId : Number(r.unit_id) > 0 ? Number(r.unit_id) : null, days : [] });
-        byName.get(name).days.push({ n : Number(r.day_number) || 1, v : Number(r.efficiency_pct) || 0 });
+        if (!byName.has(name)) byName.set(name, { id : `bc-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name, period : Number(r.period_days) || 1, unitId : Number(r.unit_id) > 0 ? Number(r.unit_id) : null, isDefault : false, days : [] });
+        const c = byName.get(name);
+        c.days.push({ n : Number(r.day_number) || 1, v : Number(r.efficiency_pct) || 0 });
+        if (Number(r.is_default) === 1) c.isDefault = true;
     }
     return [...byName.values()].map(c => {
         c.days.sort((a, b) => a.n - b.n);
         const pct = c.days.map(d => d.v);
-        return { id : c.id, name : c.name, period : Math.max(c.period, pct.length) || 1, pct : pct.length ? pct : [0], unitId : c.unitId };
+        return { id : c.id, name : c.name, period : Math.max(c.period, pct.length) || 1, pct : pct.length ? pct : [0], unitId : c.unitId, isDefault : !!c.isDefault };
     });
 }
 
@@ -7049,6 +7051,25 @@ function bcDelete() {
     toast(`Build up curve "${c.name}" deleted`, 'ok');
 }
 
+// ★ Default: the curve a board applies on a product / style change — one per
+// unit (a unit curve) or one shared (an "All units" curve); the other curves
+// of the same scope lose the mark. The open board re-derives its ramps at
+// once (annotation: tooltips / markers; bar lengths follow at the next
+// placement or Re-sync bar lengths).
+const bcIsDefaultForBoard = c => !!c?.isDefault && (Number(c.unitId) > 0 ? Number(c.unitId) === Number(currentUnitId.value) : true);
+function bcSetDefault() {
+    const c = bcList.value.find(x => x.id === bcSelectedId.value);
+    if (!c) return;
+    const scope = Number(c.unitId) > 0 ? Number(c.unitId) : null;
+    for (const x of bcList.value) {
+        const xs = Number(x.unitId) > 0 ? Number(x.unitId) : null;
+        if (xs === scope) x.isDefault = x.id === c.id;
+    }
+    saveBuildUps();
+    const s = getInstance();
+    if (s) { try { applyLearningCurves(s); s.refreshRows?.(); } catch { /* annotation only */ } }
+    toast(`"${c.name}" is now the default Build up curve for ${scope ? unitLabel(scope) : 'all units'} (${c.pct.length} days: ${c.pct.join(' / ')} %) — bars take it on the next placement / Re-sync bar lengths`, 'ok');
+}
 const bcRenameCur = computed(() => bcList.value.find(c => c.id === bcRenameSelId.value) || null);
 
 function bcRename() {
@@ -7118,7 +7139,8 @@ function buildLearningCurveRows() {
             periodDays : Number(c.period) || (c.pct?.length ?? 1),
             unitId     : bcUnitOf(c),
             dayNumber  : i + 1,
-            efficiency : Number(v) || 0
+            efficiency : Number(v) || 0,
+            isDefault  : !!c.isDefault
         }));
     }
     return rows;
@@ -17302,14 +17324,16 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 :key="c.id"
                                 :class="{ 'cal-sel' : c.id === bcSelectedId }"
                                 @click="selectBuildUp(c)"
-                            >{{ c.name }} <span class="bc-tag">{{ bcUnitTag(c) }}</span></div>
+                            >{{ c.name }} <span class="bc-tag">{{ bcUnitTag(c) }}</span><span v-if="c.isDefault" class="bc-default" :title="`Default Build up curve for ${bcUnitTag(c)}`">★ default</span></div>
                             <div v-if="!bcVisible.length" class="bc-empty">এই unit-এর কোনো curve নেই — ➕ New দিয়ে বানান</div>
                         </div>
                         <div class="st-actions">
                             <button class="cal-btn st-btn" @click="bcNew">➕ New</button>
                             <button class="cal-btn st-btn" :disabled="!bcName.trim()" @click="bcUpdate">💾 {{ bcSelectedId ? 'Update' : 'Add' }}</button>
                             <button class="cal-btn st-btn" :disabled="!bcSelectedId" @click="bcDelete">✖ Delete</button>
+                            <button class="cal-btn st-btn" :disabled="!bcSelectedId" title="The curve this unit's board applies on a product / style change (tooltip Curve tab → Profile)" @click="bcSetDefault">★ Default</button>
                         </div>
+                        <div class="pf-line-hint">★ Default = the curve a product / style change applies on the board (tooltip → Curve → Profile). One per unit; an "All units" curve marked default serves the units without their own.</div>
                     </div>
                     <div class="bc-mid">
                         <table class="st-table ef-table">
@@ -18685,6 +18709,8 @@ body {
 .sn-h-erp .sn-htxt    { color : #0d2b72; font-weight : 600; }
 .sn-h-note .sn-htxt   { font-style : italic; }
 .sn-table { width : 100%; border-collapse : collapse; font-size : 12.5px; }
+/* Build up curves: the ★ default mark in the list */
+.bc-default { margin-left : 6px; font-size : 10px; font-weight : 700; color : #7a5a00; background : #ffe9a8; border : 1px solid #e3c35a; border-radius : 3px; padding : 0 4px; vertical-align : middle; }
 .sn-table th { position : sticky; top : 0; background : #1f2a38; color : #fff; text-align : left; padding : 5px 8px; font-weight : 600; }
 .sn-table td { padding : 5px 8px; border-bottom : 1px solid #eef1f5; vertical-align : top; }
 .sn-when { white-space : nowrap; color : #5b6673; width : 150px; }

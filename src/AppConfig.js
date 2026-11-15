@@ -1094,10 +1094,21 @@ export function invalidateWorkDayCache() {
 // The automatic product-change curve of the OPEN board: that unit's own
 // 3-day Build up curve when one is defined, else a 3-day curve shared by
 // every unit (unitId empty). Curves of another unit never apply here.
+// The curve a product / style change applies: the one marked ★ Default for
+// this unit (Build up curves dialog), else the shared ★ Default, else — no
+// default chosen — the first 3-day curve of the unit / shared (old rule).
+// A default curve's period is its own day count (a "3 Days" curve defined
+// over 4 days ramps 4 days).
 function configuredLearningCurve() {
     try {
         const list = JSON.parse(localStorage.getItem('mbm-buildup') || '[]');
         const uid  = Number(uiHooks.unitId) || 0;
+        const asCurve = c => c && Array.isArray(c.pct) && c.pct.length
+            ? { id : c.id, name : c.name, period : c.pct.length, pct : c.pct.map(Number) }
+            : null;
+        const def = (uid && asCurve(list.find(c => c?.isDefault && Number(c?.unitId) === uid)))
+            || asCurve(list.find(c => c?.isDefault && !(Number(c?.unitId) > 0)));
+        if (def) return def;
         return (uid && pickLearningCurve(list.filter(c => Number(c?.unitId) === uid), 3))
             || pickLearningCurve(list.filter(c => !(Number(c?.unitId) > 0)), 3);
     }
