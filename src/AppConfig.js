@@ -3312,6 +3312,21 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Stage', enc(stage))}
         </div>
         ${(() => {
+            // Projection bar whose order has confirm POs by now: their actual
+            // ERP sewing output — sewn in full = the order is done, the bar is
+            // obsolete (the board removes it on load; Auto plan never plans it)
+            const q = Number(r.confirmQty) || 0, sewn = Number(r.confirmSewn) || 0;
+            if (!(q > 0) || !(sewn > 0)) return '';
+            const full = sewn >= q;
+            const pct  = Math.min(100, Math.round(sewn / q * 100));
+            return R('ERP output',
+                `<span class="t4-prod">` +
+                    `<span class="t4-done" title="actual sewing output of the ERP (Daily Production, sewing out) for this order's confirm POs — the projection itself carries no production">✔ Sewn <b>${enc(fmtQty(sewn))}</b> <span class="t4dim">of ${enc(fmtQty(q))} (confirm POs)</span></span>` +
+                    (full ? `<span class="t4-left t4-left-zero" title="the confirm POs are sewn in full — this projection plans nothing and is removed">order complete · projection obsolete</span>` : '') +
+                    `<span class="t4-bar" title="${pct}% of the confirm quantity sewn"><i style="width:${pct}%"></i></span><span class="t4-pct">${pct}%</span>` +
+                `</span>`, 't4-full t4-prodrow');
+        })()}
+        ${(() => {
             // Production update applied: what is DONE and, highlighted, what
             // is STILL TO MAKE (the qty the bar now stands for)
             const made = Number(r.made) || 0;

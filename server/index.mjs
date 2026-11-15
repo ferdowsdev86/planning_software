@@ -282,6 +282,42 @@ async function attachGroupTotals(events) {
     }
 }
 
+// A projection bar (ev-proj:<order>) has no PO row — but its order may have
+// confirm PO rows by now (synced after the projection was planned, planned
+// and finished elsewhere, or still in the pool). Their count, quantity and
+// actual sewing output (ERP daily_productions) go with the bar: confirm rows
+// = the projection is replaced; sewn in full = the order is done and the
+// projection bar is obsolete (26H1LEV893: 8,750 sewn in October, the
+// projection was still planned for 19/11 → 30/11).
+async function attachProjectionTotals(events) {
+    const codeOf = e => String(e.event_code || '').slice(8).replace(/-\d{1,2}$/, '');
+    const isProj = e => !e.planning_order_id && String(e.event_code || '').startsWith('ev-proj:');
+    const codes = [...new Set(events.filter(isProj).map(codeOf).filter(Boolean))];
+    if (!codes.length) return;
+    const [rows] = await pool.query(
+        `SELECT id, order_code, order_quantity, erp_po_id, prod_unit, unit_id, shipment_date FROM planning_orders
+          WHERE order_code IN (${codes.map(() => '?').join(',')})
+            AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%') AND planning_status != 'cancelled'`, codes);
+    if (!rows.length) return;
+    let sew = new Map();
+    try { sew = await sewingOutputForRows(rows); }
+    catch (e) { console.warn(`[scheduler-data] projection sewing output skipped: ${e.message}`); }
+    const byCode = new Map();
+    for (const r of rows) {
+        const g = byCode.get(r.order_code) || { rows : 0, qty : 0, sewn : 0 };
+        g.rows++; g.qty += Number(r.order_quantity) || 0; g.sewn += sew.get(Number(r.id))?.sewn || 0;
+        byCode.set(r.order_code, g);
+    }
+    for (const e of events) {
+        if (!isProj(e)) continue;
+        const g = byCode.get(codeOf(e));
+        if (!g) continue;
+        e.proj_confirm_rows = g.rows;
+        e.proj_confirm_qty  = g.qty;
+        e.proj_sewn         = g.sewn;
+    }
+}
+
 // Bar history (tooltip → Notes tab): what happened to a bar, oldest first —
 // its PO rows as they came from the ERP, every saved change (planning_change_logs),
 // the production entered on it, the planners' notes and today's sewing output.
@@ -548,6 +584,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         if (!whatIf) {
             try { await attachGroupTotals(events); }
             catch (e) { console.warn(`[scheduler-data] group totals skipped: ${e.message}`); }
+            try { await attachProjectionTotals(events); }
+            catch (e) { console.warn(`[scheduler-data] projection totals skipped: ${e.message}`); }
         }
 
         // ERP labels for the bars on this board (Item / Buyer colour modes)

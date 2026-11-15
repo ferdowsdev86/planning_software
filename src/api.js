@@ -362,6 +362,13 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // the POs whose output could not be reconciled (no new allocation)
         groupSewn  : orderId ? (Number(e.group_sewn) || 0) : undefined,
         groupIssue : orderId && e.group_issue ? String(e.group_issue) : undefined,
+        // a projection bar whose order has confirm PO rows by now: their count,
+        // quantity and actual ERP sewing output (server: attachProjectionTotals)
+        // — confirm rows = the projection is replaced; sewn in full = the order
+        // is done and the bar is obsolete
+        linkedPoCount : projId ? (Number(e.proj_confirm_rows) || 0) : undefined,
+        confirmQty    : projId ? (Number(e.proj_confirm_qty) || 0) : undefined,
+        confirmSewn   : projId ? (Number(e.proj_sewn) || 0) : undefined,
         color     : e.color || '',
         orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
         // Consolidated bars restore their full PO group from the saved notes
@@ -1246,6 +1253,9 @@ export async function loadFromApi(unitId = null) {
             if (!raw.ship && f.shipment_date) raw.ship = asDate(f.shipment_date);
             if (!raw.pcd && f.effective_pcd) raw.pcd = asDate(f.effective_pcd);
             if (!(Number(raw.smv) > 0) && Number(f.smv) > 0) raw.smv = Math.round(Number(f.smv) * 100) / 100;
+            // confirm POs synced for this order (the feed counts them by ERP
+            // order id): the planner never plans such a projection again
+            if (!(Number(raw.linkedPoCount) > 0) && Number(f.linked_po_count) > 0) raw.linkedPoCount = Number(f.linked_po_count);
         }
     }
     catch { /* projected feed unavailable — board falls back to reference data only */ }
