@@ -8037,17 +8037,21 @@ async function saveMarkedComplete() {
 // same path as the Orders list tick. Runs after every production save.
 async function autoCompleteFinished(s) {
     if (!s?.eventStore || boardReadOnly.value) return;
-    // Only production entered ON THE BOARD finishes a strip by itself. Output
-    // the ERP reports (raw.erpMade) is shown on the bar, but never removes a
-    // bar or completes an order on its own — that stays the planner's step.
-    const boardMade = r => (Number(r.made) || 0) - (Number(r.erpMade) || 0);
-    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && boardMade(r) >= Number(r.qty);
+    // Production finishes a strip WHEREVER it was reported: entered on the
+    // board or read from the ERP (raw.erpMade — Daily Production, sewing
+    // out; raw.made already carries both, applyProdUpdates). A strip whose
+    // production covers its plan qty has nothing left to make and never
+    // stays on the board as "remaining" (2620BES056: plan 1,038, ERP sewn
+    // 1,038, board entry 0 — the bar stayed Active under the old
+    // board-entry-only rule).
+    const totalMade = r => Number(r.made) || 0;
+    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && totalMade(r) >= Number(r.qty);
     const done = s.eventStore.records.filter(ev => isDone(ev.data?.raw));
     if (!done.length) return;
     const codes = [...new Set(done.map(ev => String(ev.data.raw.mbmOrder || '')).filter(Boolean))];
     const fullyDone = codes.filter(code => s.eventStore.records.every(ev => {
         const r = ev.data?.raw;
-        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || boardMade(r) >= Number(r.qty);
+        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || totalMade(r) >= Number(r.qty);
     }));
     const fullSet = new Set(fullyDone);
     const pieces = done.filter(ev => !fullSet.has(String(ev.data.raw.mbmOrder || '')));
