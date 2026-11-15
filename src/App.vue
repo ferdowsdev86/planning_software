@@ -8049,7 +8049,31 @@ async function autoCompleteFinished(s) {
     const done = s.eventStore.records.filter(ev => isDone(ev.data?.raw));
     if (!done.length) return;
     const codes = [...new Set(done.map(ev => String(ev.data.raw.mbmOrder || '')).filter(Boolean))];
-    const fullyDone = codes.filter(code => s.eventStore.records.every(ev => {
+    // Completing an ORDER is a bigger step than removing a strip:
+    // completeOrders flips EVERY planning_orders row of the code. So the
+    // bars on this board, counted once per order row (r.id), must also
+    // account for the order's FULL quantity. 26H1LEV825: 5 confirm POs
+    // (1,715 pcs) but only one PO's strip (258) ever got a bar — the other
+    // 1,465 pcs exist nowhere on the board, so its finished strip just
+    // leaves (pieces below) and the order stays open.
+    const reqOf = new Map(), covOf = new Map(), covSeen = new Set();
+    for (const ev of s.eventStore.records) {
+        const r = ev.data?.raw;
+        if (!r || r.stage) continue;
+        const code = String(r.mbmOrder || '');
+        if (!code) continue;
+        // ERP units on BOTH sides (groupQty / orderQty / fullOrderQty all
+        // carry the ERP figure — the +3% plan allowance lives only in qty)
+        if (Number(r.fullOrderQty) > 0) reqOf.set(code, Math.max(reqOf.get(code) || 0, Number(r.fullOrderQty)));
+        const rowKey = `${code}|${String(r.id)}`;
+        if (covSeen.has(rowKey)) continue;
+        covSeen.add(rowKey);
+        const rowQty = Number(r.groupQty) > 0 ? Number(r.groupQty)
+            : (Number(r.orderQty) > 0 ? Number(r.orderQty) : (Number(r.baseQty) || Number(r.qty) || 0));
+        covOf.set(code, (covOf.get(code) || 0) + rowQty);
+    }
+    const coversFullOrder = code => (covOf.get(code) || 0) + 0.5 >= (reqOf.get(code) || 0);
+    const fullyDone = codes.filter(code => coversFullOrder(code) && s.eventStore.records.every(ev => {
         const r = ev.data?.raw;
         return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || totalMade(r) >= Number(r.qty);
     }));
