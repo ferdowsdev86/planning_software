@@ -4688,6 +4688,13 @@ function computePullForward(opts = {}) {
             // gap in front of it when it already sits there)
             const floor = raw.pcd && !(Number(raw.made) > 0) ? earliestSewStart(raw.pcd) : null;
             if (floor && ns < floor) ns = clampIntoWorkWindow(new Date(floor));
+            // Nothing is ever PULLED INTO THE PAST: sewing cannot start
+            // yesterday. Every pull stops at today's first working hour —
+            // a bar already standing before today simply stays where it is
+            // (the 5-minute continuity check below turns it into an anchor;
+            // 26H1LEV434 was pulled 03/11 → 27/09 without this)
+            const todayFloor = startOfWorkDay(new Date());
+            if (ns < todayFloor) ns = clampIntoWorkWindow(new Date(todayFloor));
             if (oldStart.getTime() - ns.getTime() < 5 * 60000) {
                 // already continuous (a few minutes of rounding don't count) —
                 // and never later: pull only!
