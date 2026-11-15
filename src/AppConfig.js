@@ -3309,6 +3309,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                   + R('Projected sew end', `${enc(ddMon(proj))}${late ? ' <b style="color:#b45309" title="after the target sewing end (delivery − 7 days)">· late plan</b>' : ''}`);
           })()}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
+          ${r.parked && r.holdReason ? R('Holding Row', `<b style="color:#b45309" title="the Auto plan parked this order here instead of planning it late — split it, subcontract, or agree a new delivery, then plan it by hand">⏸ ${enc(r.holdReason)}</b>`, 't4-full') : ''}
           ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
           ${R('Stage', enc(stage))}
         </div>

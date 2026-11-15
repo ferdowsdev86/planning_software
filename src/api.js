@@ -188,6 +188,8 @@ function eventNotesPayload(raw, onHold, unitId = null) {
         // has no line, so this is what keeps it on its own unit's board
         unit       : Number(unitId) > 0 ? Number(unitId) : undefined,
         holdFloor  : onHold && raw.holdFloor ? raw.holdFloor : undefined,
+        // why the Auto plan parked it here (e.g. "Capacity — no line finishes it by delivery − 7")
+        holdReason : onHold && raw.holdReason ? String(raw.holdReason) : undefined,
         // dbPinned = the pin as loaded from DB; keeps saved positions pinned
         // even when load-time processing has cleared the working flag
         userPinned : !!(raw.userPinned || raw.dbPinned),
@@ -352,6 +354,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // reload (applyLineFormulaDuration keeps raw.sopDur over the formula)
         sopDur       : Number(noteGroup.sop?.dur) > 0 ? Number(noteGroup.sop.dur) : undefined,
         sop          : noteGroup.sop && typeof noteGroup.sop === 'object' ? noteGroup.sop : undefined,
+        // the Auto plan's reason for parking the bar on the Holding Row
+        holdReason   : noteGroup.holdReason ? String(noteGroup.holdReason) : undefined,
         dbId     : orderId,
         // what the bar's PO rows hold NOW (ERP qty; every piece of a split
         // order carries the same figure) and the plan qty of its pieces that

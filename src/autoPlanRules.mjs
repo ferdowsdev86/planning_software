@@ -2,6 +2,9 @@
 
 export const AP_LOCK_DAYS = 10;
 export const AP_HOLD_LOCK = '10-Day Plan Lock';
+// no line finishes the order by its target sewing end (delivery − 7): no late
+// plan on a line — the order is parked on the Holding Row for the planner
+export const AP_HOLD_SPACE = 'Capacity — no line finishes it by delivery − 7';
 
 const day = (d, add = 0) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + add); return x; };
 
