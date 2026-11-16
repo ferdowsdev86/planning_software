@@ -4,7 +4,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
@@ -871,10 +871,11 @@ async function runLiveOrderPlan(s, {
     // last bar sits weeks out is no longer "busy" for the empty weeks in
     // between (CEIL Lines 14/21/26 stood idle 25-43 days that way).
     const apBarsByLine = new Map();
+    const apLineIdx = buildLineIndex(s);   // one index — not an assignment scan per bar
     for (const ev of s.eventStore.records) {
         const raw = ev.data.raw;
         if (!raw || raw.stage) continue;
-        const lid = lineIdOf(s, ev);
+        const lid = lineIdOf(s, ev, apLineIdx);
         if (!LINE_BY_ID[lid]) continue;
         (apBarsByLine.get(lid) || apBarsByLine.set(lid, []).get(lid)).push(ev);
     }
@@ -1129,8 +1130,10 @@ async function runLiveOrderPlan(s, {
         // A gap slot must REALLY take the bar: the real production end may be
         // longer than the engine's estimate — never on top of the bar behind
         // the gap (the order falls through to the gap-aware fill instead)
-        const nxtBar = prof.time('place:nxtBar', () => s.eventStore.records
-            .filter(e2 => e2 !== rec && e2.data?.raw && !e2.data.raw.stage && lineIdOf(s, e2) === lineId && e2.startDate >= start)
+        // (the line's bars from the per-line cache — a scan of every record
+        // with an index-less lineIdOf cost 45 ms per placement on CEIL)
+        const nxtBar = prof.time('place:nxtBar', () => barsOnLine(s, lineId, rec.id)
+            .filter(e2 => e2.data?.raw && !e2.data.raw.stage && e2.startDate >= start)
             .sort((a2, b2) => a2.startDate - b2.startDate)[0]);
         if (nxtBar && end.getTime() > nxtBar.startDate.getTime() + 60000) {
             removeRec(rec);

@@ -103,8 +103,8 @@ import { cursorSplit } from './splitRules.mjs';
 // ---------------------------------------------------------------------------
 function tooltipProductType(po, lineId, preferred) {
     try {
-        const map = JSON.parse(localStorage.getItem('mbm-line-prof') || '{}');
-        const list = JSON.parse(localStorage.getItem('mbm-eff-list') || '[]');
+        const map = lsJson('mbm-line-prof', {}) || {};
+        const list = lsJson('mbm-eff-list', []) || [];
         const pid = lineId ? map[lineId] : null;
         const profile = (pid && list.find(p => p.id === pid)) || list[0];
         return resolveProfileType(po, profile?.values, preferred);
@@ -113,11 +113,24 @@ function tooltipProductType(po, lineId, preferred) {
     return productTypeFor(po, preferred);
 }
 
+// localStorage JSON, parsed once per distinct string: the capacity helpers
+// read the profile master on EVERY call (tens of thousands of calls in one
+// Auto plan run) — a changed value (new string) is parsed again at once
+const lsJsonCache = new Map();   // key → { str, val }
+export function lsJson(key, fallback) {
+    const str = localStorage.getItem(key);
+    const c = lsJsonCache.get(key);
+    if (c && c.str === str) return c.val;
+    let val = fallback;
+    if (str) { try { val = JSON.parse(str); } catch { val = fallback; } }
+    lsJsonCache.set(key, { str, val });
+    return val;
+}
 export function tooltipEfficiency(lineId, productType, fallbackEff) {
     const fb = Number(fallbackEff) || LINE_BY_ID[lineId]?.eff || 50;
     try {
-        const map = JSON.parse(localStorage.getItem('mbm-line-prof') || '{}');
-        const list = JSON.parse(localStorage.getItem('mbm-eff-list') || '[]');
+        const map = lsJson('mbm-line-prof', {}) || {};
+        const list = lsJson('mbm-eff-list', []) || [];
         const pid = lineId ? map[lineId] : null;
         const profile = (pid && list.find(p => p.id === pid)) || list[0];
         const v = resolveProfileEfficiency(profile?.values, productType, fb);
@@ -594,7 +607,7 @@ function rebuildBarsCache(scheduler) {
     return byLine;
 }
 
-function barsOnLine(scheduler, lineId, excludeId = null) {
+export function barsOnLine(scheduler, lineId, excludeId = null) {
     const byLine = barsByLineCache || rebuildBarsCache(scheduler);
     // bars travelling with a carried bar (Consolidate orders) are not on any
     // line while the group is in the air — never an obstacle, never pushed
@@ -1101,7 +1114,7 @@ export function invalidateWorkDayCache() {
 // over 4 days ramps 4 days).
 function configuredLearningCurve() {
     try {
-        const list = JSON.parse(localStorage.getItem('mbm-buildup') || '[]');
+        const list = lsJson('mbm-buildup', []) || [];
         const uid  = Number(uiHooks.unitId) || 0;
         const asCurve = c => c && Array.isArray(c.pct) && c.pct.length
             ? { id : c.id, name : c.name, period : c.pct.length, pct : c.pct.map(Number) }
@@ -1142,8 +1155,8 @@ function lcTypeKey(po, lineId, preferred) {
     if (!lcProfCache) {
         try {
             lcProfCache = {
-                map  : JSON.parse(localStorage.getItem('mbm-line-prof') || '{}'),
-                list : JSON.parse(localStorage.getItem('mbm-eff-list') || '[]')
+                map  : lsJson('mbm-line-prof', {}) || {},
+                list : lsJson('mbm-eff-list', []) || []
             };
         }
         catch { lcProfCache = { map : {}, list : [] }; }
@@ -1306,11 +1319,15 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
         if (done > 0) raw.lcDone = done; else delete raw.lcDone;
         raw.lc = { ...base, ...out };
     };
-    // Bars already on the line that start BEFORE the placement point
-    const prevBars = scheduler.eventStore.records
+    // Bars already on the line that start BEFORE the placement point — from
+    // the per-line cache (one indexed pass per board change). A scan of every
+    // record with an index-less lineIdOf cost O(bars²) PER CALL: 47 ms on the
+    // CEIL board, and the planner calls this per candidate line per order
+    // (splitUnplaced alone took 454 of an Auto plan's 780 s)
+    const prevBars = barsOnLine(scheduler, lineId)
         .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw !== raw
             && ev.data.raw !== raw._cloneOf   // a preview clone must not see its own bar as the previous one
-            && lineIdOf(scheduler, ev) === lineId && ev.startDate < startDate)
+            && ev.startDate < startDate)
         .sort((a, b) => b.startDate - a.startDate);
     if (!prevBars.length) { finish({ applied : false, reason : 'first-on-line', dayOffset : 0 }); return; }
     const prevKey = lcRunKey(prevBars[0].data.raw, lineId);
