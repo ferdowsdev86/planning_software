@@ -2244,22 +2244,109 @@ async function findHiddenEvents(conn) {
     return hidden;
 }
 
+// The planning_orders rows a live bar ON A LINE stands for: its anchor
+// (planning_order_id) and every member of its PO group (notes.idList) — read
+// EXACTLY. A parked bar (Holding Row: no line assignment) holds no row: its
+// anchor is 'unplanned' (the pool row the parked bar stands in for) and so
+// must its members be. Before, the match was `notes LIKE '%<id>%'`: row 5614
+// stayed "planned" because another order's bar listed 15614321 — the row's
+// 5,380 pcs (26SSOVS178 MILITARY GREEN) left the pool and no run ever
+// planned or parked them again.
+// ids: limit the read to these rows (small sets), else every live bar
+async function coveredRowIds(conn, ids = null) {
+    const list = ids ? [...new Set(ids.map(Number).filter(Boolean))] : null;
+    if (list && !list.length) return new Set();
+    const where = list
+        ? ` AND (e.planning_order_id IN (${list.map(() => '?').join(',')}) OR ${list.map(() => "e.notes LIKE CONCAT('%', ?, '%')").join(' OR ')})`
+        : '';
+    const [rows] = await conn.query(
+        `SELECT e.planning_order_id, e.notes
+           FROM planning_events e
+           JOIN planning_assignments a ON a.event_id = e.id
+           JOIN planning_resources r ON r.id = a.resource_id AND r.resource_code NOT LIKE 'HOLD-%'
+          WHERE e.event_status != 'cancelled'${where}`,
+        list ? [...list, ...list.map(String)] : []);
+    const out = new Set();
+    for (const e of rows) {
+        if (Number(e.planning_order_id) > 0) out.add(Number(e.planning_order_id));
+        let n = {};
+        try { n = JSON.parse(e.notes || '{}') || {}; } catch { /* no group */ }
+        if (Array.isArray(n.idList)) for (const i of n.idList) { if (Number(i) > 0) out.add(Number(i)); }
+    }
+    return out;
+}
+
 // PO rows of cancelled bars go back to the unplanned pool — unless another
-// live bar still carries them (as its anchor or inside its PO group)
+// live bar on a line still carries them (as its anchor or inside its PO group)
 async function releaseOrderRows(conn, ids) {
     const list = [...new Set(ids.map(Number).filter(Boolean))];
     if (!list.length) return;
+    const covered = await coveredRowIds(conn, list);
+    const free = list.filter(i => !covered.has(i));
+    if (!free.length) return;
     await conn.query(
         `UPDATE planning_orders po
             SET po.planning_status = 'unplanned', po.updated_at = NOW()
-          WHERE po.id IN (${list.map(() => '?').join(',')})
-            AND po.planning_status IN ('fully_planned', 'partially_planned')
-            AND NOT EXISTS (
-                SELECT 1 FROM planning_events e
-                 WHERE e.event_status != 'cancelled'
-                   AND (e.planning_order_id = po.id OR e.notes LIKE CONCAT('%', po.id, '%')))`,
-        list);
+          WHERE po.id IN (${free.map(() => '?').join(',')})
+            AND po.planning_status IN ('fully_planned', 'partially_planned')`,
+        free);
 }
+
+// Order-status reconciliation: a confirm PO row that reads planned
+// (fully_planned / partially_planned) while NO live bar on a line stands for
+// it is a row the pool cannot see — its quantity is planned nowhere and no
+// Auto plan run ever gets it back (the rule: a confirmed order's full
+// quantity is on a line or on the Holding Row). Such rows go back to
+// 'unplanned'. Projection rows (erp_po_id 'proj-%') follow their ev-proj bar
+// in the sync's own pass; completed / cancelled rows are never touched.
+// Runs after every ERP sync; GET /order-status/orphans previews it.
+async function reconcileOrderStatus(conn, tag = 'sync', { dry = false } = {}) {
+    const covered = await coveredRowIds(conn);
+    const [rows] = await conn.query(
+        `SELECT id, order_code, color, unit_id, order_quantity, shipment_date FROM planning_orders
+          WHERE planning_status IN ('fully_planned', 'partially_planned')
+            AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')`);
+    const orphan = rows.filter(r => !covered.has(Number(r.id)));
+    const perUnit = {};
+    for (const r of orphan) {
+        const u = perUnit[r.unit_id] || (perUnit[r.unit_id] = { rows : 0, qty : 0 });
+        u.rows++; u.qty += Number(r.order_quantity) || 0;
+    }
+    const out = { rows : orphan.length, qty : orphan.reduce((t, r) => t + (Number(r.order_quantity) || 0), 0), perUnit, dry,
+        sample : orphan.slice(0, 60).map(r => ({ id : r.id, order : r.order_code, color : r.color, unit : r.unit_id, qty : Number(r.order_quantity) || 0, ship : r.shipment_date })) };
+    if (!dry && orphan.length) {
+        const ids = orphan.map(r => Number(r.id));
+        for (let i = 0; i < ids.length; i += 500) {
+            const chunk = ids.slice(i, i + 500);
+            await conn.query(
+                `UPDATE planning_orders SET planning_status = 'unplanned', updated_at = NOW()
+                  WHERE id IN (${chunk.map(() => '?').join(',')}) AND planning_status IN ('fully_planned', 'partially_planned')`, chunk);
+        }
+        console.log(`[order-status] ${tag}: ${orphan.length} planned row(s) with no live bar on a line (${Math.round(out.qty)} pcs) back to unplanned — `
+            + Object.entries(perUnit).map(([u, v]) => `unit ${u}: ${v.rows} row(s) / ${Math.round(v.qty)} pcs`).join(', '));
+    }
+    return out;
+}
+
+// Planning Manager only: preview (GET) / apply (POST) the reconciliation now
+// instead of waiting for the next ERP sync
+async function isPlanningManager(username) {
+    if (!username) return false;
+    const [[u]] = await pool.query('SELECT role FROM planning_users WHERE username = ? AND active = 1', [username]);
+    return u?.role === 'Planning Manager';
+}
+app.get(`${BASE}/order-status/orphans`, async (req, res) => {
+    try { res.json({ success : true, ...(await reconcileOrderStatus(pool, 'preview', { dry : true })) }); }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+app.post(`${BASE}/order-status/reconcile`, async (req, res) => {
+    try {
+        const by = String(req.body?.by || '').trim();
+        if (!(await isPlanningManager(by))) return res.status(403).json({ success : false, error : 'Planning Manager only' });
+        res.json({ success : true, ...(await reconcileOrderStatus(pool, `on demand by ${by}`)) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
 
 async function retireHiddenEvents(conn, tag = 'sync') {
     const hidden = await findHiddenEvents(conn);
@@ -3730,6 +3817,10 @@ async function runAutoSync() {
         // (before the status pass below, so their rows read unplanned at once)
         try { await retireHiddenEvents(conn, 'ERP sync'); }
         catch (e) { console.warn(`[board-hygiene] skipped: ${e.message}`); }
+        // Confirm rows that read planned without any live bar on a line
+        // return to the pool (full-quantity rule)
+        try { await reconcileOrderStatus(conn, 'ERP sync'); }
+        catch (e) { console.warn(`[order-status] skipped: ${e.message}`); }
 
         // Projection row status follows its board bar (ev-proj event), the
         // same way confirm rows follow their anchored events
