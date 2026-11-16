@@ -3926,19 +3926,57 @@ async function runAutoSync() {
             [...OS_UNIT_IDS, ERP_CUTOFF]);
         for (const r of liveOsc) liveIds.add(`os-c-${r.id}`);
         const [ploRows] = await conn.query(
-            `SELECT id, erp_po_id, order_code, po_number, order_quantity
+            `SELECT id, erp_po_id, order_code, po_number, color, order_quantity
              FROM planning_orders
              WHERE erp_po_id IS NOT NULL AND erp_po_id != ''
                AND erp_po_id NOT LIKE 'proj-%'
                AND (shipment_date IS NULL OR shipment_date >= ?)`,
             [ERP_CUTOFF]);
         const dead = ploRows.filter(r => !liveIds.has(String(r.erp_po_id)));
-        let removed = 0;
+        const deadIds = new Set(dead.map(r => Number(r.id)));
+        // A row that dies while its PO lives on under ANOTHER row — the
+        // order's twin in the other source (OS ↔ MR, the one-source rule can
+        // flip between syncs) or a re-synced row — hands its bars to that row
+        // instead of losing them. Planner rule (2026-11-16): a plan the
+        // planner saved never loses a bar to a row swap; the live CEIL board
+        // lost 132 freshly saved bars at the 15:49 tick that way ("order row
+        // no longer exists" two minutes after the Save). A twin must be the
+        // same PO number AND the same order code — or, across sources, the
+        // same colour and quantity; a PO number alone is shared by orders.
+        const twinCache = new Map();
+        const twinRowsFor = async (po, color, orderCode, qty) => {
+            const key = `${po}|${color || ''}|${orderCode || ''}|${qty || ''}`;
+            if (twinCache.has(key)) return twinCache.get(key);
+            let rows = [];
+            if (po) {
+                const [all] = await conn.query(
+                    `SELECT id, order_code, color, order_quantity FROM planning_orders
+                      WHERE po_number = ? AND erp_po_id NOT LIKE 'proj-%'
+                        AND (shipment_date IS NULL OR shipment_date >= ?)
+                        AND planning_status NOT IN ('completed', 'cancelled')
+                      ORDER BY id`, [String(po), ERP_CUTOFF]);
+                const norm = v => String(v || '').trim().toLowerCase();
+                const alive = all.filter(r => !deadIds.has(Number(r.id)));
+                // the twin is the same PO–COLOUR row: same order code and colour
+                // (same quantity first), else the other source's row with the
+                // same colour and quantity — never another colour of the order
+                const sameColour = list => color ? list.filter(r => norm(r.color) === norm(color)) : list;
+                const sameQty = list => { const q = list.filter(r => Number(r.order_quantity) === Number(qty)); return q.length ? q : list; };
+                const sameOrder = sameColour(alive.filter(r => orderCode && norm(r.order_code) === norm(orderCode)));
+                rows = sameOrder.length ? sameQty(sameOrder)
+                    : alive.filter(r => color && norm(r.color) === norm(color) && Number(r.order_quantity) === Number(qty));
+            }
+            twinCache.set(key, rows);
+            return rows;
+        };
+        let removed = 0, reanchored = 0;
         for (const row of dead) {
             const rowId = Number(row.id);
-            // Events anchored to the dead row: single-PO bars are deleted
-            // outright; consolidated bars lose this member and re-anchor to a
-            // surviving one
+            // Events anchored to the dead row: a bar moves to the row's twin
+            // when there is one; otherwise a single-PO bar is deleted and a
+            // consolidated bar loses this member (anchored to a member that
+            // SURVIVES this sync — an anchor that dies later in this loop
+            // left the bar orphaned, and board hygiene then retired it)
             const [evs] = await conn.query(
                 'SELECT id, notes FROM planning_events WHERE planning_order_id = ?', [rowId]);
             for (const ev of evs) {
@@ -3946,15 +3984,29 @@ async function runAutoSync() {
                 try { ng = JSON.parse(ev.notes || '{}'); } catch { /* keep {} */ }
                 const ids = Array.isArray(ng.idList) ? ng.idList.map(Number) : [];
                 const idx = ids.indexOf(rowId);
+                const po = (Array.isArray(ng.poList) && ng.poList.length === ids.length && idx >= 0) ? ng.poList[idx] : row.po_number;
+                const twins = (await twinRowsFor(po, row.color, row.order_code, row.order_quantity)).filter(t => !ids.includes(Number(t.id)));
+                if (twins.length) {
+                    const twinId = Number(twins[0].id);
+                    if (idx >= 0) ids[idx] = twinId;
+                    else if (ids.length) ids.push(twinId);
+                    if (ids.length) ng.idList = ids;
+                    const anchor = ids.find(i => !deadIds.has(i)) ?? twinId;
+                    await conn.query('UPDATE planning_events SET planning_order_id = ?, notes = ?, updated_at = NOW() WHERE id = ?',
+                        [anchor, JSON.stringify(ng), ev.id]);
+                    reanchored++;
+                    continue;
+                }
                 if (ids.length > 1 && idx >= 0) {
                     if (Array.isArray(ng.poList) && ng.poList.length === ids.length) ng.poList.splice(idx, 1);
                     ids.splice(idx, 1);
                     ng.idList = ids;
+                    const anchor = ids.find(i => !deadIds.has(i)) ?? ids[0];
                     await conn.query(
                         `UPDATE planning_events SET planning_order_id = ?, notes = ?,
                                 planned_quantity = GREATEST(planned_quantity - ?, 0), updated_at = NOW()
                          WHERE id = ?`,
-                        [ids[0], JSON.stringify(ng), Number(row.order_quantity) || 0, ev.id]);
+                        [anchor, JSON.stringify(ng), Number(row.order_quantity) || 0, ev.id]);
                 }
                 else {
                     await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [ev.id]);
@@ -3973,6 +4025,16 @@ async function runAutoSync() {
                 const ids = Array.isArray(ng.idList) ? ng.idList.map(Number) : [];
                 const idx = ids.indexOf(rowId);
                 if (idx < 0) continue;
+                // the member moves to the row's twin when there is one (quantity kept)
+                const po = (Array.isArray(ng.poList) && ng.poList.length === ids.length) ? ng.poList[idx] : row.po_number;
+                const twins = (await twinRowsFor(po, row.color, row.order_code, row.order_quantity)).filter(t => !ids.includes(Number(t.id)));
+                if (twins.length) {
+                    ids[idx] = Number(twins[0].id);
+                    ng.idList = ids;
+                    await conn.query('UPDATE planning_events SET notes = ?, updated_at = NOW() WHERE id = ?', [JSON.stringify(ng), ev.id]);
+                    reanchored++;
+                    continue;
+                }
                 if (Array.isArray(ng.poList) && ng.poList.length === ids.length) ng.poList.splice(idx, 1);
                 ids.splice(idx, 1);
                 ng.idList = ids;
@@ -3988,7 +4050,8 @@ async function runAutoSync() {
 
         await conn.commit();
         console.log(`[auto-sync] ${new Date().toISOString()} — synced ${synced} ERP orders (since ${ERP_CUTOFF})`
-            + (removed ? `, removed ${removed} PO(s) deleted/cancelled in ERP` : ''));
+            + (removed ? `, removed ${removed} PO(s) deleted/cancelled in ERP` : '')
+            + (reanchored ? `, ${reanchored} bar(s) moved to the twin row of a removed PO row` : ''));
         return { synced, removed };
     }
     catch (e) {

@@ -436,6 +436,17 @@ export async function loadProdDayBars(date, unitIds) {
     return data.rows || [];
 }
 
+// Bars the server's board hygiene would retire on its next ERP sync (order
+// marked complete, dropped in ERP, unknown, row gone, moved to another unit)
+// — read only; Auto plan takes them off the board BEFORE it plans, so no
+// piece is ever cut from an order the server is about to retire
+export async function fetchBoardHygiene() {
+    const res = await apiFetch(`${API_BASE}/board-hygiene`);
+    const data = await res.json();
+    if (!data?.success) throw new Error(data?.error || 'board hygiene failed');
+    return Array.isArray(data.hidden) ? data.hidden : [];
+}
+
 export async function saveProdUpdatesDb(rows) {
     const res = await apiFetch(`${API_BASE}/production-updates`, {
         method  : 'POST',

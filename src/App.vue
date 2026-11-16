@@ -23,7 +23,7 @@ import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, ho
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
-    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb,
+    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, loadPlanAllocation, completeOrdersDb, reopenOrdersDb,
@@ -2146,8 +2146,8 @@ function applyApiBoardData(s, data) {
         if (data.calendarId) calendarState.id = data.calendarId;
         Object.assign(calendarState.days, data.calendarDays);
         if (data.calendarName) calendarState.name = data.calendarName;
-        // No gap packing on load (a reload shows the saved plan as it is)
-        applyCalendarToBoard({ pack : false });
+        // No gap packing and no off-day reflow on load (a reload shows the saved plan as it is)
+        applyCalendarToBoard({ pack : false, reflow : false });
     }
     removeOrdersWithoutBuyer(s);
     expandTimeAxisForEvents(s);
@@ -3684,6 +3684,7 @@ function apClearLockGuard(s) {
 // / order code → 'hold:<reason>' | 'nospace' | 'issue:<text>'
 const apPlanNotes = shallowRef({ rows : new Map(), orders : new Map(), at : null });
 const apBusy        = ref(false);
+let apLastRun = null;   // the last run's result (window.__mbm.ap.last — tests / support)
 // Apply the 10-day lock (default). Unticked = the FIRST full run: every bar
 // without production is planned again by all the rules (nothing frozen,
 // nothing held for the lock); the lock applies from the next run on.
@@ -3972,7 +3973,8 @@ async function runAutoPlanAvail() {
         + (apLateToHold.value
             ? `• target sewing end = delivery − ${AP_FINISH_BUFFER_DAYS} calendar days: NO LATE PLAN — an order no line finishes by then is parked on the Holding Row ("${AP_HOLD_SPACE}") for you to decide\n`
             : `• target sewing end = delivery − ${AP_FINISH_BUFFER_DAYS} calendar days: an order that cannot make it is planned in its earliest slot and shown as a late plan (yellow)\n`)
-        + (lock ? `• a new order whose earliest sewing start falls inside the lock stays in Holding ("${AP_HOLD_LOCK}") — no line, no bar\n` : '')
+        + (lock ? `• the FREE time inside the lock window is used too — new bars and pulled bars may sit between the locked bars; the locked bars themselves never move\n` : '')
+        + `• NO IDLE LINE: after the run every idle stretch of a line (one working day or more, up to the horizon) takes a PIECE of an order waiting on the Holding Row — cut to the output the line makes in that stretch, never before its PCD + ${AP_SEW_START_AFTER_PCD} days, flagged yellow when it ends after the target\n`
         + `• planning horizon ${fmtDate(horizonEnd)}: an order with no line slot before it stays unplanned — "${AP_NO_SPACE}"\n\n`
         + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
     if (!ok) return;
@@ -3983,6 +3985,33 @@ async function runAutoPlanAvail() {
     setBoardLoad(true, 'Blanking the board…', 0);
     let r = null, blanked = { gone : 0, kept : 0 };
     try {
+        // Bars the server's board hygiene is about to retire (order marked
+        // complete, dropped in ERP, unknown, row gone, moved to another unit)
+        // leave FIRST — the run never plans from them and never cuts a gap
+        // piece out of them (the sandbox AQL run lost 10 fresh pieces of
+        // 26SSOVS177 / 178 to the next sync tick that way). Cancelled on Save.
+        try {
+            const hidden = await fetchBoardHygiene();
+            const drop = [];
+            for (const h of hidden) {
+                const ev = s.eventStore.getById(`db-${h.id}`);
+                if (ev && ev.data?.raw && !ev.data.raw.stage) drop.push(ev);
+            }
+            if (drop.length) {
+                for (const ev of drop) {
+                    const dbId = Number(String(ev.id).slice(3).split('-')[0]);
+                    if (dbId) removedDbEventIds.add(dbId);
+                    const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === String(ev.id)) || [];
+                    if (asgn.length) s.assignmentStore.remove(asgn);
+                }
+                s.eventStore.remove(drop);
+                if (boardDbState) for (const ev of drop) delete boardDbState[String(ev.id)];
+                invalidateBarsByLine();
+                const why = [...new Set(hidden.filter(h => drop.some(ev => String(ev.id) === `db-${h.id}`)).map(h => h.reason))];
+                toast(`${drop.length} bar(s) the server would retire on its next ERP sync removed before planning (${why.slice(0, 2).join('; ')}${why.length > 2 ? '; …' : ''}) — cancelled on Save`, 'warn');
+            }
+        }
+        catch (e) { console.warn('[auto plan] board hygiene check skipped:', e.message); }
         beginBoardInteraction(s, 'batch');
         try {
             // a projection bar of an order the ERP shows sewn in full plans
@@ -4003,9 +4032,13 @@ async function runAutoPlanAvail() {
         // is searched from there). A row that never had a bar and whose
         // earliest sewing start falls INSIDE the lock is held, not planned.
         const runOpts = { mode : 'full', onProgress : planProgress, shipAfter : addCalDays(from, -1), shipBefore : to, pcdFrom : null,
-            profileFirst : true, strictDelivery : true, sewStartRule : 'pcd+8', earliestStart : firstEditable,
+            // Planner rule (2026-11-16): a line never idles while an order
+            // waits — the free time INSIDE the 10-day lock window takes new
+            // bars too (the locked bars themselves are fixed: apLocked), so
+            // the search starts today and no order is held for the lock
+            profileFirst : true, strictDelivery : true, sewStartRule : 'pcd+8', earliestStart : boardToday(),
             latestFinishOf : apLatestFinishOf, splitAcrossLines : true, horizonEnd,
-            holdOf : lock ? (u => (u.fromBoard ? null : apHoldReasonOf(u, lock))) : (() => null),
+            holdOf : () => null,
             lateToHold : apLateToHold.value };
         const infeasible = new Map();   // order id → the last reason it could not be placed
         const noteUnplaced = rr => { for (const u of rr?.unplaced || []) infeasible.set(String(u.order?.id), u); };
@@ -4016,7 +4049,11 @@ async function runAutoPlanAvail() {
         // ended up past its delivery − 7 days — then a SECOND planning pass
         // offers the dropped / still-unplanned orders the line time that the
         // settle freed (appended after each line's last bar), settled again
-        const floor = new Date(firstEditable);
+        // the pull / settle floor is today's first working hour in BOTH modes:
+        // with the lock on, the free time inside the window may be used (the
+        // locked bars are fixed bars for every pass); firstEditable only says
+        // which bars were blanked
+        const floor = new Date(boardToday());
         // bars the settle pushed past the planning horizon and took off again
         const horizonDrops = new Map();
         let dropped = prof.time('ap:settle', () => settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
@@ -4098,6 +4135,27 @@ async function runAutoPlanAvail() {
             if (n) r.parked = (r.parked || 0) + n;
             r.filledLate = s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage && !ev.data.raw.parked && ev.data.raw.latePlan && ev.data.raw.status !== 'completed' && !(Number(ev.data.raw.made) > 0)).length;
         }
+        // NO IDLE LINE: the idle stretches that are left take pieces of the
+        // orders waiting on the Holding Row (never before PCD + 8, late
+        // pieces flagged below); one settle re-fits what was placed
+        if (r) {
+            setBoardLoad(true, 'No idle line — filling the idle stretches with pieces of the waiting orders…', 0);
+            await yieldUi();
+            const gf = prof.time('ap:fillGaps', () => apFillLineGaps(s, r, { horizonEnd }));
+            r.gapFill = gf;
+            apLastRun = r;
+            // the Holding list of the review / toast: only the orders that still have a bar on the Holding Row
+            if (gf.pieces && Array.isArray(r.held)) {
+                const still = new Set();
+                for (const ev of s.eventStore.records) {
+                    const x = ev.data?.raw;
+                    if (!x || x.stage || !x.parked) continue;
+                    for (const k of [x.id, x.split?.of, x.mbmOrder]) if (k != null) still.add(String(k));
+                }
+                r.held = r.held.filter(h => { const o = h.order || {}; return [o.id, o.split?.of, o.mbmOrder].some(k => k != null && still.has(String(k))); });
+            }
+            if (gf.pieces) prof.time('ap:settle(gapFill)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd }));
+        }
         // the preserved bars exactly as they were; order-level late status
         // (a split order is late by its LAST piece) with target / projected end
         const drift = prof.time('ap:restoreLocked', () => apRestoreLocked(s));
@@ -4128,7 +4186,7 @@ async function runAutoPlanAvail() {
     // rows still waiting in the run's delivery window (a replaced projection is planned as its confirm POs)
     const left = apReview.value?.summary ? apReview.value.summary.unplannedOrders
         : unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed' && !u.replaced && u.status !== 'replaced').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the 10-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${r?.gapFill?.pieces ? ` · NO IDLE LINE: ${r.gapFill.pieces} piece(s) of ${r.gapFill.orders} waiting order(s) (${fmtQty(r.gapFill.qty)} pcs) fill ${r.gapFill.gaps} idle stretch(es)` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the 10-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
 }
 // The run's review (planner spec 2026-11-12): line plan is the board itself;
 // here the shipment check per bar (PCD, earliest sewing start, latest sewing
@@ -4377,6 +4435,164 @@ function apFlagLateOrders(s) {
 // line for the Holding Row ("Capacity"); the lines are pulled flush and
 // settled again, until no such bar is left. Completed bars, bars with
 // production and locked bars never move. Returns the bars parked.
+// NO IDLE LINE (planner rule, 2026-11-16: a line never idles while an order
+// waits). After the run, every idle stretch of a sewing line that is at least
+// one working day long — from today's first working hour to the planning
+// horizon, the free time inside the 10-day lock window included (locked bars
+// are fixed; only the time between them is used) — takes a PIECE of an order
+// the run left on the Holding Row (no on-time slot / capacity), cut to the
+// output the line makes in that stretch. Never before the order's earliest
+// sewing start (PCD + 8); the piece is a late plan (yellow) when its order
+// ends after the target — apFlagLateOrders runs after this. The Holding Row
+// bar keeps the order's remaining quantity (and leaves when nothing is left).
+// Pieces are NOT split members (no rebalancing re-cuts them) and carry
+// raw.gapFill. Returns { pieces, qty, gaps, orders }.
+function apFillLineGaps(s, r, { horizonEnd = null } = {}) {
+    const today0 = clampIntoWorkWindow(new Date(boardToday()));
+    const limit = horizonEnd ? new Date(horizonEnd) : addCalDays(today0, 120);
+    const index = buildLineIndex(s);
+    const sources = [];
+    const byLine = new Map();
+    for (const ev of s.eventStore.records) {
+        const x = ev.data?.raw;
+        if (!x || x.stage) continue;
+        const lid = lineIdOf(s, ev, index);
+        if (!lid) continue;
+        if (isHoldId(lid)) {
+            if (x.parked && x.holdReason === AP_HOLD_SPACE && x.status !== 'completed' && !(Number(x.made) > 0) && Number(x.qty) > 0 && Number(x.smv) > 0) sources.push(ev);
+            continue;
+        }
+        (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
+    }
+    const out = { pieces : 0, qty : 0, gaps : 0, orders : 0, sources : sources.length, stretches : 0, skip : { floor : 0, small : 0, spill : 0 } };
+    if (!sources.length) return out;
+    // earliest delivery first — the most urgent waiting order takes the idle
+    // time; the small leftovers (under 100 pcs) come after every real run so
+    // a stretch is filled by one order, not by a row of slivers
+    const shipOf = ev => +new Date(ev.data.raw.ship || 8.64e15);
+    const tiny = ev => (Number(ev.data.raw.qty) || 0) < 100 ? 1 : 0;
+    sources.sort((a, b) => (tiny(a) - tiny(b)) || (shipOf(a) - shipOf(b)));
+    // idle stretches of every sewing line, chronological across the board
+    const gaps = [];
+    for (const res of s.resourceStore.records) {
+        if (!res.data?.lineRow || isHoldId(res.id)) continue;
+        const bars = (byLine.get(res.id) || []).slice().sort((a, b) => a.startDate - b.startDate);
+        // a bar in production shows its REMAINING span on screen while the
+        // DB (which the server's overlap check reads) still holds the saved
+        // end — the later of the two bounds the free time behind it
+        const endOf = b => {
+            const db = boardDbState?.[String(b.id)]?.end;
+            const dbEnd = db ? new Date(db) : null;
+            return dbEnd && !Number.isNaN(+dbEnd) && dbEnd > b.endDate ? dbEnd : b.endDate;
+        };
+        let cursor = new Date(today0);
+        for (const b of bars) {
+            const bEnd = endOf(b);
+            if (bEnd <= cursor) continue;
+            if (b.startDate > cursor && cursor < limit) {
+                const gapEnd = b.startDate < limit ? new Date(b.startDate) : new Date(limit);
+                if (apWorkDaysFrom(cursor, gapEnd) >= 1) gaps.push({ lid : res.id, start : new Date(cursor), end : gapEnd });
+            }
+            const after = nextDayStartAfter(bEnd);
+            if (after > cursor) cursor = after;
+        }
+    }
+    out.stretches = gaps.length;
+    if (!gaps.length) return out;
+    gaps.sort((a, b) => a.start - b.start);
+    const usedOrders = new Set();
+    let seq = 0;
+    const removeSource = ev => {
+        const sid = String(ev.id);
+        if (sid.startsWith('db-') && !sid.includes('-sp')) {
+            const dbId = Number(sid.slice(3).split('-')[0]);
+            if (dbId) removedDbEventIds.add(dbId);
+        }
+        const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+        if (asgn.length) s.assignmentStore.remove(asgn);
+        s.eventStore.remove(ev);
+        if (boardDbState) delete boardDbState[sid];
+    };
+    for (const g of gaps) {
+        if (apWorkDaysFrom(g.start, g.end) < 1) continue;
+        for (const src of sources) {
+            const days = apWorkDaysFrom(g.start, g.end);   // what is left of the stretch
+            if (days < 1) break;
+            const x = src.data.raw;
+            const remaining = Number(x.qty) || 0;
+            if (!(remaining > 0)) continue;
+            const lo = apEarliestStartOf(x);
+            if (lo && lo > g.start) { out.skip.floor++; continue; }   // never before PCD + 8
+            const rate = apLineRatePerDay(s, g.lid, x);
+            const cap  = Math.floor(rate * days * 0.95);
+            let piece = Math.min(remaining, cap);
+            // a PARTIAL piece must be worth a strip (half a day of output);
+            // the WHOLE remaining order goes in whatever its size (a leftover
+            // of 13 pcs on the Holding Row is still an order waiting)
+            const minPiece = Math.max(10, Math.ceil(rate * 0.5));
+            if (piece < remaining && piece < minPiece) { out.skip.small++; continue; }
+            const base = x.eventCode || null;
+            const code = nextStripEventCode(s, x.po, base);
+            const orderQty0 = Number(x.orderQty) || remaining;
+            const baseQty0  = Number(x.baseQty) || 0;
+            const raw = { ...x, qty : piece, reqMin : Math.round(piece * (Number(x.smv) || 0)),
+                orderQty : Math.round(orderQty0 * piece / remaining), baseQty : baseQty0 > 0 ? Math.round(baseQty0 * piece / remaining) : x.baseQty,
+                eventCode : code, id : code.startsWith('ev-') ? code.slice(3) : code, keepSeparate : true, gapFill : true,
+                parked : false, holdReason : undefined, status : 'draft', latePlan : false, filledLate : false, userPinned : true, manualGap : false,
+                lc : undefined, dur : undefined, split : undefined, apLocked : false, start : g.start, end : g.start };
+            delete raw.projSewEnd;
+            // a piece never starts on an off day (the calendar reflow on load
+            // would move it — a reload must show the saved plan as it is)
+            let start = clampIntoWorkWindow(new Date(g.start));
+            if (isOffDay(start)) start = startOfWorkDay(nextWorkingDay(start));
+            if (start >= g.end) { out.skip.spill++; continue; }
+            const [rec] = s.eventStore.add({ id : `ev-${raw.id}-gf${++seq}`, startDate : start, endDate : endOfWork(start, 1), duration : 1, durationUnit : 'day', manuallyScheduled : true,
+                name : src.name, percentDone : 0, draggable : true, resizable : true, raw });
+            if (!rec) continue;
+            assignEventToLine(s, rec, g.lid);
+            invalidateBarsByLine();
+            const endFor = () => {
+                try { deriveLcForPlacement(s, raw, g.lid, start); applyLineFormulaDuration(s, raw, g.lid); } catch { /* keep dur */ }
+                let end = endOfWork(start, raw.dur || 1);
+                try { const sim = simulateStrip(s, raw, g.lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
+                return end;
+            };
+            let end = endFor();
+            if (end.getTime() > g.end.getTime() + 60000) {
+                // the real model needs more time than the estimate: cut the piece to the stretch
+                const span = Math.max(1, end.getTime() - start.getTime());
+                const fit = Math.floor(piece * (g.end.getTime() - start.getTime()) / span);
+                if (fit < Math.max(10, Math.ceil(rate * 0.5))) { removeSource(rec); out.skip.spill++; continue; }
+                piece = fit;
+                raw.qty = piece; raw.reqMin = Math.round(piece * (Number(x.smv) || 0));
+                raw.orderQty = Math.round(orderQty0 * piece / remaining); if (baseQty0 > 0) raw.baseQty = Math.round(baseQty0 * piece / remaining);
+                raw.dur = undefined; raw.lc = undefined;
+                end = endFor();
+                if (end.getTime() > g.end.getTime() + 60000) { removeSource(rec); out.skip.spill++; continue; }
+            }
+            rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+            raw.start = start; raw.end = end;
+            // the waiting order keeps what is left on the Holding Row
+            const left = remaining - piece;
+            if (left > 0) {
+                x.qty = left; x.reqMin = Math.round(left * (Number(x.smv) || 0));
+                x.orderQty = Math.max(0, orderQty0 - raw.orderQty); if (baseQty0 > 0) x.baseQty = Math.max(0, baseQty0 - (raw.baseQty || 0));
+            }
+            else { x.qty = 0; x.reqMin = 0; removeSource(src); }   // consumed: never a source again
+            out.pieces++; out.qty += piece;
+            if (!g.filled) { g.filled = true; out.gaps++; }
+            usedOrders.add(String(x.split?.of || x.id || x.mbmOrder));
+            // the stretch is taken (a second piece may follow when time is left after this one)
+            g.start = nextDayStartAfter(end);
+            if (apWorkDaysFrom(g.start, g.end) < 1) break;
+        }
+    }
+    out.orders = usedOrders.size;
+    invalidateBarsByLine();
+    s.refreshRows?.();
+    return out;
+}
+
 function apParkLateBars(s, r, { floor, horizonEnd }) {
     const hid = firstHoldId(s);
     if (!hid) return 0;
@@ -10685,6 +10901,21 @@ function applyErpOutput(s, store) {
     let bars = 0, qty = 0;
     for (const g of groups.values()) {
         if (!(g.sewn > 0)) continue;
+        // Output that belongs to quantity NO bar carries is not put on a bar:
+        // Auto plan plans the REMAINING quantity (PO − sewn), so the sewn
+        // part has no bar at all — attributing it again to the new bars cut
+        // them for work that was never theirs (a bar then looked finished
+        // and the sweep removed it on the next reload). What the bars may
+        // take = sewn − (PO qty − done − planned on board), never below 0.
+        const onBoardErp = g.bars.reduce((a, ev) => {
+            const r = ev.data.raw;
+            const q = Number(r.qty) || 0;
+            return a + Math.min(q, Number(r.baseQty) > 0 ? Number(r.baseQty) : Math.round(q / factor));
+        }, 0);
+        const doneErp = Math.round(g.done / factor);
+        const unplannedErp = Math.max(0, g.rows - doneErp - onBoardErp);
+        const avail = Math.max(0, g.sewn - unplannedErp);
+        if (!(avail > 0)) continue;
         // The PO rows are sewn in FULL: every bar of the order that has started
         // is done — its whole plan quantity, the +3 % allowance included (an
         // allowance nobody will sew must not stay behind as "remaining")
@@ -10698,7 +10929,7 @@ function applyErpOutput(s, store) {
             continue;
         }
         const share = attributeErpOutput({
-            erpSewn : g.sewn, doneRemoved : Math.round(g.done / factor),
+            erpSewn : avail, doneRemoved : doneErp,
             bars : g.bars.map(ev => {
                 const r = ev.data.raw;
                 const q = Number(r.qty) || 0;
@@ -13596,7 +13827,10 @@ const totalHours = () => {
 // the raw DB rows: a projection strip that its confirm order has already
 // replaced is still in the store, so it pushed the planner's saved bars later
 // and then vanished — the bar came back days after the point it was saved at.
-function applyCalendarToBoard({ pack = true } = {}) {
+// reflow false (board load): bars saved on a day that is now an off day stay
+// where they were saved — a reload shows the saved plan as it is; the reflow
+// runs when the planner changes the calendar (their action)
+function applyCalendarToBoard({ pack = true, reflow = true } = {}) {
     calendarState.offDays = new Set(
         Object.keys(calendarState.days)
             .filter(d => hmToHours(calendarState.days[d].hours) <= 0)
@@ -13688,7 +13922,7 @@ function applyCalendarToBoard({ pack = true } = {}) {
     // Reflow every bar to the new calendar (FastReact rule): starts snap off
     // 0-hour days, ends stretch so off days are never counted as work
     let reflowed = 0;
-    for (const rec of s.eventStore.records) {
+    for (const rec of (reflow ? s.eventStore.records : [])) {
         const raw = rec.data.raw;
         if (!raw || raw.stage || raw.userPinned || raw.manualGap) continue;
         if (!isOffDay(rec.startDate)) continue;
@@ -13874,7 +14108,7 @@ onMounted(() => {
     window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
-        ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, hold : apLateToHold, keepStarted : apKeepStarted, busy : apBusy },
+        ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, hold : apLateToHold, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
