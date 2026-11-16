@@ -3296,8 +3296,8 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
               return R('Order Qty', `<b>${enc(fmtQty(whole))}</b>${piece ? ` <span class="t4dim" title="this strip's share of the order (its plan qty is this + 3 %)">· strip ${enc(fmtQty(strip))}</span>` : ''}`);
           })()}
           ${R('Plan Qty', `<b>${enc(fmtQty(r.qty))}</b> <span class="t4dim" title="qty + ROUND(qty × 3%)">(+3%)</span>`)}
-          ${R('Ship date', enc(ddMon(deliv)))}
           ${R('PCD', enc(ddMon(pcd)))}
+          ${R('Ship date', enc(ddMon(deliv)))}
           ${(() => {
               // sewing window: earliest start = PCD + 8, target end = delivery − 7
               // (calendar days); a split order is late by its LAST piece
