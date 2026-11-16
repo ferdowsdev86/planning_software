@@ -960,7 +960,7 @@ async function shiftIfOverlapping(conn, projectId, ev, batchIds, visibleIds = nu
     let end   = new Date(ev.endDate);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     const durMs = end - start;
-    let moved = false;
+    let moved = false, obstacle = null;
     for (let guard = 0; guard < 10; guard++) {
         const [rows] = await conn.query(
             `SELECT e.id, e.end_date FROM planning_events e
@@ -977,12 +977,12 @@ async function shiftIfOverlapping(conn, projectId, ev, batchIds, visibleIds = nu
         if (!hit) break;
         start = new Date(hit.end_date);
         end   = new Date(start.getTime() + durMs);
-        moved = true;
+        moved = true; obstacle = hit.id;
     }
     if (!moved) return null;
     ev.startDate = start;
     ev.endDate   = end;
-    return { eventId : ev.id ?? null, eventCode : ev.eventCode ?? null, newStart : start, newEnd : end };
+    return { eventId : ev.id ?? null, eventCode : ev.eventCode ?? null, newStart : start, newEnd : end, obstacle };
 }
 
 app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
@@ -998,11 +998,12 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
     const logData = ev => JSON.stringify(savedBy ? { ...ev, _by : savedBy } : ev);
     const planLock = new Set((Array.isArray(req.body?.planLock) ? req.body.planLock : []).map(String));
     let lockedSkipped = 0;
+    const lockedSkippedIds = [];
     if (planLock.size) {
-        const keep = e => { if (planLock.has(String(e.id ?? ''))) { lockedSkipped++; return false; } return true; };
+        const keep = e => { if (planLock.has(String(e.id ?? ''))) { lockedSkipped++; lockedSkippedIds.push(String(e.id)); return false; } return true; };
         if (Array.isArray(events.updated)) events.updated = events.updated.filter(keep);
         if (Array.isArray(events.removed)) events.removed = events.removed.filter(keep);
-        if (lockedSkipped) console.warn(`[scheduler-sync] 10-day plan lock: ${lockedSkipped} change(s) to locked bar(s) ignored`);
+        if (lockedSkipped) console.warn(`[scheduler-sync] 10-day plan lock: ${lockedSkipped} change(s) to locked bar(s) ignored — ids ${lockedSkippedIds.join(', ')}`);
     }
 
     // Initial projection-planning stage: NEW board blocks for Confirm Orders
@@ -1132,9 +1133,10 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
         await conn.commit();
         conn.release();
         if (adjusted.length) {
-            console.warn(`[scheduler-sync] ${adjusted.length} event(s) shifted forward to avoid overlap with saved bars`);
+            console.warn(`[scheduler-sync] ${adjusted.length} event(s) shifted forward to avoid overlap with saved bars — `
+                + adjusted.map(a => `${a.eventId ?? a.eventCode} → ${new Date(a.newStart).toISOString().slice(0, 16)} (behind ${a.obstacle})`).join('; '));
         }
-        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped, adjusted, lockedSkipped });
+        return res.json({ success : true, requestId, revision : bumpRev(projectId), mapped, adjusted, lockedSkipped, lockedSkippedIds });
     }
     catch (e) {
         try {

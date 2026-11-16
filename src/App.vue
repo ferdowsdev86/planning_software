@@ -522,8 +522,36 @@ function finishBoardLoad(uid, data, s) {
         setBoardBaseline(s);
         loadQuietUntil = Date.now() + 3000;
         pendingRepairIds.clear();
+        // …and that is CHECKED, not assumed: every bar must stand where the
+        // DB row holds it (start, end, line). A difference is a bug in the
+        // load path — it is shouted at once, never silently saved later.
+        const diff = loadDiffFromDb(s);
+        if (diff.length) {
+            console.warn(`[board load] ${diff.length} bar(s) are not where the DB holds them after load:`, diff.slice(0, 50));
+            toast(`⚠ ${diff.length} bar(s) are not where the saved plan holds them after load (load must change nothing) — see the console: [board load]`, 'warn');
+        }
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
+}
+// Bars whose on-screen span / line differ from the DB row they were loaded
+// from (api.js keeps dbStart / dbEnd / dbLine on every DB event). Empty =
+// the load changed nothing. window.__mbm.loadDiff() for support.
+function loadDiffFromDb(s = getInstance()) {
+    const out = [];
+    if (!s) return out;
+    const index = buildLineIndex(s);
+    for (const ev of s.eventStore.records) {
+        const d = ev.data || {};
+        const raw = d.raw;
+        if (!raw || raw.stage || d.dbStart == null) continue;
+        const lid = lineIdOf(s, ev, index);
+        const why = [];
+        if (Math.abs(+ev.startDate - d.dbStart) > 60000) why.push(`start ${new Date(d.dbStart).toISOString().slice(0, 16)} → ${ev.startDate.toISOString().slice(0, 16)}`);
+        if (d.dbEnd != null && Math.abs(+ev.endDate - d.dbEnd) > 60000) why.push(`end ${new Date(d.dbEnd).toISOString().slice(0, 16)} → ${ev.endDate.toISOString().slice(0, 16)}`);
+        if (d.dbLine && lid && !isHoldId(lid) && String(lid) !== String(d.dbLine)) why.push(`line ${d.dbLine} → ${lid}`);
+        if (why.length) out.push({ id : String(ev.id), name : ev.name, qty : raw.qty, why : why.join('; ') });
+    }
+    return out;
 }
 
 function storeUnitCache(unitId, apiData) {
@@ -2257,20 +2285,19 @@ function applyApiBoardData(s, data) {
     }
     removeOrdersWithoutBuyer(s);
     expandTimeAxisForEvents(s);
-    // RULE (planner, 2026-11-16): a reload shows the plan EXACTLY as it was
-    // saved. Nothing on the board moves, grows, leaves or appears on its own
-    // at load time — no projection → confirm swap, no bar-end re-fit, no
-    // full-quantity completion, no gap packing, no sequential settle, no
-    // PCD + 8 repair. Those rules are applied by Auto plan (and only to what
-    // the run is told to touch) or by the planner's own actions. The only
-    // load-time work left is production: a bar in production is cut to its
-    // remaining quantity (applyProdUpdates), and a strip whose production
-    // covers its plan qty leaves once this planner holds the edit lock.
+    // RULE (planner, 2026-11-16, made absolute 2026-11-17): a reload shows
+    // the plan EXACTLY as it was saved — under no circumstance does a bar
+    // move, grow, shrink, leave or appear on its own at load time: no
+    // projection → confirm swap, no bar-end re-fit, no full-quantity
+    // completion, no gap packing, no sequential settle, no PCD + 8 repair, no
+    // work-window clamp (api.js boardSpanFromDb), no production cut and no
+    // finished-strip sweep. Those rules are applied by Auto plan (and only to
+    // what the run is told to touch), by the production sync the planner
+    // runs, or by the planner's own actions. Production figures are only
+    // ANNOTATED here (made / progress on the bar); loadDiffFromDb below
+    // checks the result against the DB rows and shouts if anything differs.
     beginBoardInteraction(s, 'batch');
-    try {
-        applyProdUpdates(s, { push : false });
-        autoCompleteAfterLock = true;
-    }
+    try { applyProdUpdates(s, { push : false, cut : false }); }
     finally { endBoardInteraction(s); }
     try {
         const short = shortConfirmGroups(s);
@@ -11240,7 +11267,9 @@ function applyErpOutput(s, store) {
 // the bars behind it — a reload shows the saved plan as it is; the planner
 // sees the overlap and decides. A production entry (push true) still moves
 // the followers right away, while the planner is looking.
-function applyProdUpdates(s, { push = true } = {}) {
+// cut:false (board load) = annotate only: made / progress on the bar, no
+// start or end changes — a reload shows the saved plan exactly
+function applyProdUpdates(s, { push = true, cut = true } = {}) {
     if (!s) return;
     const store = loadProdStore();
     try { applyErpOutput(s, store); }
@@ -11257,6 +11286,7 @@ function applyProdUpdates(s, { push = true } = {}) {
             raw.progress = raw.qty ? Math.min(100, Math.round(made / raw.qty * 100)) : 0;
             ev.set?.('percentDone', raw.progress);
 
+            if (!cut) continue;
             const lid  = lineIdOf(s, ev);
             const line = LINE_BY_ID[lid];
             if (!line || made <= 0) continue;
@@ -14395,7 +14425,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -14661,8 +14691,13 @@ async function saveToDbInner(s) {
                 : `Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
             // The server moved something it found overlapping (another planner's
             // bar saved meanwhile) — show what is really stored
-            if (res.adjusted?.length) {
-                toast(`⚠ ${res.adjusted.length} bar(s) were shifted by the server to avoid an overlap — reloading the saved plan`, 'warn');
+            // …or kept a locked bar as saved although the board sent a change
+            // for it: either way the screen must show what is REALLY stored,
+            // so the next reload changes nothing
+            if (res.adjusted?.length || Number(res.lockedSkipped) > 0) {
+                toast(res.adjusted?.length
+                    ? `⚠ ${res.adjusted.length} bar(s) were shifted by the server to avoid an overlap — reloading the saved plan`
+                    : `⚠ ${res.lockedSkipped} change(s) to 10-day-lock bar(s) were not saved (the lock kept them) — reloading the saved plan`, 'warn');
                 await reloadBoardForUnit(currentBoard.value, { force : true });
             }
         }

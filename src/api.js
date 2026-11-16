@@ -6,7 +6,7 @@
 import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
-    addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES, clampIntoWorkWindow,
+    addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES,
     workingMinutesBetween, planQtyOf, mergeErpInfo, isLateVsTarget
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds, isHoldId, floorLabelOf } from './AppConfig.js';
@@ -250,30 +250,23 @@ function boardSpanFromDb(e) {
     const rawEnd   = asDate(e.end_date);
     const dur      = Number(e.duration) || 1;
 
-    // RULE: any bar that has been saved to DB keeps its exact position.
-    // Only clamp into the work window (handles off-day edge cases).
-    // nextWorkingDay / startOfWorkDay snapping is for NEW unplanned bars only.
-    let start;
-    if (rawStart) {
-        start = clampIntoWorkWindow(rawStart);
-    }
-    else {
-        start = startOfWorkDay(nextWorkingDay(new Date()));
-    }
-
-    let end;
-    if (rawEnd && rawEnd > start) {
-        end = rawEnd;
-    }
-    else {
-        end = endOfWork(start, dur);
-    }
+    // RULE (planner, 2026-11-17): a saved bar is shown EXACTLY where the DB
+    // holds it — no clamp into the work window, no off-day snap, no end
+    // re-fit. (clampIntoWorkWindow moved every bar saved on a day the global
+    // calendar calls off — Friday 20/11 on the AQL board — to the next
+    // working day's 08:00 with a re-cut end: the screen stacked them, the DB
+    // kept Friday, and every later Save fought the difference.) Only a row
+    // without dates (never saved properly) gets a placeholder span.
+    const start = rawStart || startOfWorkDay(nextWorkingDay(new Date()));
+    const end   = rawEnd && rawEnd > start ? rawEnd : endOfWork(start, dur);
 
     // The duration the board moves this bar with must reproduce the SAVED
     // span (working minutes of the calendar), not the DB's elapsed-day
     // figure — otherwise every move re-sizes the bar
     const spanUnits = workingMinutesBetween(start, end) / WORK_MIN_PER_DAY;
-    return { start, end, dur : spanUnits > 0 ? Math.round(spanUnits * 1000) / 1000 : dur, pinned : true };
+    return { start, end, dur : spanUnits > 0 ? Math.round(spanUnits * 1000) / 1000 : dur, pinned : true,
+        // the DB's own span, kept on the event for the load self-check
+        dbStart : rawStart ? rawStart.getTime() : null, dbEnd : rawEnd ? rawEnd.getTime() : null };
 }
 
 function orderRowId(planningOrderId) {
@@ -1161,7 +1154,7 @@ export async function loadFromApi(unitId = null) {
         // ERP SMV, else the SMV the planner typed in (Recalculate duration),
         // else a placeholder that is FLAGGED as missing (never shown as real)
         const smv   = Number(e.smv) > 0 ? Number(e.smv) : (noteSmv > 0 ? noteSmv : randSmv(e.po_number));
-        const { start, end, dur } = boardSpanFromDb(e);
+        const { start, end, dur, dbStart, dbEnd } = boardSpanFromDb(e);
         const status = e.event_status === 'completed' ? 'completed' : e.event_status;
         const ship  = asDate(e.shipment_date);
         // Saved projection events (event_code 'ev-proj:…') have no
@@ -1189,6 +1182,7 @@ export async function loadFromApi(unitId = null) {
             events.push({
                 id         : `db-${e.id}`,
                 dbId       : e.id,
+                dbStart, dbEnd, dbLine : mappedId || null,
                 resourceId : holdId,
                 startDate  : start,
                 endDate    : end,
@@ -1208,6 +1202,7 @@ export async function loadFromApi(unitId = null) {
         events.push({
             id         : `db-${e.id}`,
             dbId       : e.id,
+            dbStart, dbEnd, dbLine : mappedId || null,
             resourceId : known ? mappedId : mappedId,
             startDate  : start,
             endDate    : end,
