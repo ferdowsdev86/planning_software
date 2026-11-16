@@ -209,6 +209,9 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     if (Number(raw.stripEff) > 0 && Number(raw.stripEff) !== 100) notes.stripEff = Number(raw.stripEff);
     if (Number(raw.planEff) > 0) notes.planEff = Number(raw.planEff);
     if (raw.keepSeparate) notes.keepSeparate = true;
+    // a gap-fill piece stays linked to its order (Orders list status) across reloads
+    if (raw.gapFill) notes.gapFill = true;
+    if (raw.pieceOf != null) notes.pieceOf = raw.pieceOf;
     // Manually applied Build up curve (bar context menu) — snapshot the
     // percentages so the bar keeps ITS curve even if the profile is edited
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
@@ -350,6 +353,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         stripEff     : Number(noteGroup.stripEff) > 0 ? Number(noteGroup.stripEff) : 100,
         planEff      : Number(noteGroup.planEff) > 0 ? Number(noteGroup.planEff) : 0,
         keepSeparate : !!noteGroup.keepSeparate,
+        gapFill      : !!noteGroup.gapFill,
+        pieceOf      : noteGroup.pieceOf ?? undefined,
         lcManual     : noteGroup.lcCurve && Array.isArray(noteGroup.lcCurve.pct) && noteGroup.lcCurve.pct.length
             ? noteGroup.lcCurve : undefined,
         lcLink       : noteGroup.lcLink && noteGroup.lcLink.refId != null ? noteGroup.lcLink : undefined,

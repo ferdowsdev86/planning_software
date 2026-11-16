@@ -459,6 +459,10 @@ function orderBoardKeys(raw, evId) {
     if (raw?.mbmOrder && raw?.color) keys.add(`ck:${raw.mbmOrder}:${raw.color}`);
     // All POs in the consolidated group
     if (Array.isArray(raw?.poList)) raw.poList.forEach(p => keys.add(`po:${String(p)}`));
+    // a piece of an order (split piece / gap-fill piece) is that order on the
+    // board — the Orders list must not call the order unplanned
+    if (raw?.split?.of) keys.add(String(raw.split.of));
+    if (raw?.pieceOf) keys.add(String(raw.pieceOf));
     keys.add(String(evId));
     return keys;
 }
@@ -771,6 +775,10 @@ async function runLiveOrderPlan(s, {
     onProgress = null,
     mode = 'incremental',
     orderTypes = null,
+    // parkLeftovers: plan nothing — every pool row of this unit that still has
+    // no bar on the board is parked on the Holding Row ("Not Available
+    // Space"); the last step of Auto plan (NO UNPLANNED ORDER rule)
+    parkLeftovers = false,
     // date window (unit boards' "auto-plan from today"): delivery strictly
     // after shipAfter, PCD on/after pcdFrom — orders outside stay unplanned
     shipAfter = null,
@@ -813,6 +821,7 @@ async function runLiveOrderPlan(s, {
     const shipGate = shipAfter ? dayStart(shipAfter) : null;
     const pcdGate  = pcdFrom ? dayStart(pcdFrom) : null;
     let windowSkipped = 0;
+    const skippedRows = [];   // rows the run leaves out (window / SMV / PCD / sewing issue) → Holding Row
     if (!s) return { planned : 0, late : 0, tight : 0, skipped : true };
     if (uiHooks.boardUserActive || isBoardInteracting()) {
         return { planned : 0, late : 0, tight : 0, skipped : true };
@@ -929,16 +938,18 @@ async function runLiveOrderPlan(s, {
         // are the order now
         if (strictDelivery && isProjRow(u) && u.mbmOrder && (confirmOrders.has(String(u.mbmOrder)) || Number(u.linkedPoCount) > 0 || Number(u.confirmQty) > 0)) { projLeft.push(u); continue; }
         if (typeFilter && !typeFilter.has(orderTypeOf(u.po, u.orderType))) continue;
+        // leftovers pass: nothing is planned — rows without a bar are parked below
+        if (parkLeftovers) { skippedRows.push({ u, reason : AP_NO_SPACE }); continue; }
         // No invented dates: an order without a valid effective PCD stays
         // visible in the unplanned data but is never auto-planned.
-        if (u.pcdStatus === 'missing' || u.planWarning) { noPcdCount++; continue; }
+        if (u.pcdStatus === 'missing' || u.planWarning) { noPcdCount++; skippedRows.push({ u, reason : AP_HOLD_NOPCD }); continue; }
         const qty = Number(u.qty ?? u.orderQty) || 0;
         if (qty <= 0) continue;
-        if (!(Number(u.smv) > 0)) continue;                        // no SMV → nothing to size
-        if (shipGate && (!u.ship || dayStart(u.ship) <= shipGate)) { windowSkipped++; continue; }
-        if (shipBefore && (!u.ship || dayStart(u.ship) > dayStart(shipBefore))) { windowSkipped++; continue; }
-        if (pcdGate  && (!u.pcd  || dayStart(u.pcd)  <  pcdGate))  { windowSkipped++; continue; }
-        if (strictDelivery && u.sewIssue) { ambiguous.push({ order : u, reason : u.sewIssue }); continue; }
+        if (!(Number(u.smv) > 0)) { skippedRows.push({ u, reason : AP_HOLD_NOSMV }); continue; }   // no SMV → nothing to size
+        if (shipGate && (!u.ship || dayStart(u.ship) <= shipGate)) { windowSkipped++; skippedRows.push({ u, reason : AP_HOLD_WINDOW }); continue; }
+        if (shipBefore && (!u.ship || dayStart(u.ship) > dayStart(shipBefore))) { windowSkipped++; skippedRows.push({ u, reason : AP_HOLD_WINDOW }); continue; }
+        if (pcdGate  && (!u.pcd  || dayStart(u.pcd)  <  pcdGate))  { windowSkipped++; skippedRows.push({ u, reason : AP_HOLD_WINDOW }); continue; }
+        if (strictDelivery && u.sewIssue) { ambiguous.push({ order : u, reason : u.sewIssue }); skippedRows.push({ u, reason : `Sewing issue — ${u.sewIssue}` }); continue; }
         if (strictDelivery && holdOf) {
             const why = holdOf(u);
             if (why) { held.push({ order : u, reason : why }); continue; }
@@ -962,7 +973,7 @@ async function runLiveOrderPlan(s, {
             shipGate ? `delivery ${shipBefore ? `${fmtDateDdMonRr(addCalDays(shipGate, 1))} → ${fmtDateDdMonRr(shipBefore)}` : `after ${fmtDateDdMonRr(shipGate)}`}` : (shipBefore ? `delivery up to ${fmtDateDdMonRr(shipBefore)}` : ''),
             pcdGate ? `PCD from ${fmtDateDdMonRr(pcdGate)}` : ''
         ].filter(Boolean).join(', ');
-        toast(`${windowSkipped} order(s) outside the window (${win}) left unplanned`, 'ok');
+        toast(`${windowSkipped} order(s) outside the window (${win}) — parked on the Holding Row ("${AP_HOLD_WINDOW}")`, 'ok');
     }
 
     if (!orders.length) {
@@ -980,9 +991,33 @@ async function runLiveOrderPlan(s, {
     await yieldUi();
 
     const isWorking = d => !isOffDay(d);
+    // Pieces of one order together (planner's rule 2026-11-16): the state the
+    // engine ranks on — the order's finish so far and its finish per line —
+    // SHARED across the engine's 25-order chunks and fed with the REAL board:
+    // the bars already on it (a kept piece of the order) and every piece this
+    // run places (its real end, not the engine's estimate)
+    const apOrderState = { endOf : new Map(), lineEnd : new Map() };
+    const noteOrderPiece = (code, lid, end) => {
+        if (!code || !lid || !end || isHoldId(lid)) return;
+        const e = new Date(end);
+        const cur = apOrderState.endOf.get(code);
+        if (!cur || e > cur) apOrderState.endOf.set(code, e);
+        const k = `${code}|${lid}`;
+        const cl = apOrderState.lineEnd.get(k);
+        if (!cl || e > cl) apOrderState.lineEnd.set(k, e);
+    };
+    {
+        const idx0 = buildLineIndex(s);
+        for (const ev of s.eventStore.records) {
+            const x = ev.data?.raw;
+            if (!x || x.stage || x.parked) continue;
+            noteOrderPiece(String(x.mbmOrder || x.po || ''), lineIdOf(s, ev, idx0), ev.endDate);
+        }
+    }
     const planCtx = {
         isWorking,
         today,
+        orderState : apOrderState,
         efficiencyOf : lineEfficiencyOf,
         lineHasProductType : (lineId, productType) => {
             const profile = profileOfLine(lineId);
@@ -1210,6 +1245,7 @@ async function runLiveOrderPlan(s, {
             const r = placeExactBar(e, picks[i].line.id, picks[i].start, latest);
             if (!r.ok) { ok = false; break; }
             placed.push({ rec : r.rec, lid : picks[i].line.id, end : r.end });
+            noteOrderPiece(String(o.mbmOrder || o.po || ''), picks[i].line.id, r.end);
             k++;
         }
         if (!ok) for (const p of placed) removeRec(p.rec);
@@ -1295,7 +1331,7 @@ async function runLiveOrderPlan(s, {
     // No late plan: the order is parked on the Holding Row — a visible bar
     // at its earliest sewing start, sized by the best line's estimate, no
     // line (Save keeps it there; the next run plans it again from the pool)
-    const parkOnHold = (o, base, best) => {
+    const parkOnHold = (o, base, best, reason = AP_HOLD_SPACE) => {
         const hid = firstHoldId(s);
         if (!hid) return false;
         const sew0 = planCtx.sewStartOf ? planCtx.sewStartOf(o) : (o.pcd ? new Date(o.pcd) : null);
@@ -1304,7 +1340,7 @@ async function runLiveOrderPlan(s, {
         const end = endOfWork(start, days);
         const qty = Number(o.qty) || 0;
         const raw = { ...base, qty, reqMin : Math.round(qty * (Number(o.smv) || 0)), eventCode : codeOf(o), dur : days, start, end,
-            status : 'draft', parked : true, holdReason : AP_HOLD_SPACE, latePlan : false, filledLate : false, userPinned : true, manualGap : false, lc : undefined, split : undefined };
+            status : 'draft', parked : true, holdReason : reason, latePlan : false, filledLate : false, userPinned : true, manualGap : false, lc : undefined, split : undefined };
         const [rec] = s.eventStore.add({ id : `ev-${o.id}`, startDate : start, endDate : end, duration : elapsedDays(start, end), durationUnit : 'day', manuallyScheduled : true,
             name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : false, raw });
         if (!rec) return false;
@@ -1494,12 +1530,24 @@ async function runLiveOrderPlan(s, {
         beginBoardInteraction(s, 'batch');
         s.suspendRefresh?.();
         try {
-            for (const p of part) {
-                const e = buildEvent(p);
-                const r = placeExactBar(e, p.line.id, p.start, latestOf(p.order));
+            for (let p of part) {
+                let e = buildEvent(p);
+                let r = placeExactBar(e, p.line.id, p.start, latestOf(p.order));
+                // the engine's first choice did not fit the real board (its
+                // slot is shorter than the real production run, or a bar sits
+                // right behind the gap): the next-ranked lines in turn — e.g.
+                // a piece meant to follow its order on the same line takes the
+                // line that finishes closest to the order instead
+                for (const alt of (!r.ok && Array.isArray(p.alternates)) ? p.alternates : []) {
+                    const p2 = { ...p, ...alt, alternates : undefined };
+                    const e2 = buildEvent(p2);
+                    const r2 = placeExactBar(e2, p2.line.id, p2.start, latestOf(p2.order));
+                    if (r2.ok) { p = p2; e = e2; r = r2; break; }
+                }
                 if (!r.ok) { failed.push({ order : p.order, reason : r.reason, raw : e.raw }); continue; }
                 placements.push(p);
                 feedFree(p.line.id, r.end);
+                noteOrderPiece(String(p.order.mbmOrder || p.order.po || ''), p.line.id, r.end);
             }
             prof.time('plan:splitUnplaced', () => splitUnplaced([...skipped, ...failed]));
         }
@@ -1590,6 +1638,38 @@ async function runLiveOrderPlan(s, {
     // Engine-settled pass: bars must sit strictly one after another (the
     // strict placement already inserted every bar into a free slot)
     if (!strictDelivery) await enforceSequentialLines(s);
+    // NO UNPLANNED ORDER (planner rule, 2026-11-16): every row the run could
+    // not put on a line — no slot before the horizon, delivery outside the
+    // window, no SMV, no PCD, a sewing issue — is parked on the Holding Row
+    // with its reason, so the Orders list never shows "unplanned" for an
+    // order that has nowhere to go; the planner sees them all in one place
+    let parkedOut = 0;
+    if (strictDelivery) {
+        const onBoard = new Set();
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data?.raw;
+            if (!raw || raw.stage) continue;
+            for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
+        }
+        const parkRow = (u, reason) => {
+            if (!u || parkedIds.has(String(u.id))) return false;
+            if (orderKeysOf(u).some(k => onBoard.has(k))) return false;
+            const q = Number(u.qty ?? u.orderQty) || 0;
+            if (!(q > 0)) return false;
+            const o = { ...u, qty : q, smv : Number(u.smv) > 0 ? Number(u.smv) : 18 };
+            const base = u.raw || { ...o, orderQty : o.orderQty ?? q, progress : 0, status : 'draft', userPinned : true, manualGap : false,
+                pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color,
+                risk : calcRisk({ start : today, end : today, ship : o.ship, matReady : o.matReady || o.pcd, lineUtil : 0, status : 'draft' }) };
+            try { if (!parkOnHold(o, base, null, reason)) return false; }
+            catch (e) { console.warn('[auto plan] could not park', o.mbmOrder || o.po, e.message); return false; }
+            for (const k of orderKeysOf(u)) onBoard.add(k);
+            held.push({ order : o, reason, capacity : reason === AP_HOLD_SPACE || reason === AP_NO_SPACE, bestFinish : null, bestLine : null });
+            return true;
+        };
+        for (const u of unplaced) if (parkRow(u.order, u.noSpace ? AP_NO_SPACE : AP_HOLD_SPACE)) parkedOut++;
+        for (const { u, reason } of skippedRows) if (parkRow(u, reason)) parkedOut++;
+        if (parkedOut) { invalidateBarsByLine(); s.refreshRows?.(); }
+    }
     recalcCapacity(s);
     refreshGrandTotals(s);
     s.refreshRows?.();
@@ -1597,7 +1677,7 @@ async function runLiveOrderPlan(s, {
     scrollBoardToToday(s);
     touchBoardCache(s);
 
-    return { planned : placements.length, late, tight, skipped : false, unplacedLate : unplaced.length, unplaced, splitOrders, splitPieces, filled, filledLate, filledPieces, parked : parkedN, held, ambiguous };
+    return { planned : placements.length, late, tight, skipped : false, unplacedLate : unplaced.length, unplaced, splitOrders, splitPieces, filled, filledLate, filledPieces, parked : parkedN, parkedOut, held, ambiguous };
 }
 
 function disableStmIfLarge(s) {
@@ -3607,6 +3687,12 @@ const AP_SEW_START_AFTER_PCD = SEW_START_AFTER_PCD_DAYS;      // 8 calendar days
 const AP_FINISH_BUFFER_DAYS  = SEW_END_BEFORE_DELIVERY_DAYS;  // 7 calendar days
 const AP_HORIZON_DAYS = 180;
 const AP_NO_SPACE     = 'Not Available Space';
+// NO UNPLANNED ORDER (planner rule, 2026-11-16): an order the run cannot put
+// on a line is parked on the Holding Row with the reason — never left
+// invisible in the Orders list
+const AP_HOLD_WINDOW  = 'Delivery outside the planning window';
+const AP_HOLD_NOSMV   = 'No SMV — cannot be sized';
+const AP_HOLD_NOPCD   = 'PCD missing';
 const BOARD_TZ        = 'Asia/Dhaka';
 // the board's local date (factory time), as a local Date at 00:00
 function boardToday() {
@@ -4155,6 +4241,21 @@ async function runAutoPlanAvail() {
                 r.held = r.held.filter(h => { const o = h.order || {}; return [o.id, o.split?.of, o.mbmOrder].some(k => k != null && still.has(String(k))); });
             }
             if (gf.pieces) prof.time('ap:settle(gapFill)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd }));
+            // NO UNPLANNED ORDER: whatever row of this unit still has no bar
+            // (dropped past the horizon, never placed) is parked on the
+            // Holding Row as "Not Available Space" — the Orders list never
+            // says "unplanned" for an order that has nowhere to go
+            setBoardLoad(true, 'Parking the orders that still have no bar on the Holding Row…', 0);
+            await yieldUi();
+            try {
+                const extra = await runLiveOrderPlan(s, { ...runOpts, showToasts : false, parkLeftovers : true });
+                if (extra?.parkedOut) {
+                    r.parkedOut = (r.parkedOut || 0) + extra.parkedOut;
+                    r.parked = (r.parked || 0) + extra.parkedOut;
+                    if (Array.isArray(extra.held)) r.held = [...(r.held || []), ...extra.held];
+                }
+            }
+            catch (e) { console.warn('[auto plan] leftovers pass skipped:', e.message); }
         }
         // the preserved bars exactly as they were; order-level late status
         // (a split order is late by its LAST piece) with target / projected end
@@ -4459,7 +4560,7 @@ function apFillLineGaps(s, r, { horizonEnd = null } = {}) {
         const lid = lineIdOf(s, ev, index);
         if (!lid) continue;
         if (isHoldId(lid)) {
-            if (x.parked && x.holdReason === AP_HOLD_SPACE && x.status !== 'completed' && !(Number(x.made) > 0) && Number(x.qty) > 0 && Number(x.smv) > 0) sources.push(ev);
+            if (x.parked && (x.holdReason === AP_HOLD_SPACE || x.holdReason === AP_NO_SPACE) && x.status !== 'completed' && !(Number(x.made) > 0) && Number(x.qty) > 0 && Number(x.smv) > 0) sources.push(ev);
             continue;
         }
         (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
@@ -4537,7 +4638,7 @@ function apFillLineGaps(s, r, { horizonEnd = null } = {}) {
             const baseQty0  = Number(x.baseQty) || 0;
             const raw = { ...x, qty : piece, reqMin : Math.round(piece * (Number(x.smv) || 0)),
                 orderQty : Math.round(orderQty0 * piece / remaining), baseQty : baseQty0 > 0 ? Math.round(baseQty0 * piece / remaining) : x.baseQty,
-                eventCode : code, id : code.startsWith('ev-') ? code.slice(3) : code, keepSeparate : true, gapFill : true,
+                eventCode : code, id : code.startsWith('ev-') ? code.slice(3) : code, keepSeparate : true, gapFill : true, pieceOf : x.pieceOf || x.split?.of || x.id,
                 parked : false, holdReason : undefined, status : 'draft', latePlan : false, filledLate : false, userPinned : true, manualGap : false,
                 lc : undefined, dur : undefined, split : undefined, apLocked : false, start : g.start, end : g.start };
             delete raw.projSewEnd;
