@@ -189,9 +189,9 @@ function scheduleBoardSettle() {
     settleTimer = setTimeout(() => {
         const s = getInstance();
         if (!s || boardSettling || carried.value || skipAutoBarSync) return;
-        // Still inside a board load (a load-time swap marks the board dirty):
-        // whatever is re-fitted now is derived, not the planner's change
-        if (Date.now() < loadQuietUntil) { autoSyncBarLengths(s); return; }
+        // Still inside a board load: nothing is re-fitted — a reload shows
+        // the saved plan as it is
+        if (Date.now() < loadQuietUntil) return;
         boardSettling = true;
         try {
             const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
@@ -297,21 +297,6 @@ function absorbAuto(s, before) {
         const b = before[id], a = after[id], base = boardBaseline[id];
         if (b && base && sameBarState(base, b) && !sameBarState(b, a)) boardBaseline[id] = a;
     }
-}
-// Bars strictly one after another on every line — an engine-settled (async)
-// pass. What it nudges is derived, so it is absorbed into the baseline and
-// never listed as a change. Starts in a microtask so the caller's own
-// baseline snapshot is already in place.
-function settleSequential(s) {
-    return Promise.resolve().then(() => {
-        const before = snapshotBoardState(s);
-        return enforceSequentialLines(s).then(() => {
-            absorbAuto(s, before);
-            pendingRepairIds.clear();
-            // a nudged bar's end is re-fitted at its new start (derived too)
-            autoSyncBarLengths(s);
-        });
-    }).catch(() => { /* board closed meanwhile */ });
 }
 function withAutoAbsorb(s, fn) {
     const before = boardBaseline ? snapshotBoardState(s) : null;
@@ -522,21 +507,11 @@ function finishBoardLoad(uid, data, s) {
     if (countSewingEvents(data) > 0) {
         boardUnitCache[uid].ready = true;
         boardUnitCache[uid].dirty = false;
-        // Bar ends are fitted to the production schedule BEFORE the baseline:
-        // a derived figure, identical on every load — never a "change"
-        autoSyncBarLengths(s);
+        // the baseline IS the saved plan: no bar was re-fitted, moved or
+        // repaired on the way in (see applyApiBoardData)
         setBoardBaseline(s);
         loadQuietUntil = Date.now() + 3000;
-        // Load-time overlap repairs are part of that derived picture — the
-        // same on every load — so they are not force-listed as changes
         pendingRepairIds.clear();
-        // after the quiet window (the lock / read-only state is known by then):
-        // bars that start before PCD + 8 move to their earliest sewing start
-        setTimeout(() => {
-            if (getInstance() !== s) return;
-            try { retireSewnProjections(s); } catch (e) { console.warn('[sewn projections] skipped:', e.message); }
-            try { enforceSewStartFloor(s); } catch (e) { console.warn('[sew floor] skipped:', e.message); }
-        }, 3500);
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
@@ -1875,12 +1850,13 @@ function autoSyncBarLengths(s) {
     catch (e) { console.warn('[bar sync] skipped:', e.message); }
 }
 
-// Planning rule on load: sewing never starts before PCD + 8 days. Bars saved
-// under the earlier rule (pulled down to their PCD) — or pulled there by
-// hand — are moved to their earliest sewing start; the bars behind them on
-// the line move back in order (push only, never a pull). Completed bars,
-// bars with production and locked bars stay — past or near-term bars with
-// no production are moved too (a plan that never ran is not history).
+// Sewing never starts before PCD + 8 days. Bars placed under the earlier
+// rule (pulled down to their PCD) — or pulled there by hand — are moved to
+// their earliest sewing start; the bars behind them on the line move back
+// in order (push only, never a pull). Completed bars, bars with production
+// and locked bars stay. NOT run on load any more (a reload shows the saved
+// plan as it is — planner rule, 2026-11-16): Auto plan applies the floor to
+// every bar it plans; this remains available as window.__mbm.enforceSewStartFloor.
 // A real change: the board goes dirty and Save keeps it.
 // A projection bar whose order's confirm POs are sewn IN FULL (ERP daily
 // production ≥ the confirm rows' quantity — raw.confirmSewn / confirmQty,
@@ -1892,11 +1868,12 @@ function projectionSewnOut(r) {
     return q > 0 && (Number(r.confirmSewn) || 0) >= q;
 }
 
-// Board load: a projection bar of an order the ERP shows as sewn in full
-// leaves the board (cancelled on Save) — it was planned again after its
-// confirm bar had gone as finished (26H1LEV893: 8,750 sewn in October, the
-// projection stood on C02 for 19/11 → 30/11). Bars with production entered
-// on the board stay.
+// Auto plan (first step of the run): a projection bar of an order the ERP
+// shows as sewn in full leaves the board (cancelled on Save) — it was
+// planned again after its confirm bar had gone as finished (26H1LEV893:
+// 8,750 sewn in October, the projection stood on C02 for 19/11 → 30/11).
+// Bars with production entered on the board stay. Not run on load: a
+// reload shows the saved plan as it is (planner rule, 2026-11-16).
 function retireSewnProjections(s) {
     if (!s || boardReadOnly.value) return 0;
     const gone = [];
@@ -2155,41 +2132,26 @@ function applyApiBoardData(s, data) {
         if (data.calendarId) calendarState.id = data.calendarId;
         Object.assign(calendarState.days, data.calendarDays);
         if (data.calendarName) calendarState.name = data.calendarName;
-        // No overlap repair here: the board is not ready for it yet (see the
-        // ORDER MATTERS note below) — packBoardGaps runs once, further down
+        // No gap packing on load (a reload shows the saved plan as it is)
         applyCalendarToBoard({ pack : false });
     }
     removeOrdersWithoutBuyer(s);
     expandTimeAxisForEvents(s);
+    // RULE (planner, 2026-11-16): a reload shows the plan EXACTLY as it was
+    // saved. Nothing on the board moves, grows, leaves or appears on its own
+    // at load time — no projection → confirm swap, no bar-end re-fit, no
+    // full-quantity completion, no gap packing, no sequential settle, no
+    // PCD + 8 repair. Those rules are applied by Auto plan (and only to what
+    // the run is told to touch) or by the planner's own actions. The only
+    // load-time work left is production: a bar in production is cut to its
+    // remaining quantity (applyProdUpdates), and a strip whose production
+    // covers its plan qty leaves once this planner holds the edit lock.
     beginBoardInteraction(s, 'batch');
-    let swapped = 0;
     try {
-        swapped = replaceProjectionsWithConfirms(s);
-        // ORDER MATTERS: first every bar takes its real span (production cut,
-        // then end = production-schedule finish), and only THEN are overlaps
-        // looked for. Repairing on the stale saved ends pushed bars away from
-        // the point the planner had saved them at.
-        applyProdUpdates(s);
-        // strips already finished by the production on file leave the board
-        // as soon as this planner holds the edit lock (see syncBoardLock)
+        applyProdUpdates(s, { push : false });
         autoCompleteAfterLock = true;
-        autoSyncBarLengths(s);
-        // full quantity: the confirm colour groups still missing from orders
-        // that are on a line — into free slots of the bars' REAL spans
-        try { replaceProjectionsWithConfirms(s, { complete : true, onlyComplete : true }); }
-        catch (e) { console.warn('[full quantity] completion skipped:', e.message); }
-        packBoardGaps(s);
     }
     finally { endBoardInteraction(s); }
-    if (swapped) {
-        markBoardDirty();
-        toast(`${swapped} projection bar(s) replaced by their confirm order (equal quantity) — Save to keep it`, 'ok');
-    }
-    if (lastConfirmCompletion.groups) {
-        const c = lastConfirmCompletion;
-        markBoardDirty();
-        toast(`Full quantity: ${c.groups} confirm colour group(s) of ${c.orders.length} planned order(s) were not on the board — planned in the first free slot, their order's line first (${fmtQty(c.qty)} pcs${c.late ? `, ${c.late} late — flagged` : ''}): ${c.orders.slice(0, 4).join(', ')}${c.orders.length > 4 ? '…' : ''} — Save to keep it`, c.late ? 'warn' : 'ok');
-    }
     try {
         const short = shortConfirmGroups(s);
         if (short.length) {
@@ -2199,10 +2161,6 @@ function applyApiBoardData(s, data) {
     catch { /* a hint only */ }
     syncOrdersListFromBoard();
     scheduleConsolidation();
-    // Engine-settled pass (async): bars must sit strictly one after another.
-    // Runs after the caller has taken the load baseline (microtask), and what
-    // it nudges is derived, not a planner change → absorbed into the baseline.
-    settleSequential(s);
     if (ordersOpen.value) ordersRows.value = collectOrders();
     recalcCapacity(s);
     scrollBoardToToday(s);
@@ -3990,7 +3948,13 @@ async function runAutoPlanAvail() {
     let r = null, blanked = { gone : 0, kept : 0 };
     try {
         beginBoardInteraction(s, 'batch');
-        try { blanked = blankBoardForAutoPlan(s, apKeepStarted.value, lock); }
+        try {
+            // a projection bar of an order the ERP shows sewn in full plans
+            // nothing — it leaves with the run (not on load: a reload never
+            // changes the saved plan)
+            try { retireSewnProjections(s); } catch (e) { console.warn('[sewn projections] skipped:', e.message); }
+            blanked = blankBoardForAutoPlan(s, apKeepStarted.value, lock);
+        }
         finally { endBoardInteraction(s); }
         s.refreshRows?.();
         await yieldUi();
@@ -10711,7 +10675,11 @@ function applyErpOutput(s, store) {
     return { bars, qty };
 }
 
-function applyProdUpdates(s) {
+// `push` false (board load): a bar whose remaining end grew does NOT push
+// the bars behind it — a reload shows the saved plan as it is; the planner
+// sees the overlap and decides. A production entry (push true) still moves
+// the followers right away, while the planner is looking.
+function applyProdUpdates(s, { push = true } = {}) {
     if (!s) return;
     const store = loadProdStore();
     try { applyErpOutput(s, store); }
@@ -10744,6 +10712,15 @@ function applyProdUpdates(s) {
             }
             if (!raw.origStart) raw.origStart = new Date(ev.startDate);
             const madeBase = Math.min(made, Math.max(0, Number(raw.madeBase) || 0));
+            // Nothing made since the bar was saved (its start is already the
+            // cut start, madeBase its production then): the bar stays EXACTLY
+            // as saved — no end re-fit, nothing moves (a reload shows the
+            // saved plan as it is). New production cuts it below.
+            if (raw._cutStart == null && made - madeBase <= 0) {
+                raw._cutStart = ev.startDate.getTime();
+                raw._cutMade  = made;
+                continue;
+            }
 
             const availMin = (line.availMin || 12000) * (raw.stripEff || 100) / 100;
             const smv      = Math.max(0.1, Number(raw.smv) || randSmv(raw.po));
@@ -10791,7 +10768,7 @@ function applyProdUpdates(s) {
                 });
                 raw.start = newStart;
                 raw.end   = newEnd;
-                if (grew) pushFollowers(s, lid, ev);
+                if (grew && push) pushFollowers(s, lid, ev);
             }
             raw._cutStart = ev.startDate.getTime();
             raw._cutMade  = made;
