@@ -1851,13 +1851,45 @@ const pickStyleRow = (rows, orderCode) => {
     const want = String(orderCode || '').trim().toUpperCase();
     return (want && rows.find(r => String(r.order_code || '').trim().toUpperCase() === want)) || rows[0] || null;
 };
+// An OS order's code (GSL-…) never matches the ERP rows' order_code, so the
+// bare fallback showed ANOTHER order's style that shares the PO number
+// (GSL-251176, PO 300137243037: three JCP orders share it — the first row,
+// 26SPJCP099 / style 401023, won; the os_orders row says the order stands
+// for 26SPJCP098 / style 400636). Map the OS codes to their mr order first.
+async function osOrderMrMap(codes, q = pool) {
+    const want = [...new Set(codes.map(c => String(c || '').trim()).filter(Boolean))];
+    if (!want.length) return new Map();
+    try {
+        const [rows] = await q.query(
+            `SELECT os_order_code, mr_order_code, mr_order_id FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${want.map(() => '?').join(',')})`, want);
+        return new Map(rows.map(r => [String(r.os_order_code).trim().toUpperCase(),
+            { code : String(r.mr_order_code || '').trim().toUpperCase(), id : Number(r.mr_order_id) || 0 }]));
+    }
+    catch { return new Map(); }
+}
+const hasOrderRow = (rows, want) => !!want && rows.some(r => String(r.order_code || '').trim().toUpperCase() === want);
+const pickStyleRowMapped = (rows, orderCode, osMap) => {
+    const want = String(orderCode || '').trim().toUpperCase();
+    const direct = want && rows.find(r => String(r.order_code || '').trim().toUpperCase() === want);
+    if (direct) return direct;
+    const os = osMap?.get(want);
+    if (os) {
+        const byId = os.id && rows.find(r => Number(r.entry_id) === os.id);
+        if (byId) return byId;
+        const byCode = os.code && rows.find(r => String(r.order_code || '').trim().toUpperCase() === os.code);
+        if (byCode) return byCode;
+    }
+    return rows[0] || null;
+};
 app.get(`${BASE}/order-details`, async (req, res) => {
     const po = req.query.po;
     if (!po) return res.status(400).json({ success : false, error : 'Missing po' });
     if (dbOffline()) return dbOfflineReply(res);
     try {
         const [rows] = await pool.query(`${STYLE_SQL('po.po_no = ?')} LIMIT 25`, [String(po)]);
-        const style = pickStyleRow(rows, req.query.order);
+        const wantOrd = String(req.query.order || '').trim().toUpperCase();
+        const osMap = rows.length && wantOrd && !hasOrderRow(rows, wantOrd) ? await osOrderMrMap([wantOrd]) : new Map();
+        const style = pickStyleRowMapped(rows, req.query.order, osMap);
 
         if (!style) return res.json({ success : false, error : 'Not found' });
 
@@ -1945,7 +1977,15 @@ app.post(`${BASE}/tooltip-bulk`, async (req, res) => {
             const byPo = new Map();                       // po → every row of that PO number
             for (const s of styles) { const k = String(s.po_no); if (!byPo.has(k)) byPo.set(k, []); byPo.get(k).push(s); }
             const pick = new Map();                       // key → the row for that PO + order
-            for (const k of needKeys) { const { po, order } = parse(k); pick.set(k, pickStyleRow(byPo.get(po) || [], order)); }
+            const unmatched = [];
+            for (const k of needKeys) {
+                const { po, order } = parse(k);
+                const want = String(order || '').trim().toUpperCase();
+                const rows = byPo.get(po) || [];
+                if (want && rows.length && !hasOrderRow(rows, want)) unmatched.push(want);
+            }
+            const osMap = unmatched.length ? await osOrderMrMap(unmatched) : new Map();
+            for (const k of needKeys) { const { po, order } = parse(k); pick.set(k, pickStyleRowMapped(byPo.get(po) || [], order, osMap)); }
             const entryIds = [...new Set([...pick.values()].filter(Boolean).map(s => s.entry_id).filter(Boolean))];
             const bookingsByEntry = new Map();
             if (entryIds.length) {
