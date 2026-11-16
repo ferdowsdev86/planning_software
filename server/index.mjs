@@ -164,6 +164,26 @@ async function erpOrderInfo(codes) {
               WHERE oe.order_code IN (${ph})
               GROUP BY oe.order_code`, list);
         for (const r of rows) out[r.order_code] = { gmt : r.gmt || null, ptype : r.ptype || null };
+        // an OS order (GSL-…): the MBM order it is a part of and that order's
+        // ORIGINAL buyer — the list, the tooltip and Find show both numbers
+        // and both buyers ("GSL-251176 / 26SPJCP098", "GREAT SYNERGY / JCP")
+        const [os] = await pool.query(
+            `SELECT o.os_order_code, o.mr_order_code, b.b_name AS mr_buyer,
+                    MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype
+               FROM \`${OS_DB}\`.os_orders o
+               LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+               LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+               LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
+               LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
+               LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+              WHERE o.os_order_code IN (${ph})
+              GROUP BY o.os_order_code, o.mr_order_code, b.b_name`, list);
+        for (const r of os) {
+            const cur = out[r.os_order_code] || {};
+            out[r.os_order_code] = { gmt : cur.gmt || r.gmt || null, ptype : cur.ptype || r.ptype || null,
+                twin : r.mr_order_code && r.mr_order_code !== r.os_order_code ? r.mr_order_code : null,
+                twinBuyer : r.mr_buyer || null };
+        }
     }
     catch { /* ERP unreachable — the bar labels fall back to the planning data */ }
     return out;
@@ -2682,8 +2702,10 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         if (OS_UNIT_IDS.length) {
             const osPhAll = OS_UNIT_IDS.map(() => '?').join(',');
             const [osMapRows] = await pool.query(
-                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd, o.mr_order_code
+                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd, o.mr_order_code, b.b_name AS mr_buyer
                  FROM \`${OS_DB}\`.os_orders o
+                 LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
+                 LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
                  WHERE o.os_unit_id IN (${osPhAll})`,
                 [...OS_UNIT_IDS]);
             for (const r of osMapRows) {
@@ -2692,7 +2714,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     unit_id   : null,
                     order_qty : r.order_qty,
                     order_delivery_date : r.odd,
-                    erp_order_code : r.mr_order_code || null   // the MBM order the OS order belongs to
+                    erp_order_code : r.mr_order_code || null,   // the MBM order the OS order belongs to
+                    erp_buyer_name : r.mr_buyer || null         // …and that order's original buyer
                 });
             }
         }
@@ -2717,6 +2740,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     o.odd                                                  AS shipment_date,
                     o.odd                                                  AS order_delivery_date,
                     o.mr_order_code                                        AS erp_order_code,
+                    b.b_name                                               AS erp_buyer_name,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id,
                     o.os_unit_id                                           AS prod_unit,
@@ -3059,6 +3083,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             // drives the Planning Month; the PO delivery is only a fallback
             r.order_delivery_date = erpInfo.order_delivery_date || r.shipment_date || null;
             r.erp_order_code   = erpInfo.erp_order_code || null;   // OS confirm → its MBM order
+            r.erp_buyer_name   = erpInfo.erp_buyer_name || null;   // …and the MBM order's original buyer
             r.prod_unit        = erpInfo.prod_unit ?? null;
             r.prod_unit_name   = r.prod_unit ? (unitShortName.get(r.prod_unit) || null) : null;
             r.unit_short_name  = r.unit_id   ? (unitShortName.get(r.unit_id)   || null) : null;

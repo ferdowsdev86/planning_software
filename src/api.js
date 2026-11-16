@@ -908,6 +908,8 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         // OS order (GSL-…): the MBM order it is a part of (mr_order_code) — shown
         // beside the OS code so the row is found by either number
         erpOrder     : r.erp_order_code && r.erp_order_code !== r.order_code ? r.erp_order_code : '',
+        // …and that MBM order's original buyer (GSL-251176 → 26SPJCP098 / JCP)
+        erpBuyer     : r.erp_buyer_name && String(r.erp_buyer_name).trim().toUpperCase() !== String(r.buyer_name || '').trim().toUpperCase() ? String(r.erp_buyer_name).trim() : '',
         orderType    : r.order_type || 'projected',
         // false = projection still waiting for its confirm POs from ERP
         confirmArrived : r.order_type === 'confirm' ? true : !!r.has_confirm,

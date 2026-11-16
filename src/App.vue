@@ -18,7 +18,7 @@ import {
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff,
     isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS
 } from './planningData.js';
-import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo } from './planningData.js';
+import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo, orderTwinOf } from './planningData.js';
 import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
@@ -7625,8 +7625,11 @@ function orderCellText(r, key) {
         case 'progress'      : return `${r.progress}%`;
         case 'done'          : return '';
         case 'prodUnitName'  : return String(r.prodUnitName ?? '—');
-        // OS order: "26SPJCP098 · GSL-251176" — the MBM order first, its OS part after
-        case 'mbmOrder'      : return r.erpOrder ? `${r.erpOrder} · ${r.mbmOrder}` : String(r.mbmOrder ?? '');
+        // OS order: "GSL-251176 / 26SPJCP098" — the OS order, then the MBM
+        // order it is a part of; the buyer the same way ("GREAT SYNERGY LTD. /
+        // JCP") — a search / filter on either number or either buyer finds the row
+        case 'mbmOrder'      : return r.erpOrder ? `${r.mbmOrder} / ${r.erpOrder}` : String(r.mbmOrder ?? '');
+        case 'buyer'         : return r.erpBuyer ? `${r.buyer} / ${r.erpBuyer}` : String(r.buyer ?? '');
         case 'pcdSource'     : return r.pcdSource === 'order_pcd' ? 'ERP PCD'
                                     : r.pcdSource === 'delivery_minus_30' ? 'Delivery-30'
                                     : (r.pcdStatus === 'missing' ? 'missing' : '');
@@ -14725,10 +14728,14 @@ function findRowInfo(s, ev) {
     const lid = lineIdOf(s, ev);
     const res = s.resourceStore.getById(lid);
     const unit = res?.data?.unit || currentBoard.value?.unitName || '';
+    // an OS order (GSL-…) shows its MBM order and that order's buyer too
+    const code = mbmOrderNo(raw.po, raw.mbmOrder);
+    const tw = orderTwinOf(code);
     return {
         id : String(ev.id), rec : ev,
-        order : mbmOrderNo(raw.po, raw.mbmOrder), po : raw.po || '',
-        style : raw.style || '—', color : raw.color || '', buyer : raw.buyer || '—',
+        order : tw.twin ? `${code} / ${tw.twin}` : code, po : raw.po || '',
+        style : raw.style || '—', color : raw.color || '',
+        buyer : tw.twinBuyer && tw.twinBuyer.toUpperCase() !== String(raw.buyer || '').toUpperCase() ? `${raw.buyer || '—'} / ${tw.twinBuyer}` : (raw.buyer || '—'),
         qty : Number(raw.qty) || 0,
         line : res?.name || lid || '—',
         floor : res?.data?.lineRow ? floorLabelOf(unit, res.data.floor) : (isHoldId(lid) ? 'Holding' : '—'),
@@ -14789,9 +14796,11 @@ function runFind() {
         if (!raw || raw.stage) continue;
         const info = findRowInfo(s, ev);
         if (!findAny(mStyle, [raw.style])) continue;
-        if (!findAny(mOrder, [raw.mbmOrder, raw.po, ...(Array.isArray(raw.poList) ? raw.poList : [])])) continue;
+        // an OS order is found by its own number / buyer AND by the MBM order's
+        const tw = orderTwinOf(mbmOrderNo(raw.po, raw.mbmOrder));
+        if (!findAny(mOrder, [raw.mbmOrder, tw.twin, raw.po, ...(Array.isArray(raw.poList) ? raw.poList : [])])) continue;
         if (!findAny(mProd,  [`${raw.style || ''} :: ${raw.color || ''}`, raw.color, raw.productType, raw.product])) continue;
-        if (!findAny(mBuyer, [raw.buyer])) continue;
+        if (!findAny(mBuyer, [raw.buyer, tw.twinBuyer])) continue;
         if (from || to) {
             if (!info.ship || Number.isNaN(+info.ship)) continue;
             if (from && info.ship < from) continue;

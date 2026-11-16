@@ -586,6 +586,13 @@ export function buyerShortOf(name) {
     const n = String(name || '').trim();
     return (n && buyerShortNames[n.toUpperCase()]) || n;
 }
+// an OS order (GSL-…): the MBM order it is a part of and that order's
+// original buyer, as the server read them (erpByOrder) — {} when none
+export function orderTwinOf(code) {
+    const i = erpOrderInfo[String(code || '').trim()];
+    if (!i?.twin) return {};
+    return { twin : String(i.twin), twinBuyer : i.twinBuyer ? String(i.twinBuyer).trim() : '' };
+}
 export function garmentTypeOf(raw) {
     if (!raw) return '';
     const code = mbmOrderNo(raw.po, raw.mbmOrder);

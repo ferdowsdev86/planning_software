@@ -7,7 +7,7 @@ import {
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
-    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
+    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, orderTwinOf, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery, isLateVsTarget, earliestSewStart, sewTargetDay,
     dayCapacityFactor, hmToHours, calendarState,
     workDayUnits, planQtyOf, workingMinutesBetween,
@@ -3223,13 +3223,20 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
 
             const R = (lbl, val, cls='') =>
                 `<div class="t4r${cls ? ' '+cls : ''}"><span class="t4l">${lbl}</span><span class="t4v">${val}</span></div>`;
+            // an OS order (GSL-…): the MBM order it is a part of and that
+            // order's original buyer — "GREAT SYNERGY LTD. / JCP | GSL-251176 / 26SPJCP098"
+            const twin = orderTwinOf(r.mbmOrder || s.order_code || order);
+            const twinBuyer = twin.twinBuyer && twin.twinBuyer.toUpperCase() !== String(r.buyer || '').trim().toUpperCase() ? twin.twinBuyer : '';
+            const hdrName = twin.twin
+                ? `${r.buyer || '—'}${twinBuyer ? ` / ${twinBuyer}` : ''} | ${r.mbmOrder || s.order_code || order} / ${twin.twin}`
+                : (e.name || r.buyer || '—');
 
             return `
 <div class="mb-tip4" data-tip-ev="${enc(String(e.id))}">
 
   <!-- HEADER -->
   <div class="tip4-hdr">
-    <span class="tip4-hdr-name">${enc(e.name || r.buyer || '—')}</span>
+    <span class="tip4-hdr-name">${enc(hdrName)}</span>
     <span class="tip4-hdr-badges">${orderTypeBadge}${consolidatedBadge}${consolGroupBadge}</span>
   </div>
 
@@ -3280,8 +3287,8 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
     <div class="tip4-card-hd">📦 Order</div>
     <div class="tip4-card-body">
       <div class="tip4-rows">
-        ${R('Order No', `<b class="t4-order-no">${enc(r.mbmOrder || s.order_code || order || '—')}</b>`, 't4-full')}
-        ${R('Buyer', enc(r.buyer || '—'), 't4-full')}
+        ${R('Order No', `<b class="t4-order-no">${enc(r.mbmOrder || s.order_code || order || '—')}${twin.twin ? ` / ${enc(twin.twin)}` : ''}</b>`, 't4-full')}
+        ${R('Buyer', `${enc(r.buyer || '—')}${twinBuyer ? ` / ${enc(twinBuyer)}` : ''}`, 't4-full')}
         ${R('Color', colorHtml, 't4-full')}
         <div class="tip4-2col">
           ${(() => {
