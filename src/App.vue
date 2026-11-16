@@ -39,7 +39,7 @@ import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
     backwardPass, feasibility, sequenceOptions, autoPlanOrders
 } from './planningEngine.js';
-import { resolveDropPosition, snapToleranceDays, findLineOverlaps } from './snapService.mjs';
+import { findLineOverlaps } from './snapService.mjs';
 
 const schedRef = ref(null);
 const order = ref(null);
@@ -177,11 +177,11 @@ function scheduleUnsavedRefresh() {
     unsavedTimer = setTimeout(() => prof.time('dirty:refreshUnsavedState', refreshUnsavedState), 250);
 }
 
-// After ANY edit the whole board is brought back to the production model
-// right away: a move changes which bars carry a learning-curve ramp, and a
-// bar whose ramp changed gets its real end (pushing its followers) NOW —
-// while the planner is looking — instead of silently on the next reload.
-// What you plan is exactly what a reload shows.
+// After an edit the learning-curve ANNOTATION of the board is refreshed (a
+// move changes which bars carry a ramp — tooltip, schedule dialog and day
+// chips follow). No bar is resized or moved by this: a change touches the
+// bar the planner changed and what it pushed, nothing else (planner rule,
+// 2026-11-16) — so what is on screen is what Save writes and a reload shows.
 let settleTimer = null, boardSettling = false, loadQuietUntil = 0;
 function scheduleBoardSettle() {
     if (boardSettling) return;
@@ -194,11 +194,16 @@ function scheduleBoardSettle() {
         if (Date.now() < loadQuietUntil) return;
         boardSettling = true;
         try {
-            const open = ev => (Number(ev.data.raw.qty) || 0) - (Number(ev.data.raw.made) || 0) > 0;
-            const r = prof.time('settle:resizeBars(all)', () => resizeBars(s, open, { dirty : true }));
-            if (r.grown || r.pushed) {
-                toast(`${r.grown + r.shrunk} bar(s) re-fitted to the production schedule${r.pushed ? `, ${r.pushed} follower(s) shifted later` : ''}`, 'ok');
-            }
+            // ANNOTATION ONLY (planner rule, 2026-11-16: a change moves the
+            // bar the planner changed — and what it pushes — nothing else).
+            // The learning-curve ramps are re-derived so the tooltip / dialog
+            // / day chips read right; no bar is resized or moved here. The
+            // board-wide re-fit this used to run (resizeBars on every open
+            // bar) rewrote the whole plan on the first edit after a reload:
+            // 779 of 931 bars on the sandbox CEIL board — past bars included
+            // — changed length or start because ONE bar was moved.
+            prof.time('settle:applyLearningCurves', () => applyLearningCurves(s));
+            s.refreshRows?.();
         }
         catch (e) { console.warn('[board settle] skipped:', e.message); }
         finally { boardSettling = false; }
@@ -2312,6 +2317,11 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
 // A board load is tried up to three times (the endpoint is re-resolved in
 // between); the planner sees each failed try, and the final failure
 const BOARD_LOAD_TRIES = 3;
+// Bumped by every successful Save: a board response that was requested
+// BEFORE a save finished is older than the plan now in the DB — it is thrown
+// away and the board is fetched again, so a stale load can never overwrite
+// a saved plan on screen
+let boardSaveGen = 0;
 async function loadBoardWithRetry(unitId) {
     let lastErr = null;
     for (let attempt = 1; attempt <= BOARD_LOAD_TRIES; attempt++) {
@@ -2321,6 +2331,12 @@ async function loadBoardWithRetry(unitId) {
             // keep their endpoint) before the data request
             const picked = await resolveApiBase();
             apiBaseLabel.value = picked.base;
+            for (let fresh = 0; fresh < 3; fresh++) {
+                const gen = boardSaveGen;
+                const data = await loadFromApi(unitId);
+                if (gen === boardSaveGen) return data;
+                console.info('[board load] a save finished while this load was in flight — fetching the saved plan again');
+            }
             return await loadFromApi(unitId);
         }
         catch (e) {
@@ -13847,6 +13863,7 @@ onMounted(() => {
     window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
+        ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, hold : apLateToHold, keepStarted : apKeepStarted, busy : apBusy },
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -13990,19 +14007,23 @@ function enforceNoOverlapBeforeSave(s) {
                 // Move the changed one; if both changed, the later-starting one
                 const mover = changedIds.has(b.id) || !changedIds.has(a.id) ? b : a;
                 const other = mover === b ? a : b;
-                if (!changedIds.has(mover.id) && !changedIds.has(other.id)) continue; // old DB overlap — load repair owns it
+                if (!changedIds.has(mover.id) && !changedIds.has(other.id)) continue; // old DB overlap — the planner's to resolve
                 const rec = mover.rec;
                 const raw = rec.data.raw;
-                const fixed = resolveDropPosition({
-                    desired : rec.startDate,
-                    dur     : raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1,
-                    bars    : bars.filter(x => x.id !== mover.id),
-                    tol     : snapToleranceDays(),
-                    helpers : { nextStartAfter, endOfWork }
-                });
-                rec.set({ startDate : fixed.start, endDate : fixed.end, duration : elapsedDays(fixed.start, fixed.end) });
-                raw.start = fixed.start;
-                raw.end   = fixed.end;
+                // The smallest move that clears the overlap: right behind the
+                // bar it runs into, and the bars behind it step back IN ORDER
+                // (pushFollowers). The earlier "first gap that fits" search
+                // (resolveDropPosition) threw a bar to the END of a packed
+                // line — on the sandbox CEIL board five Auto-plan bars of
+                // Line 28 jumped 02/01 → 31/01 at Save, a month the planner
+                // never saw before the reload.
+                const ns  = nextStartAfter(other.end);
+                const dur = raw.dur || elapsedDays(rec.startDate, rec.endDate) || 1;
+                const ne  = endOfWork(ns, dur);
+                rec.set({ startDate : ns, endDate : ne, duration : elapsedDays(ns, ne) });
+                raw.start = ns;
+                raw.end   = ne;
+                try { pushFollowers(s, res.id, rec); } catch { /* the next pass catches what is left */ }
                 nudged++;
                 fixedThisPass++;
                 break; // line changed — recompute this line's pairs next pass
@@ -14089,6 +14110,7 @@ async function saveToDbInner(s) {
                 boardUnitCache[uid].apiData.assignments = serializeBoardAssignments(s);
             }
             markBoardSaved();
+            boardSaveGen++;   // a board load answered after this point is stale (loadBoardWithRetry)
             setBoardBaseline(s);
             boardDbState = snapshotBoardState(s);
             skippedDbEvents.length = 0;
