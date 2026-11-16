@@ -2375,19 +2375,33 @@ app.post(`${BASE}/order-status/reconcile`, async (req, res) => {
 // (os_orders: os_order_code ↔ mr_order_code) is moved to the twin's
 // projection row instead of being retired — the bar stays on the board under
 // the other number. Returns the twin row id or null.
-async function projTwinRowFor(conn, eventCode) {
+async function projTwinRowFor(conn, eventCode, lineUnit = null) {
     const code = String(eventCode || '').startsWith('ev-proj:') ? String(eventCode).slice(8).replace(/-\d{1,2}$/, '') : null;
     if (!code) return null;
     try {
+        // the order's own current rows first (its OS confirm rows are re-keyed
+        // by the sync — 'os-c-…' ids churn, GSL-251203 went 117212540 →
+        // 120346297), then the twin number's rows; a row of the LINE's unit
+        // wins (the MR row of an order handed to the OS side says prod_unit
+        // 16 — anchoring there hands the bar to the unit rule next pass)
+        const codes = new Set([code]);
         const [os] = await conn.query(
-            `SELECT id, mr_order_id, os_order_code, mr_order_code FROM \`${OS_DB}\`.os_orders
-              WHERE os_order_code = ? OR mr_order_code = ? LIMIT 2`, [code, code]);
-        for (const o of os) {
-            const key = String(o.os_order_code) === code ? (o.mr_order_id ? `proj-${o.mr_order_id}` : null) : `proj-os-${o.id}`;
-            if (!key) continue;
-            const [[row]] = await conn.query('SELECT id FROM planning_orders WHERE erp_po_id = ? LIMIT 1', [key]);
-            if (row) return Number(row.id);
-        }
+            `SELECT os_order_code, mr_order_code FROM \`${OS_DB}\`.os_orders
+              WHERE os_order_code = ? OR mr_order_code = ? LIMIT 4`, [code, code]);
+        for (const o of os) { if (o.os_order_code) codes.add(String(o.os_order_code)); if (o.mr_order_code) codes.add(String(o.mr_order_code)); }
+        const list = [...codes];
+        const [rows] = await conn.query(
+            `SELECT id, order_code, erp_po_id, COALESCE(prod_unit, unit_id) AS pu FROM planning_orders
+              WHERE order_code IN (${list.map(() => '?').join(',')})
+                AND planning_status NOT IN ('completed', 'cancelled')`, list);
+        if (!rows.length) return null;
+        const score = r => (lineUnit != null && Number(r.pu) === Number(lineUnit) ? 4 : 0)
+            + (String(r.order_code) === code ? 2 : 0)
+            + (String(r.erp_po_id || '').startsWith('proj-') ? 1 : 0);
+        rows.sort((a, b) => (score(b) - score(a)) || (Number(a.id) - Number(b.id)));
+        // never a row of another unit when the line's unit is known
+        if (lineUnit != null && Number(rows[0].pu) !== Number(lineUnit)) return null;
+        return Number(rows[0].id);
     }
     catch (e) { console.warn(`[board-hygiene] twin lookup skipped: ${e.message}`); }
     return null;
@@ -2397,7 +2411,7 @@ async function retireHiddenEvents(conn, tag = 'sync') {
     const hidden = await findHiddenEvents(conn);
     for (const e of hidden) {
         if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
-            const twinId = await projTwinRowFor(conn, e.event_code);
+            const twinId = await projTwinRowFor(conn, e.event_code, e.line_unit);
             if (twinId) {
                 await conn.query('UPDATE planning_events SET planning_order_id = ?, updated_at = NOW() WHERE id = ?', [twinId, e.id]);
                 await conn.query(
