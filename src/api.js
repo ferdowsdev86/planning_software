@@ -1466,7 +1466,10 @@ export async function pingApi(timeoutMs = 10000) {
     catch { return await get('/health', timeoutMs); }
 }
 
-export async function syncToApi(scheduler, { eventIds = null, unitId = null, planLock = null, by = null } = {}) {
+// size of one save part (window.__mbm.syncOpts.chunk — tests lower it)
+// (a part of 150 changes took ~40 s on the WAN DB — under a proxy's 60 s read timeout)
+export const syncOpts = { chunk : 150 };
+export async function syncToApi(scheduler, { eventIds = null, unitId = null, planLock = null, by = null, onProgress = null } = {}) {
     const updated = [];
     const added   = [];
     // a What-if copy on screen: the WHOLE board goes into the copy (its own
@@ -1562,35 +1565,90 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null, pla
         if (outW?.success) removedDbEventIds.clear();
         return outW;
     }
-    const res = await apiFetch(`${API_BASE}/projects/1/scheduler-sync`, {
-        method  : 'POST',
-        signal  : ctrl.signal,
-        headers : { 'Content-Type' : 'application/json' },
-        body    : JSON.stringify({
-            requestId : `plan-sync-${Math.random().toString(36).slice(2, 10)}`,
-            // Replacement stage: confirm orders take their projection's slot
-            // on the board, so confirm blocks are now authorized
-            allowConfirmPlanning : true,
-            // Every DB bar on THIS board: the server's overlap check may only
-            // treat these as obstacles (bars the board hides are not there
-            // as far as the planner is concerned)
-            visibleIds : scheduler.eventStore.records
-                .filter(e => e.data?.raw && !e.data.raw.stage)
-                .map(e => e.data.dbId ?? (String(e.id).startsWith('db-') ? Number(String(e.id).slice(3)) : null))
-                .filter(v => v != null),
-            // 10-day plan lock of an Auto Plan run: these bars are never
-            // rewritten or cancelled by this save (the server drops any
-            // change to them)
-            planLock  : Array.isArray(planLock) && planLock.length ? planLock : undefined,
-            // who saves — named in the bar history (tooltip → Notes)
-            by        : by || undefined,
-            events    : { updated, added, removed }
-        })
-    });
+    // Every DB bar on THIS board: the server's overlap check may only treat
+    // these as obstacles (bars the board hides are not there as far as the
+    // planner is concerned)
+    const allVisible = scheduler.eventStore.records
+        .filter(e => e.data?.raw && !e.data.raw.stage)
+        .map(e => e.data.dbId ?? (String(e.id).startsWith('db-') ? Number(String(e.id).slice(3)) : null))
+        .filter(v => v != null);
+    // A proxy (nginx) in front of the API answers a request it rejects or
+    // times out with an HTML page — "Unexpected token '<' … is not valid
+    // JSON" told the planner nothing. Read the body as text, say what came back.
+    const readJson = async res => {
+        const text = await res.text();
+        try { return JSON.parse(text); }
+        catch {
+            const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+            throw new Error(`the server answered HTTP ${res.status} with a page instead of JSON (${plain || 'empty'}) — the request was rejected or timed out in front of the API; nothing of it was saved`);
+        }
+    };
+    const postSync = async (events, visibleIds) => {
+        const res = await apiFetch(`${API_BASE}/projects/1/scheduler-sync`, {
+            method  : 'POST',
+            signal  : ctrl.signal,
+            headers : { 'Content-Type' : 'application/json' },
+            body    : JSON.stringify({
+                requestId : `plan-sync-${Math.random().toString(36).slice(2, 10)}`,
+                // Replacement stage: confirm orders take their projection's slot
+                // on the board, so confirm blocks are now authorized
+                allowConfirmPlanning : true,
+                visibleIds,
+                // 10-day plan lock of an Auto Plan run: these bars are never
+                // rewritten or cancelled by this save (the server drops any
+                // change to them)
+                planLock  : Array.isArray(planLock) && planLock.length ? planLock : undefined,
+                // who saves — named in the bar history (tooltip → Notes)
+                by        : by || undefined,
+                events
+            })
+        });
+        const out = await readJson(res);
+        if (!res.ok && !out?.error) throw new Error(`HTTP ${res.status}`);
+        return out;
+    };
+    const total = updated.length + added.length + removed.length;
+    // A whole-board save (Auto plan on CEIL: 3,000+ changes) in ONE request
+    // ran for minutes and the proxy cut it off with an HTML 504 while the API
+    // kept writing. Big saves go in PARTS of SYNC_CHUNK changes — removals
+    // first (the rows a re-planned order re-uses are free before its new bars
+    // arrive), then the updates, then the new bars — each part its own
+    // transaction, a few seconds long. The overlap check of a part treats a
+    // bar whose update is still to come as NO obstacle (its saved dates are
+    // stale); once its part is saved it counts again.
+    const SYNC_CHUNK = Math.max(50, Number(syncOpts.chunk) || 150);
+    if (total <= SYNC_CHUNK) {
+        const out = await postSync({ updated, added, removed }, allVisible);
+        clearTimeout(timer);
+        if (out?.success) removedDbEventIds.clear();
+        return out;
+    }
+    const pendingUpd = new Set(updated.map(u => String(u.id)));
+    const merged = { success : true, mapped : [], adjusted : [], lockedSkipped : 0, revision : null, parts : 0 };
+    let done = 0;
+    const part = async events => {
+        const visible = allVisible.filter(id => !pendingUpd.has(String(id)));
+        const out = await postSync(events, visible);
+        if (!out?.success) throw new Error(out?.error || 'save failed');
+        merged.mapped.push(...(out.mapped || []));
+        merged.adjusted.push(...(out.adjusted || []));
+        merged.lockedSkipped += Number(out.lockedSkipped) || 0;
+        merged.revision = out.revision ?? merged.revision;
+        merged.parts++;
+    };
+    const chunks = list => { const out = []; for (let i = 0; i < list.length; i += SYNC_CHUNK) out.push(list.slice(i, i + SYNC_CHUNK)); return out; };
+    try {
+        for (const c of chunks(removed)) { await part({ updated : [], added : [], removed : c }); done += c.length; onProgress?.(done, total); }
+        for (const c of chunks(updated)) { await part({ updated : c, added : [], removed : [] }); for (const u of c) pendingUpd.delete(String(u.id)); done += c.length; onProgress?.(done, total); }
+        for (const c of chunks(added))   { await part({ updated : [], added : c, removed : [] }); done += c.length; onProgress?.(done, total); }
+    }
+    catch (e) {
+        clearTimeout(timer);
+        throw new Error(`save stopped after ${done} of ${total} change(s) (${merged.parts} part(s) are in the DB — click Save again for the rest): ${e.message}`);
+    }
     clearTimeout(timer);
-    const out = await res.json();
-    if (out?.success) removedDbEventIds.clear();
-    return out;
+    removedDbEventIds.clear();
+    return merged;
 }
 
 // ---------------------------------------------------------------------------
