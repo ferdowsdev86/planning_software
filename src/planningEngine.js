@@ -415,7 +415,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         sewStartOf = null,
         // latestSewEndOf(order) → Date: the latest sewing finish to use instead
         // of the backward pass (e.g. delivery − 6 days for washing + finishing)
-        latestSewEndOf = null
+        latestSewEndOf = null,
+        // pieces of one order: true = fill the first line, then finish
+        // together; false = the older rule (parallel lines, same start)
+        sameOrderSerial = true
     } = ctx;
     // the product name the profile knows (ERP garment type) when the order carries one
     const profType = o => o.profileType || o.productType;
@@ -451,6 +454,10 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         if (pt) return pt;
         const mo = String(a.mbmOrder || '').localeCompare(String(b.mbmOrder || ''));
         if (mo) return mo;
+        // pieces of one order: the biggest first (it takes the first line, the
+        // small ones follow it), then style / colour / PO
+        const dq = (Number(b.qty) || 0) - (Number(a.qty) || 0);
+        if (sameOrderSerial && dq) return dq;
         const st = String(a.style || '').localeCompare(String(b.style || ''));
         if (st) return st;
         const col = String(a.color || '').localeCompare(String(b.color || ''));
@@ -464,10 +471,18 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         && a.getDate() === b.getDate();
 
     const placements = [];
-    // pieces of ONE order plan together: the start of the order's first
-    // placed piece this run — later pieces prefer the same start (parallel
-    // lines) or the same line right after it (the ranking below)
-    const firstStartOf = new Map();
+    // Pieces of ONE order plan together (planner's rule, 2026-11-16: 26H1LEV765
+    // — eleven POs scattered over five lines, the first line left empty for a
+    // week): the FIRST line is filled to its maximum — every later piece goes
+    // flush after the order's own piece on that line while it still ends by
+    // its latest sewing end; only a piece that line cannot finish in time
+    // spills to another line, and there it takes the line whose finish lies
+    // closest to the order's finish so far (the pieces complete together).
+    // (ctx.orderState: the caller's maps — shared across its calls and fed
+    // with the real board; without it the state lives for this call only)
+    const orderEndOf   = ctx.orderState?.endOf   || new Map();   // order code → latest end of its pieces placed so far
+    const orderLineEnd = ctx.orderState?.lineEnd || new Map();   // `${order}|${line}` → end of the order's last piece on that line
+    const firstStartOf = new Map();                                // (older rule) order code → start of its first piece this call
     for (const o of prepared) {
         // The order's IDEAL start: PCD + pre-production days (never before
         // today, never before material). An order must not start before this —
@@ -547,19 +562,25 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             const typeFit = ctx.lineHasProductType?.(line.id, profType(o)) ? 0 : 1;
             const clubPcd = line.lastPcd && sameDay(line.lastPcd, o.pcd) ? 0 : 1;
             const clubType = line.lastProductType && line.lastProductType === profType(o) ? 0 : 1;
-            // pieces of one order together: how far this start sits from the
-            // order's first placed piece (0 = parallel, same start), and
-            // whether this line's previous bar is the same order (serial)
+            // pieces of one order together: serial = flush after the order's
+            // own piece on this line (the line filled to its maximum); endGap
+            // = how far this piece's finish lies from the order's finish so
+            // far (0 = the pieces complete together)
             const oCode = String(o.mbmOrder || o.po || '');
-            const sib = oCode ? firstStartOf.get(oCode) : null;
-            const sibGap = sib ? Math.abs(+start - +sib) : 0;
+            const sibEnd = oCode ? orderEndOf.get(oCode) : null;
+            const ownEnd = oCode ? orderLineEnd.get(`${oCode}|${line.id}`) : null;
+            const serial = ownEnd && start <= addDays(ownEnd, 2) ? 0 : 1;
+            const endGap = sibEnd ? Math.abs(+endDate - +sibEnd) : 0;
+            // (older rule) how far this start sits from the order's first piece
+            const sibStart = oCode ? firstStartOf.get(oCode) : null;
+            const sibGap = sibStart ? Math.abs(+start - +sibStart) : 0;
             const clubOrder = oCode && line.lastOrder === oCode ? 0 : 1;
             // How many days this line PUSHES the order past its ideal start.
             // 0 = the line can take it exactly on time (e.g. an empty line).
             const delayDays = Math.max(0, Math.round((start - idealStart) / 86400000));
             return {
                 line, start, endDate, dur, availMin, planEff, fwd, back, feas, lateness,
-                typeFit, clubPcd, clubType, clubOrder, sibGap, delayDays, slot
+                typeFit, clubPcd, clubType, clubOrder, serial, endGap, sibGap, hasSib : !!sibEnd, delayDays, slot
             };
         });
 
@@ -573,14 +594,22 @@ export function autoPlanOrders(orders, lineStates, ctx) {
             // profile rule first: a line listed for the product beats every
             // unlisted line, however early the unlisted one is free
             if (profileFirst && a.typeFit !== b.typeFit) return a.typeFit - b.typeFit;
+            // a later piece of an order already on the board this run: the
+            // order's own line, flush after its piece, beats a free line
+            // elsewhere (first line to the maximum — a later start is accepted,
+            // the strict pool already holds only lines that finish in time);
+            // a piece that must spill takes the line whose finish is closest
+            // to the order's finish so far (the pieces complete together)
+            if (sameOrderSerial && a.hasSib) {
+                if (a.serial !== b.serial) return a.serial - b.serial;
+                if (a.endGap !== b.endGap) return a.endGap - b.endGap;
+            }
             // NEVER push an order later when a line can take it earlier —
             // a free line beats clubbing preferences outright
             if (a.delayDays !== b.delayDays) return a.delayDays - b.delayDays;
-            // pieces of ONE order plan together (planner's rule): the start
-            // closest to the order's first piece wins (same start = parallel
-            // lines), then the sibling's own line (one piece after the other)
-            // — never at the cost of a later start (delayDays decides first)
-            if (a.sibGap !== b.sibGap) return a.sibGap - b.sibGap;
+            // (older rule) the start closest to the order's first piece wins
+            // (same start = parallel lines), then the sibling's own line
+            if (!sameOrderSerial && a.sibGap !== b.sibGap) return a.sibGap - b.sibGap;
             if (a.clubOrder !== b.clubOrder) return a.clubOrder - b.clubOrder;
             // strict runs: same start → the line with the highest expected
             // output for this product (profile efficiency) takes it
@@ -617,9 +646,18 @@ export function autoPlanOrders(orders, lineStates, ctx) {
         }
         best.line.lastOrder = String(o.mbmOrder || o.po || '') || best.line.lastOrder;
         const oCode = String(o.mbmOrder || o.po || '');
-        if (oCode && !firstStartOf.has(oCode)) firstStartOf.set(oCode, new Date(best.start));
+        if (oCode) {
+            const prev = orderEndOf.get(oCode);
+            if (!prev || best.endDate > prev) orderEndOf.set(oCode, new Date(best.endDate));
+            orderLineEnd.set(`${oCode}|${best.line.id}`, new Date(best.endDate));
+            if (!firstStartOf.has(oCode)) firstStartOf.set(oCode, new Date(best.start));
+        }
 
-        placements.push({ order : o, ...best });
+        // the runners-up in rank order: the caller places on the REAL board,
+        // where the chosen slot can turn out too short (production model
+        // longer than this estimate, a bar right behind the gap) — it then
+        // tries these before giving the order up to the split / fill passes
+        placements.push({ order : o, ...best, alternates : sameOrderSerial && best.hasSib ? pool.slice(1, 6) : [] });
     }
 
     return { placements, unplaced };

@@ -809,6 +809,7 @@ async function runLiveOrderPlan(s, {
     // by its target sewing end is NOT planned late — it is parked on the
     // Holding Row ("Capacity") for the planner to decide
     lateToHold = false,
+    serialPieces = true,
     // strict runs: a bar may not end after this date (the planning horizon) —
     // an order with no slot before it stays unplanned: "Not Available Space"
     horizonEnd = null,
@@ -1018,6 +1019,7 @@ async function runLiveOrderPlan(s, {
         isWorking,
         today,
         orderState : apOrderState,
+        sameOrderSerial : !!serialPieces,
         efficiencyOf : lineEfficiencyOf,
         lineHasProductType : (lineId, productType) => {
             const profile = profileOfLine(lineId);
@@ -1145,32 +1147,51 @@ async function runLiveOrderPlan(s, {
         assignEventToLine(s, rec, lineId);
         // the slot search below must see every bar placed so far in this batch
         invalidateBarsByLine();
-        const desired = startOfWorkDay(desiredStart);
-        prof.time('place:derive+formula', () => { deriveLcForPlacement(s, raw, lineId, desired); applyLineFormulaDuration(s, raw, lineId); });
-        let dur = raw.dur || 1, start = null, end = null;
-        for (let k = 0; k < 5; k++) {
-            const ins = prof.time('place:computeInsertStart', () => computeInsertStart(s, lineId, desired, dur, rec.id));
-            start = ins.start; end = ins.end;
-            let fin = null;
-            try { const sim = prof.time('place:simulateStrip', () => simulateStrip(s, raw, lineId, start)); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
-            if (!fin) break;
-            if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
-            end = fin;
+        let desired = startOfWorkDay(desiredStart);
+        let start = null, end = null, nxtBar = null;
+        // The engine's slot is a free stretch of the line by ITS estimate; the
+        // real production run (production model, learning curve) can be
+        // longer than that stretch. Then the bar is NOT put on top of the bar
+        // behind the gap — it moves on to the line's NEXT free stretch (after
+        // that bar), as long as it still ends by the latest sewing finish.
+        // Before, the first too-short gap refused the whole placement: the
+        // first (biggest) piece of 26H1LEV765 fell out of pass 1 that way and
+        // ended three months late while 16 lines could have taken it.
+        for (let stretch = 0; stretch < 8; stretch++) {
+            prof.time('place:derive+formula', () => { deriveLcForPlacement(s, raw, lineId, desired); applyLineFormulaDuration(s, raw, lineId); });
+            let dur = raw.dur || 1;
+            start = null; end = null;
+            for (let k = 0; k < 5; k++) {
+                const ins = prof.time('place:computeInsertStart', () => computeInsertStart(s, lineId, desired, dur, rec.id));
+                start = ins.start; end = ins.end;
+                let fin = null;
+                try { const sim = prof.time('place:simulateStrip', () => simulateStrip(s, raw, lineId, start)); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
+                if (!fin) break;
+                if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
+                end = fin;
+                break;
+            }
+            if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || (latest && end > latest)) {
+                removeRec(rec);
+                return { ok : false, rec : null, start, end, reason : 'would end after the latest sewing finish on the real board' };
+            }
+            // A gap slot must REALLY take the bar: never on top of the bar
+            // behind the gap — the stretch after that bar is tried instead
+            // (the line's bars from the per-line cache — a scan of every record
+            // with an index-less lineIdOf cost 45 ms per placement on CEIL)
+            nxtBar = prof.time('place:nxtBar', () => barsOnLine(s, lineId, rec.id)
+                .filter(e2 => e2.data?.raw && !e2.data.raw.stage && e2.startDate >= start)
+                .sort((a2, b2) => a2.startDate - b2.startDate)[0]);
+            if (nxtBar && end.getTime() > nxtBar.startDate.getTime() + 60000) {
+                const after = nextDayStartAfter(nxtBar.endDate);
+                if (!(after > desired)) break;
+                desired = after;
+                continue;
+            }
+            nxtBar = null;
             break;
         }
-        if (!(start instanceof Date) || Number.isNaN(+start) || !(end > start) || (latest && end > latest)) {
-            removeRec(rec);
-            return { ok : false, rec : null, start, end, reason : 'would end after the latest sewing finish on the real board' };
-        }
-        // A gap slot must REALLY take the bar: the real production end may be
-        // longer than the engine's estimate — never on top of the bar behind
-        // the gap (the order falls through to the gap-aware fill instead)
-        // (the line's bars from the per-line cache — a scan of every record
-        // with an index-less lineIdOf cost 45 ms per placement on CEIL)
-        const nxtBar = prof.time('place:nxtBar', () => barsOnLine(s, lineId, rec.id)
-            .filter(e2 => e2.data?.raw && !e2.data.raw.stage && e2.startDate >= start)
-            .sort((a2, b2) => a2.startDate - b2.startDate)[0]);
-        if (nxtBar && end.getTime() > nxtBar.startDate.getTime() + 60000) {
+        if (nxtBar) {
             removeRec(rec);
             return { ok : false, rec : null, start, end, reason : 'the free stretch is shorter than the real production run' };
         }
@@ -1508,7 +1529,11 @@ async function runLiveOrderPlan(s, {
     // takes the line time an earlier one needs; same deadline → earlier PCD
     if (strictDelivery) {
         const tOf = o => { const l = latestOf(o); return l && !Number.isNaN(+l) ? +l : Infinity; };
-        orders.sort((a, b) => (tOf(a) - tOf(b)) || ((+new Date(a.pcd || 0)) - (+new Date(b.pcd || 0))));
+        // …and the pieces of one order BIGGEST first: the first line takes the
+        // big piece, the small ones follow it (pieces of one order together)
+        const codeK = o => String(o.mbmOrder || o.po || '');
+        orders.sort((a, b) => (tOf(a) - tOf(b)) || ((+new Date(a.pcd || 0)) - (+new Date(b.pcd || 0)))
+            || codeK(a).localeCompare(codeK(b)) || ((Number(b.qty) || 0) - (Number(a.qty) || 0)));
     }
     // Calculate in small slices so the main thread stays responsive; a strict
     // run places every slice on the real board at once (then the next slice
@@ -3778,6 +3803,10 @@ const apApplyLock   = ref(true);
 // no late plan (planner 2026-11-15): an order no line finishes by delivery − 7
 // is parked on the Holding Row ("Capacity") instead of being planned late
 const apLateToHold  = ref(true);
+// pieces of one order: fill the first line to its maximum, then the other
+// lines so the pieces finish together (planner 2026-11-16); off = the older
+// rule (parallel lines, same start)
+const apSerialPieces = ref(true);
 const apStats       = computed(() => {
     const s = getInstance();
     const lock = apLockWindow();
@@ -4125,7 +4154,7 @@ async function runAutoPlanAvail() {
             profileFirst : true, strictDelivery : true, sewStartRule : 'pcd+8', earliestStart : boardToday(),
             latestFinishOf : apLatestFinishOf, splitAcrossLines : true, horizonEnd,
             holdOf : () => null,
-            lateToHold : apLateToHold.value };
+            lateToHold : apLateToHold.value, serialPieces : apSerialPieces.value };
         const infeasible = new Map();   // order id → the last reason it could not be placed
         const noteUnplaced = rr => { for (const u of rr?.unplaced || []) infeasible.set(String(u.order?.id), u); };
         const notePlaced = rr => { for (const p of rr?.placed || []) infeasible.delete(String(p)); };
@@ -14209,7 +14238,7 @@ onMounted(() => {
     window.__mbm = { prof, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
-        ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, hold : apLateToHold, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
+        ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, hold : apLateToHold, serialPieces : apSerialPieces, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
         msh : { open : openMultiStrip, sel : mshSel, action : mshAction, live : mshLive, curveSel : mshCurveSel, implement : mshImplement, rows : mshRows, isOpen : mshOpen },
         pf  : { open : openPullForward, line : pfLine, lines : pfLineList, scope : pfScope, from : pfFrom, to : pfTo, preview : pfPreview, prev : pfPrev, apply : applyPullForward, compute : computePullForward, isOpen : pfOpen } };
 
@@ -17420,6 +17449,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div v-else class="pf-line-hint"><b>First full run — lock OFF:</b> every bar without production leaves the board and is planned again by all the rules from today; nothing is frozen or held for the lock. Tick the lock again for the runs after this one.</div>
                             <label class="pf-radio pf-mouse" style="margin-top:8px"><input type="checkbox" v-model="apLateToHold"> No late plan — an order no line finishes by delivery − 7 goes to the Holding Row</label>
                             <div class="pf-line-hint">{{ apLateToHold ? `Ticked: such an order is parked on the Holding Row ("${AP_HOLD_SPACE}") — visible on the board, no line — for you to decide (split, subcontract, new delivery); idle line time is still filled with orders that finish in time` : 'Unticked: such an order is planned in its earliest slot after the lines\' last bars and flagged as a late plan (yellow)' }}</div>
+                            <label class="pf-radio pf-mouse" style="margin-top:8px"><input type="checkbox" v-model="apSerialPieces"> Pieces of one order: fill the first line, then finish together</label>
+                            <div class="pf-line-hint">{{ apSerialPieces ? 'Ticked: a later piece of an order already on a line goes flush after it on that line while it still ends by delivery − 7 (the first line to its maximum); a piece that line cannot finish in time takes the line whose finish is closest to the order\'s — the pieces complete together' : 'Unticked: the older rule — a later piece starts at the same time as the first on a parallel line, never later' }}</div>
                             <label class="pf-radio pf-mouse" style="margin-top:8px"><input type="checkbox" v-model="apKeepStarted"> Keep bars with production already reported</label>
                             <div class="pf-line-hint">Bars on the board now: <b>{{ apStats.bars }}</b> · leave and are planned again: <b>{{ apStats.blank }}</b> · stay: <b>{{ apStats.keep }}</b> ({{ apApplyLock ? `locked ${apStats.locked} + ended before today ${apStats.past} + ` : '' }}completed{{ apKeepStarted ? ' + production started' : '' }})</div>
                         </fieldset>

@@ -98,8 +98,11 @@ test('free windows: a run too long for the gap goes after the last bar instead',
     assert.ok(placements[0].start >= day('2026-12-01'), `start ${ymd(placements[0].start)} should be after the last bar`);
 });
 
-test('pieces of one order plan together: the second piece starts parallel to the first, not days later', () => {
-    const two = [
+// Pieces of one order (planner's rule 2026-11-16): the first line is filled
+// to its maximum — the next piece goes flush after the order's own piece on
+// that line, even though other lines are free right now
+test('pieces of one order: the second piece follows the first on the SAME line while that line finishes it in time', () => {
+    const three = [
         { id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
         { id : 'l2', name : 'Line 02', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
         { id : 'l3', name : 'Line 03', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') }
@@ -108,8 +111,47 @@ test('pieces of one order plan together: the second piece starts parallel to the
         { ...order, id : 'o1', po : 'P1', qty : 10000 },
         { ...order, id : 'o2', po : 'P2', qty : 10000 }
     ];
-    const { placements } = autoPlanOrders(pieces, two, { ...ctxBase });
+    const { placements } = autoPlanOrders(pieces, three, { ...ctxBase, strictDelivery : true });
     assert.equal(placements.length, 2);
-    assert.equal(+placements[0].start, +placements[1].start, 'both pieces of the order should start together');
-    assert.notEqual(placements[0].line.id, placements[1].line.id, 'on parallel lines');
+    assert.equal(placements[0].line.id, placements[1].line.id, 'same line');
+    assert.ok(+placements[1].start >= +placements[0].endDate, `second piece ${ymd(placements[1].start)} starts after the first ends ${ymd(placements[0].endDate)}`);
+    assert.ok(placements[1].lateness <= 0, 'and still in time');
+});
+
+// …only a piece the first line cannot finish by the latest sewing end spills
+// to another line — the line whose finish lies closest to the order's finish
+// so far, so the pieces complete together
+test('pieces of one order: a piece the first line cannot finish in time spills to the line that ends closest to the order', () => {
+    const three = [
+        { id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
+        { id : 'l2', name : 'Line 02', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },   // free now: ends well before the order
+        { id : 'l3', name : 'Line 03', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-16') }    // free later: ends with the order's first piece
+    ];
+    // 18,000 min/day a line: the 20,000-pc first piece runs 12/11 → ~23/11,
+    // the 10,000-pc second piece ~5.6 working days
+    const pieces = [
+        { ...order, id : 'o1', po : 'P1', qty : 20000 },
+        { ...order, id : 'o2', po : 'P2', qty : 10000 }
+    ];
+    // latest sewing end 26/11: serial on Line 01 would end ~29/11 (too late);
+    // Line 02 (free now) ends ~17/11, Line 03 (free 16/11) ends ~21/11 — nearer the order's 23/11
+    const { placements, unplaced } = autoPlanOrders(pieces, three, { ...ctxBase, strictDelivery : true, latestSewEndOf : () => day('2026-11-26') });
+    assert.equal(unplaced.length, 0);
+    assert.equal(placements.length, 2);
+    assert.equal(placements[0].line.id, 'l1');
+    assert.notEqual(placements[1].line.id, 'l1', 'the first line cannot finish the second piece by 26/11');
+    assert.equal(placements[1].line.id, 'l3', 'Line 03 finishes nearest to the first piece (Line 02 would finish days earlier)');
+    assert.ok(placements[1].lateness <= 0);
+});
+
+test('older rule on request (sameOrderSerial false): the second piece starts parallel to the first on another line', () => {
+    const three = [
+        { id : 'l1', name : 'Line 01', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') },
+        { id : 'l2', name : 'Line 02', manpower : 50, eff : 60, hours : 10, freeFrom : day('2026-11-12') }
+    ];
+    const pieces = [{ ...order, id : 'o1', po : 'P1', qty : 10000 }, { ...order, id : 'o2', po : 'P2', qty : 10000 }];
+    const { placements } = autoPlanOrders(pieces, three, { ...ctxBase, strictDelivery : true, sameOrderSerial : false });
+    assert.equal(placements.length, 2);
+    assert.equal(+placements[0].start, +placements[1].start, 'same start');
+    assert.notEqual(placements[0].line.id, placements[1].line.id, 'parallel lines');
 });
