@@ -2370,9 +2370,45 @@ app.post(`${BASE}/order-status/reconcile`, async (req, res) => {
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 
+// A projection bar whose order row is gone (or whose code the ERP does not
+// know) but whose order lives on under its twin number in the other source
+// (os_orders: os_order_code ↔ mr_order_code) is moved to the twin's
+// projection row instead of being retired — the bar stays on the board under
+// the other number. Returns the twin row id or null.
+async function projTwinRowFor(conn, eventCode) {
+    const code = String(eventCode || '').startsWith('ev-proj:') ? String(eventCode).slice(8).replace(/-\d{1,2}$/, '') : null;
+    if (!code) return null;
+    try {
+        const [os] = await conn.query(
+            `SELECT id, mr_order_id, os_order_code, mr_order_code FROM \`${OS_DB}\`.os_orders
+              WHERE os_order_code = ? OR mr_order_code = ? LIMIT 2`, [code, code]);
+        for (const o of os) {
+            const key = String(o.os_order_code) === code ? (o.mr_order_id ? `proj-${o.mr_order_id}` : null) : `proj-os-${o.id}`;
+            if (!key) continue;
+            const [[row]] = await conn.query('SELECT id FROM planning_orders WHERE erp_po_id = ? LIMIT 1', [key]);
+            if (row) return Number(row.id);
+        }
+    }
+    catch (e) { console.warn(`[board-hygiene] twin lookup skipped: ${e.message}`); }
+    return null;
+}
+
 async function retireHiddenEvents(conn, tag = 'sync') {
     const hidden = await findHiddenEvents(conn);
     for (const e of hidden) {
+        if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
+            const twinId = await projTwinRowFor(conn, e.event_code);
+            if (twinId) {
+                await conn.query('UPDATE planning_events SET planning_order_id = ?, updated_at = NOW() WHERE id = ?', [twinId, e.id]);
+                await conn.query(
+                    `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, reason, changed_by, changed_at)
+                     VALUES (?, ?, 'update', ?, ?, 1, NOW())`,
+                    [e.project_id, e.id, JSON.stringify({ planning_order_id : e.planning_order_id, event_code : e.event_code }),
+                        `hidden bar kept (${tag}): ${e.reason} — moved to the twin order's projection row ${twinId}`]);
+                console.log(`[board-hygiene] ${tag}: ${e.id} ${e.event_code} moved to twin projection row ${twinId} (${e.reason})`);
+                continue;
+            }
+        }
         await conn.query(
             "UPDATE planning_events SET event_status = 'cancelled', updated_at = NOW() WHERE id = ?", [e.id]);
         await conn.query(
@@ -3889,14 +3925,46 @@ async function runAutoSync() {
              WHERE erp_po_id LIKE 'proj-%'
                AND (shipment_date IS NULL OR shipment_date >= ?)`,
             [ERP_CUTOFF]);
-        let projDeleted = 0;
-        for (const row of projRows) {
-            if (!liveOrdKeys.has(String(row.erp_po_id))) {
+        // A projection row that leaves because its order is now kept from the
+        // OTHER source (OS ↔ MR twin: os_orders.mr_order_id) hands its bars to
+        // the twin's projection row first — the bar stays on the board under
+        // the order's other number (planner rule, 2026-11-16: a saved plan
+        // never loses a bar to a row swap; GSL-251203 → 26SPJCP115 on CEIL
+        // Line 08 was hidden and then retired that way)
+        const deadProj = projRows.filter(row => !liveOrdKeys.has(String(row.erp_po_id)));
+        let projDeleted = 0, projMoved = 0;
+        if (deadProj.length) {
+            const osIds = deadProj.map(r => String(r.erp_po_id).match(/^proj-os-(\d+)$/)?.[1]).filter(Boolean);
+            const mrIds = deadProj.map(r => String(r.erp_po_id).match(/^proj-(\d+)$/)?.[1]).filter(Boolean);
+            const twinKey = new Map();   // dead key → twin key
+            try {
+                if (osIds.length) {
+                    const [os] = await conn.query(`SELECT id, mr_order_id FROM \`${OS_DB}\`.os_orders WHERE id IN (${osIds.map(() => '?').join(',')})`, osIds);
+                    for (const o of os) if (o.mr_order_id) twinKey.set(`proj-os-${o.id}`, `proj-${o.mr_order_id}`);
+                }
+                if (mrIds.length) {
+                    const [os] = await conn.query(`SELECT id, mr_order_id FROM \`${OS_DB}\`.os_orders WHERE mr_order_id IN (${mrIds.map(() => '?').join(',')})`, mrIds);
+                    for (const o of os) twinKey.set(`proj-${o.mr_order_id}`, `proj-os-${o.id}`);
+                }
+            }
+            catch (e) { console.warn(`[auto-sync] projection twin lookup skipped: ${e.message}`); }
+            const twinKeys = [...new Set(twinKey.values())];
+            const twinRow = new Map();
+            if (twinKeys.length) {
+                const [rows] = await conn.query(`SELECT id, erp_po_id FROM planning_orders WHERE erp_po_id IN (${twinKeys.map(() => '?').join(',')})`, twinKeys);
+                for (const r of rows) if (liveOrdKeys.has(String(r.erp_po_id))) twinRow.set(String(r.erp_po_id), Number(r.id));
+            }
+            for (const row of deadProj) {
+                const twinId = twinRow.get(twinKey.get(String(row.erp_po_id)) || '');
+                if (twinId && twinId !== Number(row.id)) {
+                    const [u] = await conn.query('UPDATE planning_events SET planning_order_id = ?, updated_at = NOW() WHERE planning_order_id = ?', [twinId, row.id]);
+                    projMoved += u.affectedRows || 0;
+                }
                 await conn.query('DELETE FROM planning_orders WHERE id = ?', [row.id]);
                 projDeleted++;
             }
         }
-        console.log(`[auto-sync] projections: src=${projSrc.length} os=${osSrc.length} inTable=${projRows.length} deleted=${projDeleted}`);
+        console.log(`[auto-sync] projections: src=${projSrc.length} os=${osSrc.length} inTable=${projRows.length} deleted=${projDeleted}${projMoved ? ` (${projMoved} bar(s) moved to the twin projection row)` : ''}`);
 
         // Reconcile ERP-side deletions: a PO deleted from mr_purchase_order or
         // set to status 3 must leave the Orders list — and the board — on the
