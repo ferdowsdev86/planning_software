@@ -3023,15 +3023,18 @@ const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } 
 // The ERP detail is keyed by PO + ORDER CODE: one PO number can sit on
 // several orders / styles (G-STAR), the order code picks the right one
 export const tipKeyOf = r => (r?.po ? `${String(r.po).trim()}|${String(r.mbmOrder || '').trim().toUpperCase()}` : '');
+// 'tip2-': the key prefix changed when the OS order style fix landed — a tab
+// that still held the old answer (26SPJCP099 / 401023 for GSL-251176) kept
+// showing it until it was closed; the old entries are simply never read now
 export function warmTipCache(key, detail, qs, rows) {
-    if (key && detail !== undefined) ssSet(`tip-${key}`, detail);
+    if (key && detail !== undefined) ssSet(`tip2-${key}`, detail);
     if (qs && Array.isArray(rows)) ssSet(`pos-sum-${qs}`, rows);
 }
 
 // { detail, poSummary } when everything the tooltip needs is cached, else null
 export function tipDataFromCache(r) {
     const tk = tipKeyOf(r);
-    const detail = tk ? ssGet(`tip-${tk}`) : null;
+    const detail = tk ? ssGet(`tip2-${tk}`) : null;
     if (tk && detail === undefined) return null;
     const qs = tipPoQuery(r);
     const poSummary = qs ? ssGet(`pos-sum-${qs}`) : [];
@@ -3056,16 +3059,16 @@ export function fetchTipData(r) {
     if (tipOffline()) return Promise.resolve({ detail : null, poSummary : [] });
     const p = (async () => {
         const API_BASE = tipApiBase();
-        let detail = tk ? ssGet(`tip-${tk}`) : null;
+        let detail = tk ? ssGet(`tip2-${tk}`) : null;
         if (tk && detail === undefined) {
             detail = null;
             let res = null;
             try {
                 res = await fetch(`${API_BASE}/order-details?po=${encodeURIComponent(r.po)}&order=${encodeURIComponent(String(r.mbmOrder || ''))}`);
                 const json = await res.json();
-                if (json.success) { detail = json.data; ssSet(`tip-${tk}`, detail); }
+                if (json.success) { detail = json.data; ssSet(`tip2-${tk}`, detail); }
                 // a clean "not found" is cached too — no re-ask on every hover
-                else if (res.ok && !json.offline) ssSet(`tip-${tk}`, null);
+                else if (res.ok && !json.offline) ssSet(`tip2-${tk}`, null);
                 else tipFailed(res);
             }
             catch { tipFailed(res); }
