@@ -780,7 +780,12 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
         const [[{ total }]] = await pool.query(countSql, countParams);
         const [rows]        = await pool.query(sql, params);
 
-        const enriched = rows.map(r => {
+        // an order marked complete is out of the plan — a PO row of it that
+        // the ERP sync brought AFTER the mark (its status still 'unplanned') is
+        // not to plan either: Auto plan parked 26SSOVS131 / 26SUBOR377 on the
+        // Holding Row from such rows and the board hid the bars on reload
+        const doneCodes = await completedOrderCodes();
+        const enriched = rows.filter(r => !(r.order_code && doneCodes.has(r.order_code))).map(r => {
             const poRaw  = typeof r.po_list === 'string' ? JSON.parse(r.po_list) : (r.po_list || []);
             const idRaw  = typeof r.id_list === 'string' ? JSON.parse(r.id_list) : (r.id_list || []);
             const detRaw = typeof r.po_details === 'string' ? JSON.parse(r.po_details) : (r.po_details || []);

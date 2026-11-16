@@ -34,7 +34,10 @@
 //     piecesBy(line, order, start, limit) → number      pieces made from start up to limit
 //   }
 //   opts    { today : Date, horizonEnd : Date | null, maxLines : 3, topLines : 6,
-//             minGapMs : 4 h, tolMs : 15 min, precisionMs : 15 min }
+//             minGapMs : 4 h, precisionMs : 15 min,
+//             holdLate : false }   true = a late plan is returned (late : true) but
+//                                   takes NO line time — the caller parks it on the
+//                                   Holding Row with its suggested start
 // → { placements : [{ order, pieces : [{ line, start, end, qty }], finish, late, split }],
 //     unplaced   : [{ order, reason }] }
 // ---------------------------------------------------------------------------
@@ -50,6 +53,7 @@ export function planAutoV2({ orders, lines, model, opts = {} }) {
     const topLines   = Math.max(2, Number(opts.topLines) || 6);
     const minGapMs   = Number(opts.minGapMs) > 0 ? Number(opts.minGapMs) : 4 * 60 * MIN;
     const precision  = Number(opts.precisionMs) > 0 ? Number(opts.precisionMs) : 15 * MIN;
+    const holdLate   = !!opts.holdLate;
     const { listed, eff, startOn, finishOn, piecesBy } = model;
 
     // the module's own copy of the free windows — consumed as it places
@@ -172,7 +176,7 @@ export function planAutoV2({ orders, lines, model, opts = {} }) {
         if (onTime.length) {
             const c = onTime[0];
             consume(c.window, c.line.id, c.start, c.finish);
-            placements.push({ order : o, pieces : [{ line : c.line, start : c.start, end : c.finish, qty : o.qty }], finish : c.finish, late : false, split : 0 });
+            placements.push({ order : o, pieces : [{ line : c.line, start : c.start, end : c.finish, qty : o.qty }], finish : c.finish, late : false, split : 0, floor });
             continue;
         }
         // 2. synchronized splits by the target: two lines, then three — over
@@ -189,7 +193,7 @@ export function planAutoV2({ orders, lines, model, opts = {} }) {
         }
         if (chosen) {
             for (const p of chosen.pieces) consume(p.window, p.line.id, p.start, p.end);
-            placements.push({ order : o, pieces : chosen.pieces.map(p => ({ line : p.line, start : p.start, end : p.end, qty : p.qty })), finish : chosen.finish, late : false, split : chosen.pieces.length });
+            placements.push({ order : o, pieces : chosen.pieces.map(p => ({ line : p.line, start : p.start, end : p.end, qty : p.qty })), finish : chosen.finish, late : false, split : chosen.pieces.length, floor });
             continue;
         }
         // 3. late: the earliest completion after the target — a single line or
@@ -204,15 +208,15 @@ export function planAutoV2({ orders, lines, model, opts = {} }) {
                 }
             }
         }
-        if (!best) { unplaced.push({ order : o, reason : AP2_NO_SPACE }); continue; }
+        if (!best) { unplaced.push({ order : o, reason : AP2_NO_SPACE, floor }); continue; }
         if (best.split) {
-            for (const p of best.split.pieces) consume(p.window, p.line.id, p.start, p.end);
-            placements.push({ order : o, pieces : best.split.pieces.map(p => ({ line : p.line, start : p.start, end : p.end, qty : p.qty })), finish : best.finish, late : true, split : best.split.pieces.length });
+            if (!holdLate) for (const p of best.split.pieces) consume(p.window, p.line.id, p.start, p.end);
+            placements.push({ order : o, pieces : best.split.pieces.map(p => ({ line : p.line, start : p.start, end : p.end, qty : p.qty })), finish : best.finish, late : true, split : best.split.pieces.length, floor });
         }
         else {
             const c = best.single;
-            consume(c.window, c.line.id, c.start, c.finish);
-            placements.push({ order : o, pieces : [{ line : c.line, start : c.start, end : c.finish, qty : o.qty }], finish : c.finish, late : true, split : 0 });
+            if (!holdLate) consume(c.window, c.line.id, c.start, c.finish);
+            placements.push({ order : o, pieces : [{ line : c.line, start : c.start, end : c.finish, qty : o.qty }], finish : c.finish, late : true, split : 0, floor });
         }
     }
     return { placements, unplaced };

@@ -133,3 +133,15 @@ test('a placed run consumes the line: the next order starts after it; a gap too 
     assert.equal(ymd(placements[0].pieces[0].start), '2026-12-03', 'the 4-hour gap cannot take a 2-day run');
     assert.ok(+placements[1].pieces[0].start >= +placements[0].pieces[0].end, 'the second order follows the first');
 });
+
+test('holdLate: a late plan is reported with its suggested start but takes no line time (the caller parks it on the Holding Row)', () => {
+    const lines = [line('A', 500)];
+    const late  = { id : 'o1', qty : 4000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-02', 18) };   // needs 8 days: late
+    const next  = { id : 'o2', qty : 500,  product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const { placements } = planAutoV2({ orders : [late, next], lines, model, opts : { ...opts, holdLate : true } });
+    const p1 = placements.find(p => p.order.id === 'o1'), p2 = placements.find(p => p.order.id === 'o2');
+    assert.equal(p1.late, true);
+    assert.equal(ymd(p1.floor), '2026-12-01', 'suggested start = PCD + 8');
+    assert.equal(ymd(p2.pieces[0].start), '2026-12-01', 'the line is still free for the next order: the late one took no line time');
+    assert.equal(p2.late, false);
+});

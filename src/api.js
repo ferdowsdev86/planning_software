@@ -896,7 +896,11 @@ function mapUnplannedRow(o) {
         ship,
         priority : o.priority,
         suitable,
-        unitId   : o.unit_id != null ? Number(o.unit_id) : null,
+        // the board a row belongs to = its PRODUCTION unit (prod_unit; the
+        // order-entry unit_id only as a fallback) — 26SUBOR481: entered under
+        // MBM, produced in AQL; with unit_id the AQL run skipped it for good
+        unitId   : o.prod_unit != null ? Number(o.prod_unit) : (o.unit_id != null ? Number(o.unit_id) : null),
+        entryUnitId : o.unit_id != null ? Number(o.unit_id) : null,
         unitName : o.unit_name || unitLabel(o.unit_id)
     };
 }
