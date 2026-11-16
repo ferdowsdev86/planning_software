@@ -1523,14 +1523,54 @@ app.post(`${BASE}/resources/efficiency`, async (req, res) => {
 });
 
 // Every unit's sewing lines (Setup dialogs list all units, not only the open board)
+// ?all=1 → the switched-off lines too (active = 0; never the hidden HOLD-<unit>
+// rows) — the Lines tab lists them greyed with their on/off switch
 app.get(`${BASE}/lines`, async (req, res) => {
+    const all = String(req.query.all || '') === '1';
     try {
         const [rows] = await pool.query(
             `SELECT id, resource_code, resource_name, unit_id, floor_id, manpower, machine_count,
-                    default_efficiency, working_hours_per_day, sort_order
-               FROM planning_resources WHERE resource_type = 'sewing_line' AND active = 1
+                    default_efficiency, working_hours_per_day, sort_order, active
+               FROM planning_resources WHERE resource_type = 'sewing_line'
+                AND ${all ? "resource_code NOT LIKE 'HOLD-%'" : 'active = 1'}
               ORDER BY unit_id, sort_order, id`);
-        res.json({ success : true, rows : rows.map(r => ({ ...r, unit_name : unitLabel(r.unit_id) })) });
+        res.json({ success : true, rows : rows.map(r => ({ ...r, active : Number(r.active) !== 0, unit_name : unitLabel(r.unit_id) })) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+
+// Switch a sewing line on / off (planning_resources.active). An inactive
+// line is not loaded by any board (scheduler-data reads active = TRUE), so a
+// line is switched off only while it holds no bar that still has work in
+// front of it — the planner moves those first. Permission: Planning Manager,
+// or the 'perm:lines' token (Settings → users & permissions).
+app.post(`${BASE}/resources/active`, async (req, res) => {
+    const b = req.body || {};
+    const id = Number(b.resourceId);
+    const on = !!b.active;
+    const by = String(b.by || '').trim();
+    if (!(id > 0)) return res.status(400).json({ success : false, error : 'resourceId required' });
+    try {
+        if (!(await userHasPermToken(by, 'perm:lines'))) {
+            return res.status(403).json({ success : false, error : 'No permission to switch lines on / off (Settings → users & permissions → Lines on/off)' });
+        }
+        const [[line]] = await pool.query(
+            `SELECT id, resource_code, resource_name, unit_id, active FROM planning_resources
+              WHERE id = ? AND resource_type = 'sewing_line' AND resource_code NOT LIKE 'HOLD-%'`, [id]);
+        if (!line) return res.status(404).json({ success : false, error : 'Line not found' });
+        if (!on) {
+            const [[k]] = await pool.query(
+                `SELECT COUNT(*) AS n FROM planning_events e
+                   JOIN planning_assignments a ON a.event_id = e.id
+                  WHERE a.resource_id = ? AND e.event_status NOT IN ('completed', 'cancelled') AND e.end_date >= CURDATE()`, [id]);
+            if (Number(k?.n) > 0) {
+                return res.status(409).json({ success : false, bars : Number(k.n),
+                    error : `${line.resource_name} still holds ${k.n} planned bar(s) (today or later) — move them to another line and Save first, then switch the line off` });
+            }
+        }
+        await pool.query('UPDATE planning_resources SET active = ?, updated_at = NOW() WHERE id = ?', [on ? 1 : 0, id]);
+        console.log(`[lines] ${line.resource_name} (${line.resource_code}, unit ${line.unit_id}) switched ${on ? 'ON' : 'OFF'} by ${by}`);
+        res.json({ success : true, id, active : on, unitId : line.unit_id, name : line.resource_name });
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
@@ -4246,14 +4286,17 @@ app.post(`${BASE}/board-snapshots`, async (req, res) => {
 
 // Backup / Restore permission: Planning Manager always; others need the
 // 'perm:backup' token (Settings → users & permissions)
-async function mayBackupRestore(username) {
+const mayBackupRestore = username => userHasPermToken(username, 'perm:backup');
+// Planning Manager always; others need the 'perm:<name>' token in their
+// boards list (Settings → users & permissions)
+async function userHasPermToken(username, token) {
     if (!username) return false;
     const [[u]] = await pool.query('SELECT role, boards FROM planning_users WHERE username = ? AND active = 1', [username]);
     if (!u) return false;
     if (u.role === 'Planning Manager') return true;
     let b = [];
     try { b = typeof u.boards === 'string' ? JSON.parse(u.boards) : (u.boards || []); } catch { b = []; }
-    return Array.isArray(b) && b.includes('perm:backup');
+    return Array.isArray(b) && b.includes(token);
 }
 
 // RESTORE the board to a backup: every bar of the backup returns to its saved

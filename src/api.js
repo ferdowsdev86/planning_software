@@ -479,8 +479,9 @@ export async function loadPlanAllocation(orders, opts = {}) {
 }
 // Line / product-type efficiency rows as saved in the DB (efficiency_profile)
 // All units' sewing lines, as board line objects (id l6 / m3 / c17 like the board)
-export async function loadAllLinesDb() {
-    const j = await get('/lines', 8000);
+// { all : true } → the switched-off lines too (active : false)
+export async function loadAllLinesDb({ all = false } = {}) {
+    const j = await get(all ? '/lines?all=1' : '/lines', 8000);
     if (!j.success) throw new Error(j.error || 'load failed');
     return (j.rows || []).map(r => {
         const lm = /^([LMC])(\d+)$/.exec(String(r.resource_code || ''));
@@ -488,9 +489,22 @@ export async function loadAllLinesDb() {
             id : CODE_TO_ID[r.resource_code] || (lm ? `${lm[1].toLowerCase()}${Number(lm[2])}` : `r${r.id}`),
             dbId : r.id, name : r.resource_name, unit : r.unit_name, unitId : r.unit_id,
             floor : `F${r.floor_id}`, manpower : r.manpower, machines : r.machine_count,
-            eff : Number(r.default_efficiency), hours : Number(r.working_hours_per_day) || 10
+            eff : Number(r.default_efficiency), hours : Number(r.working_hours_per_day) || 10,
+            active : r.active !== false && Number(r.active ?? 1) !== 0
         };
     });
+}
+// Switch a line on / off (planning_resources.active) — server checks the
+// permission and refuses while the line still holds planned bars
+export async function setLineActiveDb(resourceId, active, by) {
+    const res = await apiFetch(`${API_BASE}/resources/active`, {
+        method  : 'POST',
+        headers : { 'Content-Type' : 'application/json' },
+        body    : JSON.stringify({ resourceId, active : !!active, by })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'save failed');
+    return data;
 }
 export async function loadEffProfilesDb() {
     const j = await get('/efficiency-profiles', 8000);

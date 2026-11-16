@@ -31,7 +31,7 @@ import {
     sessionHeartbeat, endSession, loadSessions, killSession,
     authLogin, loadUsersDb, saveUsersDb,
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
-    skippedDbEvents, registerBoardLines, loadAllLinesDb, loadCalendarsDb,
+    skippedDbEvents, registerBoardLines, loadAllLinesDb, setLineActiveDb, loadCalendarsDb,
     loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb,
     loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, whatIfView
 } from './api.js';
@@ -2643,7 +2643,7 @@ const chLineOptions = computed(() => {
             .map(r => ({ id : r.id, dbId : r.data.dbId, name : r.data.name || r.name }));
     }
     const uid = Number(chTargetCal.value?.unitId);
-    return allUnitLines.value.filter(l => Number(l.unitId) === uid).map(l => ({ id : l.id, dbId : l.dbId, name : l.name }));
+    return allUnitLines.value.filter(l => Number(l.unitId) === uid && l.active !== false).map(l => ({ id : l.id, dbId : l.dbId, name : l.name }));
 });
 const chSelectedLines = computed(() => chLineOptions.value.filter(l => chLineSel.value[l.id] && l.dbId));
 const chTargetLabel = computed(() => (chTargetMode.value === 'lines' && chSelectedLines.value.length
@@ -5669,6 +5669,13 @@ const PERM_BACKUP = 'perm:backup';
 const canBackupRestore = computed(() =>
     (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
     || userHasPerm(currentUser.value, PERM_BACKUP) || userHasPerm(authUser.value, PERM_BACKUP));
+// Switch a sewing line on / off (Efficiency profiles → Lines): Planning
+// Manager always, others only when granted — the server checks the same
+// permission. An inactive line is not loaded by any board.
+const PERM_LINES = 'perm:lines';
+const canToggleLines = computed(() =>
+    (authUser.value?.role || currentUser.value?.role) === 'Planning Manager'
+    || userHasPerm(currentUser.value, PERM_LINES) || userHasPerm(authUser.value, PERM_LINES));
 // View-only session: Management role (§17) or read access to the open board
 // (a What-if copy is NOT view-only: it is planned like a board, and Save
 // keeps the changes in the copy — see syncToApi / syncBoardLock)
@@ -6739,9 +6746,35 @@ const lineEffSummary = computed(() => {
             eff   : Math.round(resolveProfileEfficiency(profile?.values, name, Number(l.eff) || LINE_BY_ID[l.id]?.eff) || 50),
             color : PRODUCT_TYPES.find(t => t.name === name)?.color || '#888'
         }));
-        return { line : l, products };
+        return { line : l, products, active : l.active !== false };
     });
 });
+const lsActiveCount = computed(() => lineEffSummaryShown.value.filter(r => r.active).length);
+// Lines tab: switch a line on / off. Off = planning_resources.active 0: no
+// board loads the line any more (reload shows it), its orders are planned on
+// the other lines. The server refuses while the line still holds planned
+// bars — the planner moves them first.
+const lineSwitching = ref('');
+async function toggleLineActive(row) {
+    if (!canToggleLines.value) { toast('🔒 Switching lines on / off needs permission (Setup → Settings — users & permissions → Lines on/off)', 'warn'); return; }
+    const l = row.line;
+    if (!(Number(l.dbId) > 0) || lineSwitching.value) return;
+    const on = !row.active;
+    const msg = on
+        ? `Switch ${l.name} (${l.unit}) ON?\n\nThe line shows on its board again after a reload and Auto plan may use it.`
+        : `Switch ${l.name} (${l.unit}) OFF?\n\nThe line disappears from its board (after a reload), no new bar can be planned on it, and Auto plan ignores it. It must hold no planned bar from today on.`;
+    if (!window.confirm(msg)) return;
+    lineSwitching.value = String(l.dbId);
+    try {
+        const r = await setLineActiveDb(l.dbId, on, authUser.value?.username || currentUser.value?.username || '');
+        const i = allUnitLines.value.findIndex(x => x.dbId === l.dbId);
+        if (i >= 0) allUnitLines.value.splice(i, 1, { ...allUnitLines.value[i], active : on });
+        const openUnit = Number(currentBoard.value?.unitId) === Number(r.unitId);
+        toast(`${l.name} switched ${on ? 'ON' : 'OFF'}${openUnit ? ' — reload this board (F5) to see the change' : ''}`, 'ok');
+    }
+    catch (e) { toast(`Line not switched: ${e.message}`, 'error'); }
+    finally { lineSwitching.value = ''; }
+}
 
 // Efficiency profiles are shared planning data: the DB copy (efficiency_profile,
 // written on every Update) is the source of truth for EVERY browser — a
@@ -6923,7 +6956,7 @@ function openEffProfiles() {
     openMenu.value = null;
     // Show the shared (DB) values, not a stale local copy
     loadEffProfilesDb().then(applyEffProfilesFromDb).catch(() => { /* offline */ });
-    loadAllLinesDb().then(rows => { allUnitLines.value = rows; }).catch(() => { /* offline — the open board's lines */ });
+    loadAllLinesDb({ all : true }).then(rows => { allUnitLines.value = rows; }).catch(() => { /* offline — the open board's lines */ });
     effTab.value = 'define';
     if (!effSelectedProfileId.value && effList.value[0]) {
         effSelectedProfileId.value = effList.value[0].id;
@@ -16548,19 +16581,29 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <option value="">All units</option>
                             <option v-for="u in lsUnits" :key="u" :value="u">{{ u }}</option>
                         </select>
-                        <span class="ls-dim">{{ lineEffSummaryShown.length }} line(s)</span>
+                        <span class="ls-dim">{{ lineEffSummaryShown.length }} line(s) · {{ lsActiveCount }} active<template v-if="lineEffSummaryShown.length - lsActiveCount"> · {{ lineEffSummaryShown.length - lsActiveCount }} off</template></span>
                     </div>
                     <div class="ef-table-wrap ls-wrap">
                     <table class="st-table ls-table">
                         <thead>
                             <tr>
                                 <th class="ls-line">Line</th>
+                                <th class="ls-act" title="Active = the line is on its board · Off = no board loads the line, nothing is planned on it">Active</th>
                                 <th class="ls-top">Products the line can run — efficiency %</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="row in lineEffSummaryShown" :key="row.line.id">
-                                <td class="ls-line"><strong>{{ row.line.name }}</strong><div class="ls-dim">{{ row.line.unit }}</div></td>
+                            <tr v-for="row in lineEffSummaryShown" :key="row.line.id" :class="{ 'ls-off' : !row.active }">
+                                <td class="ls-line"><strong>{{ row.line.name }}</strong><div class="ls-dim">{{ row.line.unit }}<template v-if="!row.active"> · off</template></div></td>
+                                <td class="ls-act">
+                                    <label class="ls-switch" :class="{ 'ls-switch-on' : row.active, 'ls-switch-locked' : !canToggleLines || !row.line.dbId }"
+                                        :title="!row.line.dbId ? 'Line not in the DB' : canToggleLines ? (row.active ? 'Switch the line OFF — it leaves its board' : 'Switch the line ON — it returns to its board') : '🔒 Needs the Lines on/off permission (Setup → Settings — users & permissions)'"
+                                        @click="canToggleLines ? null : toggleLineActive(row)">
+                                        <input type="checkbox" :checked="row.active" :disabled="!canToggleLines || !row.line.dbId || lineSwitching === String(row.line.dbId)" @click.prevent="toggleLineActive(row)">
+                                        <span class="ls-knob"></span>
+                                        <span class="ls-state">{{ row.active ? 'On' : 'Off' }}</span>
+                                    </label>
+                                </td>
                                 <td class="ls-top">
                                     <span v-if="!row.products.length" class="ls-dim">— not in the line chart —</span>
                                     <span
@@ -16578,7 +16621,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint">Line chart: AQL-A1…A9 = Line 01…09 · % = ওই product-এর profile efficiency (Define tab-এ না থাকলে line efficiency)</div>
+                    <div class="st-hint">Line chart: AQL-A1…A9 = Line 01…09 · % = ওই product-এর profile efficiency (Define tab-এ না থাকলে line efficiency) · <b>Active</b> switch = line চালু/বন্ধ — Off করলে কোনো board-এ line-টা আর দেখাবে না (board reload-এ), Auto plan-ও ব্যবহার করবে না; আজ বা পরের planned bar থাকলে আগে সরিয়ে Save করুন · switch চালাতে পারে শুধু যার Settings-এ <b>Lines on/off</b> টিক আছে (Planning Manager সবসময়)</div>
                 </div>
             </div>
         </div>
@@ -17767,6 +17810,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <th class="st-board-h" title="Planning → High Level Planning Board (standalone simulation): Read = look at scenarios, Write = simulate, import and save scenarios">High Level Board</th>
                                 <th class="st-board-h" title="May send a completed order back to the projection / confirm stage">Re-open completed</th>
                                 <th class="st-board-h" title="Reports → Board backup & compare: back the board up and restore it from a dated backup">Backup / Restore</th>
+                                <th class="st-board-h" title="Setup → Efficiency profiles → Lines: switch a sewing line on / off (an off line is on no board)">Lines on/off</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -17825,11 +17869,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                         @change="setUserPerm(u, PERM_BACKUP, $event.target.checked)"
                                     >
                                 </td>
+                                <td class="st-check">
+                                    <input type="checkbox"
+                                        :checked="u.role === 'Planning Manager' || userHasPerm(u, PERM_LINES)"
+                                        :disabled="u.role === 'Planning Manager'"
+                                        :title="u.role === 'Planning Manager' ? 'Planning Manager always may' : 'Allow switching sewing lines on / off (Setup → Efficiency profiles → Lines)'"
+                                        @change="setUserPerm(u, PERM_LINES, $event.target.checked)"
+                                    >
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                     </div>
-                    <div class="st-hint"><b>Backup / Restore</b> = Reports → Board backup & compare-এ "Backup now" আর "Restore this backup" চালাতে পারবে — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17) · <b>High Level Board</b> = Planning → High Level Planning Board (simulation): Read = scenario দেখতে পারবে, Write = simulate / import / save করতে পারবে — Planning Manager সবসময় Write; live plan-এ এর কোনো প্রভাব নেই</div>
+                    <div class="st-hint"><b>Backup / Restore</b> = Reports → Board backup & compare-এ "Backup now" আর "Restore this backup" চালাতে পারবে — Planning Manager সবসময় পারে · <b>Lines on/off</b> = Setup → Efficiency profiles → Lines-এ কোনো sewing line চালু/বন্ধ করতে পারবে (বন্ধ line কোনো board-এ দেখায় না) — Planning Manager সবসময় পারে · <b>Re-open completed</b> = Orders list-এ completed order-এর status-এ click করে projection/confirm stage-এ ফেরত পাঠাতে পারবে (Save-এ স্থায়ী) — Planning Manager সবসময় পারে · Board access: <b>Read</b> = board খুলে দেখতে পারবে, কিছু সরাতে/save করতে পারবে না (edit lock নেয় না) · <b>Write</b> = plan করতে ও save করতে পারবে · user শুধু তার access-এর board-ই menu-তে দেখবে · Users ও passwords DB-র planning_users table-এ sync হয় (scrypt hash) — password ঘরে কিছু লিখে Save করলে সেটাই নতুন password · Management role সব board read-only (§17) · <b>High Level Board</b> = Planning → High Level Planning Board (simulation): Read = scenario দেখতে পারবে, Write = simulate / import / save করতে পারবে — Planning Manager সবসময় Write; live plan-এ এর কোনো প্রভাব নেই</div>
                     <div class="st-actions">
                         <button class="cal-btn st-btn" @click="addUser">➕ Add user</button>
                         <button class="cal-btn cal-btn-primary st-btn" @click="saveSettings">💾 Save permissions</button>
@@ -19293,7 +19345,20 @@ body {
 .ls-table tbody tr:hover td { background : #f0f5ff; }
 
 .ls-line    { width : 90px; }
+.ls-act     { width : 64px; text-align : center; white-space : nowrap; }
 .ls-top     { }
+/* on / off switch per line */
+.ls-switch { position : relative; display : inline-flex; align-items : center; gap : 5px; cursor : pointer; user-select : none; }
+.ls-switch input { position : absolute; opacity : 0; width : 0; height : 0; }
+.ls-knob { position : relative; width : 30px; height : 16px; border-radius : 8px; background : #c4c9d4; transition : background .15s; flex : none; }
+.ls-knob::after { content : ''; position : absolute; top : 2px; left : 2px; width : 12px; height : 12px; border-radius : 50%; background : #fff; box-shadow : 0 1px 2px rgba(0,0,0,.3); transition : left .15s; }
+.ls-switch-on .ls-knob { background : #2e7d32; }
+.ls-switch-on .ls-knob::after { left : 16px; }
+.ls-state { font-size : 11px; color : #666; min-width : 20px; text-align : left; }
+.ls-switch-on .ls-state { color : #2e7d32; font-weight : 600; }
+.ls-switch-locked { cursor : not-allowed; opacity : .55; }
+.ls-off td { background : #f7f7f7; color : #888; }
+.ls-off .ls-pill { opacity : .5; }
 
 .ls-dim { color : #999; font-style : italic; font-size : 12px; }
 
