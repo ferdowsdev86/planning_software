@@ -2704,10 +2704,12 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         if (OS_UNIT_IDS.length) {
             const osPhAll = OS_UNIT_IDS.map(() => '?').join(',');
             const [osMapRows] = await pool.query(
-                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd, o.mr_order_code, b.b_name AS mr_buyer
+                `SELECT o.os_order_code, o.order_qty, o.os_unit_id, o.odd, o.mr_order_code,
+                        COALESCE(NULLIF(s.stl_no, ''), o.mr_style) AS mr_style, b.b_name AS mr_buyer
                  FROM \`${OS_DB}\`.os_orders o
                  LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
                  LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+                 LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                  WHERE o.os_unit_id IN (${osPhAll})`,
                 [...OS_UNIT_IDS]);
             for (const r of osMapRows) {
@@ -2717,7 +2719,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     order_qty : r.order_qty,
                     order_delivery_date : r.odd,
                     erp_order_code : r.mr_order_code || null,   // the MBM order the OS order belongs to
-                    erp_buyer_name : r.mr_buyer || null         // …and that order's original buyer
+                    erp_buyer_name : r.mr_buyer || null,        // …and that order's original buyer
+                    erp_style      : r.mr_style || null         // …and the ERP style behind the OS style name
                 });
             }
         }
@@ -2742,6 +2745,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
                     o.odd                                                  AS shipment_date,
                     o.odd                                                  AS order_delivery_date,
                     o.mr_order_code                                        AS erp_order_code,
+                    COALESCE(NULLIF(s.stl_no, ''), o.mr_style)             AS erp_style,
                     b.b_name                                               AS erp_buyer_name,
                     COALESCE(NULLIF(s.stl_smv, 0), NULLIF(s.production_smv, 0), 0)               AS smv,
                     oe.unit_id,
@@ -3086,6 +3090,7 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             r.order_delivery_date = erpInfo.order_delivery_date || r.shipment_date || null;
             r.erp_order_code   = erpInfo.erp_order_code || null;   // OS confirm → its MBM order
             r.erp_buyer_name   = erpInfo.erp_buyer_name || null;   // …and the MBM order's original buyer
+            r.erp_style        = erpInfo.erp_style || null;        // …and the ERP style number
             r.prod_unit        = erpInfo.prod_unit ?? null;
             r.prod_unit_name   = r.prod_unit ? (unitShortName.get(r.prod_unit) || null) : null;
             r.unit_short_name  = r.unit_id   ? (unitShortName.get(r.unit_id)   || null) : null;

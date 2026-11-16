@@ -918,6 +918,8 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         erpOrder     : r.erp_order_code && r.erp_order_code !== r.order_code ? r.erp_order_code : '',
         // …and that MBM order's original buyer (GSL-251176 → 26SPJCP098 / JCP)
         erpBuyer     : r.erp_buyer_name && String(r.erp_buyer_name).trim().toUpperCase() !== String(r.buyer_name || '').trim().toUpperCase() ? String(r.erp_buyer_name).trim() : '',
+        // …and the ERP style number behind the OS style name (GSLB-44-180 / 400636)
+        erpStyle     : r.erp_style && String(r.erp_style).trim() !== String(r.style_no || '').trim() ? String(r.erp_style).trim() : '',
         orderType    : r.order_type || 'projected',
         // false = projection still waiting for its confirm POs from ERP
         confirmArrived : r.order_type === 'confirm' ? true : !!r.has_confirm,

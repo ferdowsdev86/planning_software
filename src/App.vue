@@ -1110,14 +1110,13 @@ async function runLiveOrderPlan(s, {
         // the slot search below must see every bar placed so far in this batch
         invalidateBarsByLine();
         const desired = startOfWorkDay(desiredStart);
-        deriveLcForPlacement(s, raw, lineId, desired);
-        applyLineFormulaDuration(s, raw, lineId);
+        prof.time('place:derive+formula', () => { deriveLcForPlacement(s, raw, lineId, desired); applyLineFormulaDuration(s, raw, lineId); });
         let dur = raw.dur || 1, start = null, end = null;
         for (let k = 0; k < 5; k++) {
-            const ins = computeInsertStart(s, lineId, desired, dur, rec.id);
+            const ins = prof.time('place:computeInsertStart', () => computeInsertStart(s, lineId, desired, dur, rec.id));
             start = ins.start; end = ins.end;
             let fin = null;
-            try { const sim = simulateStrip(s, raw, lineId, start); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
+            try { const sim = prof.time('place:simulateStrip', () => simulateStrip(s, raw, lineId, start)); if (sim?.finish && sim.finish > start) fin = new Date(sim.finish); } catch { /* the formula end stays */ }
             if (!fin) break;
             if (fin.getTime() > end.getTime() + 60000) { dur = Math.max(dur, elapsedDays(start, fin)) + 0.05; continue; }
             end = fin;
@@ -1130,9 +1129,9 @@ async function runLiveOrderPlan(s, {
         // A gap slot must REALLY take the bar: the real production end may be
         // longer than the engine's estimate — never on top of the bar behind
         // the gap (the order falls through to the gap-aware fill instead)
-        const nxtBar = s.eventStore.records
+        const nxtBar = prof.time('place:nxtBar', () => s.eventStore.records
             .filter(e2 => e2 !== rec && e2.data?.raw && !e2.data.raw.stage && lineIdOf(s, e2) === lineId && e2.startDate >= start)
-            .sort((a2, b2) => a2.startDate - b2.startDate)[0];
+            .sort((a2, b2) => a2.startDate - b2.startDate)[0]);
         if (nxtBar && end.getTime() > nxtBar.startDate.getTime() + 60000) {
             removeRec(rec);
             return { ok : false, rec : null, start, end, reason : 'the free stretch is shorter than the real production run' };
@@ -1374,6 +1373,7 @@ async function runLiveOrderPlan(s, {
             // it is parked on the Holding Row ("Capacity") for the planner
             if (lateToHold && latest) {
                 // the lines' bars as they stand now (every placement so far included)
+                const tFill0 = performance.now();
                 const idx2 = buildLineIndex(s);
                 const onLine = new Map();
                 for (const ev of s.eventStore.records) {
@@ -1384,6 +1384,7 @@ async function runLiveOrderPlan(s, {
                     (onLine.get(lid) || onLine.set(lid, []).get(lid)).push(ev);
                 }
                 for (const list of onLine.values()) list.sort((a, b) => a.startDate - b.startDate);
+                if (prof.on) prof.rows.push({ label : 'fill:onLine', ms : Math.round((performance.now() - tFill0) * 10) / 10 });
                 // every free stretch of every line from the earliest sewing start
                 // that the estimated run fits in and that ends by the target. A
                 // bar is NEVER put on top of the bar that follows it — the
@@ -1484,7 +1485,7 @@ async function runLiveOrderPlan(s, {
             message : strictDelivery ? `Placing orders on board… ${done} / ${orders.length}` : `Calculating plan… ${done} / ${orders.length}`
         });
         await yieldUi();
-        const { placements : part, unplaced : skipped = [] } = autoPlanOrders(chunk, lineStates, planCtx);
+        const { placements : part, unplaced : skipped = [] } = prof.time('plan:engine', () => autoPlanOrders(chunk, lineStates, planCtx));
         if (!strictDelivery) { placements.push(...part); unplaced.push(...skipped); continue; }
         const failed = [];
         beginBoardInteraction(s, 'batch');
@@ -1497,7 +1498,7 @@ async function runLiveOrderPlan(s, {
                 placements.push(p);
                 feedFree(p.line.id, r.end);
             }
-            splitUnplaced([...skipped, ...failed]);
+            prof.time('plan:splitUnplaced', () => splitUnplaced([...skipped, ...failed]));
         }
         finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
     }
@@ -1507,7 +1508,7 @@ async function runLiveOrderPlan(s, {
             await yieldUi();
             beginBoardInteraction(s, 'batch');
             s.suspendRefresh?.();
-            try { fillRemaining(); }
+            try { prof.time('plan:fillRemaining', () => fillRemaining()); }
             finally { s.resumeRefresh?.(true); endBoardInteraction(s); }
         }
         late = filledLate;
@@ -3937,6 +3938,12 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
     unplanned.value = [...unplanned.value, ...out];
     return stats;
 }
+// async phase timer for the Auto plan profile (window.__mbm.prof.on = true; …prof.report())
+const apT = async (label, fn) => {
+    const t0 = performance.now();
+    try { return await fn(); }
+    finally { if (prof.on) prof.rows.push({ label, ms : Math.round((performance.now() - t0) * 10) / 10 }); }
+};
 async function runAutoPlanAvail() {
     const s = getInstance();
     if (!s || !currentBoard.value) return;
@@ -3979,7 +3986,7 @@ async function runAutoPlanAvail() {
             // nothing — it leaves with the run (not on load: a reload never
             // changes the saved plan)
             try { retireSewnProjections(s); } catch (e) { console.warn('[sewn projections] skipped:', e.message); }
-            blanked = blankBoardForAutoPlan(s, apKeepStarted.value, lock);
+            blanked = prof.time('ap:blank', () => blankBoardForAutoPlan(s, apKeepStarted.value, lock));
         }
         finally { endBoardInteraction(s); }
         s.refreshRows?.();
@@ -4000,7 +4007,7 @@ async function runAutoPlanAvail() {
         const infeasible = new Map();   // order id → the last reason it could not be placed
         const noteUnplaced = rr => { for (const u of rr?.unplaced || []) infeasible.set(String(u.order?.id), u); };
         const notePlaced = rr => { for (const p of rr?.placed || []) infeasible.delete(String(p)); };
-        r = await runLiveOrderPlan(s, { showToasts : true, ...runOpts });
+        r = await apT('ap:pass1', () => runLiveOrderPlan(s, { showToasts : true, ...runOpts }));
         noteUnplaced(r);
         // Settle NOW (the board's own deferred passes) and drop every bar that
         // ended up past its delivery − 7 days — then a SECOND planning pass
@@ -4009,13 +4016,13 @@ async function runAutoPlanAvail() {
         const floor = new Date(firstEditable);
         // bars the settle pushed past the planning horizon and took off again
         const horizonDrops = new Map();
-        let dropped = settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+        let dropped = prof.time('ap:settle', () => settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
         // No gaps: pull every bar flush after the one before it (never before
         // its PCD rule start), settle again — repeat until nothing moves
         const pullAndSettle = () => {
             for (let k = 0; k < 4; k++) {
-                const moved = pullFlushStrict(s, floor);
-                dropped += settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+                const moved = prof.time('ap:pullFlush', () => pullFlushStrict(s, floor));
+                dropped += prof.time('ap:settle', () => settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
                 if (!moved) break;
             }
         };
@@ -4025,12 +4032,12 @@ async function runAutoPlanAvail() {
         for (let pass = 2; pass <= 4; pass++) {
             setBoardLoad(true, `Pass ${pass} — re-trying the orders left unplanned…`, 0);
             let r2 = null;
-            try { r2 = await runLiveOrderPlan(s, { showToasts : false, ...runOpts }); }
+            try { r2 = await apT(`ap:pass${pass}`, () => runLiveOrderPlan(s, { showToasts : false, ...runOpts })); }
             catch (e) { console.warn(`[auto plan] pass ${pass} skipped:`, e.message); break; }
             if (!r2 || r2.skipped || !(r2.planned > 0)) { noteUnplaced(r2); break; }
             if (r) { r.planned += r2.planned || 0; r.tight += r2.tight || 0; r.splitOrders = (r.splitOrders || 0) + (r2.splitOrders || 0); r.unplacedLate = Math.max(0, (r.unplacedLate || 0) - (r2.planned || 0)); }
             noteUnplaced(r2);
-            dropped += settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+            dropped += prof.time('ap:settle', () => settleStrictBoard(s, r, { floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
             pullAndSettle();
         }
         // Fill every line (planner's choice): pull every bar flush down to its
@@ -4044,12 +4051,12 @@ async function runAutoPlanAvail() {
             setBoardLoad(true, 'Planning the orders that miss their target sewing end in their earliest slot…', 0);
             await yieldUi();
             for (let k = 0; k < 4; k++) {
-                const moved = pullFlushStrict(s, floor);
-                settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+                const moved = prof.time('ap:pullFlush', () => pullFlushStrict(s, floor));
+                prof.time('ap:settle(noDrop)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
                 if (!moved) break;
             }
             let r3 = null;
-            try { r3 = await runLiveOrderPlan(s, { showToasts : false, ...runOpts, fillAll : true }); }
+            try { r3 = await apT('ap:fillPass', () => runLiveOrderPlan(s, { showToasts : false, ...runOpts, fillAll : true })); }
             catch (e) { console.warn('[auto plan] fill pass skipped:', e.message); }
             if (r3 && !r3.skipped && r) {
                 r.planned += r3.planned || 0; r.tight += r3.tight || 0; r.splitOrders = (r.splitOrders || 0) + (r3.splitOrders || 0);
@@ -4063,11 +4070,11 @@ async function runAutoPlanAvail() {
             infeasible.clear();
             noteUnplaced(r3);
             for (let k = 0; k < 4; k++) {
-                settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops });
-                const moved = pullFlushStrict(s, floor);
+                prof.time('ap:settle(noDrop)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
+                const moved = prof.time('ap:pullFlush', () => pullFlushStrict(s, floor));
                 if (!moved) break;
             }
-            settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+            prof.time('ap:settle(noDrop)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
             // the late count as the board stands now (the settle may have moved bars)
             if (r) r.filledLate = s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw.latePlan && ev.data.raw.status !== 'completed' && !(Number(ev.data.raw.made) > 0)).length;
         }
@@ -4075,24 +4082,24 @@ async function runAutoPlanAvail() {
         // from where the settle left each piece, settle again (lengths
         // changed) — until nothing moves
         for (let k = 0; k < 3; k++) {
-            const ch = rebalanceSplitPieces(s);
+            const ch = prof.time('ap:rebalance', () => rebalanceSplitPieces(s));
             if (!ch) break;
-            settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops });
+            prof.time('ap:settle(noDrop)', () => settleStrictBoard(s, r, { dropLate : false, floor, dropAfter : horizonEnd, dropLog : horizonDrops }));
         }
         // No late plan: a bar the settle pushed past its target leaves its line
         // for the Holding Row ("Capacity"), the lines are pulled flush again
         if (apLateToHold.value && r) {
             setBoardLoad(true, 'No late plan — moving the bars pushed past their target sewing end to the Holding Row…', 0);
             await yieldUi();
-            const n = apParkLateBars(s, r, { floor, horizonEnd });
+            const n = prof.time('ap:parkLate', () => apParkLateBars(s, r, { floor, horizonEnd }));
             if (n) r.parked = (r.parked || 0) + n;
             r.filledLate = s.eventStore.records.filter(ev => ev.data?.raw && !ev.data.raw.stage && !ev.data.raw.parked && ev.data.raw.latePlan && ev.data.raw.status !== 'completed' && !(Number(ev.data.raw.made) > 0)).length;
         }
         // the preserved bars exactly as they were; order-level late status
         // (a split order is late by its LAST piece) with target / projected end
-        const drift = apRestoreLocked(s);
+        const drift = prof.time('ap:restoreLocked', () => apRestoreLocked(s));
         if (drift) console.warn(`[auto plan] ${drift} locked bar(s) had drifted — restored`);
-        apFlagLateOrders(s);
+        prof.time('ap:flagLate', () => apFlagLateOrders(s));
         const heldRows = r?.held || [], issueRows = r?.ambiguous || [];
         // …those still without a bar at the end: Not Available Space
         {
@@ -4105,10 +4112,10 @@ async function runAutoPlanAvail() {
         apNotePlanResult(heldRows, noSpace, issueRows, blanked);
         // Review for the planner (nothing is saved yet): shipment check per
         // bar, infeasible POs with the binding constraint, idle time per line
-        try { apReview.value = buildAutoPlanReview(s, { from, to, floor, infeasible : [...infeasible.values()], blanked, r, dropped, lock, horizonEnd, held : heldRows, ambiguous : issueRows }); apReviewOpen.value = true; }
+        try { apReview.value = prof.time('ap:review', () => buildAutoPlanReview(s, { from, to, floor, infeasible : [...infeasible.values()], blanked, r, dropped, lock, horizonEnd, held : heldRows, ambiguous : issueRows })); apReviewOpen.value = true; }
         catch (e) { console.warn('[auto plan] review skipped:', e.message); }
-        syncOrdersListFromBoard();
-        recalcCapacity(s);
+        prof.time('ap:syncOrdersList', () => syncOrdersListFromBoard());
+        prof.time('ap:recalcCapacity', () => recalcCapacity(s));
         markBoardDirty();
         touchBoardCache(s);
         s.refreshRows?.();
@@ -4475,13 +4482,13 @@ function pullFlushStrict(s, floor, { toPcd = false } = {}) {
                 let target = prevEnd ? nextDayStartAfter(prevEnd) : (lo ? clampIntoWorkWindow(new Date(lo)) : null);
                 if (lo && target && target < lo) target = clampIntoWorkWindow(new Date(lo));
                 // the bar's real end when it starts at `start` (production model)
-                const endFor = start => {
+                const endFor = start => prof.time('pull:endFor', () => {
                     deriveLcForPlacement(s, raw, lid, start);
                     applyLineFormulaDuration(s, raw, lid);
                     let end = endOfWork(start, raw.dur || elapsedDays(ev.startDate, ev.endDate) || 1);
                     try { const sim = simulateStrip(s, raw, lid, start); if (sim?.finish && sim.finish > start) end = new Date(sim.finish); } catch { /* formula end */ }
                     return end;
-                };
+                });
                 if (target) {
                     // a FIXED bar ahead (completed / production started — never
                     // moved) that this bar would run into: this bar goes behind it
@@ -4541,18 +4548,18 @@ function settleStrictBoard(s, r, { dropLate = true, floor = null, toPcd = false,
             // curves follow the neighbours (a dropped bar changes them), then
             // the re-fit — not idempotent (a pushed follower is re-fitted on
             // its new dates next time), so repeat until nothing changes
-            try { applyLearningCurves(s, { lineIds }); } catch { /* no curves */ }
-            const rr = resizeBars(s, open, { dirty : true }) || {};
+            try { prof.time('settle:lc', () => applyLearningCurves(s, { lineIds })); } catch { /* no curves */ }
+            const rr = prof.time('settle:resizeBars', () => resizeBars(s, open, { dirty : true })) || {};
             // a preserved bar (10-day lock) keeps its span, quantity and its
             // learning curve — whatever the passes above derived for it
-            apRestoreLocked(s);
+            prof.time('settle:restoreLocked', () => apRestoreLocked(s));
             // no overlap, no gap: every bar sits right after the one before it
             // on its line — pulled forward or pushed back IN ORDER (the
             // save-time nudge would instead drop an overlapping bar into the
             // next free slot, i.e. the end of a packed line: split pieces lost
             // their sisters by months that way)
             let nudged = 0;
-            try { nudged = pullFlushStrict(s, floor, { toPcd }) || 0; } catch { /* no flush */ }
+            try { nudged = prof.time('settle:pullFlush', () => pullFlushStrict(s, floor, { toPcd })) || 0; } catch { /* no flush */ }
             if (nudged) rr.pushed = (rr.pushed || 0) + nudged;
             // (one line index per pass — a lineIdOf scan per bar is O(bars²))
             const passIndex = dropAfter ? buildLineIndex(s) : null;
@@ -7656,6 +7663,7 @@ function orderCellText(r, key) {
         // JCP") — a search / filter on either number or either buyer finds the row
         case 'mbmOrder'      : return r.erpOrder ? `${r.mbmOrder} / ${r.erpOrder}` : String(r.mbmOrder ?? '');
         case 'buyer'         : return r.erpBuyer ? `${r.buyer} / ${r.erpBuyer}` : String(r.buyer ?? '');
+        case 'style'         : return r.erpStyle ? `${r.style} / ${r.erpStyle}` : String(r.style ?? '');
         case 'pcdSource'     : return r.pcdSource === 'order_pcd' ? 'ERP PCD'
                                     : r.pcdSource === 'delivery_minus_30' ? 'Delivery-30'
                                     : (r.pcdStatus === 'missing' ? 'missing' : '');
