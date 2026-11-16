@@ -37,7 +37,8 @@ export const SEW_OUT_SQL = (a = 'd') => `${a}.mr_operation_type_id = 2 AND ${a}.
 
 // one grouped read per PO identity — before any join to planning rows
 export const sewingOutputSql = (erpDb, n) => `
-    SELECT d.po_id, d.clr_id, d.prod_unit_id, d.order_id, SUM(d.prod_qty) AS qty
+    SELECT d.po_id, d.clr_id, d.prod_unit_id, d.order_id, SUM(d.prod_qty) AS qty,
+           COUNT(DISTINCT d.prod_date) AS days, MIN(d.prod_date) AS first_date, MAX(d.prod_date) AS last_date
       FROM \`${erpDb}\`.daily_productions d
      WHERE ${SEW_OUT_SQL('d')} AND d.po_id IN (${Array(n).fill('?').join(',')})
      GROUP BY d.po_id, d.clr_id, d.prod_unit_id, d.order_id`;
@@ -64,7 +65,8 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
     for (const o of output || []) {
         const k = Number(o.po_id);
         if (!byPo.has(k)) byPo.set(k, []);
-        byPo.get(k).push({ clr : Number(o.clr_id) || 0, unit : Number(o.prod_unit_id) || 0, order : Number(o.order_id) || 0, qty : Number(o.qty) || 0 });
+        byPo.get(k).push({ clr : Number(o.clr_id) || 0, unit : Number(o.prod_unit_id) || 0, order : Number(o.order_id) || 0, qty : Number(o.qty) || 0,
+            days : Number(o.days) || 0, last : o.last_date ? String(o.last_date).slice(0, 10) : null });
     }
     const groups = new Map();   // identity → { rows, sewn, issue }
     for (const r of rows || []) {
@@ -93,6 +95,10 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
             const badQty = bad.reduce((t, o) => t + o.qty, 0);
             g = {
                 rows : [], sewn : good.reduce((t, o) => t + o.qty, 0),
+                // working days the PO has sewn on (the learning curve of a
+                // bar planned for the remaining quantity continues after them)
+                days : good.reduce((t, o) => Math.max(t, o.days), 0),
+                last : good.reduce((t, o) => (o.last && (!t || o.last > t) ? o.last : t), null),
                 issue : badQty > 0
                     ? `${badQty} pcs of sewing output of this PO are booked under another ${bad.some(o => !okClr(o)) ? 'colour' : 'order'} — cannot be reconciled`
                     : null
@@ -108,7 +114,8 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
         for (const r of g.rows) {
             const take = Math.min(r.qty, rest);
             rest -= take;
-            out.set(r.id, { sewn : take, remaining : Math.max(0, r.qty - take), issue : g.issue });
+            out.set(r.id, { sewn : take, remaining : Math.max(0, r.qty - take), issue : g.issue,
+                days : g.sewn > 0 ? g.days : 0, last : g.sewn > 0 ? g.last : null });
         }
     }
     return out;

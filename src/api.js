@@ -221,6 +221,9 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     // Multiple strip handling: linked build-up curve relationship (reference
     // bar, mode live/copy, version) must survive a reload
     if (raw.lcLink && raw.lcLink.refId != null) notes.lcLink = raw.lcLink;
+    // the order was already in production when the bar was planned: the
+    // learning curve entered at this ramp day — a reload must not restart it
+    if (Number(raw.lcDone) > 0) notes.lcDone = Number(raw.lcDone);
     // SOP-PLN-01 production run (whole days) + milestone snapshot
     if (Number(raw.sopDur) > 0) notes.sop = { ...(raw.sop || {}), dur : Number(raw.sopDur) };
     // SMV the planner entered because ERP has none for the style
@@ -365,6 +368,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // actual sewing output of those PO rows (ERP daily_productions) and
         // the POs whose output could not be reconciled (no new allocation)
         groupSewn  : orderId ? (Number(e.group_sewn) || 0) : undefined,
+        groupSewnDays : orderId ? (Number(e.group_sewn_days) || 0) : undefined,
+        // ramp days the order had already consumed when this bar was planned
+        // for its remaining quantity (the curve continues after them)
+        lcDone     : Number(noteGroup.lcDone) > 0 ? Number(noteGroup.lcDone) : undefined,
         groupIssue : orderId && e.group_issue ? String(e.group_issue) : undefined,
         // a projection bar whose order has confirm PO rows by now: their count,
         // quantity and actual ERP sewing output (server: attachProjectionTotals)
@@ -864,6 +871,7 @@ function mapUnplannedRow(o) {
         baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
         orderQty : Number(o.order_quantity ?? o.remaining_quantity),
         sewn     : Number(o.sewn_quantity) || 0,
+        sewnDays : Number(o.sewn_days) || 0,   // working days already sewn on (ERP) — the learning curve continues after them
         sewIssue : o.sew_issue || null,
         smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
         smvMissing : !(Number(o.smv) > 0),
@@ -1315,6 +1323,7 @@ export async function loadFromApi(unitId = null) {
             baseQty  : Number(o.remaining_quantity ?? o.order_quantity),
             orderQty : Number(o.order_quantity ?? o.remaining_quantity),
             sewn     : Number(o.sewn_quantity) || 0,
+            sewnDays : Number(o.sewn_days) || 0,
             sewIssue : o.sew_issue || null,
             smv      : Number(o.smv) > 0 ? Number(o.smv) : randSmv(o.po_number),
             smvMissing : !(Number(o.smv) > 0),

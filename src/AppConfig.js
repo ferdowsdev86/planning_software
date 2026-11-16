@@ -69,7 +69,7 @@ function flushWidth(scheduler, ev, renderData) {
     if (!(nextLeft > renderData.left + renderData.width)) return;
     renderData.width = nextLeft - renderData.left;
 }
-import { pickLearningCurve, buildLineLearning, learningDuration } from './learningCurveService.mjs';
+import { pickLearningCurve, buildLineLearning, learningDuration, afterProduction } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
 
 // SOP-PLN-01 backward timeline for one bar, using ITS line's capacity params
@@ -1198,11 +1198,15 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
             // automatic changeover derivation and always ramps from day 1
             const manual = raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length
                 ? raw.lcManual : null;
-            const info = manual
+            let info = manual
                 ? { applied : true, reason : 'manual', dayOffset : 0,
                     typeKey : typeKeyById.get(ev.id) || raw.productType || '_Default' }
                 : plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
+            // planned for the remaining quantity of an order already in
+            // production: the ramp entered after the days already sewn
+            // (saved with the bar) — the line sequence alone would restart it
+            if (!manual && Number(raw.lcDone) > 0) info = afterProduction(info, raw.lcDone, curve.period);
             const activeCurve = manual || curve;
             // Multiple strip rule: the first bar of a run is the reference;
             // every later strip of the same style + product on the line is
@@ -1225,6 +1229,7 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 applied     : info.applied,
                 reason      : info.reason,
                 dayOffset   : info.dayOffset,
+                producedDays : info.producedDays || undefined,
                 typeKey     : String(info.typeKey).split('|')[0],
                 runKey      : info.typeKey,
                 profileName : activeCurve.name,
@@ -1291,21 +1296,25 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
         period : curve.period, pct : curve.pct, learnFrac : 0, dayPlan : [],
         viaPlacement : true
     };
+    // An order already in production (the bar is planned for its REMAINING
+    // quantity: ERP output on sewnDays working days, or the ramp days a saved
+    // bar carries) enters the ramp after those days — never again at day 1.
+    // raw.lcDone is saved with the bar so a reload reproduces the same ramp.
+    const done = Math.max(0, Math.floor(Math.max(Number(raw.lcDone) || 0, Number(raw.sewnDays) || 0)));
+    const finish = info => {
+        const out = done > 0 ? afterProduction(info, done, curve.period) : info;
+        if (done > 0) raw.lcDone = done; else delete raw.lcDone;
+        raw.lc = { ...base, ...out };
+    };
     // Bars already on the line that start BEFORE the placement point
     const prevBars = scheduler.eventStore.records
         .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw !== raw
             && ev.data.raw !== raw._cloneOf   // a preview clone must not see its own bar as the previous one
             && lineIdOf(scheduler, ev) === lineId && ev.startDate < startDate)
         .sort((a, b) => b.startDate - a.startDate);
-    if (!prevBars.length) {
-        raw.lc = { ...base, applied : false, reason : 'first-on-line', dayOffset : 0 };
-        return;
-    }
+    if (!prevBars.length) { finish({ applied : false, reason : 'first-on-line', dayOffset : 0 }); return; }
     const prevKey = lcRunKey(prevBars[0].data.raw, lineId);
-    if (prevKey !== myKey) {
-        raw.lc = { ...base, applied : true, reason : 'product-change', dayOffset : 0 };
-        return;
-    }
+    if (prevKey !== myKey) { finish({ applied : true, reason : 'product-change', dayOffset : 0 }); return; }
     // Same type: walk back to the start of the run and continue its ramp
     let runStart = prevBars[0];
     let hasChangeoverBefore = false;
@@ -1316,12 +1325,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     }
     const offset  = Math.max(0, workDayIndexOf(startDate) - workDayIndexOf(runStart.startDate));
     const applied = hasChangeoverBefore && offset < curve.period;
-    raw.lc = {
-        ...base,
-        applied,
-        reason    : applied ? 'continuation' : 'same-product',
-        dayOffset : Math.min(offset, curve.period)
-    };
+    finish({ applied, reason : applied ? 'continuation' : 'same-product', dayOffset : Math.min(offset, curve.period) });
 }
 
 export function packBoardGaps(scheduler) {
@@ -3382,9 +3386,11 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
             'continuation'   : 'Product Change (continuing ramp)',
             'same-product'   : 'Same Product Continuation',
             'first-on-line'  : 'First product on line',
+            'in-production'  : 'Already in production — ramp done',
             'manual'         : 'Applied manually (Build up curve)'
         }[lc.reason] || '—';
-        const dayLbl = applied ? `Day ${Math.min((lc.dayOffset || 0) + 1, lc.period)} of ${lc.period}` : '—';
+        const dayLbl = (applied ? `Day ${Math.min((lc.dayOffset || 0) + 1, lc.period)} of ${lc.period}` : '—')
+            + (Number(lc.producedDays) > 0 ? ` · ${lc.producedDays} day(s) already sewn` : '');
         const dayRows = applied && Array.isArray(lc.dayPlan)
             ? lc.dayPlan.filter(d => d.day <= lc.period).map(d =>
                 `<tr><td>Day ${d.day}</td><td class="t4num">${d.effPct}%</td><td class="t4num">${fmtQty(d.capacity)} pcs</td></tr>`).join('')

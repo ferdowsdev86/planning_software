@@ -88,6 +88,30 @@ export function buildLineLearning(bars, curve) {
 }
 
 /**
+ * An order already IN PRODUCTION enters the ramp where its output left it
+ * (planner's rule, 2026-11-16): when a bar is planned for the REMAINING
+ * quantity of an order that has sewn on `producedDays` working days, the
+ * curve does not start again at day 1 — those days are consumed. Inside the
+ * period the bar continues at day producedDays + 1; from the period on there
+ * is no ramp left ('in-production'). A bar that was not going to ramp at all
+ * (first on the line, same product) stays as it is; a manual curve is never
+ * touched by the caller.
+ * @param {{applied, reason, dayOffset}} info — the line-sequence decision
+ * @param {number} producedDays — working days the order has already sewn
+ * @param {number} period — the curve length in working days
+ */
+export function afterProduction(info, producedDays, period) {
+    const done = Math.max(0, Math.floor(Number(producedDays) || 0));
+    const per  = Math.max(0, Number(period) || 0);
+    if (!info || !done || !per) return info;
+    const dayOffset = Math.min(per, Math.max(Number(info.dayOffset) || 0, done));
+    const applied = !!info.applied && dayOffset < per;
+    return { ...info, applied, dayOffset,
+        reason : applied ? 'continuation' : (info.applied ? 'in-production' : info.reason),
+        producedDays : done };
+}
+
+/**
  * Capacity-based duration for a bar whose head runs on the learning curve.
  * Day i (0-based ramp index = dayOffset + day-within-bar) below the curve
  * period uses baseEff × pct[i]/100; every later day uses the normal baseEff.

@@ -1086,7 +1086,7 @@ async function runLiveOrderPlan(s, {
         invalidateBarsByLine();
     };
     const placeExactBar = (e, lineId, desiredStart, latest) => {
-        const raw = e.raw;
+        let raw = e.raw;
         // the line goes through the assignment store ONLY: an event added or
         // set with a resourceId flips Bryntum's stores into single-assignment
         // mode and the next board load in this tab throws ("Data loading into
@@ -1096,6 +1096,11 @@ async function runLiveOrderPlan(s, {
         const { resourceId : _lineHint, ...eventData } = e;
         const [rec] = s.eventStore.add(eventData);
         if (!rec) return { ok : false, reason : 'store refused the bar' };
+        // the store CLONES the raw on add: from here on every derivation
+        // (learning curve entry, formula duration, start / end) must land on
+        // the record's own raw — on e.raw it was lost, and the bar on the
+        // board carried neither its ramp entry (lcDone) nor viaPlacement
+        if (rec.data?.raw && rec.data.raw !== raw) { e.raw = rec.data.raw; raw = rec.data.raw; }
         assignEventToLine(s, rec, lineId);
         // the slot search below must see every bar placed so far in this batch
         invalidateBarsByLine();
@@ -3777,7 +3782,8 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         if (!isPoGroup(r) || !r.id) continue;
         const id = rowKey(r);
         let g = groups.get(id);
-        if (!g) { g = { rows : Number(r.groupQty), sewn : Number(r.groupSewn) || 0, done : Number(r.groupDone) || 0, issue : r.groupIssue || null, bars : [] }; groups.set(id, g); }
+        if (!g) { g = { rows : Number(r.groupQty), sewn : Number(r.groupSewn) || 0, sewnDays : 0, done : Number(r.groupDone) || 0, issue : r.groupIssue || null, bars : [] }; groups.set(id, g); }
+        g.sewnDays = Math.max(g.sewnDays, Number(r.groupSewnDays) || 0);
         g.bars.push(ev);
     }
     const plan = new Map();   // order row → { toPlan (ERP pcs), sewn, cover }
@@ -3789,7 +3795,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
             rowsQty : g.rows, erpSewn : g.sewn, doneRemoved : Math.round(g.done / (planQtyOf(1000) / 1000)),
             bars : g.bars.map(ev => { const r = ev.data.raw; return { base : baseOf(r), made : Number(r.made) || 0, completed : r.status === 'completed', kept : keptSet.has(ev), start : ev.startDate, end : ev.endDate }; })
         });
-        plan.set(id, { ...p, rows : g.rows });
+        plan.set(id, { ...p, rows : g.rows, sewnDays : g.sewnDays });
     }
 
     const have = new Set(unplanned.value.map(u => String(u.id)));
@@ -3826,6 +3832,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // afterwards as "another unit's" and never re-planned)
         pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : currentUnitId.value ?? r.unitId ?? null,
         dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable, idList : r.idList,
+        sewnDays : Number(r.groupSewnDays) || 0,
         // a projection keeps what it knows of its confirm POs: with any, the
         // planner leaves it replaced instead of planning it again
         linkedPoCount : r.linkedPoCount, confirmQty : r.confirmQty, confirmSewn : r.confirmSewn,
@@ -3902,6 +3909,9 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         row.baseQty = p.toPlan;
         row.orderQty = p.toPlan;
         row.sewn = p.sewn;
+        // working days the order has sewn on: the new bar's learning curve
+        // continues after them (deriveLcForPlacement), it does not restart
+        row.sewnDays = p.sewnDays || 0;
         row.lockCover = p.cover;
         out.push(asBalance(row));
     }

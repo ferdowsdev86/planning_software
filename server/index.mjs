@@ -288,16 +288,17 @@ async function attachGroupTotals(events) {
     for (const e of events) {
         const ids = byAnchor.get(Number(e.planning_order_id));
         if (!ids) continue;
-        let q = 0, d = 0, sewn = 0;
+        let q = 0, d = 0, sewn = 0, days = 0;
         const issues = [];
         for (const i of ids) {
             q += qtyOf.get(i) || 0; d += doneOf.get(i) || 0;
             const so = sew.get(i);
-            if (so) { sewn += so.sewn; if (so.issue) issues.push(`PO ${poNoOf.get(i) || i}: ${so.issue}`); }
+            if (so) { sewn += so.sewn; days = Math.max(days, so.days || 0); if (so.issue) issues.push(`PO ${poNoOf.get(i) || i}: ${so.issue}`); }
         }
         e.group_qty   = q;
         e.group_done  = d;
         e.group_sewn  = sewn;
+        e.group_sewn_days = days;   // working days the group has sewn on (ERP)
         e.group_issue = issues.length ? issues.slice(0, 3).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '') : null;
     }
 }
@@ -799,18 +800,19 @@ app.get(`${BASE}/unplanned-orders`, async (req, res) => {
             }
             const sew = await sewingOutputForRows(flat);
             for (const g of enriched) {
-                let sewn = 0, rem = 0, any = false;
+                let sewn = 0, rem = 0, days = 0, any = false;
                 const issues = [];
                 for (const d of g.po_details) {
                     const so = d && d.id != null ? sew.get(Number(d.id)) : null;
                     if (!so) { rem += Number(d?.remaining ?? d?.qty) || 0; continue; }
                     any = true;
                     d.sewn = so.sewn; d.remaining = so.remaining;
-                    sewn += so.sewn; rem += so.remaining;
+                    sewn += so.sewn; rem += so.remaining; days = Math.max(days, so.days || 0);
                     if (so.issue) issues.push(`PO ${d.po || d.id}: ${so.issue}`);
                 }
                 if (!any) continue;
                 g.sewn_quantity      = sewn;
+                g.sewn_days          = days;   // working days already sewn on (learning curve continues after them)
                 g.remaining_quantity = rem;
                 g.sew_issue          = issues.length ? issues.slice(0, 3).join('; ') + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '') : null;
             }

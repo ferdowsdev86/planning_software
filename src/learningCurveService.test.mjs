@@ -160,3 +160,38 @@ test('tiny order finishing inside day 1 stays a fraction of a day', () => {
     assert.ok(r.dur < 0.3, `dur ${r.dur}`);
     assert.ok(r.learnMin > 0);
 });
+
+// --- an order already in production enters the ramp where it left it --------
+import { afterProduction } from './learningCurveService.mjs';
+
+test('remaining quantity of an order sewn for 1 day continues at ramp day 2', () => {
+    const info = { applied : true, reason : 'product-change', dayOffset : 0, typeKey : 'Pant' };
+    const r = afterProduction(info, 1, 3);
+    assert.equal(r.applied, true);
+    assert.equal(r.dayOffset, 1);
+    assert.equal(r.reason, 'continuation');
+    assert.equal(r.producedDays, 1);
+    // the duration model then charges only days 2 and 3 of the ramp
+    const d = learningDuration({ qty : 3000, smv : 10, manpower : 50, baseEffPct : 50, dailyMinutes : 600, dayPcts : CURVE.pct, dayOffset : r.dayOffset });
+    assert.equal(d.dayPlan[0].day, 2);
+});
+
+test('an order sewn for the whole period (or longer) gets no ramp at all', () => {
+    const info = { applied : true, reason : 'product-change', dayOffset : 0, typeKey : 'Pant' };
+    for (const days of [3, 5, 40]) {
+        const r = afterProduction(info, days, 3);
+        assert.equal(r.applied, false);
+        assert.equal(r.dayOffset, 3);
+        assert.equal(r.reason, 'in-production');
+    }
+});
+
+test('production days never shorten a line offset and never create a ramp', () => {
+    // the line sequence already put it at day 3 of the ramp — production of 1 day does not pull it back
+    assert.equal(afterProduction({ applied : true, reason : 'continuation', dayOffset : 2 }, 1, 3).dayOffset, 2);
+    // first bar on the line / same product: no ramp before, no ramp after
+    const first = { applied : false, reason : 'first-on-line', dayOffset : 0 };
+    assert.deepEqual(afterProduction(first, 2, 3), { ...first, dayOffset : 2, producedDays : 2 });
+    // nothing produced: untouched
+    assert.equal(afterProduction(first, 0, 3), first);
+});
