@@ -532,50 +532,18 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         }
 
 
-        // Board hygiene: a bar must never load for an order that is absent
-        // from the Orders list — retired orders (planning_completed_orders)
-        // and orders unknown to ERP (no mr_order_entry row AND no confirm PO
-        // link) would be unmanageable ghosts on the board.
-        // Split strips append a 1-2 digit counter (…-2, …-3). Strip ONLY
-        // that: a greedy -\d+$ ate the numeric tail of real codes like
-        // GSL-250942 → 'GSL', so their planned bars were dropped as ghosts.
+        // RULE (planner, 2026-11-17): the board shows EVERY live bar of the
+        // unit — nothing is hidden by a classification (order marked complete,
+        // dropped in ERP, unknown code, delivery before the cut-off). Such a
+        // bar carries the sync's flag in its notes (erpFlag, see
+        // flagHiddenEvents) and the planner removes or re-plans it; a load
+        // that hid bars made the screen differ from the DB and the next Save
+        // cancelled what the planner could not see.
+        // Split strips append a 1-2 digit counter (…-2, …-3); a legacy piece
+        // code with a 3+-digit counter still names its order.
         const evOrderCode = e => e.order_code
             || (String(e.event_code || '').startsWith('ev-proj:')
                 ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '').replace(/^([A-Za-z]+-\d{6})-\d{3,}$/, '$1') : null);
-        const evCodes = [...new Set(events.map(evOrderCode).filter(Boolean))];
-        // (a What-if copy shows that day's plan as it was — no hygiene filter)
-        if (!whatIf && evCodes.length) {
-            const ph = evCodes.map(() => '?').join(',');
-            // OS orders (mbm_os.os_orders — GSL-… codes) are just as real as
-            // mr_order_entry ones: without this their planned projection bars
-            // were silently dropped as "unknown to ERP" on every board load,
-            // while the list kept showing them as Planned
-            const [completedSet, [erpRows], [osKnown]] = await Promise.all([
-                completedOrderCodes(),
-                pool.query(`SELECT order_code, MAX(${erpOrderOk('')}) AS ok, MAX(${mrSourceOkSql('')}) AS src_ok FROM \`${ERP_DB}\`.mr_order_entry WHERE order_code IN (${ph}) GROUP BY order_code`, evCodes),
-                pool.query(`SELECT os_order_code FROM \`${OS_DB}\`.os_orders WHERE os_order_code IN (${ph})`, evCodes)
-            ]);
-            const inErp = new Set(erpRows.map(r => r.order_code));
-            // dropped (qty 0) / sample / 2nd-quality orders: not a production order
-            // (ORDER_SOURCE_RETIRE=1: nor an order whose source no longer qualifies)
-            const notProd = new Set(erpRows.filter(r => !Number(r.ok) || (ORDER_SOURCE_RETIRE && !Number(r.src_ok))).map(r => r.order_code));
-            if (ORDER_SOURCE_RETIRE) {
-                try { const l = await sourceLosers(); for (const c of [...l.mrCodes, ...l.osCodes]) notProd.add(c); }
-                catch { /* winner lookup failed: no extra filter */ }
-            }
-            for (const r of osKnown) inErp.add(r.os_order_code);
-            events = events.filter(e => {
-                const oc = evOrderCode(e);
-                if (!oc) return true;
-                if (completedSet.has(oc)) return false;
-                if (notProd.has(oc)) return false;
-                // delivered before the cut-off: out of the plan on every unit
-                if (e.shipment_date && ymdStr(e.shipment_date) < ERP_CUTOFF) return false;
-                if (!inErp.has(oc) && e.planning_order_id == null) return false;
-                return true;
-            });
-        }
-
         if (effUnit) {
             const evResource = new Map();
             for (const a of assignments) {
@@ -2124,7 +2092,7 @@ app.post(`${BASE}/orders/complete`, async (req, res) => {
                 `UPDATE planning_orders SET planning_status = 'completed', updated_at = NOW()
                  WHERE order_code IN (${codes.map(() => '?').join(',')})`, codes);
             // …and its bars leave the plan with it (not only the screen)
-            await retireHiddenEvents(conn, 'order complete');
+            await retireHiddenEvents(conn, 'order complete', { only : ['order marked complete'] });
             await conn.commit();
             conn.release();
             return res.json({ success : true, completed : codes.length });
@@ -2427,8 +2395,8 @@ async function projTwinRowFor(conn, eventCode, lineUnit = null) {
     return null;
 }
 
-async function retireHiddenEvents(conn, tag = 'sync') {
-    const hidden = await findHiddenEvents(conn);
+async function retireHiddenEvents(conn, tag = 'sync', { only = null, list = null } = {}) {
+    const hidden = list || (await findHiddenEvents(conn)).filter(e => !only || only.includes(e.reason));
     for (const e of hidden) {
         if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
             const twinId = await projTwinRowFor(conn, e.event_code, e.line_unit);
@@ -2461,6 +2429,66 @@ async function retireHiddenEvents(conn, tag = 'sync') {
             + hidden.map(e => `${e.id} ${e.order_code || e.event_code} on ${e.resource_name || 'no line'} (${e.reason})`).join('; '));
     }
     return hidden;
+}
+
+// RULE (planner, 2026-11-17 — "after Save the board must never go blank on
+// a reload"): the ERP sync NEVER removes a bar on its own. What the hygiene
+// finds is written on the bar (notes.erpFlag — the board shows it red-dashed
+// with the reason in the tooltip); the planner removes or re-plans it, or
+// the next Auto plan run blanks it like any other bar. Only two findings are
+// certain enough to retire at once: a zero-quantity bar and an order the
+// planner himself marked complete. A projection bar whose row was re-keyed
+// is still moved to its twin row (a repair, not a removal).
+const HYGIENE_RETIRE_REASONS = ['zero quantity', 'order marked complete'];
+async function flagHiddenEvents(conn, tag = 'sync') {
+    const hidden = await findHiddenEvents(conn);
+    const certain = hidden.filter(e => HYGIENE_RETIRE_REASONS.includes(e.reason));
+    if (certain.length) await retireHiddenEvents(conn, tag, { list : certain });
+    const flaggedIds = new Set();
+    let flagged = 0, moved = 0;
+    for (const e of hidden) {
+        if (HYGIENE_RETIRE_REASONS.includes(e.reason)) continue;
+        if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
+            const twinId = await projTwinRowFor(conn, e.event_code, e.line_unit);
+            if (twinId) {
+                await conn.query('UPDATE planning_events SET planning_order_id = ?, updated_at = NOW() WHERE id = ?', [twinId, e.id]);
+                await conn.query(
+                    `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, reason, changed_by, changed_at)
+                     VALUES (?, ?, 'update', ?, ?, 1, NOW())`,
+                    [e.project_id, e.id, JSON.stringify({ planning_order_id : e.planning_order_id, event_code : e.event_code }),
+                        `hidden bar kept (${tag}): ${e.reason} — moved to the twin order's projection row ${twinId}`]);
+                moved++;
+                continue;
+            }
+        }
+        flaggedIds.add(Number(e.id));
+        let n = null;
+        try { n = JSON.parse(e.notes || '{}') || {}; } catch { n = null; }
+        if (!n || typeof n !== 'object' || Array.isArray(n)) continue;   // legacy free-text notes: never overwritten
+        if (n.erpFlag === e.reason) continue;
+        n.erpFlag = e.reason;
+        await conn.query('UPDATE planning_events SET notes = ? WHERE id = ?', [JSON.stringify(n), e.id]);
+        flagged++;
+    }
+    // a flag whose finding is gone (row back, order active again) is cleared
+    const [withFlag] = await conn.query(`SELECT id, notes FROM planning_events WHERE event_status != 'cancelled' AND notes LIKE '%"erpFlag"%'`);
+    let cleared = 0;
+    for (const r of withFlag) {
+        if (flaggedIds.has(Number(r.id))) continue;
+        let n = null;
+        try { n = JSON.parse(r.notes || '{}') || {}; } catch { n = null; }
+        if (!n || !n.erpFlag) continue;
+        delete n.erpFlag;
+        await conn.query('UPDATE planning_events SET notes = ? WHERE id = ?', [JSON.stringify(n), r.id]);
+        cleared++;
+    }
+    if (flagged || moved || cleared) {
+        const why = {};
+        for (const e of hidden) if (!HYGIENE_RETIRE_REASONS.includes(e.reason)) why[e.reason] = (why[e.reason] || 0) + 1;
+        console.log(`[board-hygiene] ${tag}: ${flagged} bar(s) newly FLAGGED (kept on the board), ${moved} moved to a twin row, ${cleared} flag(s) cleared — `
+            + Object.entries(why).map(([k, v]) => `${v}× ${k}`).join('; '));
+    }
+    return { retired : certain.length, flagged, moved, cleared };
 }
 
 // One source per business order — read-only audit of the rule
@@ -2520,6 +2548,15 @@ app.get(`${BASE}/order-sources/audit`, async (req, res) => {
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 
+// Run the flag pass now (Planning Manager) instead of waiting for the sync
+app.post(`${BASE}/board-hygiene/flag`, async (req, res) => {
+    try {
+        const by = String(req.body?.by || '').trim();
+        if (!(await isPlanningManager(by))) return res.status(403).json({ success : false, error : 'Planning Manager only' });
+        res.json({ success : true, ...(await flagHiddenEvents(pool, `on demand by ${by}`)) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
 // What the rule above would retire right now — read only
 app.get(`${BASE}/board-hygiene`, async (req, res) => {
     try {
@@ -3917,7 +3954,7 @@ async function runAutoSync() {
 
         // Orders that left this unit / ERP in this sync take their bars along
         // (before the status pass below, so their rows read unplanned at once)
-        try { await retireHiddenEvents(conn, 'ERP sync'); }
+        try { await flagHiddenEvents(conn, 'ERP sync'); }
         catch (e) { console.warn(`[board-hygiene] skipped: ${e.message}`); }
         // Confirm rows that read planned without any live bar on a line
         // return to the pool (full-quantity rule)

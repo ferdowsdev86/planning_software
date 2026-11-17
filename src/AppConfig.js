@@ -2682,6 +2682,10 @@ export const schedulerProConfig = {
         // 5 Pocket the same red). Lateness stays visible as the red marker
         // along the bottom edge (mb-late), a qty mismatch as its outline.
         if (pastDelivery) renderData.cls.add('mb-late');
+        // the ERP sync's finding (order dropped / unknown / row gone): red
+        // dashed outline, reason in the tooltip — the bar stays until the
+        // planner acts
+        if (r.erpFlag) renderData.cls.add('mb-erp-flag');
         const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
         if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));
@@ -3344,6 +3348,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                   + R('Projected sew end', `${enc(ddMon(proj))}${late ? ' <b style="color:#b45309" title="after the target sewing end (delivery − 7 days)">· late plan</b>' : ''}`);
           })()}
           ${R('Status', enc(s.order_status || orderTypeOf(r.po, r.orderType) || '—'))}
+          ${r.erpFlag ? R('ERP check', `<b style="color:#c62828">${enc(r.erpFlag)}</b> <span class="t4dim">— the ERP sync no longer finds this order as a plannable order; the bar stays until you remove it or run Auto plan</span>`) : ''}
           ${r.parked && r.holdReason ? R('Holding Row', `<b style="color:#b45309" title="the Auto plan parked this order here instead of planning it late — split it, subcontract, or agree a new delivery, then plan it by hand">⏸ ${enc(r.holdReason)}</b>`, 't4-full') : ''}
           ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
           ${R('Stage', enc(stage))}

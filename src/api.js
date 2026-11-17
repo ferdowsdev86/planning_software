@@ -190,6 +190,7 @@ function eventNotesPayload(raw, onHold, unitId = null) {
         holdFloor  : onHold && raw.holdFloor ? raw.holdFloor : undefined,
         // why the Auto plan parked it here (e.g. "Capacity — no line finishes it by delivery − 7")
         holdReason : onHold && raw.holdReason ? String(raw.holdReason) : undefined,
+        erpFlag    : raw.erpFlag ? String(raw.erpFlag) : undefined,
         // dbPinned = the pin as loaded from DB; keeps saved positions pinned
         // even when load-time processing has cleared the working flag
         userPinned : !!(raw.userPinned || raw.dbPinned),
@@ -357,6 +358,9 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         sop          : noteGroup.sop && typeof noteGroup.sop === 'object' ? noteGroup.sop : undefined,
         // the Auto plan's reason for parking the bar on the Holding Row
         holdReason   : noteGroup.holdReason ? String(noteGroup.holdReason) : undefined,
+        // the ERP sync's finding about this bar (order dropped / unknown / row
+        // gone / other unit) — shown on the bar, never acted on by the sync
+        erpFlag      : noteGroup.erpFlag ? String(noteGroup.erpFlag) : undefined,
         dbId     : orderId,
         // what the bar's PO rows hold NOW (ERP qty; every piece of a split
         // order carries the same figure) and the plan qty of its pieces that
@@ -1143,6 +1147,7 @@ export async function loadFromApi(unitId = null) {
 
     const events = [];
     const extraUnplanned = [];
+    const noRowIds = new Set();
     for (const e of data.events.rows) {
         const isStage = e.production_stage && e.production_stage !== 'sewing';
         const mappedId = resourceOfEvent[e.id]
@@ -1164,11 +1169,11 @@ export async function loadFromApi(unitId = null) {
         const hasBuyer = String(e.buyer_name || '').trim()
             || (isProjEvent && String(e.event_name || '').trim());
 
-        // Sewing orders with no buyer stay off the list and off the board
-        if (!isStage && !hasBuyer) {
-            skippedDbEvents.push({ id : e.id, name : e.event_name || e.event_code || `bar ${e.id}` });
-            continue;
-        }
+        // A sewing bar whose order row is gone (no buyer from the join) is
+        // NOT dropped: it loads under a placeholder buyer with the ERP flag —
+        // a bar the planner cannot see is a bar the next Save cancels
+        const noRow = !isStage && !hasBuyer;
+        if (noRow) { e.buyer_name = '(ERP row missing)'; noRowIds.add(`db-${e.id}`); }
 
         const parked = eventParked(e.notes);
         const unassigned = !known;
@@ -1219,6 +1224,8 @@ export async function loadFromApi(unitId = null) {
             }
         });
     }
+
+    for (const ev of events) if (noRowIds.has(String(ev.id)) && ev.raw) ev.raw.erpFlag = ev.raw.erpFlag || 'order row no longer exists';
 
     // Risk pass (document 12) once utilisation is known
     const util = computeLineUtil(events);

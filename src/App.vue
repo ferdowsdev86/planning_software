@@ -533,6 +533,33 @@ function finishBoardLoad(uid, data, s) {
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
+// After a Save: the plan as the DB now holds it, read back and compared with
+// the screen. missing = on the screen, not in the DB; moved = in the DB at
+// another start / end; extra = in the DB (this unit, live), not on the screen.
+async function verifySavedPlan(s) {
+    try {
+        const data = await loadFromApi(currentUnitId.value || null);
+        const db = new Map();
+        for (const e of data.events || []) { if (e.dbId != null && !e.raw?.stage) db.set(String(e.dbId), e); }
+        const missing = [], moved = [], seen = new Set();
+        for (const ev of s.eventStore.records) {
+            const raw = ev.data?.raw;
+            if (!raw || raw.stage) continue;
+            const id = String(ev.id);
+            const dbId = ev.data?.dbId != null ? String(ev.data.dbId) : (id.startsWith('db-') ? id.slice(3).split('-')[0] : null);
+            const row = dbId ? db.get(dbId) : null;
+            if (!row) { missing.push(`${ev.name} ${raw.qty} (${id})`); continue; }
+            seen.add(dbId);
+            const ds = new Date(row.startDate), de = new Date(row.endDate);
+            if (Math.abs(+ev.startDate - +ds) > 60000 || Math.abs(+ev.endDate - +de) > 60000) {
+                moved.push(`${ev.name} ${raw.qty}: screen ${ev.startDate.toISOString().slice(0, 16)} / DB ${ds.toISOString().slice(0, 16)}`);
+            }
+        }
+        const extra = [...db.values()].filter(e => !seen.has(String(e.dbId))).map(e => `${e.name} ${e.raw?.qty} (db-${e.dbId})`);
+        return { missing, moved, extra, dbBars : db.size };
+    }
+    catch (e) { return { error : e.message, missing : [], moved : [], extra : [] }; }
+}
 // Bars whose on-screen span / line differ from the DB row they were loaded
 // from (api.js keeps dbStart / dbEnd / dbLine on every DB event). Empty =
 // the load changed nothing. window.__mbm.loadDiff() for support.
@@ -4359,8 +4386,18 @@ async function runAutoPlanAvail() {
         // 26SSOVS177 / 178 to the next sync tick that way). Cancelled on Save.
         try {
             const hidden = await fetchBoardHygiene();
+            // RULE (2026-11-17): only the CERTAIN findings leave before the run
+            // (zero quantity, order marked complete by the planner). A bar the
+            // sync merely flags (order dropped / unknown / row gone / other
+            // unit) is an ordinary bar to the run: blanked and re-planned when
+            // its order is still in the pool, gone with the blank when it is
+            // not — never removed behind the planner's back
+            const certain = h => /^(zero quantity|order marked complete)/.test(String(h.reason || ''));
+            const flaggedN = hidden.filter(h => !certain(h) && s.eventStore.getById(`db-${h.id}`)).length;
+            if (flaggedN) toast(`${flaggedN} bar(s) carry an ERP flag (red dashed) — they are re-planned or blanked by this run like any other bar`, 'warn');
             const drop = [];
             for (const h of hidden) {
+                if (!certain(h)) continue;
                 const ev = s.eventStore.getById(`db-${h.id}`);
                 if (ev && ev.data?.raw && !ev.data.raw.stage) drop.push(ev);
             }
@@ -14425,7 +14462,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -14691,6 +14728,19 @@ async function saveToDbInner(s) {
                 : `Plan saved (${changes.length} change${changes.length === 1 ? '' : 's'}${synced > 0 ? ` + ${synced} bar(s) synced to the schedule` : ''})`, 'ok');
             // The server moved something it found overlapping (another planner's
             // bar saved meanwhile) — show what is really stored
+            // RULE (planner, 2026-11-17 — "after Save a reload must never show a
+            // blank board"): the saved plan is READ BACK and compared with the
+            // screen; a bar the DB does not hold, holds elsewhere, or holds
+            // without the screen is reported at once and the board is
+            // reloaded from the DB — never discovered two reloads later
+            const chk = await verifySavedPlan(s);
+            if (chk.error) toast(`⚠ Saved, but the read-back check could not run: ${chk.error}`, 'warn');
+            else if (chk.missing.length || chk.moved.length || chk.extra.length) {
+                console.warn('[save check] screen ≠ saved plan', chk);
+                toast(`⚠ SAVE CHECK: ${chk.missing.length} bar(s) on the screen are NOT in the saved plan, ${chk.moved.length} stored at another place, ${chk.extra.length} in the DB but not on the screen — reloading the saved plan (details: console [save check])`, 'error');
+                await reloadBoardForUnit(currentBoard.value, { force : true });
+                return;
+            }
             // …or kept a locked bar as saved although the board sent a change
             // for it: either way the screen must show what is REALLY stored,
             // so the next reload changes nothing
@@ -19820,6 +19870,8 @@ body {
 .od-holding   { background : #f9a825; color : #222; }
 .od-replaced  { background : #6d4c41; }
 .od-sewn      { background : #00897b; }
+/* a bar the ERP sync flagged (order dropped / unknown / row gone) — it stays, red-dashed, until the planner acts */
+.b-sch-event.mb-erp-flag, .mb-erp-flag { outline : 2px dashed #c62828 !important; outline-offset : -2px; }
 /* part of the group already on a line while the row itself is still to plan */
 .od-onboard   { display : block; font-size : 9px; color : #555; white-space : nowrap; margin-top : 1px; }
 .od-ord-proj    { background : #ef6c00; }
