@@ -213,6 +213,12 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     // a gap-fill piece stays linked to its order (Orders list status) across reloads
     if (raw.gapFill) notes.gapFill = true;
     if (raw.pieceOf != null) notes.pieceOf = raw.pieceOf;
+    // a split piece (Auto plan synchronized split / manual split) stays a piece
+    // of ITS order across reloads — without this the Orders list lost the link
+    // after a reload (a 'proj:GSL-251203-2' piece did not count for GSL-251203)
+    if (raw.split && raw.split.of != null) {
+        notes.split = { of : raw.split.of, part : Number(raw.split.part) || 1, parts : Number(raw.split.parts) || 1 };
+    }
     // Manually applied Build up curve (bar context menu) — snapshot the
     // percentages so the bar keeps ITS curve even if the profile is edited
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
@@ -349,6 +355,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         keepSeparate : !!noteGroup.keepSeparate,
         gapFill      : !!noteGroup.gapFill,
         pieceOf      : noteGroup.pieceOf ?? undefined,
+        split        : noteGroup.split && noteGroup.split.of != null ? noteGroup.split : undefined,
         lcManual     : noteGroup.lcCurve && Array.isArray(noteGroup.lcCurve.pct) && noteGroup.lcCurve.pct.length
             ? noteGroup.lcCurve : undefined,
         lcLink       : noteGroup.lcLink && noteGroup.lcLink.refId != null ? noteGroup.lcLink : undefined,

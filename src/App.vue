@@ -9860,8 +9860,13 @@ function applySewnStatus(rows) {
 function overlayBoardPlacements(rows) {
     const s = getInstance();
     if (!s) return rows;
-    const byProj  = new Map();   // order code -> live projection bar
+    const byProj  = new Map();   // order code -> live projection bar(s) — every piece
     const confirmBars = [];      // live confirm bars (swapped or placed)
+    // a split / gap-fill piece of a projection carries a numeric suffix in its
+    // id ('proj:GSL-251203-2') — the ORDER CODE never does; api.js strips it
+    // into raw.mbmOrder, so the code wins and the id only falls back
+    const projCodeOf = (raw, pid) => String(raw.mbmOrder || '').trim()
+        || (pid.startsWith('proj:') ? pid.slice(5).replace(/-\d{1,2}$/, '') : '');
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
@@ -9884,8 +9889,12 @@ function overlayBoardPlacements(rows) {
                 gid   : String(raw.id || ''), sewn : Number(raw.groupSewn) || 0
             });
         }
-        else if (pid.startsWith('proj:')) byProj.set(pid.slice(5), ev);
-        else if (raw.mbmOrder) byProj.set(String(raw.mbmOrder), ev);
+        else {
+            const code = projCodeOf(raw, pid);
+            if (!code) continue;
+            if (!byProj.has(code)) byProj.set(code, []);
+            byProj.get(code).push({ ev, lid, hold });
+        }
     }
     if (!byProj.size && !confirmBars.length) return rows;
     const lineName = lid => { const res = lid ? s.resourceStore.getById(lid) : null; return res?.data?.name || res?.name || lid; };
@@ -9971,25 +9980,40 @@ function overlayBoardPlacements(rows) {
             continue;
         }
         if (r.orderType !== 'projected') continue;
-        const ev = byProj.get(r.mbmOrder);
-        if (ev) {
-            if (isHoldId(lineIdOf(s, ev))) {
-                // Parked on the Holding Row: on the board, not planned
-                if (r.status !== 'completed') {
-                    r.status = 'holding'; r.planned = false; r.replaced = false;
-                    r.line = 'Holding'; r.start = null; r.end = null;
-                }
-                continue;
+        const pieces = byProj.get(String(r.mbmOrder).trim()) || [];
+        if (pieces.length) {
+            if (r.status === 'completed') continue;
+            // Every live piece of the projection counts — a synchronized split
+            // (-2 / -3) or a gap-fill piece is this order on the board. The
+            // same rule as a confirm group: ≥ 90 % of the plan qty on lines =
+            // planned (all its lines, first start → last end); less = still to
+            // plan, with the planned share beside the status ("1,289 on Line
+            // 08") — GSL-251203 showed "Unplanned 3,847" while 1,289 pcs of it
+            // sat on CEIL Line 08.
+            const onLine = pieces.filter(p => !p.hold).sort((a, b) => a.ev.startDate - b.ev.startDate);
+            const onHold = pieces.filter(p => p.hold);
+            const lines  = [...new Set(onLine.map(p => lineName(p.lid)))].join(', ');
+            const onBoardQty = onLine.reduce((t, p) => t + (Number(p.ev.data?.raw?.qty) || 0), 0);
+            const rowQtyPlan = planQtyOf(Number(r.orderQty) || Number(r.qty) || 0);
+            r.replaced = false;
+            if (onLine.length && !(rowQtyPlan > 0 && onBoardQty < rowQtyPlan * 0.9)) {
+                // The projection's own bar(s) live on the board — PLANNED, not
+                // replaced (replaced = bar gone, a planned confirm took its slot)
+                r.status = 'planned'; r.planned = true;
+                r.line  = lines;
+                r.start = new Date(Math.min(...onLine.map(p => +p.ev.startDate)));
+                r.end   = new Date(Math.max(...onLine.map(p => +p.ev.endDate)));
+                r.onBoardQty = 0; r.onBoardLines = '';
             }
-            r.line  = lineName(lineIdOf(s, ev));
-            r.start = ev.startDate ? new Date(ev.startDate) : r.start;
-            r.end   = ev.endDate   ? new Date(ev.endDate)   : r.end;
-            // The projection's own bar is live on the board — it is PLANNED,
-            // not replaced (replaced = bar gone, a planned confirm took its slot)
-            if (r.status === 'unplanned' || r.status === 'holding' || r.status === 'replaced' || r.replaced) {
-                r.status   = 'planned';
-                r.planned  = true;
-                r.replaced = false;
+            else {
+                // Parked on the Holding Row only, or only part of it on a line:
+                // on the board, not planned
+                r.status  = onHold.length && !onLine.length ? 'holding' : 'unplanned';
+                r.planned = false;
+                r.line    = onHold.length && !onLine.length ? 'Holding' : '—';
+                r.start   = null; r.end = null;
+                r.onBoardQty   = onBoardQty;
+                r.onBoardLines = lines;
             }
         }
         else if (confirmByOrder.has(String(r.mbmOrder)) && r.status !== 'completed') {
