@@ -535,16 +535,18 @@ export function orderDeliveryOf(ship) {
 // full confirm:    Buyer : Style : PO : color : po_delivery
 export function barDisplayLine(raw, compact = false) {
     if (!raw) return '';
-    const mbm   = mbmOrderNo(raw.po, raw.mbmOrder);
+    // an OS order (GSL-…) reads as its MBM order + ERP style (barOrderNo / barStyleOf)
+    const mbm   = barOrderNo(raw);
+    const style = barStyleOf(raw);
     const buyer = raw.buyer || '—';
     if (compact) return `${buyer}:${mbm}`;
     const type = orderTypeOf(raw.po, raw.orderType);
     if (type === 'projection') {
-        return `${buyer} : ${raw.style || '—'} : ${mbm} : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
+        return `${buyer} : ${style || '—'} : ${mbm} : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
     }
     const colorStr = raw.color || orderColor(raw.po);
     const poStr = raw.poCount > 1 ? `[${raw.poCount} POs]` : (raw.po || '—');
-    return `${buyer} : ${raw.style || '—'} : ${mbm} : ${poStr} : ${colorStr} : ${fmtDateDdMonRr(poDeliveryOf(raw.ship))}`;
+    return `${buyer} : ${style || '—'} : ${mbm} : ${poStr} : ${colorStr} : ${fmtDateDdMonRr(poDeliveryOf(raw.ship))}`;
 }
 
 // Uniform delivery-date format for the "Style" display mode: DD-MMM-YYYY
@@ -568,8 +570,8 @@ export function barProductLine(raw, compact = false) {
     if (!raw) return 'N/A';
     const type = String(raw.productType || productTypeFor(raw.po, raw.productType) || '').trim() || 'N/A';
     if (compact) return type;
-    const mbm = mbmOrderNo(raw.po, raw.mbmOrder);
-    return `${type} : ${raw.buyer || '—'} : ${raw.style || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
+    const mbm = barOrderNo(raw);
+    return `${type} : ${raw.buyer || '—'} : ${barStyleOf(raw) || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
 }
 
 // ERP labels the server sends with the board / the unplanned list:
@@ -591,7 +593,71 @@ export function buyerShortOf(name) {
 export function orderTwinOf(code) {
     const i = erpOrderInfo[String(code || '').trim()];
     if (!i?.twin) return {};
-    return { twin : String(i.twin), twinBuyer : i.twinBuyer ? String(i.twinBuyer).trim() : '' };
+    return { twin : String(i.twin), twinBuyer : i.twinBuyer ? String(i.twinBuyer).trim() : '',
+        twinStyle : i.twinStyle ? String(i.twinStyle).trim() : '' };
+}
+
+// RULE (planner, 2026-11-17): an OS order (GSL-…) wears ONE face on the board
+// whatever row it is anchored to right now — the bar reads the MBM order
+// number and the ERP style, the tooltip shows the GSL side (OS code, OS
+// style GSLB-…, OS buyer, qty, delivery). The identity is SNAPSHOTTED into
+// the bar's notes at save time (notes.os) so a mirror row that disappears
+// (the OS confirm rows are re-keyed by the ERP sync) never degrades the bar
+// to "MBM-0 / (ERP row missing)".
+// osInfoOf: the OS side of a bar — its saved snapshot, else what the server
+// read for its code (an OS code, or an MBM code with OS orders behind it)
+export function osInfoOf(raw) {
+    if (!raw) return null;
+    if (raw.os && raw.os.code) return raw.os;
+    const code = mbmOrderNo(raw.po, raw.mbmOrder);
+    const i = erpOrderInfo[code];
+    if (!i) return null;
+    if (i.os && i.os.code) {
+        return { ...i.os, mbm : i.twin || '', mbmBuyer : i.twinBuyer || '', erpStyle : i.twinStyle || '' };
+    }
+    // an MBM order (the twin) — the OS order of this board's unit, else the only one
+    const list = Array.isArray(i.osOrders) ? i.osOrders : [];
+    if (!list.length) return null;
+    const hit = list.length === 1 ? list[0]
+        : list.find(o => raw.unitId != null && Number(o.unit) === Number(raw.unitId));
+    if (!hit) return null;
+    return { ...hit, mbm : code, mbmBuyer : String(raw.buyer || ''), erpStyle : String(raw.style || '') };
+}
+// what Save writes into notes.os (dates as yyyy-mm-dd, nothing derived)
+export function osSnapshotOf(raw) {
+    const o = osInfoOf(raw);
+    if (!o || !o.code) return null;
+    const ymd = d => {
+        if (!d) return undefined;
+        const x = d instanceof Date ? d : new Date(d);
+        if (Number.isNaN(x.getTime())) return undefined;
+        return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    };
+    const s = v => (v == null || v === '' ? undefined : String(v));
+    return {
+        code : String(o.code), mbm : s(o.mbm), mbmBuyer : s(o.mbmBuyer), erpStyle : s(o.erpStyle),
+        style : s(o.style), buyer : s(o.buyer), ptype : s(o.ptype),
+        qty : Number(o.qty) > 0 ? Number(o.qty) : undefined, odd : ymd(o.odd), pcd : ymd(raw.pcd) || ymd(o.pcd),
+        unit : Number(o.unit) > 0 ? Number(o.unit) : undefined,
+        // the colour / PO this bar stood for and its PO delivery — the sync
+        // re-links a bar whose mirror row was re-keyed to the row of the same
+        // colour; the bar keeps its own dates while the row is away
+        po : s(raw.po), color : s(raw.color), ship : ymd(raw.ship)
+    };
+}
+// the order number the BAR reads: the MBM order for an OS order, else its code
+export function barOrderNo(raw) {
+    if (!raw) return '';
+    const code = mbmOrderNo(raw.po, raw.mbmOrder);
+    if (raw.os && raw.os.mbm) return String(raw.os.mbm);
+    return orderTwinOf(code).twin || code;
+}
+// the style the BAR reads: the ERP style behind an OS style name, else the style
+export function barStyleOf(raw) {
+    if (!raw) return '';
+    if (raw.os && raw.os.erpStyle) return String(raw.os.erpStyle);
+    const tw = orderTwinOf(mbmOrderNo(raw.po, raw.mbmOrder));
+    return tw.twinStyle || String(raw.style || '').trim();
 }
 export function garmentTypeOf(raw) {
     if (!raw) return '';
@@ -601,8 +667,8 @@ export function garmentTypeOf(raw) {
 
 export function barStyleLine(raw, compact = false) {
     if (!raw) return 'N/A : N/A : N/A';
-    const style = String(raw.style || '').trim()
-        || mbmOrderNo(raw.po, raw.mbmOrder)
+    const style = barStyleOf(raw)
+        || barOrderNo(raw)
         || 'N/A';
     const type = orderTypeOf(raw.po, raw.orderType);
     const colorSet = [];

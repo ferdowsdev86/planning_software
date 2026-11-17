@@ -7,7 +7,7 @@ import {
     calcRisk, computeLineUtil, WORK_MIN_PER_DAY, buildManpowerRanges,
     addWorkDays, nextWorkingDay, startOfWorkDay, endOfWork, elapsedDays,
     addCalDays, randSmv, productTypeFor, LINES, LINE_BY_ID, STAGE_RESOURCES,
-    workingMinutesBetween, planQtyOf, mergeErpInfo, isLateVsTarget
+    workingMinutesBetween, planQtyOf, mergeErpInfo, isLateVsTarget, erpOrderInfo, osSnapshotOf, mbmOrderNo
 } from './planningData.js';
 import { lineIdOf, removedDbEventIds, isHoldId, floorLabelOf } from './AppConfig.js';
 
@@ -219,6 +219,12 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     if (raw.split && raw.split.of != null) {
         notes.split = { of : raw.split.of, part : Number(raw.split.part) || 1, parts : Number(raw.split.parts) || 1 };
     }
+    // An OS order (GSL-…): its identity — OS code, MBM order, both styles,
+    // both buyers, qty, delivery — is saved WITH the bar. The mirror row the
+    // bar is anchored to is re-keyed by the ERP sync; without the snapshot a
+    // reload showed "MBM-0 / (ERP row missing)" in place of the order
+    const osSnap = osSnapshotOf(raw);
+    if (osSnap) notes.os = osSnap;
     // Manually applied Build up curve (bar context menu) — snapshot the
     // percentages so the bar keeps ITS curve even if the profile is edited
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
@@ -307,7 +313,33 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
     // cleanup would strip every saved projection bar right after load
     const projBuyer = projId && e.event_name && String(e.event_name).includes('|')
         ? String(e.event_name).split('|')[0].trim() : '';
+    // An OS order's saved identity (notes.os, see eventNotesPayload): the bar
+    // keeps its code / style / buyer / dates when its mirror row is gone, and
+    // the label helpers read the MBM order + ERP style from it. A bar saved
+    // before the snapshot still names its order in the event name ("GREAT
+    // SYNERGY LTD. | GSL-251203").
+    const osSnap = noteGroup.os && noteGroup.os.code ? noteGroup.os : null;
+    const nameCode = !orderId && !projId && String(e.event_name || '').includes('|')
+        ? String(e.event_name).split('|').pop().trim().split(/\s+/)[0] : '';
+    // the row is gone when the join brought nothing (a dangling
+    // planning_order_id still counts as "has an id" — the row behind it does not)
+    const rowGone = !projId && !e.order_code && !e.po_number && !e.shipment_date;
+    if (rowGone && osSnap) {
+        if (!e.style_no) e.style_no = osSnap.style || '';
+        if (!e.po_number && osSnap.po) e.po_number = osSnap.po;
+        if (!e.color && osSnap.color) e.color = osSnap.color;
+        if (!ship && (osSnap.ship || osSnap.odd)) ship = asDate(osSnap.ship || osSnap.odd);
+        if (!e.pcd && osSnap.pcd) e.pcd = osSnap.pcd;
+        if (!e.product_category && osSnap.ptype) e.product_category = osSnap.ptype;
+    }
+    // the server's ERP labels may lack this code (ERP unreachable, row gone):
+    // the snapshot fills the twin so the bar label and tooltip stay the same
+    if (osSnap && osSnap.mbm && !erpOrderInfo[osSnap.code]?.twin) {
+        mergeErpInfo({ erpByOrder : { [osSnap.code] : { twin : osSnap.mbm, twinBuyer : osSnap.mbmBuyer || null, twinStyle : osSnap.erpStyle || null,
+            os : { code : osSnap.code, unit : osSnap.unit, style : osSnap.style, buyer : osSnap.buyer, qty : osSnap.qty, odd : osSnap.odd, pcd : osSnap.pcd, ptype : osSnap.ptype } } } });
+    }
     const rawOut = {
+        os       : osSnap || undefined,
         // floor whose Holding Row the bar was parked on
         holdFloor : noteGroup.holdFloor || null,
         // whole-order quantity of a colour piece (all colour groups together)
@@ -319,7 +351,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         po       : e.po_number || '',
         // split strips carry a numeric suffix (proj:26XXX-2) — the order code
         // itself never does, so strip it back off
-        mbmOrder : e.order_code || (projId ? projId.slice(5).replace(/-\d{1,2}$/, '') : ''),
+        mbmOrder : e.order_code || (projId ? projId.slice(5).replace(/-\d{1,2}$/, '') : ((osSnap && osSnap.code) || nameCode || '')),
         eventCode : e.event_code || null,
         productType : productTypeFor(e.po_number, e.product_category),
         qty, orderQty : orderQty || qty, baseQty : baseQty || undefined, pq3 : true, smv,
@@ -390,7 +422,7 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         confirmQty    : projId ? (Number(e.proj_confirm_qty) || 0) : undefined,
         confirmSewn   : projId ? (Number(e.proj_sewn) || 0) : undefined,
         color     : e.color || '',
-        orderType : projId ? 'projection' : (e.order_code ? 'confirm' : undefined),
+        orderType : projId ? 'projection' : (e.order_code || osSnap || nameCode ? 'confirm' : undefined),
         // Consolidated bars restore their full PO group from the saved notes
         poList   : noteGroup.poList?.length ? noteGroup.poList : (e.po_number ? [e.po_number] : []),
         idList   : noteGroup.idList?.length ? noteGroup.idList : (orderId ? [orderId] : []),
@@ -1184,7 +1216,14 @@ export async function loadFromApi(unitId = null) {
         // NOT dropped: it loads under a placeholder buyer with the ERP flag —
         // a bar the planner cannot see is a bar the next Save cancels
         const noRow = !isStage && !hasBuyer;
-        if (noRow) { e.buyer_name = '(ERP row missing)'; noRowIds.add(`db-${e.id}`); }
+        if (noRow) {
+            // the bar's own saved identity first (notes.os of an OS order),
+            // then the "Buyer | CODE" the event was named with
+            const osSnap = parseEventNotes(e.notes).os;
+            const nameBuyer = String(e.event_name || '').includes('|') ? String(e.event_name).split('|')[0].trim() : '';
+            e.buyer_name = (osSnap && osSnap.buyer) || nameBuyer || '(ERP row missing)';
+            noRowIds.add(`db-${e.id}`);
+        }
 
         const parked = eventParked(e.notes);
         const unassigned = !known;
@@ -1493,6 +1532,20 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null, pla
     // storage), never into the live plan
     const toWhatIf = !!whatIfView.id;
     const idFilter = eventIds && !toWhatIf ? new Set(eventIds.map(String)) : null;
+    // the OS identity snapshot (notes.os) needs the server's ERP labels for
+    // every code on the board — bars placed this session may lack them
+    try {
+        const missing = [];
+        for (const ev of scheduler.eventStore.records) {
+            const raw = ev.data?.raw;
+            if (!raw || raw.stage) continue;
+            if (idFilter && !idFilter.has(String(ev.id))) continue;
+            const code = mbmOrderNo(raw.po, raw.mbmOrder);
+            if (code && !/^MBM-\d*$/.test(code) && !erpOrderInfo[code]) missing.push(code);
+        }
+        if (missing.length) await loadErpOrderInfoDb(missing);
+    }
+    catch { /* offline — the snapshot is taken on the next Save */ }
     for (const ev of scheduler.eventStore.records) {
         if (idFilter && !idFilter.has(String(ev.id))) continue;
         const d = ev.data;

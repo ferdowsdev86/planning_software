@@ -146,6 +146,21 @@ const EVENT_SQL_HEAD = `
                               WHERE x.order_code = REGEXP_REPLACE(SUBSTRING(e.event_code, 9), '-[0-9]{1,2}$', '')
                               ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)`;
 
+// The order code a bar carries in ITSELF when its order row is gone: the OS
+// identity snapshot its Save wrote (notes.os.code), else the "Buyer | CODE"
+// it was named with — the ERP labels (twin / style) still resolve for it
+function savedOrderCodeOf(e) {
+    let n = null;
+    try { n = JSON.parse(e.notes || '{}') || {}; } catch { n = null; }
+    if (n && n.os && n.os.code) return String(n.os.code);
+    const nm = String(e.event_name || '');
+    if (nm.includes('|')) {
+        const tail = nm.split('|').pop().trim().split(/\s+/)[0];
+        if (/^[A-Za-z0-9]+-\d{3,}$/.test(tail) || /^\d{2}[A-Z0-9]{4,}$/.test(tail)) return tail;
+    }
+    return null;
+}
+
 // ERP style masters per order code — garment type (Chino, 5 Pocket, Shorts
 // Cargo…) and product type (Pant, Shorts…): the board's Item mode labels its
 // bars with the garment type. One grouped query for the codes on the board.
@@ -167,22 +182,50 @@ async function erpOrderInfo(codes) {
         // an OS order (GSL-…): the MBM order it is a part of and that order's
         // ORIGINAL buyer — the list, the tooltip and Find show both numbers
         // and both buyers ("GSL-251176 / 26SPJCP098", "GREAT SYNERGY / JCP")
+        // …the ERP style behind the OS style name (GSLB-44-635 → 398448) and
+        // the OS side itself (style, buyer, qty, delivery, PCD, unit): the
+        // board shows every GSL bar as "MBM order + ERP style" and the tooltip
+        // the GSL side; the bar's Save snapshots it (notes.os). An MBM code
+        // in the list gets its OS orders too (osOrders) — a bar anchored to
+        // the twin's own row still shows the GSL card.
         const [os] = await pool.query(
             `SELECT o.os_order_code, o.mr_order_code, b.b_name AS mr_buyer,
-                    MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype
+                    MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype,
+                    MAX(COALESCE(NULLIF(s.stl_no, ''), o.mr_style)) AS twin_style,
+                    MAX(o.style) AS os_style, MAX(ob.b_name) AS os_buyer, MAX(o.order_qty) AS os_qty,
+                    MAX(o.odd) AS os_odd, MAX(CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd END) AS os_pcd,
+                    MAX(o.product_type) AS os_ptype, MAX(o.os_unit_id) AS os_unit
                FROM \`${OS_DB}\`.os_orders o
                LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
                LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
+               LEFT JOIN \`${ERP_DB}\`.mr_buyer ob ON ob.b_id = o.buyer_id
                LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
-              WHERE o.os_order_code IN (${ph})
-              GROUP BY o.os_order_code, o.mr_order_code, b.b_name`, list);
+              WHERE o.os_order_code IN (${ph}) OR o.mr_order_code IN (${ph})
+              GROUP BY o.os_order_code, o.mr_order_code, b.b_name`, [...list, ...list]);
+        const want = new Set(list);
+        // DATE columns arrive as local-midnight Dates — format locally (an ISO
+        // string would step back a day, the DB clock runs Dhaka time)
+        const ymd = d => {
+            if (!d) return null;
+            const x = new Date(d);
+            if (Number.isNaN(x.getTime())) return null;
+            return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        };
         for (const r of os) {
-            const cur = out[r.os_order_code] || {};
-            out[r.os_order_code] = { gmt : cur.gmt || r.gmt || null, ptype : cur.ptype || r.ptype || null,
-                twin : r.mr_order_code && r.mr_order_code !== r.os_order_code ? r.mr_order_code : null,
-                twinBuyer : r.mr_buyer || null };
+            const osSide = { code : r.os_order_code, unit : OS_UNIT_MAP[r.os_unit] ?? r.os_unit, style : r.os_style || null,
+                buyer : r.os_buyer || null, qty : Number(r.os_qty) || 0, odd : ymd(r.os_odd), pcd : ymd(r.os_pcd), ptype : r.os_ptype || null };
+            if (want.has(r.os_order_code)) {
+                const cur = out[r.os_order_code] || {};
+                out[r.os_order_code] = { gmt : cur.gmt || r.gmt || null, ptype : cur.ptype || r.ptype || null,
+                    twin : r.mr_order_code && r.mr_order_code !== r.os_order_code ? r.mr_order_code : null,
+                    twinBuyer : r.mr_buyer || null, twinStyle : r.twin_style || null, os : osSide };
+            }
+            if (r.mr_order_code && r.mr_order_code !== r.os_order_code && want.has(r.mr_order_code)) {
+                const cur = out[r.mr_order_code] || (out[r.mr_order_code] = { gmt : r.gmt || null, ptype : r.ptype || null });
+                (cur.osOrders || (cur.osOrders = [])).push(osSide);
+            }
         }
     }
     catch { /* ERP unreachable — the bar labels fall back to the planning data */ }
@@ -543,7 +586,8 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         // code with a 3+-digit counter still names its order.
         const evOrderCode = e => e.order_code
             || (String(e.event_code || '').startsWith('ev-proj:')
-                ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '').replace(/^([A-Za-z]+-\d{6})-\d{3,}$/, '$1') : null);
+                ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '').replace(/^([A-Za-z]+-\d{6})-\d{3,}$/, '$1') : null)
+            || savedOrderCodeOf(e);
         if (effUnit) {
             const evResource = new Map();
             for (const a of assignments) {
@@ -2159,7 +2203,7 @@ async function completedOrderCodes() {
 // --------------------------------------------------------------------------
 async function findHiddenEvents(conn) {
     const [rows] = await conn.query(`
-        SELECT e.id, e.project_id, e.event_code, e.planning_order_id, e.notes,
+        SELECT e.id, e.project_id, e.event_code, e.event_name, e.planning_order_id, e.notes,
                e.start_date, e.end_date, e.planned_quantity,
                o.id AS o_id, o.order_code, COALESCE(o.prod_unit, o.unit_id) AS order_unit,
                o.shipment_date, p.shipment_date AS proj_shipment_date,
@@ -2395,9 +2439,73 @@ async function projTwinRowFor(conn, eventCode, lineUnit = null) {
     return null;
 }
 
+// A CONFIRM bar whose order row is gone but whose order the bar still names
+// itself (notes.os — the OS identity its Save wrote — or its event name): the
+// ERP sync re-keys OS confirm rows ('os-c-<os_order_color.id>' ids churn),
+// so the SAME colour of the SAME order is back under a new id. The bar is
+// re-linked to that row (same order code, the bar's PO / colour when the
+// snapshot has them, the line's unit) and the row reads planned again —
+// a repair, never a removal. Returns { id, idList } or null.
+async function confirmRowFor(conn, e) {
+    if (String(e.event_code || '').startsWith('ev-proj:')) return null;
+    let n = {};
+    try { n = JSON.parse(e.notes || '{}') || {}; } catch { n = {}; }
+    const code = (n.os && n.os.code) || savedOrderCodeOf(e);
+    if (!code) return null;
+    try {
+        const [rows] = await conn.query(
+            `SELECT id, po_number, color, COALESCE(prod_unit, unit_id) AS pu, order_quantity, planning_status FROM planning_orders
+              WHERE order_code = ? AND (erp_po_id IS NULL OR erp_po_id NOT LIKE 'proj-%')
+                AND planning_status NOT IN ('completed', 'cancelled')`, [code]);
+        if (!rows.length) return null;
+        const po = n.os && n.os.po ? String(n.os.po) : '', color = n.os && n.os.color ? String(n.os.color).toUpperCase() : '';
+        const score = r => (e.line_unit != null && Number(r.pu) === Number(e.line_unit) ? 8 : 0)
+            + (po && String(r.po_number) === po ? 4 : 0)
+            + (color && String(r.color || '').toUpperCase() === color ? 2 : 0)
+            + (r.planning_status === 'unplanned' ? 1 : 0);
+        rows.sort((a, b) => (score(b) - score(a)) || (Number(a.id) - Number(b.id)));
+        const best = rows[0];
+        if (e.line_unit != null && Number(best.pu) !== Number(e.line_unit)) return null;
+        // the bar's PO / colour must match when the snapshot names them —
+        // another colour's row is another bar's row; a bar saved before the
+        // snapshot (no PO known) is re-linked only when the order has ONE row
+        if (po && String(best.po_number) !== po) return null;
+        if (color && String(best.color || '').toUpperCase() !== color) return null;
+        if (!po && rows.length > 1) return null;
+        // the old anchor inside the saved PO group follows the new id
+        const idList = Array.isArray(n.idList) ? n.idList.map(i => (Number(i) === Number(e.planning_order_id) ? Number(best.id) : i)) : null;
+        return { id : Number(best.id), idList };
+    }
+    catch (err) { console.warn(`[board-hygiene] confirm row lookup skipped: ${err.message}`); }
+    return null;
+}
+async function relinkConfirmBar(conn, tag, e, hit) {
+    let n = {};
+    try { n = JSON.parse(e.notes || '{}') || {}; } catch { n = {}; }
+    if (hit.idList) n.idList = hit.idList;
+    delete n.erpFlag;
+    await conn.query('UPDATE planning_events SET planning_order_id = ?, notes = ?, updated_at = NOW() WHERE id = ?', [hit.id, JSON.stringify(n), e.id]);
+    // a bar on a line stands for its row: the re-created row is planned again
+    // (the pool must not offer the same colour a second time)
+    if (e.line_unit != null) {
+        await conn.query(`UPDATE planning_orders SET planning_status = 'fully_planned', updated_at = NOW()
+                           WHERE id = ? AND planning_status = 'unplanned'`, [hit.id]);
+    }
+    await conn.query(
+        `INSERT INTO planning_change_logs (project_id, event_id, action_type, old_data, reason, changed_by, changed_at)
+         VALUES (?, ?, 'update', ?, ?, 1, NOW())`,
+        [e.project_id, e.id, JSON.stringify({ planning_order_id : e.planning_order_id, event_code : e.event_code }),
+            `hidden bar kept (${tag}): ${e.reason} — re-linked to the order's re-created row ${hit.id}`]);
+    console.log(`[board-hygiene] ${tag}: ${e.id} ${e.event_code} re-linked to row ${hit.id} (${e.reason})`);
+}
+
 async function retireHiddenEvents(conn, tag = 'sync', { only = null, list = null } = {}) {
     const hidden = list || (await findHiddenEvents(conn)).filter(e => !only || only.includes(e.reason));
     for (const e of hidden) {
+        if (e.reason === 'order row no longer exists') {
+            const hit = await confirmRowFor(conn, e);
+            if (hit) { await relinkConfirmBar(conn, tag, e, hit); continue; }
+        }
         if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
             const twinId = await projTwinRowFor(conn, e.event_code, e.line_unit);
             if (twinId) {
@@ -2448,6 +2556,10 @@ async function flagHiddenEvents(conn, tag = 'sync') {
     let flagged = 0, moved = 0;
     for (const e of hidden) {
         if (HYGIENE_RETIRE_REASONS.includes(e.reason)) continue;
+        if (e.reason === 'order row no longer exists') {
+            const hit = await confirmRowFor(conn, e);
+            if (hit) { await relinkConfirmBar(conn, tag, e, hit); moved++; continue; }
+        }
         if (e.reason === 'order row no longer exists' || e.reason === 'order unknown to ERP') {
             const twinId = await projTwinRowFor(conn, e.event_code, e.line_unit);
             if (twinId) {
@@ -4451,7 +4563,7 @@ async function freezeWhatIfData(snapshotId) {
               WHERE event_id IN (${ph}) OR SUBSTRING_INDEX(event_ref, ':po', 1) IN (${refs.map(() => '?').join(',')})
               ORDER BY save_date, line`, [...ids, ...refs])
     ]);
-    const evOrderCode = e => e.order_code || (String(e.event_code || '').startsWith('ev-proj:') ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+    const evOrderCode = e => e.order_code || (String(e.event_code || '').startsWith('ev-proj:') ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null) || savedOrderCodeOf(e);
     const [erpByOrder, buyerShort] = await Promise.all([erpOrderInfo(events.map(evOrderCode)), buyerShortNames()]);
     // plain JSON (dates → ISO strings, exactly what the API would send)
     return JSON.parse(JSON.stringify({ events, production, erpByOrder, buyerShort, takenAt : new Date().toISOString() }));

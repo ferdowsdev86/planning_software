@@ -15410,8 +15410,9 @@ function findRowInfo(s, ev) {
     const tw = orderTwinOf(code);
     return {
         id : String(ev.id), rec : ev,
-        order : tw.twin ? `${code} / ${tw.twin}` : code, po : raw.po || '',
-        style : raw.style || '—', color : raw.color || '',
+        // MBM order first, the GSL number beside it — the same face as the bar
+        order : tw.twin ? `${tw.twin} / ${code}` : code, po : raw.po || '',
+        style : tw.twinStyle && tw.twinStyle !== String(raw.style || '') ? `${tw.twinStyle} / ${raw.style || '—'}` : (raw.style || '—'), color : raw.color || '',
         buyer : tw.twinBuyer && tw.twinBuyer.toUpperCase() !== String(raw.buyer || '').toUpperCase() ? `${raw.buyer || '—'} / ${tw.twinBuyer}` : (raw.buyer || '—'),
         qty : Number(raw.qty) || 0,
         line : res?.name || lid || '—',

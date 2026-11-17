@@ -7,7 +7,7 @@ import {
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
-    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, orderTwinOf, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
+    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, orderTwinOf, osInfoOf, barOrderNo, barStyleOf, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery, isLateVsTarget, earliestSewStart, sewTargetDay,
     dayCapacityFactor, hmToHours, calendarState,
     workDayUnits, planQtyOf, workingMinutesBetween,
@@ -444,7 +444,8 @@ export function barModeLine(r, mode, compact = false) {
     switch (mode) {
         case 'buyer'    : return buyerShortOf(r.buyer) || 'N/A';
         case 'product'  : return itemLabelOf(r) || 'N/A';
-        case 'ptype'    : return String(r.style || '').trim() || mbmOrderNo(r.po, r.mbmOrder) || 'N/A';
+        // an OS order reads its ERP style / MBM order here too (one face)
+        case 'ptype'    : return barStyleOf(r) || barOrderNo(r) || 'N/A';
         case 'delivery' : return fmtDateDdMonRr(orderDeliveryOf(r.ship)) || 'N/A';
         default         : return barDisplayLine(r, compact);
     }
@@ -2680,7 +2681,9 @@ export const schedulerProConfig = {
         else if (q) {
             const hay = [
                 r.buyer, r.po, r.style, r.status, r.productType, buyerShortOf(r.buyer), itemLabelOf(r),
-                orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name
+                orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name,
+                // an OS order is found by either number / either style
+                mbmOrderNo(r.po, r.mbmOrder), barOrderNo(r), barStyleOf(r)
             ].join(' ').toLowerCase();
             renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
         }
@@ -2697,7 +2700,7 @@ export const schedulerProConfig = {
         const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
         if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));
-        else if (colorState.mode === 'style')   paint(styleColorOf(r.style || mbmOrderNo(r.po, r.mbmOrder)));
+        else if (colorState.mode === 'style')   paint(styleColorOf(barStyleOf(r) || barOrderNo(r)));
         else if (colorState.mode === 'ptype') {
             const c = PLAN_STATE_COLORS[planStateOf(r, e.startDate, e.endDate)];
             renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
@@ -3266,10 +3269,38 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
             // an OS order (GSL-…): the MBM order it is a part of and that
             // order's original buyer — "GREAT SYNERGY LTD. / JCP | GSL-251176 / 26SPJCP098"
             const twin = orderTwinOf(r.mbmOrder || s.order_code || order);
-            const twinBuyer = twin.twinBuyer && twin.twinBuyer.toUpperCase() !== String(r.buyer || '').trim().toUpperCase() ? twin.twinBuyer : '';
-            const hdrName = twin.twin
-                ? `${r.buyer || '—'}${twinBuyer ? ` / ${twinBuyer}` : ''} | ${r.mbmOrder || s.order_code || order} / ${twin.twin}`
+            // the OS side of the order (saved snapshot or the server's ERP
+            // labels) — shown in its own card; the bar / header read the MBM
+            // order first, the GSL number beside it (one face for every GSL bar)
+            const osi = osInfoOf(r);
+            const shownOrder = barOrderNo(r);
+            const osCode = osi?.code && String(osi.code) !== String(shownOrder) ? String(osi.code) : (twin.twin ? String(r.mbmOrder || s.order_code || order) : '');
+            const twinBuyer = twin.twinBuyer && twin.twinBuyer.toUpperCase() !== String(r.buyer || '').trim().toUpperCase() ? twin.twinBuyer
+                : (osi?.mbmBuyer && String(osi.mbmBuyer).toUpperCase() !== String(r.buyer || '').trim().toUpperCase() ? String(osi.mbmBuyer) : '');
+            const hdrName = osCode
+                ? `${r.buyer || '—'}${twinBuyer ? ` / ${twinBuyer}` : ''} | ${shownOrder} / ${osCode}`
                 : (e.name || r.buyer || '—');
+            const erpStyleShown = barStyleOf(r);
+            const osStyle = osi?.style && String(osi.style) !== String(erpStyleShown) ? String(osi.style) : '';
+            const osCard = osi ? `
+  <div class="tip4-card tip4-os-card">
+    <div class="tip4-card-hd">🏷 OS order (${enc(String(osi.code || '').split('-')[0] || 'OS')})</div>
+    <div class="tip4-card-body">
+      <div class="tip4-rows">
+        ${R('OS Order', `<b>${enc(String(osi.code || '—'))}</b>${osi.mbm ? ` <span class="t4dim">· MBM ${enc(String(osi.mbm))}</span>` : ''}`, 't4-full')}
+        ${R('OS Buyer', enc(String(osi.buyer || r.buyer || '—')), 't4-full')}
+        <div class="tip4-2col">
+          ${R('OS Style', enc(String(osi.style || '—')))}
+          ${R('ERP Style', enc(String(osi.erpStyle || erpStyleShown || '—')))}
+          ${R('OS Qty', osi.qty ? `<b>${enc(fmtQty(Number(osi.qty)))}</b>` : '—')}
+          ${R('Product', enc(String(osi.ptype || '—')))}
+          ${R('OS Delivery', enc(ddMon(osi.odd)))}
+          ${R('OS PCD', enc(ddMon(osi.pcd)))}
+        </div>
+        ${r.os ? '' : `<div class="t4dim">saved with the bar on the next Save</div>`}
+      </div>
+    </div>
+  </div>` : '';
 
             return `
 <div class="mb-tip4" data-tip-ev="${enc(String(e.id))}">
@@ -3298,7 +3329,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       ${imgHtml}
       <div class="tip4-rows">
         <div class="tip4-2col">
-          ${R('Style No', `<b>${enc(s.stl_no || r.style || '—')}</b>`)}
+          ${R('Style No', `<b>${enc(s.stl_no || erpStyleShown || r.style || '—')}</b>${osStyle ? ` <span class="t4dim" title="OS style name">· ${enc(osStyle)}</span>` : ''}`)}
           ${R('Product', enc(garmentTypeOf(r) || s.erp_garment_type || s.stl_product_name || (ptype !== '_Default' && ptype) || '—'))}
           ${R('Wash', washLbl)}
         </div>
@@ -3326,7 +3357,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
     <div class="tip4-card-hd">📦 Order</div>
     <div class="tip4-card-body">
       <div class="tip4-rows">
-        ${R('Order No', `<b class="t4-order-no">${enc(r.mbmOrder || s.order_code || order || '—')}${twin.twin ? ` / ${enc(twin.twin)}` : ''}</b>`, 't4-full')}
+        ${R('Order No', `<b class="t4-order-no">${enc(shownOrder || s.order_code || order || '—')}</b>${osCode ? ` <span class="t4dim">/ ${enc(osCode)}</span>` : ''}`, 't4-full')}
         ${R('Buyer', `${enc(r.buyer || '—')}${twinBuyer ? ` / ${enc(twinBuyer)}` : ''}`, 't4-full')}
         ${R('Color', colorHtml, 't4-full')}
         <div class="tip4-2col">
@@ -3394,6 +3425,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       </div>
     </div>
   </div>
+  ${osCard}
   </div>
 
   <!-- PURCHASE ORDERS TAB -->
