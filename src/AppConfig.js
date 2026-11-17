@@ -1494,7 +1494,11 @@ export function nextStripEventCode(scheduler, po, parentCode = null) {
         if (!r) continue;
         const code = String(r.eventCode || '');
         if (code !== base && !code.startsWith(`${base}-`)) continue;
-        const m = code.match(/-(\d+)$/);
+        // the counter is what follows the base ('-2', '-3'), never the base's
+        // own numeric tail: 'ev-proj:GSL-251168' once counted as piece
+        // 251168, the next pieces became …-251169 / …-251170 — codes the
+        // board hygiene could not map to an order, so it retired them
+        const m = code.slice(base.length).match(/^-(\d{1,2})$/);
         if (m) maxSuffix = Math.max(maxSuffix, Number(m[1]));
     }
     return maxSuffix <= 1 ? `${base}-2` : `${base}-${maxSuffix + 1}`;

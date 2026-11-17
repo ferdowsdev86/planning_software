@@ -541,7 +541,7 @@ app.get(`${BASE}/projects/:id/scheduler-data`, async (req, res) => {
         // GSL-250942 → 'GSL', so their planned bars were dropped as ghosts.
         const evOrderCode = e => e.order_code
             || (String(e.event_code || '').startsWith('ev-proj:')
-                ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+                ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '').replace(/^([A-Za-z]+-\d{6})-\d{3,}$/, '$1') : null);
         const evCodes = [...new Set(events.map(evOrderCode).filter(Boolean))];
         // (a What-if copy shows that day's plan as it was — no hygiene filter)
         if (!whatIf && evCodes.length) {
@@ -668,7 +668,14 @@ function unplannedQuery(unitId, limit, offset, loserCodes = []) {
     // MBM / CEIL / AQL) and every row of an order kept from its OTHER source
     // stay out of the pool, whether or not the sync has retired them yet.
     const codes = [...new Set(loserCodes.map(c => String(c || '')).filter(Boolean))];
-    const sf   = `AND ${planningRowSourceOkSql('planning_orders')}`
+    // …and the pool offers NOTHING the board hygiene would retire: a row of an
+    // order that is no production order in ERP (qty 0, sample, 2nd quality —
+    // erpOrderOk, the hygiene's own test) stays out. Before, 26H1LEV1079
+    // (order_type 7) and 448 CEIL sample rows were planned at 02:37 and
+    // retired by the sync at 02:48 — the lines were left empty.
+    const sf   = `AND ${planningRowSourceOkSql('planning_orders')}
+              AND NOT EXISTS (SELECT 1 FROM \`${ERP_DB}\`.mr_order_entry noe
+                               WHERE noe.order_code = planning_orders.order_code AND NOT (${erpOrderOk('noe')}))`
         + (codes.length ? ` AND (order_code IS NULL OR order_code NOT IN (${codes.map(c => pool.escape(c)).join(',')}))` : '');
     const uf   = (unitId ? 'AND COALESCE(prod_unit, unit_id) = ?' : '') + `\n              ${sf}`;
     const base = unitId ? [unitId] : [];
@@ -1746,9 +1753,12 @@ const ymdStr = d => d instanceof Date
 const ERP_CUTOFF = /^\d{4}-\d{2}-\d{2}$/.test(process.env.ERP_CUTOFF || '') ? process.env.ERP_CUTOFF : '2026-10-09';
 // Orders that are not production orders stay out of the plan (list, sync,
 // boards): order qty 0 = dropped / cancelled in ERP; mr_order_entry.order_type
-// 2 sample, 5 SMS, 6 sample courier, 7 2nd quality (1 bulk, 3 combine,
-// 4 chemical, 8 liability, 9 excess, 10 replenishment, 11 development, 99 dummy)
-const ERP_SKIP_TYPES = [2, 5, 6, 7];
+// 2 sample, 6 sample courier, 7 2nd quality (1 bulk, 3 combine, 5 SMS,
+// 4 chemical, 8 liability, 9 excess, 10 replenishment, 11 development, 99 dummy).
+// SMS (5) is an in-house order in the ERP running-month report (the Orders
+// list rule, 2026-11-08) — it is planned, so its bars are NOT retired
+// (2026-11-17: 448 CEIL SMS bars planned by Auto plan vanished 11 min later)
+const ERP_SKIP_TYPES = [2, 6, 7];
 const erpOrderOk = (alias = 'oe') => {
     const a = alias ? `${alias}.` : '';
     return `${a}order_qty > 0 AND COALESCE(${a}order_type, 1) NOT IN (${ERP_SKIP_TYPES.join(',')})`;
@@ -2197,9 +2207,12 @@ async function findHiddenEvents(conn) {
         WHERE e.event_status != 'cancelled'
           AND (e.production_stage IS NULL OR e.production_stage = 'sewing')`);
     const events = [...new Map(rows.map(r => [r.id, r])).values()];
+    // piece suffix = 1-2 digits; a legacy piece code whose counter ran from
+    // the order number's own tail ('ev-proj:GSL-251168-251169', client bug
+    // fixed 2026-11-17) still names its order — never "unknown to ERP"
     const codeOf = e => e.order_code
         || (String(e.event_code || '').startsWith('ev-proj:')
-            ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '') : null);
+            ? String(e.event_code).slice(8).replace(/-\d{1,2}$/, '').replace(/^([A-Za-z]+-\d{6})-\d{3,}$/, '$1') : null);
 
     const [comp] = await conn.query('SELECT order_code FROM planning_completed_orders');
     const completed = new Set(comp.map(r => r.order_code));
