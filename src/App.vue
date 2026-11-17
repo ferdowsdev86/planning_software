@@ -3765,6 +3765,9 @@ const apKeepStarted = ref(true);           // keep completed / production-starte
 //                         no slot before it: "Not Available Space", no bar
 const AP_SEW_START_AFTER_PCD = SEW_START_AFTER_PCD_DAYS;      // 8 calendar days
 const AP_FINISH_BUFFER_DAYS  = SEW_END_BEFORE_DELIVERY_DAYS;  // 7 calendar days
+// confirm orders group-wise: PO / colour rows of one order whose deliveries lie
+// within this many days of the group's first delivery are ONE planning unit
+const AP_GROUP_DELIVERY_WINDOW_DAYS = 7;
 const AP_HORIZON_DAYS = 180;
 const AP_NO_SPACE     = 'Not Available Space';
 // NO UNPLANNED ORDER (planner rule, 2026-11-16): an order the run cannot put
@@ -4197,20 +4200,30 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         orders.push({ ...u, qty, productType : u.productType || productTypeFromProfile(u.po, lidHint), profileType : erpOrderInfo[code]?.gmt || u.productType || null, color : u.color || orderColor(u.po), mbmOrder : code });
     }
     // CONFIRM ORDERS PLAN GROUP-WISE (planner 2026-11-17): every PO / colour
-    // row of one order with the same delivery date is ONE planning unit — one
-    // run (or one synchronized split), one finish — never PO by PO. The bar
-    // carries every row (idList / poList), so the save marks them all planned
-    // and the Orders list shows each row on the bar. A balance row (part of an
-    // order whose other bars stay) and projections stay on their own.
+    // row of one ORDER is ONE planning unit — one run (or one synchronized
+    // split), one finish — never PO by PO, never delivery by delivery
+    // (26H1LEV975: 737 pcs due 07/01 and 4,384 due 09/01 were two groups on
+    // two lines ending two days apart — the planner wants one bar). The
+    // group's delivery / target is the EARLIEST of its POs, so no PO is late.
+    // POs of the same order due more than AP_GROUP_DELIVERY_WINDOW_DAYS after
+    // the group's first delivery open a new group (27SUJCP007: 12/01 … 16/02 —
+    // five weeks of POs pulled to the first target would park the whole order
+    // as late). The bar carries every row (idList / poList), so the save marks
+    // them all planned and the Orders list shows each row on the bar. A
+    // balance row (part of an order whose other bars stay) and projections
+    // stay on their own.
     const union = (...lists) => { const out = [...new Set(lists.flat().filter(v => v != null && v !== '').map(v => (typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : v))))]; return out.length ? out : undefined; };
-    const ymdK = d => { const x = new Date(d); return `${x.getFullYear()}-${x.getMonth() + 1}-${x.getDate()}`; };
     const groupsByKey = new Map();
     const grouped = [];
-    for (const o of orders) {
+    const dayMs = 24 * 60 * 60 * 1000;
+    // earliest delivery first, so a group's first member holds its earliest ship
+    const ordersByShip = [...orders].sort((a, b) => (+new Date(a.ship || 0)) - (+new Date(b.ship || 0)));
+    for (const o of ordersByShip) {
         const confirm = orderTypeOf(o.po, o.orderType) === 'confirm';
         if (!confirm || o.balance || !o.mbmOrder || !o.ship) { grouped.push(o); continue; }
-        const k = `${o.mbmOrder}|${ymdK(o.ship)}`;
+        const k = String(o.mbmOrder);
         let g = groupsByKey.get(k);
+        if (g && (+new Date(o.ship) - +new Date(g.ship)) > AP_GROUP_DELIVERY_WINDOW_DAYS * dayMs) g = null;   // a later delivery wave: its own group
         if (!g) {
             g = { ...o, members : [o], idList : union(o.idList, o.dbId ? [o.dbId] : []), poList : union(o.poList, o.po ? [o.po] : []) || [], poDetails : [...(o.poDetails || [])],
                 _smvW : (Number(o.smv) || 0) * (Number(o.qty) || 0), _q : Number(o.qty) || 0 };
@@ -4229,6 +4242,9 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         g.poCount  = g.poList.length || 1;
         g.poDetails = [...g.poDetails, ...(o.poDetails || [])];
         if (o.pcd && (!g.pcd || new Date(o.pcd) < new Date(g.pcd))) g.pcd = o.pcd;
+        // the earliest PO delivery is the group's delivery (target = it − 7)
+        if (o.ship && (!g.ship || new Date(o.ship) < new Date(g.ship))) { g.ship = o.ship; if (o.poDelivery) g.poDelivery = o.poDelivery; }
+        if (o.matReady && (!g.matReady || new Date(o.matReady) < new Date(g.matReady))) g.matReady = o.matReady;
         g._smvW += (Number(o.smv) || 0) * (Number(o.qty) || 0); g._q += Number(o.qty) || 0;
         g.smv = g._q > 0 ? Math.round(g._smvW / g._q * 100) / 100 : g.smv;
         g.color = `${g.members[0].color || ''} +${g.members.length - 1} colour${g.members.length > 2 ? 's' : ''}`;
@@ -17723,7 +17739,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Rules</legend>
-                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order with the same delivery is one unit (never PO by PO); <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the 10-day lock keeps its bars</div>
+                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order is ONE unit (never PO by PO) — deliveries within 7 days of the first one belong together, the earliest sets the target; a later delivery wave is its own unit; <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the 10-day lock keeps its bars</div>
                         </fieldset>
                     </div>
                     <div class="st-actions">
