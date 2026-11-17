@@ -2975,7 +2975,8 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
         // ?only=projected — the order book alone (one row per order, no confirm
         // PO rows): the "Available Order" summary reads every unit this way
         if (req.query.only === 'projected') {
-            return res.json({ success : true, rows : projRows, total : projRows.length });
+            return res.json({ success : true, rows : projRows, total : projRows.length,
+                erpByOrder : await erpOrderInfo(projRows.map(r => r.order_code)) });   // ERP garments type per order (list "Product")
         }
 
         // 2. Confirm orders: one row per PO from planning_orders
@@ -3222,7 +3223,11 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             return !erpInfo?.erp || erpListOkRow(erpInfo);
         });
 
-        res.json({ success : true, rows : [...projRows, ...filteredConf], total : projRows.length + filteredConf.length });
+        const allRows = [...projRows, ...filteredConf];
+        // ERP garments type per order (mr_style.gmt_id → Blazer, Chino, 5 Pocket…;
+        // an OS order through its MBM twin) — the list's "Product" column
+        const erpByOrder = await erpOrderInfo(allRows.map(r => r.order_code));
+        res.json({ success : true, rows : allRows, total : allRows.length, erpByOrder });
     }
     catch (e) {
         res.status(500).json({ success : false, error : e.message });

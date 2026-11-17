@@ -921,6 +921,7 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
     const q = qs.length ? `?${qs.join('&')}` : '';
     const data = await get(`/all-orders${q}`, 15000);
     if (!data.success) throw new Error(data.error || 'load failed');
+    const erpBy = data.erpByOrder || {};
     return (data.rows || []).map(r => ({
         id           : r.order_type === 'confirm' ? `erp-c-${r.group_key || r.po_number}` : `erp-p-${r.order_code}`,
         unit         : r.unit_short_name || (r.unit_id ? `Unit ${r.unit_id}` : '—'),
@@ -928,7 +929,10 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         prodUnitName : r.prod_unit_name || '—',
         buyer        : r.buyer_name || '',
         style        : r.style_no   || '',
-        productType  : r.product_category || '',
+        // Product = the ERP style's GARMENTS TYPE (mr_style.gmt_id → Blazer,
+        // Chino, 5 Pocket…; an OS order through its MBM twin), the planning
+        // product category (Jacket, Pant) only when the ERP has none
+        productType  : erpBy[r.order_code]?.gmt || r.product_category || '',
         mbmOrder     : r.order_code || '',
         // OS order (GSL-…): the MBM order it is a part of (mr_order_code) — shown
         // beside the OS code so the row is found by either number
