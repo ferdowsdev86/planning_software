@@ -44,21 +44,73 @@ const model = {
 const line = (id, perDay, extra = {}) => ({ id, name : id, perDay, hours : 10, eff : 60, products : ['Pant'], windows : [{ from : D('2026-12-01'), to : null }], ...extra });
 const opts = { today : D('2026-12-01'), horizonEnd : D('2027-03-01', 18) };
 
-test('split rule: 1,200 + 800 pcs/day lines take a 4,000-pc order as 2,400 + 1,600 and finish together after two working days', () => {
+test('split rule: 1,200 + 800 pcs/day lines take an 8,000-pc order as 4,800 + 3,200 and finish together after four working days', () => {
     const lines = [line('A', 1200), line('B', 800)];
-    // target = exactly two working days after the start: no single line makes it (A alone needs 3⅓ days)
-    const o = { id : 'o1', qty : 4000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-02', 18) };
+    // target = exactly four working days after the start: no single line makes it (A alone needs 6⅔ days)
+    const o = { id : 'o1', qty : 8000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-04', 18) };
     const { placements, unplaced } = planAutoV2({ orders : [o], lines, model, opts });
     assert.equal(unplaced.length, 0);
     const p = placements[0];
     assert.equal(p.split, 2);
     assert.equal(p.late, false);
     const byLine = Object.fromEntries(p.pieces.map(x => [x.line.id, x]));
-    assert.equal(byLine.A.qty, 2400);
-    assert.equal(byLine.B.qty, 1600);
+    assert.equal(byLine.A.qty, 4800);
+    assert.equal(byLine.B.qty, 3200);
     assert.equal(+byLine.A.end, +byLine.B.end, 'both bars end at the same moment');
-    assert.equal(ymd(byLine.A.end), '2026-12-02');
+    assert.equal(ymd(byLine.A.end), '2026-12-04');
     assert.equal(byLine.A.end.getHours(), 18);
+});
+
+test('minimum piece 3,000: an order under 6,000 is never split — a late 4,000-pc order runs late on ONE line', () => {
+    const lines = [line('A', 1200), line('B', 800)];
+    const o = { id : 'o1', qty : 4000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-02', 18) };
+    const { placements, unplaced } = planAutoV2({ orders : [o], lines, model, opts });
+    assert.equal(unplaced.length, 0);
+    assert.equal(placements[0].split, 0);
+    assert.equal(placements[0].late, true);
+    assert.equal(placements[0].pieces[0].line.id, 'A');
+});
+
+test('minimum piece 3,000 on a slow line: a late 6,500-pc order splits 3,500 + 3,000 — the slow line is lifted to 3,000 and finishes within 2 days of the fast one', () => {
+    const lines = [line('A', 1200), line('B', 800)];
+    // A alone needs 5.4 days — late by the 5-day target; proportional shares would give B only 2,600
+    const o = { id : 'o1', qty : 6500, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-05', 18) };
+    const { placements, unplaced } = planAutoV2({ orders : [o], lines, model, opts });
+    assert.equal(unplaced.length, 0);
+    const p = placements[0];
+    assert.equal(p.split, 2);
+    assert.equal(p.late, false);
+    const a = p.pieces.find(x => x.line.id === 'A'), b = p.pieces.find(x => x.line.id === 'B');
+    assert.equal(b.qty, 3000, 'the slow line carries the minimum piece');
+    assert.equal(a.qty, 3500);
+    assert.ok(Math.abs(+b.end - +a.end) <= 2 * 24 * 3600 * 1000, 'the two pieces finish within 2 days of each other');
+    assert.ok(p.finish <= o.target);
+});
+
+test('over 10,000 pcs: always several lines — even when one line would finish by the target; pieces ≥ 3,000, the fewest lines that meet the target', () => {
+    const lines = [line('A', 1200), line('B', 1000), line('C', 900)];
+    const o = { id : 'o1', qty : 12000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-31', 18) };   // A alone: 10 days, on time
+    const { placements } = planAutoV2({ orders : [o], lines, model, opts });
+    const p = placements[0];
+    assert.equal(p.split, 2, 'two lines suffice for the target: not one, not three');
+    assert.equal(p.late, false);
+    assert.ok(p.pieces.every(x => x.qty >= 3000));
+    assert.equal(p.pieces.reduce((a, x) => a + x.qty, 0), 12000);
+    assert.equal(+p.pieces[0].end, +p.pieces[1].end);
+    // a tighter target needs the third line
+    const o2 = { id : 'o2', qty : 12000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-04', 18) };   // 2 best lines make 8,800 in 4 days
+    const { placements : p2 } = planAutoV2({ orders : [o2], lines, model, opts });
+    assert.equal(p2[0].split, 3);
+    assert.equal(p2[0].late, false);
+    assert.ok(p2[0].pieces.every(x => x.qty >= 3000));
+});
+
+test('over 10,000 pcs with a single listed line: that line, on time, rather than a late split', () => {
+    const lines = [line('A', 1200)];
+    const o = { id : 'o1', qty : 11000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-31', 18) };
+    const { placements } = planAutoV2({ orders : [o], lines, model, opts });
+    assert.equal(placements[0].split, 0);
+    assert.equal(placements[0].late, false);
 });
 
 test('single line first: when one line finishes by the target the order is NOT split, even though a split would be faster', () => {
@@ -93,27 +145,28 @@ test('PCD + 8 is a hard floor: a line free earlier is used only from the floor o
 test('split with unequal starts and different calendars: the later / shorter line gets fewer pieces, both end together', () => {
     const A = line('A', 1200);                                                                 // free 01/12, 10 h days
     const B = line('B', 800, { hours : 8, windows : [{ from : D('2026-12-02'), to : null }] }); // free 02/12, 8 h days
-    const o = { id : 'o1', qty : 4000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-03', 18) };
+    const o = { id : 'o1', qty : 9000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-06', 18) };
     const { placements } = planAutoV2({ orders : [o], lines : [A, B], model, opts });
     const p = placements[0];
     assert.equal(p.split, 2);
     const a = p.pieces.find(x => x.line.id === 'A'), b = p.pieces.find(x => x.line.id === 'B');
-    assert.equal(a.qty + b.qty, 4000);
-    assert.ok(a.qty > b.qty * 2, `A (${a.qty}) runs a day longer at a higher rate than B (${b.qty})`);
+    assert.equal(a.qty + b.qty, 9000);
+    assert.ok(a.qty > b.qty, `A (${a.qty}) runs a day longer at a higher rate than B (${b.qty})`);
     assert.equal(+a.end, +b.end);
     assert.ok(p.finish <= o.target);
     assert.equal(ymd(b.start), '2026-12-02');
 });
 
-test('late plan: no single line or synchronized split by the target → the earliest completion after it, marked late', () => {
+test('late plan: no single line or synchronized split by the target → the earliest completion after it, marked late (split over several lines, pieces ≥ 3,000)', () => {
     const lines = [line('A', 500), line('B', 300)];
-    const o = { id : 'o1', qty : 4000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-02', 18) };
+    const o = { id : 'o1', qty : 8000, product : 'Pant', floor : D('2026-12-01'), target : D('2026-12-02', 18) };
     const { placements, unplaced } = planAutoV2({ orders : [o], lines, model, opts });
     assert.equal(unplaced.length, 0);
     assert.equal(placements[0].late, true);
     assert.equal(placements[0].split, 2, 'the split finishes earlier than either line alone');
     assert.ok(placements[0].finish > o.target);
     const [x, y] = placements[0].pieces;
+    assert.ok(x.qty >= 3000 && y.qty >= 3000);
     assert.equal(+x.end, +y.end);
 });
 
