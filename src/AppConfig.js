@@ -939,18 +939,26 @@ export function pushFollowers(scheduler, lineId, placed) {
         .sort((a, b) => a.startDate - b.startDate);
     let prevEnd = new Date(placed.endDate);
     let pushed  = 0;
+    // 1-minute tolerance: saved dates are minute-exact, a computed end may
+    // carry seconds — a bar that starts where the previous one ends is flush,
+    // not overlapped
+    const TOUCH_MS = 60 * 1000;
     for (const ev of followers) {
         if (isFixed(ev)) {
             if (ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
             continue;
         }
-        let ns = nextStartAfter(prevEnd);
-        // A bar NEVER advances earlier automatically ("plan agabe na") — it
-        // keeps its own start and only shifts LATER when the placed bar (or a
-        // pushed predecessor) actually collides with it. Gaps stay gaps.
-        if (ev.startDate > ns) {
-            ns = clampIntoWorkWindow(ev.startDate);
+        // A bar the placed bar (or a pushed predecessor) does NOT run into is
+        // NOT TOUCHED — not its start, not its end (planner rule, 2026-11-17:
+        // one move changes the moved bar and what it really pushes, nothing
+        // else; before, every later bar on the line had its end re-fitted to
+        // the formula and showed up as "shifted" / a pending Save change —
+        // 14 bars for one move on CEIL). Gaps stay gaps, saved ends stay.
+        if (ev.startDate.getTime() + TOUCH_MS >= prevEnd.getTime()) {
+            if (ev.endDate > prevEnd) prevEnd = new Date(ev.endDate);
+            continue;
         }
+        let ns = nextStartAfter(prevEnd);
         for (let guard = 0; guard < 10; guard++) {
             const ne   = endOfWork(ns, ev.data.raw.dur);
             const obst = bars.find(o => o !== ev && isFixed(o) && o.startDate < ne && o.endDate > ns);
