@@ -264,3 +264,21 @@ test('consumePlan: where the output ends in the plan and what that day still owe
     assert.deepEqual(consumePlan([130, 261], 0), { idx : 0, rest : 130, fullDays : 0, over : 0 });
     assert.deepEqual(consumePlan([130, 261], 400), { idx : 2, rest : 0, fullDays : 2, over : 9 });
 });
+
+import { rampDaysBefore } from './learningCurveService.mjs';
+
+test('ramp days run: a recorded ramp day before the rest\'s start day is done — the rest goes on with the next ramp day', () => {
+    const lcT = { '2026-11-04' : 172 };
+    // the rest still stands on the recorded day itself: that day keeps its number (day 1)
+    assert.equal(rampDaysBefore(lcT, '2026-11-04'), 0);
+    // the rest stands on a later day (moved / re-planned): day 1 is run → it begins with day 2
+    assert.equal(rampDaysBefore(lcT, '2026-11-05'), 1);
+    assert.equal(rampDaysBefore(lcT, '2026-11-20'), 1);
+    assert.equal(rampDaysBefore({ '2026-11-04' : 172, '2026-11-05' : 293 }, '2026-11-07'), 2);
+    assert.equal(rampDaysBefore(null, '2026-11-07'), 0);
+    // 27WISAN011: day 1 made 120 of 172 → lag 0.3023; the rest on another day reads 293 / 526 / 785 / 863 — no day 1
+    const pct = [20, 40, 70], tOf = k => [172, 345, 604, 863][Math.min(k, 4) - 1];
+    const { lag } = curveLag([{ ymd : '2026-11-04', target : 172, actual : 120 }]);
+    const run = rampDaysBefore(lcT, '2026-11-08');
+    assert.deepEqual([0, 1, 2, 3].map(i => lagTarget(pct, run + i + 1 - lag, tOf)), [293, 526, 785, 863]);
+});

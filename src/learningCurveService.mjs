@@ -246,3 +246,18 @@ export function consumePlan(plan, made) {
     }
     return { idx : list.length, rest : 0, fullDays : list.length, over : left };
 }
+
+/**
+ * Recorded ramp days dated before `ymd` — ramp days RUN: a ramp day with
+ * production is done however much it made (its shortfall is the lag), so the
+ * schedule of what is left goes on with the next ramp day, never day 1 again.
+ * @param {Object<string, number>} lcT — { 'yyyy-mm-dd': target } of the
+ *        recorded ramp days
+ * @param {string} ymd — the day the rest of the strip starts on
+ */
+export function rampDaysBefore(lcT, ymd) {
+    if (!lcT || typeof lcT !== 'object' || !ymd) return 0;
+    let n = 0;
+    for (const y of Object.keys(lcT)) if (y < ymd) n++;
+    return n;
+}

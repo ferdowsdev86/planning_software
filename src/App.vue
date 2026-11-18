@@ -6,7 +6,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, lcAtDone, holdCapacitySet, itemLabelOf, headerDayQty, prof
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, lcAtDone, rampDaysRun, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -11881,20 +11881,25 @@ const sameYmd = (a, b) => ymdOf(new Date(a)) === ymdOf(new Date(b));
 function planFromAnchor(s, ev, lid = lineIdOf(s, ev), lag = undefined) {
     const raw = ev?.data?.raw;
     if (!s || !raw || !lid || isHoldId(lid)) return null;
-    const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
-    const base  = raw.origStart && raw._lcBase != null ? (Number(raw._lcBase) || 0) : ranRampDays(raw);
+    // a strip moved since its last cut is anchored where it stands NOW (the
+    // next production pass re-anchors it the same way — the dialogs must not
+    // print the dates it stood on before)
+    const moved  = raw._cutStart != null && Math.abs(ev.startDate - raw._cutStart) > 60000;
+    const anchor = raw.origStart && !moved;
+    const start  = anchor ? new Date(raw.origStart) : new Date(ev.startDate);
+    const base   = anchor && raw._lcBase != null ? (Number(raw._lcBase) || 0) : rampDaysRun(raw, start);
+    const madeAt = anchor ? (Number(raw.madeBase) || 0) : (moved ? Number(raw._cutMade ?? raw.made) || 0 : 0);
     try {
         return simulateStrip(s, {
-            ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0, lcDone : base, lcRun : base, lc : lcAtDone(raw, base),
+            ...raw, made : madeAt, lcDone : base, lcRun : base, lc : lcAtDone(raw, base),
             lcLag : lag === undefined ? raw.lcLag : lag     // the curve as far behind as the caller says
         }, lid, start);
     }
     catch { return null; }
 }
-// ramp days a bar has behind it: a manual curve counts the days its OWN
-// production has run (lcRun), the automatic one the order's sewn days (lcDone)
+// a manual curve counts the days its OWN production has run (lcRun), the
+// automatic one the order's sewn days (lcDone) — rampDaysRun reads both
 const isManualCurve = raw => !!(raw?.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length);
-const ranRampDays   = raw => Math.max(0, Math.floor(Number(isManualCurve(raw) ? raw?.lcRun : raw?.lcDone) || 0));
 
 // A strip cut by the OLD rule (output laid over the day at the peak target)
 // while it stood on its first ramp day: its saved start is too early in that
@@ -11907,7 +11912,7 @@ const ranRampDays   = raw => Math.max(0, Math.floor(Number(isManualCurve(raw) ? 
 function repairPeakRateCut(s, ev, lid, made, dayRec) {
     const raw = ev.data.raw;
     if (raw._cutStart != null || raw.lcT || raw.lcLag != null || !(made > 0)) return;
-    if (!raw.lc?.applied || !Array.isArray(raw.lc.pct) || ranRampDays(raw) > 0 || (raw.lc.dayOffset || 0) > 0) return;
+    if (!raw.lc?.applied || !Array.isArray(raw.lc.pct) || rampDaysRun(raw, ev.startDate) > 0 || (raw.lc.dayOffset || 0) > 0) return;
     if (Math.abs(made - (Number(raw.madeBase) || 0)) > 0.5) return;            // only a bar as it was saved
     const dates = Object.keys(dayRec).filter(y => Number(dayRec[y]) > 0);
     const y0 = ymdOf(ev.startDate);
@@ -11966,12 +11971,12 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             if (raw._cutStart != null && Math.abs(ev.startDate - raw._cutStart) > 60000) {
                 raw.origStart = new Date(ev.startDate);
                 raw.madeBase  = Number(raw._cutMade ?? made) || 0;
-                raw._lcBase   = ranRampDays(raw);
+                raw._lcBase   = rampDaysRun(raw, raw.origStart);
             }
             if (!raw.origStart) raw.origStart = new Date(ev.startDate);
             // ramp days already behind the bar AT its anchor (the plan from
             // the anchor is read with the ramp entry the bar had there)
-            if (raw._lcBase == null) raw._lcBase = ranRampDays(raw);
+            if (raw._lcBase == null) raw._lcBase = rampDaysRun(raw, raw.origStart);
             const barKey = String(ev.id);
             const dayRec = store[barKey] || {};     // production per date (hand entries / ERP rows)
             repairPeakRateCut(s, ev, lid, made, dayRec);
@@ -12019,7 +12024,8 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                 // the rest of (the saved start's day) keeps the target saved
                 // with it (raw.lcT / the entry's day plan).
                 const inPlan = new Map(wdays.map(x => [ymdOf(x.date), x]));
-                const T = { ...(raw.lcT || {}) };
+                const kept = raw.lcT || {};      // targets saved with earlier entries
+                const T = {};                    // …of the days that HAVE a record now
                 const judged = [];
                 let lag = 0;
                 for (const y of Object.keys(dayRec).filter(k => dayRec[k] != null).sort()) {
@@ -12027,9 +12033,8 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                     if (inPlan.has(y) && y !== restDay) {
                         const x = planFromAnchor(s, ev, lid, lag)?.days.find(d => ymdOf(d.date) === y);
                         t = x && !x.off && x.ramping && x.factor < 1 ? x.q : 0;
-                        if (!(t > 0)) delete T[y];
                     }
-                    else if (Number(T[y]) > 0) t = Number(T[y]);
+                    else if (Number(kept[y]) > 0) t = Number(kept[y]);
                     else if (y === restDay && wdays[0].ramping && wdays[0].factor < 1) t = Number(savedPlanStore[barKey]?.[y]) || 0;
                     if (!(t > 0)) continue;
                     T[y] = t;
@@ -12065,7 +12070,11 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                 : Math.max((Number(raw._lcBase) || 0) + newDays, Math.floor(made / target), Math.floor(Number(raw.sewnDays) || 0));
             const doneKey = manualLc ? 'lcRun' : 'lcDone';
             if (doneDays > 0) raw[doneKey] = doneDays; else delete raw[doneKey];
-            if (raw.lc && Array.isArray(raw.lc.pct)) raw.lc = lcAtDone(raw, doneDays);
+            // …and a recorded ramp day dated before the day the rest stands on
+            // is a ramp day run as well (rampDaysRun): the rest never begins
+            // with a ramp day that already has its production
+            const rampAt = at => { if (raw.lc && Array.isArray(raw.lc.pct)) raw.lc = lcAtDone(raw, rampDaysRun(raw, at)); };
+            rampAt(cutDay ? cutDay.day.date : newStart);
             if (cutDay) {
                 // inside the cut day: the day's window from its start (the
                 // anchor's own time on the anchor's day) holds what the day
@@ -12099,6 +12108,7 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                     else break;
                 }
                 newStart = clampIntoLineWorkWindow(newStart, lid);
+                rampAt(newStart);
             }
 
             // End = when the REMAINING qty is made from the cut start (same
