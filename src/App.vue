@@ -6089,6 +6089,37 @@ const plLine = computed(() => {
     };
 });
 
+// Consolidate orders ON and the clicked bar is part of a consolidated run:
+// the dialog covers the WHOLE run (every member bar — the quantity the board
+// shows on the consolidated bar), not just the bar under the pointer
+// (planner, 2026-11-18: "click on a consolidated order must give the plan
+// schedule and the production update on the full quantity")
+const plMembers = computed(() => {
+    plTick.value;
+    const s = getInstance();
+    const rec = plRec.value;
+    if (!s || !rec) return [];
+    const g = consolidate.value ? uiHooks.consol?.get(String(rec.id)) : null;
+    if (!g || g.count < 2) return [rec];
+    const recs = g.members.map(m => s.eventStore.getById(m.id)).filter(r => r && eventRawOf(r));
+    return recs.length ? recs : [rec];
+});
+const memberMade = raw => Math.max(Number(raw.made) || 0, Math.round((Number(raw.qty) || 0) * (Number(raw.progress) || 0) / 100));
+const plGroup = computed(() => {
+    const ms = plMembers.value;
+    if (ms.length < 2) return null;
+    const raws = ms.map(eventRawOf);
+    const pos = [...new Set(raws.map(r => String(r.po || '')).filter(Boolean))];
+    return {
+        count : ms.length,
+        qty   : raws.reduce((a, r) => a + (Number(r.qty) || 0), 0),
+        made  : raws.reduce((a, r) => a + memberMade(r), 0),
+        start : ms.reduce((m, r) => (r.startDate < m ? r.startDate : m), ms[0].startDate),
+        end   : ms.reduce((m, r) => (r.endDate > m ? r.endDate : m), ms[0].endDate),
+        pos
+    };
+});
+
 // All strips of the same PO currently on the board
 const plAllStrips = computed(() => {
     const s = getInstance();
@@ -6123,25 +6154,23 @@ function barDayCapacity(raw, lid) {
 // Daily rows: quantity distributed over working days (off days show 0).
 // Learning-curve days produce at the curve percentage of the day's target —
 // the schedule shows the reduced quantity and the applied efficiency.
-const plDailyRows = computed(() => {
-    plTick.value; // dependency: recompute per open (see openPlannedSchedule)
-    const rec = plRec.value;
-    const raw = plRaw.value;
-    if (!rec || !raw) return [];
-    // The SAME day model that sized the bar (simulateStrip) — capacity,
-    // learning ramp, changed-hours dates, part-days at start / end
-    const sim = simulateStrip(getInstance(), raw, plLine.value?.id, rec.startDate, rec.endDate);
+const hmOf  = min => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
+// day rows of ONE bar — the SAME day model that sized it (simulateStrip):
+// capacity, learning ramp, changed-hours dates, part-days at start / end
+function dailyRowsOfBar(rec, raw, lid, lineHours) {
+    const sim = simulateStrip(getInstance(), raw, lid, rec.startDate, rec.endDate);
     const baseEff = Math.round(sim.effPct);
     const rows = [];
     for (const x of sim.days) {
         const d = x.date;
         // the line's hours for the date (line override → unit override → line / weekday)
-        let hours = x.off || !x.q ? '0:00' : lineHoursLabel({ id : plLine.value?.id, hours : plLine.value?.line?.hours }, d);
+        let hours = x.off || !x.q ? '0:00' : lineHoursLabel({ id : lid, hours : lineHours }, d);
         if (!x.off && x.q > 0 && x.q < x.fullTarget) {
             const clock = Math.max(1, Math.round((x.q / x.fullTarget) * (x.span / 60000)));
-            hours = `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, '0')}`;
+            hours = hmOf(clock);
         }
         rows.push({
+            ymd   : ymdOf(d),
             day   : DAY_ABBR[d.getDay()],
             date  : fmtDate(new Date(d)),
             mKey  : `${d.getFullYear()}-${d.getMonth()}`,
@@ -6153,6 +6182,39 @@ const plDailyRows = computed(() => {
             off   : x.off
         });
     }
+    return rows;
+}
+// several bars (a consolidated run) → one row per date: quantities and hours
+// add up (one bar ends, the next starts the same day = one full day), the
+// efficiency is the quantity-weighted mean, the learning-curve day is the
+// one of the bar ramping that day
+function mergeDailyRows(lists) {
+    if (lists.length === 1) return lists[0];
+    const byDay = new Map();
+    for (const rows of lists) {
+        for (const r of rows) {
+            let m = byDay.get(r.ymd);
+            if (!m) { m = { ...r, qty : 0, effW : 0, hoursMin : 0, lcDay : 0, off : true }; byDay.set(r.ymd, m); }
+            m.qty += r.qty;
+            m.effW += r.eff * r.qty;
+            m.hoursMin += Math.round(hmToHours(r.hours) * 60);
+            if (r.lcDay && !m.lcDay) m.lcDay = r.lcDay;
+            if (!r.off) m.off = false;
+        }
+    }
+    return [...byDay.values()].sort((a, b) => a.ymd.localeCompare(b.ymd)).map(m => ({
+        ymd : m.ymd, day : m.day, date : m.date, mKey : m.mKey, mName : m.mName,
+        qty : m.qty, eff : m.qty > 0 ? Math.round(m.effW / m.qty) : 0, lcDay : m.lcDay,
+        hours : hmOf(m.hoursMin), off : m.off
+    }));
+}
+const plDailyRows = computed(() => {
+    plTick.value; // dependency: recompute per open (see openPlannedSchedule)
+    const rec = plRec.value;
+    const raw = plRaw.value;
+    if (!rec || !raw) return [];
+    const lid = plLine.value?.id, lineHours = plLine.value?.line?.hours;
+    const rows = mergeDailyRows(plMembers.value.map(r => dailyRowsOfBar(r, eventRawOf(r), lid, lineHours)));
     let cum = 0;
     for (const r of rows) {
         cum += r.qty;
@@ -6164,10 +6226,92 @@ const plDailyRows = computed(() => {
 // Daily progress + forecast of the strip (raw.fc, see computeBarForecast):
 // one row per day — original target, actual, achievement, variance,
 // cumulative variance, forecast — plus the forecast days after the data
+// Consolidated run: the members' forecasts merged into one — per date the
+// targets / actuals / variances / forecasts add up, the status is the most
+// telling one (ERP > provisional > open > zero > no record > planned > off),
+// the cumulative variance is recounted over the merged rows; a member that is
+// not in production yet (no forecast) contributes its planned days; the head
+// figures (ends, cutoff, made, remaining) span every member
+const FC_STATUS_RANK = { final : 7, provisional : 6, open : 5, zero : 4, missing : 3, future : 2, off : 1, none : 0 };
+function mergeForecasts(members) {
+    const withFc = members.filter(m => m.fc && Array.isArray(m.fc.rows));
+    if (!withFc.length) return null;
+    if (members.length === 1) return members[0].fc;
+    const byDay = new Map();
+    const add = (k, v) => (v == null ? k : (k == null ? v : k + v));
+    const take = (ymd) => { let m = byDay.get(ymd); if (!m) { m = { ymd, lcDay : 0, factor : 1, target : null, savedTarget : false, actual : null, variance : null, status : 'none', achievedPct : null, curveExpected : null, curveNext : null, manual : false, erp : false, attributed : true, off : true }; byDay.set(ymd, m); } return m; };
+    for (const mb of withFc) {
+        for (const r of mb.fc.rows) {
+            const m = take(r.ymd);
+            m.target = add(m.target, r.target); m.actual = add(m.actual, r.actual); m.variance = add(m.variance, r.variance);
+            m.savedTarget = m.savedTarget || !!r.savedTarget;
+            if (r.lcDay && !m.lcDay) { m.lcDay = r.lcDay; m.factor = r.factor; }
+            if ((FC_STATUS_RANK[r.status] || 0) > (FC_STATUS_RANK[m.status] || 0)) m.status = r.status;
+            if (m.achievedPct == null && r.achievedPct != null) { m.achievedPct = r.achievedPct; m.curveExpected = r.curveExpected; m.curveNext = r.curveNext; }
+            m.manual = m.manual || !!r.manual; m.erp = m.erp || !!r.erp;
+            if (r.actual != null && !r.attributed) m.attributed = false;
+            if (!r.off) m.off = false;
+        }
+    }
+    // members without a forecast: their planned days (the day model)
+    for (const mb of members) {
+        if (mb.fc) continue;
+        for (const r of mb.days) {
+            if (r.off || !r.q) continue;
+            const m = take(r.ymd);
+            m.target = add(m.target, r.q);
+            if (!m.lcDay && r.lcDay) { m.lcDay = r.lcDay; m.factor = r.factor; }
+            if ((FC_STATUS_RANK.future) > (FC_STATUS_RANK[m.status] || 0)) m.status = 'future';
+            m.off = false;
+        }
+    }
+    const rows = [...byDay.values()].sort((a, b) => a.ymd.localeCompare(b.ymd));
+    let cum = 0;
+    for (const r of rows) {
+        r.achievement = r.actual != null && r.target > 0 ? Math.round(r.actual / r.target * 1000) / 10 : null;
+        if (r.variance != null) { cum += r.variance; r.cumVariance = cum; } else r.cumVariance = null;
+    }
+    const fcDay = new Map();
+    for (const mb of members) {
+        const days = mb.fc ? (mb.fc.forecastDays || []) : mb.days.filter(d => !d.off && d.q > 0 && d.ymd >= mb.todayYmd).map(d => ({ ymd : d.ymd, qty : d.q }));
+        for (const d of days) fcDay.set(d.ymd, (fcDay.get(d.ymd) || 0) + d.qty);
+    }
+    const head = withFc[0].fc;
+    const lastEnd = members.reduce((m, x) => (x.end > m ? x.end : m), members[0].end);
+    // the run's target end = the earliest member target (delivery − 7)
+    const targetEnd = withFc.reduce((m, x) => (x.fc.targetEnd && (!m || new Date(x.fc.targetEnd) < new Date(m)) ? x.fc.targetEnd : m), null) || head.targetEnd;
+    return {
+        ...head,
+        rows,
+        forecastDays : [...fcDay].map(([ymd, qty]) => ({ ymd, qty })).sort((a, b) => a.ymd.localeCompare(b.ymd)),
+        savedEnd     : lastEnd,
+        // a member still to start has no forecast: the run's forecast end is
+        // the later of the forecast ends and the planned ends
+        forecastEnd  : withFc.every(x => x.fc.forecastEnd) ? members.reduce((m, x) => { const e = x.fc ? new Date(x.fc.forecastEnd) : x.end; return e > m ? e : m; }, new Date(0)) : null,
+        exhausted    : withFc.some(x => x.fc.exhausted),
+        late         : withFc.some(x => x.fc.late),
+        cutoff       : withFc.reduce((m, x) => (x.fc.cutoff && (!m || x.fc.cutoff > m) ? x.fc.cutoff : m), null),
+        provisional  : withFc.some(x => x.fc.provisional),
+        remaining    : members.reduce((a, x) => a + (x.fc ? (Number(x.fc.remaining) || 0) : (Number(x.raw.qty) || 0)), 0),
+        made         : withFc.reduce((a, x) => a + (Number(x.fc.made) || 0), 0),
+        unattributed : withFc.reduce((a, x) => a + (Number(x.fc.unattributed) || 0), 0),
+        targetEnd,
+        group        : members.length
+    };
+}
 const plProgress = computed(() => {
     plTick.value;
     const raw = plRaw.value;
-    const fc = raw?.fc;
+    const ms = plMembers.value;
+    if (!raw || !ms.length) return null;
+    const lid = plLine.value?.id;
+    const todayYmd = ymdOf(new Date());
+    const fc = mergeForecasts(ms.map(r => {
+        const mr = eventRawOf(r);
+        const sim = mr.fc ? null : simulateStrip(getInstance(), mr, lid, r.startDate, r.endDate);
+        return { raw : mr, fc : mr.fc, end : r.endDate, todayYmd,
+            days : sim ? sim.days.map(x => ({ ymd : ymdOf(x.date), q : x.q, off : x.off, lcDay : x.lcDay, factor : x.factor })) : [] };
+    }));
     if (!fc || !Array.isArray(fc.rows)) return null;
     const fcDay = new Map((fc.forecastDays || []).map(d => [d.ymd, d.qty]));
     const seen = new Set();
@@ -17949,14 +18093,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 </div>
                 <div class="st-body pl-body">
                     <div class="pl-grid pl-info">
-                        <label>Order</label><input class="cal-in pr-ro" :value="`${plRaw.buyer} :: ${plRaw.po}`" readonly>
+                        <label>Order</label><input class="cal-in pr-ro" :value="`${plRaw.buyer} :: ${plGroup && plGroup.pos.length > 1 ? plGroup.pos.join(', ') : plRaw.po}`" readonly>
                         <label>Product</label><input class="cal-in pr-ro" :value="plRaw.style" readonly>
                         <label>Customer</label><input class="cal-in pr-ro" :value="plRaw.buyer" readonly>
                         <label>Line</label><input class="cal-in pr-ro" :value="plLine?.name" readonly>
-                        <label>This strip</label><input class="cal-in pr-ro" :value="`${fmtQty(plRaw.qty)}   (${plRaw.end ? fmtDate(plRaw.end) : '—'})`" readonly>
+                        <!-- Consolidate orders ON: the figures are the consolidated run's (every member bar) -->
+                        <label>{{ plGroup ? 'Consolidated' : 'This strip' }}</label><input class="cal-in pr-ro" :value="plGroup ? `${fmtQty(plGroup.qty)}   (${fmtDate(plGroup.end)})  ·  ⧉ ${plGroup.count} bars as one` : `${fmtQty(plRaw.qty)}   (${plRaw.end ? fmtDate(plRaw.end) : '—'})`" readonly>
                         <label>All strips</label><input class="cal-in pr-ro" :value="`${fmtQty(plAllStrips.qty)} in ${plAllStrips.count} strip(s)`" readonly>
-                        <label>Starting</label><input class="cal-in pr-ro" :value="`${fmtDate(plRaw.start)}  =>  ${plRaw.end ? fmtDate(plRaw.end) : '—'}`" readonly>
-                        <label>Made</label><input class="cal-in pr-ro" :value="fmtQty(Math.round(plRaw.qty * plRaw.progress / 100))" readonly>
+                        <label>Starting</label><input class="cal-in pr-ro" :value="plGroup ? `${fmtDate(plGroup.start)}  =>  ${fmtDate(plGroup.end)}` : `${fmtDate(plRaw.start)}  =>  ${plRaw.end ? fmtDate(plRaw.end) : '—'}`" readonly>
+                        <label>Made</label><input class="cal-in pr-ro" :value="fmtQty(plGroup ? plGroup.made : Math.round(plRaw.qty * plRaw.progress / 100))" readonly>
                         <label>Send by</label><input class="cal-in pr-ro" value="_Ex-Factory -> _Ex-fty" readonly>
                     </div>
                     <div class="pl-cols">
