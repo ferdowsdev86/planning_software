@@ -16,11 +16,11 @@ import {
     addCalDays, randSmv, orderColor, mbmOrderNo, orderTypeOf, orderFamilyKey, VIEW_START, VIEW_END,
     nextStartAfter, WORK_MIN_PER_DAY, clampIntoWorkWindow, resolveProfileType, resolveProfileEfficiency,
     computeLineUtil, formulaWorkingDays, isLateVsDelivery, planQtyOf, buyerDefaultEff,
-    isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS
+    isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS, workingMinutesBetween
 } from './planningData.js';
 import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo, orderTwinOf, WORK_SNAP_MIN } from './planningData.js';
 import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
-import { planAutoV2, AP2_NO_SPACE } from './autoPlanV2.mjs';
+import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -3821,6 +3821,9 @@ const AP_FINISH_BUFFER_DAYS  = SEW_END_BEFORE_DELIVERY_DAYS;  // 7 calendar days
 // confirm orders group-wise: PO / colour rows of one order whose deliveries lie
 // within this many days of the group's first delivery are ONE planning unit
 const AP_GROUP_DELIVERY_WINDOW_DAYS = 7;
+// product continuity: a same-product slot may start at most this many days
+// after the earliest on-time start and still be preferred (autoPlanV2)
+const AP_CONTINUITY_DELAY_DAYS = 3;
 const AP_HORIZON_DAYS = 180;
 const AP_NO_SPACE     = 'Not Available Space';
 // NO UNPLANNED ORDER (planner rule, 2026-11-16): an order the run cannot put
@@ -4178,6 +4181,18 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         if (p.curveStage >= 0) { row.sewnDays = p.curveStage; row.lcDone = p.curveStage; }
         out.push(asBalance(row));
     }
+    // the schedule as it WAS (the bars this run replaces) — the review compares
+    // it with the new one on the same inputs (on time / late, product changes
+    // per line, idle hours, orders whose completion got worse)
+    const idxB = buildLineIndex(s);
+    stats.before = gone.map(ev => {
+        const r = ev.data.raw;
+        const lid = lineIdOf(s, ev, idxB);
+        if (!LINE_BY_ID[lid]) return null;
+        const t = sewTargetDay(r.ship);
+        return { id : String(ev.id), order : String(r.mbmOrder || r.po || ev.id), line : lid, start : new Date(ev.startDate), end : new Date(ev.endDate),
+            product : r.profileType || erpOrderInfo[mbmOrderNo(r.po, r.mbmOrder)]?.gmt || r.productType || '', target : t ? endOfWorkDay(t) : null, qty : Number(r.qty) || 0 };
+    }).filter(Boolean);
     s.eventStore.remove(gone);
     if (boardDbState) for (const ev of gone) delete boardDbState[String(ev.id)];
     if (gone.length) invalidateBarsByLine();
@@ -4225,16 +4240,24 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         if (!LINE_BY_ID[lid]) continue;
         (barsByLine.get(lid) || barsByLine.set(lid, []).get(lid)).push(ev);
     }
+    // the product of a bar on the board — the same id the engine gets for an
+    // order (ERP garment type, else the planning product type)
+    const barProductOf = raw => String(raw.profileType || erpOrderInfo[mbmOrderNo(raw.po, raw.mbmOrder)]?.gmt || raw.productType || '').trim();
     for (const line of lineStates) {
         const bars = (barsByLine.get(line.id) || []).sort((a, b) => a.startDate - b.startDate);
         let cur = new Date(today);
+        // PRODUCT CONTINUITY: every free window knows the product of the bar
+        // before it and the bar after it (existing / locked bars anchor the
+        // line's sequence — the engine continues a product where it can)
+        let prevProd = null;
         for (const ev of bars) {
-            if (ev.endDate <= cur) continue;
-            if (ev.startDate > cur && (+ev.startDate - +cur) > 4 * 3600 * 1000) line.windows.push({ from : new Date(cur), to : new Date(ev.startDate) });
+            if (ev.endDate <= cur) { prevProd = barProductOf(ev.data.raw) || prevProd; continue; }
+            if (ev.startDate > cur && (+ev.startDate - +cur) > 4 * 3600 * 1000) line.windows.push({ from : new Date(cur), to : new Date(ev.startDate), prevProduct : prevProd, nextProduct : barProductOf(ev.data.raw) || null });
             const nxt = nextStartAfter(ev.endDate);
             if (nxt > cur) cur = nxt;
+            prevProd = barProductOf(ev.data.raw) || prevProd;
         }
-        line.windows.push({ from : new Date(cur), to : null });
+        line.windows.push({ from : new Date(cur), to : null, prevProduct : prevProd, nextProduct : null });
     }
     // the pool rows of this unit and delivery window (same eligibility as before:
     // a row already on the board, a replaced projection, a completed row, a row
@@ -4354,8 +4377,11 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         }
     };
     const engOrders = grouped.map(o => ({ id : String(o.id), qty : Number(o.qty) || 0, product : profOf(o), floor : earliestSewStart(new Date(o.pcd)), target : apLatestFinishOf(o), row : o }));
-    // a late plan takes no line: it goes to the Holding Row with its suggested start
-    const { placements, unplaced } = planAutoV2({ orders : engOrders, lines : lineStates, model, opts : { today, horizonEnd, precisionMs : WORK_SNAP_MIN * 60000, holdLate : true } });
+    model.workMinutes = (a, b) => workingMinutesBetween(new Date(a), new Date(b));
+    // a late plan takes no line: it goes to the Holding Row with its suggested start;
+    // product continuity within AP_CONTINUITY_DELAY_DAYS of the earliest on-time start
+    const { placements, unplaced, improved } = planAutoV2({ orders : engOrders, lines : lineStates, model,
+        opts : { today, horizonEnd, precisionMs : WORK_SNAP_MIN * 60000, holdLate : true, continuityMaxDelayMs : AP_CONTINUITY_DELAY_DAYS * 86400000 } });
     // the bars, exactly where the engine put them (a split: every piece ends
     // at the shared finish; the pieces carry raw.split so the late flag, the
     // tooltip and the Orders list treat them as one order)
@@ -4508,7 +4534,7 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         planned : onLines.length, late : 0, tight : 0, parked,
         splitOrders : onLines.filter(p => p.split).length, splitPieces, orders : grouped.length, groupsMerged : grouped.filter(g => g.members?.length > 1).length,
         unplaced : [],
-        held, ambiguous
+        held, ambiguous, improved : improved || null
     };
 }
 async function runAutoPlanAvail() {
@@ -4534,7 +4560,8 @@ async function runAutoPlanAvail() {
         + `• every available order with delivery ${to ? `${fmtDate(from)} → ${fmtDate(to)}` : `on / after ${fmtDate(from)}`}, earliest target first\n`
         + `• 1. earliest sewing start = PCD + ${AP_SEW_START_AFTER_PCD} calendar days — hard, for every piece; target sewing end = delivery − ${AP_FINISH_BUFFER_DAYS} calendar days\n`
         + `• 2. line ranking: product match (efficiency profile) → earliest feasible start on / after PCD + 8 → higher product efficiency\n`
-        + `• 3. CONFIRM ORDERS GROUP-WISE: every PO / colour of an order with the same delivery is ONE unit — one line when it finishes by the target; else a split over 2, then 3 lines, every piece ending at the SAME time, whole pieces by each line's capacity\n`
+        + `• 3. CONFIRM ORDERS GROUP-WISE: every PO / colour of an order (deliveries within 7 days) is ONE unit, shown as one strip per colour — one line when it finishes by the target; else a split over 2, then 3 lines, every piece ending at the SAME time, whole pieces by each line's capacity\n`
+        + `• 3b. PRODUCT CONTINUITY: on time first, least lateness second, then the fewest product changes (the same product runs on after itself on a line, within ${AP_CONTINUITY_DELAY_DAYS} days of the earliest on-time start), then the least idle time — never at the cost of an on-time completion; the review compares before / after\n`
         + `• NOTHING STAYS UNPLANNED: an order no line finishes by the target, or with no slot before the horizon ${fmtDate(horizonEnd)}, or without SMV / PCD, goes to the HOLDING ROW at its suggested start (PCD + 8) with the reason — never a late bar on a line\n\n`
         + `Nothing is saved until you click Save (Undo reverses the run). Continue?`);
     if (!ok) return;
@@ -4737,7 +4764,37 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
         ...(ambiguous || []).map(a => listRow(a.order || {}, a.reason, { where : 'unplanned — no allocation' })),
         ...(blanked?.ambiguous || []).map(a => ({ order : a.order, po : a.po, color : a.color, qty : 0, base : 0, sewn : 0, reason : a.issue, where : 'its bars stay as they are' }))
     ];
-    return { unit : currentBoard.value?.unitName || '', from, to, at : new Date(), rows, idle, infeasible : inf, held : heldRows, issues : issueRows, lock, horizonEnd,
+    // BEFORE / AFTER on the same inputs (planner, 2026-11-18): the bars this
+    // run replaced + the bars that stayed vs the board now — on time / late,
+    // product changes per line, idle working hours, orders whose completion
+    // got worse (and why)
+    let compare = null;
+    try {
+        const prodOfRaw = x => String(x.profileType || erpOrderInfo[mbmOrderNo(x.po, x.mbmOrder)]?.gmt || x.productType || '').trim();
+        const itemOf = ev => { const x = ev.data.raw; const lid = lineIdOf(s, ev, index); if (!lid || isHoldId(lid)) return null; const t = sewTargetDay(x.ship); return { order : String(x.mbmOrder || x.po || ev.id), line : lid, start : new Date(ev.startDate), end : new Date(ev.endDate), product : prodOfRaw(x), target : t ? endOfWorkDay(t) : null }; };
+        const after = bars.map(itemOf).filter(Boolean);
+        const stayedIds = new Set(bars.filter(ev => String(ev.id).startsWith('db-')).map(ev => String(ev.id)));
+        const stayed = bars.filter(ev => stayedIds.has(String(ev.id))).map(itemOf).filter(Boolean);
+        const before = [...(blanked?.before || []), ...stayed];
+        const wm = (a, b) => workingMinutesBetween(new Date(a), new Date(b));
+        const mB = scheduleMetrics(before, { workMinutes : wm, horizonEnd }), mA = scheduleMetrics(after, { workMinutes : wm, horizonEnd });
+        const lineName = id => s.resourceStore.getById(id)?.name || id;
+        const lineIds = [...new Set([...Object.keys(mB.changesByLine), ...Object.keys(mA.changesByLine)])].sort((a, b) => lineName(a).localeCompare(lineName(b), undefined, { numeric : true }));
+        const worsened = [];
+        for (const [order, a] of mA.finishes) {
+            const b = mB.finishes.get(order);
+            if (!b || !a.finish || !b.finish) continue;
+            const wasLate = b.target && b.finish > b.target, isLate = a.target && a.finish > a.target;
+            if (+a.finish > +b.finish + 3600000 && (isLate || !wasLate && +a.finish - +b.finish > 86400000)) {
+                worsened.push({ order, before : b.finish, after : a.finish, target : a.target, late : !!isLate,
+                    reason : isLate && !wasLate ? 'now after the target — the remaining quantity / the line capacity left no on-time slot' : isLate ? 'late before and after — later completion' : 'finishes later (still on time)' });
+            }
+        }
+        compare = { before : mB, after : mA, lines : lineIds.map(id => ({ line : lineName(id), before : mB.changesByLine[id] || 0, after : mA.changesByLine[id] || 0, idleBefore : Math.round((mB.idleByLine[id] || 0) / 60 * 10) / 10, idleAfter : Math.round((mA.idleByLine[id] || 0) / 60 * 10) / 10 })),
+            worsened : worsened.sort((x, y) => (+y.after - +y.before) - (+x.after - +x.before)).slice(0, 40), improved : r?.improved || null, continuityDays : AP_CONTINUITY_DELAY_DAYS };
+    }
+    catch (e) { console.warn('[auto plan] schedule comparison skipped:', e.message); }
+    return { unit : currentBoard.value?.unitName || '', from, to, at : new Date(), rows, idle, infeasible : inf, held : heldRows, issues : issueRows, lock, horizonEnd, compare,
         recon : { groups : blanked?.reconciled || 0, sewn : blanked?.sewnQty || 0, covered : blanked?.coveredQty || 0, fullySewn : blanked?.fullySewn || 0,
             reduced : blanked?.reduced || 0, reducedQty : blanked?.reducedQty || 0, locked : blanked?.locked || 0 },
         summary : { bars : rows.length, orders : new Set(rows.map(x => x.order + '|' + x.po)).size, plannedQty, onTimeQty, unplannedQty, unplannedOrders : unplIn.length,
@@ -18185,7 +18242,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Rules</legend>
-                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order is ONE unit (never PO by PO) — deliveries within 7 days of the first one belong together, the earliest sets the target; a later delivery wave is its own unit; <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the 10-day lock keeps its bars</div>
+                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order is ONE unit (never PO by PO) — deliveries within 7 days of the first one belong together, the earliest sets the target; a later delivery wave is its own unit; <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 3b. <b>Product continuity</b>: priorities in this order — the most orders by their target, the least lateness for the rest, the fewest product changes (the same product runs on after itself on a line; a same-product slot may start up to 3 days after the earliest on-time start), then the least idle time and the stronger product efficiency; a continuity gain never outranks an on-time completion; after the run, adjacent swaps and moves into a same-product gap that cost no order its completion; the review compares the board before and after (on time / late, product changes per line, idle hours, orders that got worse) · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the 10-day lock keeps its bars</div>
                         </fieldset>
                     </div>
                     <div class="st-actions">
@@ -18215,6 +18272,38 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         split pieces <b>{{ apReview.summary.splitPieces }}</b> · bars starting before today (no output recorded) <b>{{ apReview.summary.pastStart }}</b> ·
                         idle <b>{{ fmtQty(apReview.summary.idleHours) }}</b> h · board: {{ apReview.summary.removed }} bar(s) removed, {{ apReview.summary.kept }} kept
                         · <i>nothing is saved yet — review the board, then Save (Undo reverses the run)</i>
+                    </div>
+                    <!-- BEFORE / AFTER on the same inputs: on time / late, product changes per line, idle hours, orders that got worse -->
+                    <div v-if="apReview.compare" class="pf-sum ap-compare">
+                        <b>Before → after</b> (the bars this run replaced + the bars that stayed, vs the board now) ·
+                        orders on time <b>{{ apReview.compare.before.onTime }} → {{ apReview.compare.after.onTime }}</b> ·
+                        late <b>{{ apReview.compare.before.late }} → {{ apReview.compare.after.late }}</b> ({{ apReview.compare.before.lateDays }} → {{ apReview.compare.after.lateDays }} days late in all) ·
+                        product changes <b>{{ apReview.compare.before.changes }} → {{ apReview.compare.after.changes }}</b> ·
+                        idle working hours <b>{{ apReview.compare.before.idleHours }} → {{ apReview.compare.after.idleHours }}</b>
+                        <template v-if="apReview.compare.improved"> · improvement pass: {{ apReview.compare.improved.swaps }} swap(s), {{ apReview.compare.improved.moves }} move(s)</template>
+                        · continuity window {{ apReview.compare.continuityDays }} days
+                        <details class="ap-compare-lines">
+                            <summary>Product changes and idle hours per line</summary>
+                            <table class="st-table">
+                                <thead><tr><th>Line</th><th class="od-num">Changes before</th><th class="od-num">Changes after</th><th class="od-num">Idle h before</th><th class="od-num">Idle h after</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="l in apReview.compare.lines" :key="l.line" :class="{ 'ap-cmp-better' : l.after < l.before, 'ap-cmp-worse' : l.after > l.before }">
+                                        <td>{{ l.line }}</td><td class="od-num">{{ l.before }}</td><td class="od-num">{{ l.after }}</td><td class="od-num">{{ l.idleBefore }}</td><td class="od-num">{{ l.idleAfter }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </details>
+                        <details v-if="apReview.compare.worsened.length" class="ap-compare-lines" open>
+                            <summary>{{ apReview.compare.worsened.length }} order(s) whose completion got worse</summary>
+                            <table class="st-table">
+                                <thead><tr><th>Order</th><th>Before</th><th>After</th><th>Target</th><th>Why</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="w in apReview.compare.worsened" :key="w.order" :class="{ 'ap-cmp-worse' : w.late }">
+                                        <td>{{ w.order }}</td><td>{{ fmtDate(w.before) }}</td><td>{{ fmtDate(w.after) }}</td><td>{{ w.target ? fmtDate(w.target) : '—' }}</td><td>{{ w.reason }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </details>
                     </div>
                     <div class="pf-sum" style="margin-top:4px">
                         <b>Remaining sewing quantity</b> — {{ apReview.recon.groups }} PO group(s) of the board reconciled: actual sewing output <b>{{ fmtQty(apReview.recon.sewn) }}</b> pcs deducted ·
@@ -21878,6 +21967,13 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 
 /* Planned-schedule rows on learning-curve days */
 .pl-lc td { background : #fff8e8; }
+/* Auto plan review: before / after comparison */
+.ap-compare { border-top : 1px dashed #c9d3dd; margin-top : 6px; padding-top : 6px; }
+.ap-compare-lines { margin-top : 4px; }
+.ap-compare-lines summary { cursor : pointer; color : #1f3b63; font-weight : 600; font-size : 12px; }
+.ap-compare-lines table { margin-top : 4px; font-size : 12px; }
+.ap-compare tr.ap-cmp-better td { color : #1e7d45; }
+.ap-compare tr.ap-cmp-worse td { color : #b23b2a; }
 /* Daily progress + forecast block of the Planned schedule dialog */
 .pl-fc-head { display : flex; flex-wrap : wrap; gap : 4px 18px; font-size : 12px; padding : 4px 6px 8px; color : #2c3e50; }
 .pl-fc-head b { color : #1f3b63; margin-right : 3px; }

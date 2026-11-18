@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planAutoV2, AP2_NO_SPACE } from './autoPlanV2.mjs';
+import { planAutoV2, AP2_NO_SPACE, changeDelta, scheduleMetrics } from './autoPlanV2.mjs';
 
 // A small calendar / capacity model: every day works, a line's day runs from
 // 08:00 for `hours` hours at a flat `perDay` pieces per working day.
@@ -197,4 +197,102 @@ test('holdLate: a late plan is reported with its suggested start but takes no li
     assert.equal(ymd(p1.floor), '2026-12-01', 'suggested start = PCD + 8');
     assert.equal(ymd(p2.pieces[0].start), '2026-12-01', 'the line is still free for the next order: the late one took no line time');
     assert.equal(p2.late, false);
+});
+
+// ---------------------------------------------------------------------------
+// PRODUCT CONTINUITY (planner, 2026-11-18)
+// ---------------------------------------------------------------------------
+test('continuity: among on-time lines the one where the same product precedes the slot wins — within the allowed delay', () => {
+    // A is free from 01/12 (last ran Shorts), B is free from 02/12 and last ran Chino
+    const A = line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] });
+    const B = line('B', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-02'), to : null, prevProduct : 'Chino' }] });
+    const o = { id : 'o1', qty : 2000, product : 'Chino', floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const { placements } = planAutoV2({ orders : [o], lines : [A, B], model, opts });
+    assert.equal(placements[0].pieces[0].line.id, 'B', 'Chino continues on the Chino line one day later');
+    // the same product slot four days later is beyond the 3-day delay: the earliest start wins
+    const B2 = line('B', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-05'), to : null, prevProduct : 'Chino' }] });
+    const { placements : p2 } = planAutoV2({ orders : [o], lines : [A, B2], model, opts });
+    assert.equal(p2[0].pieces[0].line.id, 'A');
+});
+
+test('continuity never outranks an on-time completion: when only the other-product line finishes by the target, it is taken', () => {
+    const A = line('A', 1200, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] });
+    const B = line('B', 1200, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-03'), to : null, prevProduct : 'Chino' }] });
+    const o = { id : 'o1', qty : 2400, product : 'Chino', floor : D('2026-12-01'), target : D('2026-12-03', 18) };   // 2 days: only A makes it
+    const { placements } = planAutoV2({ orders : [o], lines : [A, B], model, opts });
+    assert.equal(placements[0].pieces[0].line.id, 'A');
+    assert.equal(placements[0].late, false);
+});
+
+test('an urgent order of another product goes before a matching product that can wait; a matching product not yet ready (PCD + 8 later) does not hold the slot', () => {
+    const A = line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Chino' }] });
+    const chino  = { id : 'chino',  qty : 2000, product : 'Chino',  floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const shorts = { id : 'shorts', qty : 2000, product : 'Shorts', floor : D('2026-12-01'), target : D('2026-12-03', 18) };   // urgent
+    const { placements } = planAutoV2({ orders : [chino, shorts], lines : [A], model, opts });
+    const byId = Object.fromEntries(placements.map(p => [p.order.id, p]));
+    assert.ok(+byId.shorts.pieces[0].start < +byId.chino.pieces[0].start, 'Shorts (target 03/12) runs first, Chino after it');
+    assert.equal(byId.shorts.late, false);
+    // not ready: a Chino whose earliest start is 05/12 cannot take the 01/12 slot — another product runs there
+    const late = { id : 'chino2', qty : 1000, product : 'Chino', floor : D('2026-12-05'), target : D('2026-12-20', 18) };
+    const other = { id : 'pant', qty : 1000, product : 'Shorts', floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const { placements : p2 } = planAutoV2({ orders : [late, other], lines : [line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Chino' }] })], model, opts });
+    const m = Object.fromEntries(p2.map(p => [p.order.id, p]));
+    assert.equal(ymd(m.pant.pieces[0].start), '2026-12-01');
+    assert.equal(ymd(m.chino2.pieces[0].start), '2026-12-05');
+});
+
+test('a locked bar anchors the sequence: the gap before it prefers its product, the gap after it continues it', () => {
+    // line A: free 01/12–03/12 (before a locked Chino bar 04/12–06/12), then free from 07/12 after it
+    const A = line('A', 1000, { products : ['Chino', 'Shorts'], windows : [
+        { from : D('2026-12-01'), to : D('2026-12-04'), prevProduct : 'Shorts', nextProduct : 'Chino' },
+        { from : D('2026-12-07'), to : null, prevProduct : 'Chino', nextProduct : null }] });
+    const B = line('B', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] });
+    const o = { id : 'o1', qty : 2000, product : 'Chino', floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const { placements } = planAutoV2({ orders : [o], lines : [A, B], model, opts });
+    assert.equal(placements[0].pieces[0].line.id, 'A', 'the 2-day Chino run fills the gap before the locked Chino bar (no new change) instead of breaking B\'s Shorts sequence');
+    assert.equal(ymd(placements[0].pieces[0].start), '2026-12-01');
+});
+
+test('improvement pass: an adjacent swap removes a product change when both orders still finish by their targets', () => {
+    // one line, Shorts anchor before the window; orders by target: Chino (target earlier) then Shorts
+    const A = line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] });
+    const chino  = { id : 'chino',  qty : 1000, product : 'Chino',  floor : D('2026-12-01'), target : D('2026-12-10', 18) };
+    const shorts = { id : 'shorts', qty : 1000, product : 'Shorts', floor : D('2026-12-01'), target : D('2026-12-12', 18) };
+    const { placements, improved } = planAutoV2({ orders : [chino, shorts], lines : [A], model, opts });
+    const byId = Object.fromEntries(placements.map(p => [p.order.id, p]));
+    assert.ok(+byId.shorts.pieces[0].start < +byId.chino.pieces[0].start, 'Shorts first (continues the anchor), Chino second');
+    assert.equal(improved.swaps, 1);
+    assert.equal(improved.changesAfter, 1);
+    assert.ok(byId.chino.finish <= chino.target && byId.shorts.finish <= shorts.target);
+    // no swap when it would make the first order late
+    const chinoTight = { ...chino, target : D('2026-12-01', 18) };
+    const { placements : p2, improved : i2 } = planAutoV2({ orders : [chinoTight, shorts], lines : [line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] })], model, opts });
+    assert.equal(i2.swaps, 0);
+    assert.equal(ymd(p2.find(p => p.order.id === 'chino').pieces[0].start), '2026-12-01');
+});
+
+test('improvement pass: a move to a same-product gap on another line is bounded by the continuity delay — a gap 5 days later is left alone', () => {
+    const A = line('A', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-01'), to : null, prevProduct : 'Shorts' }] });
+    const B = line('B', 1000, { products : ['Chino', 'Shorts'], windows : [{ from : D('2026-12-06'), to : null, prevProduct : 'Chino' }] });
+    const o = { id : 'o1', qty : 1000, product : 'Chino', floor : D('2026-12-01'), target : D('2026-12-20', 18) };
+    const { placements, improved } = planAutoV2({ orders : [o], lines : [A, B], model, opts });
+    assert.equal(improved.moves, 0);
+    assert.equal(placements[0].pieces[0].line.id, 'A');
+    assert.equal(ymd(placements[0].pieces[0].start), '2026-12-01');
+});
+
+test('changeDelta and scheduleMetrics: changes per line, on time / late, idle hours', () => {
+    assert.equal(changeDelta('Chino', null, 'Chino'), 0);
+    assert.equal(changeDelta('Chino', null, 'Shorts'), 1);
+    assert.equal(changeDelta('Chino', 'Shorts', 'Chino'), 0, 'a change already existed between the neighbours');
+    assert.equal(changeDelta('Chino', 'Chino', 'Shorts'), 2);
+    const items = [
+        { order : 'o1', line : 'A', start : D('2026-12-01'), end : D('2026-12-02', 18), product : 'Chino', target : D('2026-12-05', 18) },
+        { order : 'o2', line : 'A', start : D('2026-12-04'), end : D('2026-12-05', 18), product : 'Shorts', target : D('2026-12-04', 18) },
+        { order : 'o3', line : 'A', start : D('2026-12-06'), end : D('2026-12-06', 18), product : 'Shorts', target : null }
+    ];
+    const m = scheduleMetrics(items, { workMinutes : (a, b) => (b - a) / 60000 / 2 });   // half the calendar time is working time
+    assert.equal(m.onTime, 2); assert.equal(m.late, 1); assert.equal(m.lateDays, 1);
+    assert.equal(m.changesByLine.A, 1);
+    assert.ok(m.idleHours > 0);
 });
