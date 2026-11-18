@@ -3100,10 +3100,15 @@ async function chApplyToOtherUnit(from, to, timeH) {
 // and a line figure on other dates prints its hours on the row (maroon) —
 // the unit-wide columns stay as they are
 // Working hours of every line on every day of the plan window, coloured on
-// the row (planner rule): the line's NORMAL hours (its own standard working
-// hours; the weekday's calendar hours when the line has none) → plain white;
-// a date given more than that (Change working hours, unit-wide or for the
-// line) → light grey; less → light red; a Friday / 0-hour day → grey "off".
+// the row (planner rule, 2026-11-18): the reference is the BOARD's normal
+// hours — the weekday's hours of the unit calendar, the "Normal hours"
+// column of the Change working hours dialog. A day nobody changed → plain
+// white (a line's own standard hours are its normal, no mark). A date the
+// planner changed (Change working hours, unit-wide or for the line):
+//   0 hours / a Friday            → deep ash with a crosshatch (off)
+//   a Friday given working hours  → light yellow with a crosshatch
+//   more than the normal hours    → ash, plain (the bars stay uncovered)
+//   less than the normal hours    → light red, plain
 // Only the colour marks the cell — the hours figure is NOT printed on the
 // board (the day header / Change working hours dialog carry the figures).
 function lineNormalHours(res, d) {
@@ -3130,13 +3135,17 @@ function applyLineHourRanges(s = getInstance()) {
         const day = new Date(d0); day.setHours(0, 0, 0, 0);
         const next = new Date(day); next.setDate(next.getDate() + 1);
         const ymd = ymdOf(day);
+        const weekly = hmToHours(calendarState.days[day.getDay()]?.hours || '0');
+        const uo = calendarState.overrides?.[ymd];
+        const unitH = uo != null && uo !== '' ? (Number(uo) || 0) : null;
         for (const res of lines) {
-            const normal = lineNormalHours(res, day);
-            const h = lineDayHoursOf(res, day);
+            const lo = lineOverrideOf(day, res.id);
+            const h = lo !== undefined ? lo : (unitH != null ? unitH : weekly);
             let cls = null;
             if (h <= 0) cls = 'mb-lh-off';
-            else if (h > normal + 0.01) cls = 'mb-lh-more';
-            else if (h < normal - 0.01) cls = 'mb-lh-less';
+            else if (weekly <= 0) cls = 'mb-lh-fri';
+            else if (h > weekly + 0.01) cls = 'mb-lh-more';
+            else if (h < weekly - 0.01) cls = 'mb-lh-less';
             if (!cls) continue;
             ranges.push({ id : `lh-${res.id}-${ymd}`, resourceId : res.id, startDate : day, endDate : next, name : '', cls });
         }
@@ -18115,6 +18124,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetLabel }}</b></span>
                     </div>
                     <div class="st-hint">Zero hours / নতুন hours 00:00 = ওই তারিখ ছুটি (bar গুলো টপকে যাবে) · Add time = overtime · Reset = আবার সাপ্তাহিক নিয়মে (Selected lines: ওই line আবার unit calendar অনুযায়ী) · Selected lines = শুধু ওই line-গুলোর hours বদলায়, বাকি board আগের মতো · বিদ্যমান bar move/re-plan করলে নতুন hours ধরবে · Save করলে position স্থায়ী হয়</div>
+                    <div class="st-hint ch-legend">Board-এ রং (Normal hours-এর সাথে তুলনা): <span class="ch-sw ch-sw-normal"></span> normal = সাদা · <span class="ch-sw ch-sw-off"></span> Friday / 0 ঘণ্টা = গাঢ় ছাই + cross · <span class="ch-sw ch-sw-fri"></span> Friday-তে কাজের ঘণ্টা = হালকা হলুদ + cross · <span class="ch-sw ch-sw-more"></span> Normal-এর বেশি = ছাই · <span class="ch-sw ch-sw-less"></span> Normal-এর কম = হালকা লাল</div>
                 </div>
             </div>
         </div>
@@ -21730,6 +21740,14 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 }
 .ch-apply { width : auto; margin : 0; padding : 7px 26px; }
 .ch-note  { color : #333; }
+/* colour legend of the line × day marks (same paints as the board) */
+.ch-legend { margin-top : 4px; }
+.ch-sw { display : inline-block; width : 14px; height : 11px; vertical-align : -2px; border : 1px solid #999; margin : 0 2px 0 4px; }
+.ch-sw-normal { background : #fff; }
+.ch-sw-off { background : repeating-linear-gradient(45deg, #8f8f8f 0 1px, transparent 1px 4px), repeating-linear-gradient(-45deg, #8f8f8f 0 1px, transparent 1px 4px), #bdbdbd; }
+.ch-sw-fri { background : repeating-linear-gradient(45deg, #d9c45a 0 1px, transparent 1px 4px), repeating-linear-gradient(-45deg, #d9c45a 0 1px, transparent 1px 4px), #fff3b0; }
+.ch-sw-more { background : #dedede; }
+.ch-sw-less { background : #ffd9d9; }
 
 /* Build up curve dialog (per-bar) */
 .lcd-dialog { width : 480px; max-width : 95vw; }
@@ -22967,11 +22985,13 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
         #f4f4f4 !important;
 }
 
-/* Selected-lines hours on ONE row: 0 hours = grey off crosshatch on that
-   line only; another figure = maroon crosshatch with the hours printed */
-/* Line × day working hours: normal = white (no mark); more than the
-   weekday's normal hours = light grey; less = light red; Friday / 0 h = grey */
+/* Line × day working hours (planner rule 2026-11-18, reference = the unit
+   calendar's weekday hours): unchanged day = white (no mark); 0 h / Friday =
+   deep ash crosshatch; a Friday given hours = light yellow crosshatch; more
+   than normal = plain ash; less = plain light red. The marks sit in the
+   resource-time-range canvas UNDER the bars — a bar is never crossed. */
 .b-sch-resource-time-range.mb-lh-off,
+.b-sch-resource-time-range.mb-lh-fri,
 .b-sch-resource-time-range.mb-lh-more,
 .b-sch-resource-time-range.mb-lh-less {
     display : flex; align-items : flex-end; justify-content : center;
@@ -22981,15 +23001,22 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 }
 .b-sch-resource-time-range.mb-lh-off {
     background :
-        repeating-linear-gradient(45deg, #bdbdbd 0 1px, transparent 1px 6px),
-        repeating-linear-gradient(-45deg, #bdbdbd 0 1px, transparent 1px 6px),
-        #d6d6d6 !important;
+        repeating-linear-gradient(45deg, #8f8f8f 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, #8f8f8f 0 1px, transparent 1px 6px),
+        #bdbdbd !important;
 }
-.b-sch-resource-time-range.mb-lh-more { background : #ececec !important; }
-.b-sch-resource-time-range.mb-lh-less { background : #ffe0e0 !important; }
+.b-sch-resource-time-range.mb-lh-fri {
+    background :
+        repeating-linear-gradient(45deg, #d9c45a 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, #d9c45a 0 1px, transparent 1px 6px),
+        #fff3b0 !important;
+}
+.b-sch-resource-time-range.mb-lh-more { background : #dedede !important; }
+.b-sch-resource-time-range.mb-lh-less { background : #ffd9d9 !important; }
 .b-sch-resource-time-range.mb-lh-more, .b-sch-resource-time-range.mb-lh-more * { color : #555 !important; font-weight : bold !important; }
 .b-sch-resource-time-range.mb-lh-less, .b-sch-resource-time-range.mb-lh-less * { color : #8c1a1a !important; font-weight : bold !important; }
-.b-sch-resource-time-range.mb-lh-off * { color : #777 !important; }
+.b-sch-resource-time-range.mb-lh-off * { color : #666 !important; }
+.b-sch-resource-time-range.mb-lh-fri * { color : #7a6400 !important; }
 
 /* Hours changed from the weekly default — FastReact's maroon crosshatch */
 .b-time-ranges-canvas .b-sch-range.mb-hours-changed {
