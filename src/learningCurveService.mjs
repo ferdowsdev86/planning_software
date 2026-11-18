@@ -166,3 +166,83 @@ export function learningDuration({ qty, smv, manpower, baseEffPct, dailyMinutes,
         dayPlan
     };
 }
+
+// ---------------------------------------------------------------------------
+// THE CURVE FALLS BEHIND WITH THE OUTPUT (planner, 2026-11-18).
+//
+// A ramp day that makes less than its target has not finished that day of the
+// curve: the curve is behind by  shortfall ÷ the day's target  of a day
+// (day 1: target 189, made 150 → 39 ÷ 189 = 0.20635 day). Every following
+// ramp day then stands that much earlier on the curve — its target is taken
+// between the previous day's target and its own:
+//
+//     revised(n) = target(n) − (target(n) − target(n−1)) × lag
+//     378 → 339,  661 → 603,  945 → 886,  then the full 945
+//
+// The lag adds up over the ramp days (each against ITS OWN target of the
+// day), a day above its target wins time back (never below 0), and a day at
+// the full target (the ramp is over) adds nothing — a slow day at peak is
+// pace, not learning.
+// ---------------------------------------------------------------------------
+
+/**
+ * The target of the curve at the fractional ramp day `x` (1 = the first ramp
+ * day; x ≤ 1 → the first day's target, x ≥ period + 1 → the full target).
+ * @param {number[]} pct — the curve steps (e.g. [20, 40, 70])
+ * @param {number} x — ramp day, 1-based, fractional (ramp day − lag)
+ * @param {(k:number)=>number} tOf — the plain target of ramp day k (1-based;
+ *        k > period → the full-day target)
+ */
+export function lagTarget(pct, x, tOf) {
+    const N = Array.isArray(pct) ? pct.length : 0;
+    if (!N) return tOf(1);
+    if (!(x > 1)) return tOf(1);
+    if (x >= N + 1) return tOf(N + 1);
+    const k  = Math.floor(x + 1e-9);
+    const fr = Math.max(0, x - k);
+    if (fr < 1e-9) return tOf(k);
+    const a = tOf(k), b = tOf(k + 1);
+    return Math.round(a + (b - a) * fr);
+}
+
+/**
+ * How far the curve is behind after the recorded ramp days.
+ * @param {Array<{ymd, target, actual}>} days — the ramp days WITH a record,
+ *        each with the target that day was planned with
+ * @returns {{lag:number, history:Array<{ymd,target,actual,part,lag}>}}
+ */
+export function curveLag(days) {
+    let lag = 0;
+    const history = [];
+    const list = [...(days || [])].filter(d => d && d.ymd).sort((a, b) => (a.ymd < b.ymd ? -1 : a.ymd > b.ymd ? 1 : 0));
+    for (const d of list) {
+        const t = Number(d.target), a = Number(d.actual);
+        if (!(t > 0) || d.actual == null || !Number.isFinite(a)) continue;
+        const part = Math.max(-1, Math.min(1, (t - a) / t));
+        lag = Math.max(0, lag + part);
+        history.push({ ymd : d.ymd, target : t, actual : a, part : Math.round(part * 1e5) / 1e5, lag : Math.round(lag * 1e5) / 1e5 });
+    }
+    return { lag : Math.round(lag * 1e5) / 1e5, history };
+}
+
+/**
+ * The production made so far laid over the plan days from the bar's start:
+ * which day the output ends in, what that day still owes, and how many plan
+ * days are done in full.
+ * @param {number[]} plan — pieces planned per working day, from the start
+ * @param {number} made — pieces made since that start
+ * @returns {{idx:number, rest:number, fullDays:number, over:number}}
+ *   idx  — index of the day the output ends in (plan.length when all is made)
+ *   rest — what that day's plan still owes
+ *   over — pieces beyond the whole plan
+ */
+export function consumePlan(plan, made) {
+    let left = Math.max(0, Number(made) || 0);
+    const list = Array.isArray(plan) ? plan : [];
+    for (let i = 0; i < list.length; i++) {
+        const q = Math.max(0, Number(list[i]) || 0);
+        if (left < q) return { idx : i, rest : q - left, fullDays : i, over : 0 };
+        left -= q;
+    }
+    return { idx : list.length, rest : 0, fullDays : list.length, over : left };
+}

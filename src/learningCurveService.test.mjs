@@ -195,3 +195,72 @@ test('production days never shorten a line offset and never create a ramp', () =
     // nothing produced: untouched
     assert.equal(afterProduction(first, 0, 3), first);
 });
+
+// ---------------------------------------------------------------------------
+// The curve falls behind with the output (planner, 2026-11-18)
+// ---------------------------------------------------------------------------
+import { lagTarget, curveLag, consumePlan } from './learningCurveService.mjs';
+
+const tOfPeak = (peak, pct) => k => (k > pct.length ? peak : Math.max(1, Math.floor(peak * pct[Math.max(1, k) - 1] / 100)));
+
+test("curve lag: the planner's table — day 1 made 150 of 189 → 378 / 661 / 945 become 339 / 603 / 886, then 945", () => {
+    const pct = [20, 40, 70], tOf = tOfPeak(945, pct);
+    assert.deepEqual([1, 2, 3, 4, 5].map(tOf), [189, 378, 661, 945, 945]);
+    const { lag } = curveLag([{ ymd : '2026-11-04', target : 189, actual : 150 }]);
+    assert.equal(lag, 0.20635);                       // 39 ÷ 189 of a day
+    assert.equal(lagTarget(pct, 2 - lag, tOf), 339);
+    assert.equal(lagTarget(pct, 3 - lag, tOf), 603);
+    assert.equal(lagTarget(pct, 4 - lag, tOf), 886);
+    assert.equal(lagTarget(pct, 5 - lag, tOf), 945);  // the ramp is over: the full target
+    assert.equal(lagTarget(pct, 6 - lag, tOf), 945);
+});
+
+test('curve lag: 27SUJCP006 — day 1 made 90 of 130 → 261 / 458 / 654 become 221 / 397 / 594', () => {
+    const pct = [20, 40, 70];
+    const tOf = k => [130, 261, 458, 654][Math.min(k, 4) - 1];
+    const { lag } = curveLag([{ ymd : '2026-11-04', target : 130, actual : 90 }]);
+    assert.ok(Math.abs(lag - 40 / 130) < 1e-4);
+    assert.deepEqual([2, 3, 4, 5].map(n => lagTarget(pct, n - lag, tOf)), [221, 397, 594, 654]);
+});
+
+test('curve lag: no lag = the plain curve; a day on target adds nothing', () => {
+    const pct = [20, 40, 70], tOf = tOfPeak(945, pct);
+    assert.deepEqual([1, 2, 3, 4].map(n => lagTarget(pct, n, tOf)), [189, 378, 661, 945]);
+    assert.equal(curveLag([{ ymd : 'a', target : 189, actual : 189 }]).lag, 0);
+    assert.equal(curveLag([]).lag, 0);
+});
+
+test('curve lag adds up day by day, a day above target wins time back, never below 0', () => {
+    // day 1: 40 of 130 short (0.30769) · day 2: 21 of 221 short (0.09502)
+    const two = curveLag([{ ymd : '2026-11-04', target : 130, actual : 90 }, { ymd : '2026-11-05', target : 221, actual : 200 }]);
+    assert.ok(Math.abs(two.lag - (40 / 130 + 21 / 221)) < 1e-4);
+    assert.equal(two.history.length, 2);
+    // day 2 above its target: 0.30769 − 0.1 = 0.20769
+    const back = curveLag([{ ymd : '2026-11-04', target : 130, actual : 90 }, { ymd : '2026-11-05', target : 200, actual : 220 }]);
+    assert.ok(Math.abs(back.lag - (40 / 130 - 0.1)) < 1e-4);
+    assert.equal(curveLag([{ ymd : 'a', target : 130, actual : 200 }]).lag, 0);
+    // a day with no output at all loses the whole day
+    assert.equal(curveLag([{ ymd : 'a', target : 130, actual : 0 }]).lag, 1);
+});
+
+test('curve lag: a day without a record is not judged', () => {
+    assert.equal(curveLag([{ ymd : '2026-11-04', target : 130, actual : null }]).lag, 0);
+    assert.equal(curveLag([{ ymd : '2026-11-04', target : 0, actual : 50 }]).lag, 0);
+});
+
+test('curve lag of more than a day: the curve steps back across days, never below day 1', () => {
+    const pct = [20, 40, 70], tOf = tOfPeak(1000, pct);
+    assert.equal(lagTarget(pct, 2 - 1.3, tOf), 200);          // 0.7 → still day 1
+    assert.equal(lagTarget(pct, 3 - 1.3, tOf), 340);          // 1.7 → 200 + 0.7 × 200
+    assert.equal(lagTarget(pct, 4 - 1.3, tOf), 610);          // 2.7 → 400 + 0.7 × 300
+    assert.equal(lagTarget(pct, 5 - 1.3, tOf), 910);          // 3.7 → 700 + 0.7 × 300
+    assert.equal(lagTarget(pct, 6 - 1.3, tOf), 1000);
+});
+
+test('consumePlan: where the output ends in the plan and what that day still owes', () => {
+    assert.deepEqual(consumePlan([130, 261, 458], 90), { idx : 0, rest : 40, fullDays : 0, over : 0 });
+    assert.deepEqual(consumePlan([130, 221, 397], 290), { idx : 1, rest : 61, fullDays : 1, over : 0 });
+    assert.deepEqual(consumePlan([130, 261], 130), { idx : 1, rest : 261, fullDays : 1, over : 0 });   // day 1 done in full
+    assert.deepEqual(consumePlan([130, 261], 0), { idx : 0, rest : 130, fullDays : 0, over : 0 });
+    assert.deepEqual(consumePlan([130, 261], 400), { idx : 2, rest : 0, fullDays : 2, over : 9 });
+});

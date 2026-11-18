@@ -240,6 +240,12 @@ function eventNotesPayload(raw, onHold, unitId = null) {
     // the order was already in production when the bar was planned: the
     // learning curve entered at this ramp day — a reload must not restart it
     if (Number(raw.lcDone) > 0) notes.lcDone = Number(raw.lcDone);
+    // the curve behind its plan (the ramp days' output so far — production
+    // cut) and the target each recorded ramp day was planned with: the next
+    // production entry is judged against the same targets after a reload
+    if (Number(raw.lcLag) > 0) notes.lcLag = Number(raw.lcLag);
+    if (Number(raw.lcRun) > 0) notes.lcRun = Number(raw.lcRun);   // days of a MANUAL curve its own production has run
+    if (raw.lcT && typeof raw.lcT === 'object' && Object.keys(raw.lcT).length) notes.lcT = raw.lcT;
     // SOP-PLN-01 production run (whole days) + milestone snapshot
     if (Number(raw.sopDur) > 0) notes.sop = { ...(raw.sop || {}), dur : Number(raw.sopDur) };
     // SMV the planner entered because ERP has none for the style
@@ -413,6 +419,9 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // ramp days the order had already consumed when this bar was planned
         // for its remaining quantity (the curve continues after them)
         lcDone     : Number(noteGroup.lcDone) > 0 ? Number(noteGroup.lcDone) : undefined,
+        lcLag      : Number(noteGroup.lcLag) > 0 ? Number(noteGroup.lcLag) : undefined,
+        lcRun      : Number(noteGroup.lcRun) > 0 ? Number(noteGroup.lcRun) : undefined,
+        lcT        : noteGroup.lcT && typeof noteGroup.lcT === 'object' ? { ...noteGroup.lcT } : undefined,
         groupIssue : orderId && e.group_issue ? String(e.group_issue) : undefined,
         // a projection bar whose order has confirm PO rows by now: their count,
         // quantity and actual ERP sewing output (server: attachProjectionTotals)

@@ -6,7 +6,7 @@ import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
-    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, holdCapacitySet, itemLabelOf, headerDayQty, prof
+    applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, lcAtDone, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
 import {
@@ -22,7 +22,7 @@ import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWind
 import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
-import { afterProduction } from './learningCurveService.mjs';
+import { curveLag, consumePlan } from './learningCurveService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
@@ -3409,6 +3409,9 @@ function applyCurveSnapshotToRec(s, rec, snap) {
         delete raw.lcManual;
         delete raw.lc;
     }
+    // a curve put on (or taken off) by hand starts fresh from the bar's
+    // start: the days an earlier curve had run and its lag are not this one's
+    delete raw.lcRun; delete raw.lcLag; delete raw.lcT; raw._lcBase = null;
     deriveLcForPlacement(s, raw, lid, new Date(rec.startDate));
     applyLineFormulaDuration(s, raw, lid);
     const start = new Date(rec.startDate);
@@ -11645,13 +11648,37 @@ function puDayPlan(s, ev, ymd) {
     if (!s || !raw || raw.stage) return 0;
     const lid = lineIdOf(s, ev);
     if (!lid || isHoldId(lid)) return 0;
-    try {
-        const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
-        const sim = simulateStrip(s, { ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0 }, lid, start);
-        const t = new Date(ymd + 'T00:00:00').getTime();
-        return sim.days.find(x => x.date.getTime() === t)?.q || 0;
+    return dayPlanMap(s, ev, lid)[ymd]?.q || 0;
+}
+
+// The plan figure of every date of a strip, for the production dialogs:
+//   · a date WITH production keeps the target it was planned with (the ramp
+//     day's target judged for the curve lag — raw.lcT — else the figure
+//     saved with the entry),
+//   · a date after the day the strip now starts on = the schedule of what is
+//     left (the curve behind its plan included — the revised targets),
+//   · every other date = the plan from the strip's production anchor.
+function dayPlanMap(s, ev, lid = lineIdOf(s, ev)) {
+    const raw = ev?.data?.raw;
+    const out = {};
+    if (!s || !raw || !lid || isHoldId(lid)) return out;
+    const key = String(ev.id);
+    for (const d of planFromAnchor(s, ev, lid)?.days || []) out[ymdOf(d.date)] = { q : d.q, off : d.off };
+    const startY = ymdOf(ev.startDate);
+    if (Number(raw.made) > 0) {
+        let rest = null;
+        try { rest = simulateStrip(s, raw, lid, ev.startDate); } catch { rest = null; }
+        for (const d of rest?.days || []) {
+            const y = ymdOf(d.date);
+            if (y > startY || !out[y]) out[y] = { q : d.q, off : d.off };
+        }
     }
-    catch { return 0; }
+    const rec = loadProdStore()[key] || {};
+    for (const y of Object.keys(rec)) {
+        const t = Number(raw.lcT?.[y]) || Number(savedPlanStore[key]?.[y]) || 0;
+        if (t > 0) out[y] = { q : t, off : false };
+    }
+    return out;
 }
 
 // Column filters of the "Update a date" table: text = contains; number
@@ -11844,6 +11871,64 @@ function applyErpOutput(s, store) {
     return { bars, qty };
 }
 
+const sameYmd = (a, b) => ymdOf(new Date(a)) === ymdOf(new Date(b));
+
+// The plan of a strip from its production ANCHOR (raw.origStart — the start
+// before production cut it, or the saved cut start after a reload) for what
+// was left there (qty − madeBase), with the ramp entry the bar had AT the
+// anchor: the days the output is laid over, and the plan figures the
+// production dialogs print for a date.
+function planFromAnchor(s, ev, lid = lineIdOf(s, ev), lag = undefined) {
+    const raw = ev?.data?.raw;
+    if (!s || !raw || !lid || isHoldId(lid)) return null;
+    const start = raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate);
+    const base  = raw.origStart && raw._lcBase != null ? (Number(raw._lcBase) || 0) : ranRampDays(raw);
+    try {
+        return simulateStrip(s, {
+            ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0, lcDone : base, lcRun : base, lc : lcAtDone(raw, base),
+            lcLag : lag === undefined ? raw.lcLag : lag     // the curve as far behind as the caller says
+        }, lid, start);
+    }
+    catch { return null; }
+}
+// ramp days a bar has behind it: a manual curve counts the days its OWN
+// production has run (lcRun), the automatic one the order's sewn days (lcDone)
+const isManualCurve = raw => !!(raw?.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length);
+const ranRampDays   = raw => Math.max(0, Math.floor(Number(isManualCurve(raw) ? raw?.lcRun : raw?.lcDone) || 0));
+
+// A strip cut by the OLD rule (output laid over the day at the peak target)
+// while it stood on its first ramp day: its saved start is too early in that
+// day (27SUJCP006: 09:23 instead of 14:55 — 113 of the 130 still on day 1).
+// Recognised only where nothing is in doubt — a ramp bar never cut by the
+// new rule (no lcT / lcLag), ALL of its production on its start day, the
+// day's plan figure saved with the entry — the bar is anchored back to where
+// that day's plan began, and the cut below puts it where the day's own plan
+// says the output ends.
+function repairPeakRateCut(s, ev, lid, made, dayRec) {
+    const raw = ev.data.raw;
+    if (raw._cutStart != null || raw.lcT || raw.lcLag != null || !(made > 0)) return;
+    if (!raw.lc?.applied || !Array.isArray(raw.lc.pct) || ranRampDays(raw) > 0 || (raw.lc.dayOffset || 0) > 0) return;
+    if (Math.abs(made - (Number(raw.madeBase) || 0)) > 0.5) return;            // only a bar as it was saved
+    const dates = Object.keys(dayRec).filter(y => Number(dayRec[y]) > 0);
+    const y0 = ymdOf(ev.startDate);
+    if (dates.length !== 1 || dates[0] !== y0 || Math.abs(Number(dayRec[y0]) - made) > 0.5) return;
+    const saved = Number(savedPlanStore[String(ev.id)]?.[y0]) || 0;
+    if (!(saved > made)) return;                                               // the day's plan was not reached
+    let d0 = null;
+    try { d0 = simulateStrip(s, { ...raw, made : 0, lcLag : undefined }, lid, startOfWorkDay(ev.startDate)).days.find(x => !x.off); }
+    catch { return; }
+    if (!d0 || ymdOf(d0.date) !== y0 || !(d0.fullTarget > 0)) return;
+    const we0   = d0.ws0 + d0.span;
+    const begin = we0 - Math.min(1, saved / d0.fullTarget) * d0.span;          // where that day's plan began
+    const right = begin + (made / d0.fullTarget) * d0.span;                    // where its output ends
+    if (ev.startDate.getTime() < begin - 60000 || right - ev.startDate.getTime() <= 60000) return;
+    raw.origStart = new Date(Math.round(begin));
+    raw.madeBase  = 0;
+    raw._lcBase   = 0;
+    raw._cutStart = ev.startDate.getTime();   // "new production" for the cut below: it runs, not the as-saved shortcut
+    raw._cutMade  = 0;
+}
+
 // `push` false (board load): a bar whose remaining end grew does NOT push
 // the bars behind it — a reload shows the saved plan as it is; the planner
 // sees the overlap and decides. A production entry (push true) still moves
@@ -11881,8 +11966,15 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             if (raw._cutStart != null && Math.abs(ev.startDate - raw._cutStart) > 60000) {
                 raw.origStart = new Date(ev.startDate);
                 raw.madeBase  = Number(raw._cutMade ?? made) || 0;
+                raw._lcBase   = ranRampDays(raw);
             }
             if (!raw.origStart) raw.origStart = new Date(ev.startDate);
+            // ramp days already behind the bar AT its anchor (the plan from
+            // the anchor is read with the ramp entry the bar had there)
+            if (raw._lcBase == null) raw._lcBase = ranRampDays(raw);
+            const barKey = String(ev.id);
+            const dayRec = store[barKey] || {};     // production per date (hand entries / ERP rows)
+            repairPeakRateCut(s, ev, lid, made, dayRec);
             const madeBase = Math.min(made, Math.max(0, Number(raw.madeBase) || 0));
             // Nothing made since the bar was saved (its start is already the
             // cut start, madeBase its production then): the bar stays EXACTLY
@@ -11899,45 +11991,106 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             const target   = Math.max(1, Math.floor(availMin / smv));
 
             const end = new Date(ev.endDate);
-            let rem = made - madeBase;
-            let newStart = rem > 0 ? null : new Date(raw.origStart);
-            const d = new Date(raw.origStart);
-            let guard = 0;
-            let newDays = 0;   // full production days the new output stands for
-            while (rem > 0 && guard++ < 200) {
-                if (!isOffDay(d)) {
-                    if (rem >= target) {
-                        rem -= target;
-                        newDays++;
+            const rem = made - madeBase;
+            // THE CUT FOLLOWS THE DAY'S OWN PLAN (planner, 2026-11-18,
+            // 27SUJCP006 on MBM Line 22: day 1 planned 130 on the 20 % ramp
+            // day, 90 made — "40 remain on day 1, it shows 113"). The output
+            // was laid over the days at the PEAK target (90 ÷ 654 of the day
+            // → 113 of the 130 still stood on day 1); it is laid over the
+            // plan of each day now — the ramp day's own target — so the day
+            // the output ends in keeps exactly what its plan still owes
+            // (130 − 90 = 40). And the ramp days that fell short put the
+            // curve BEHIND: lag = shortfall ÷ the day's target, summed
+            // (curveLag) — the following ramp days take the target between
+            // the previous step and their own (simulateStrip / lagTarget:
+            // 261 → 221, 458 → 397, 654 → 594, then the full 654).
+            const curveOn = !!(raw.lc && Array.isArray(raw.lc.pct) && raw.lc.pct.length && (raw.lc.applied || raw.lc.reason === 'in-production'));
+            const plan    = planFromAnchor(s, ev, lid);
+            const wdays   = plan ? plan.days.filter(x => !x.off && x.q > 0) : [];
+            // the first day of a strip already cut holds the REST of that day only
+            const restDay = madeBase > 0 && wdays.length ? ymdOf(wdays[0].date) : null;
+            if (curveOn) {
+                // Day by day, in date order: a recorded day of the plan is
+                // judged against the target the curve gave it with the lag
+                // the days BEFORE it left (so the result does not depend on
+                // the order the figures were typed in, and a corrected figure
+                // re-reads every later day); a recorded day the plan no
+                // longer shows (cut off before the saved start) or shows only
+                // the rest of (the saved start's day) keeps the target saved
+                // with it (raw.lcT / the entry's day plan).
+                const inPlan = new Map(wdays.map(x => [ymdOf(x.date), x]));
+                const T = { ...(raw.lcT || {}) };
+                const judged = [];
+                let lag = 0;
+                for (const y of Object.keys(dayRec).filter(k => dayRec[k] != null).sort()) {
+                    let t = 0;
+                    if (inPlan.has(y) && y !== restDay) {
+                        const x = planFromAnchor(s, ev, lid, lag)?.days.find(d => ymdOf(d.date) === y);
+                        t = x && !x.off && x.ramping && x.factor < 1 ? x.q : 0;
+                        if (!(t > 0)) delete T[y];
                     }
-                    else {
-                        const sw = startOfWorkDay(d);
-                        const ew = endOfWorkDay(d);
-                        newStart = new Date(sw.getTime() + (rem / target) * (ew.getTime() - sw.getTime()));
-                        rem = 0;
-                        break;
-                    }
+                    else if (Number(T[y]) > 0) t = Number(T[y]);
+                    else if (y === restDay && wdays[0].ramping && wdays[0].factor < 1) t = Number(savedPlanStore[barKey]?.[y]) || 0;
+                    if (!(t > 0)) continue;
+                    T[y] = t;
+                    judged.push({ ymd : y, target : t, actual : Number(dayRec[y]) || 0 });
+                    lag = curveLag(judged).lag;
                 }
-                d.setDate(d.getDate() + 1);
-                if (d >= end) break;
+                if (Object.keys(T).length) raw.lcT = T; else delete raw.lcT;
+                if (lag > 0) raw.lcLag = lag; else delete raw.lcLag;
             }
-            if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
-            if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
-            // A strip that has STARTED (its start is behind us) stands for
-            // what is left, and that is sewn from NOW on: the remaining piece
-            // starts at the current working minute (the next working day
-            // after hours / on an off day) — never in the past, and never at
-            // the planned rate's point in the future (production ahead of
-            // plan put the rest days away and pushed the followers behind
-            // it). A strip that has not started yet keeps the planned-rate
-            // cut from its own start (planner, 2026-11-18, 26H1LEV939)
-            if ((Number(raw.qty) || 0) - made > 0 && ev.startDate <= new Date()) {
-                newStart = clampIntoLineWorkWindow(new Date(), lid);
-                // …in the line's first free moment from now: when another
-                // strip is running on the line right now (the line moved on
-                // while this one waited for its last pieces), the rest goes
-                // behind the strips that occupy the line, never on top of
-                // them ("the remaining goes to the next slot with capacity")
+            let newStart = new Date(raw.origStart);
+            let newDays = 0;       // plan days the output covers in full
+            let cutDay = null;     // { day, rest } the day the output ends in, what it still owes
+            if (rem > 0) {
+                const seq = wdays.map(x => {
+                    const y = ymdOf(x.date);
+                    return curveOn && y !== restDay && dayRec[y] != null && Number(raw.lcT?.[y]) > 0 ? Number(raw.lcT[y]) : x.q;
+                });
+                const c = consumePlan(seq, rem);
+                newDays = c.fullDays;
+                if (c.idx < wdays.length) cutDay = { day : wdays[c.idx], rest : c.rest };
+                else newStart = new Date(end.getTime() - 3600000);
+            }
+            // The ramp days already run are learning days done: the plan
+            // days the output covers in full, counted on from the bar's
+            // anchor — at least the full days the peak rate puts behind the
+            // WHOLE output (survives earlier saves, which lost the ramp
+            // history). The ramp continues from the stage after them, never
+            // restarts (26H1LEV939). raw.lcDone is saved with the bar.
+            // A manual curve runs on the bar's OWN days: its count (raw.lcRun)
+            // is the plan days its own output covers, nothing else.
+            const manualLc = isManualCurve(raw);
+            const doneDays = manualLc ? (Number(raw._lcBase) || 0) + newDays
+                : Math.max((Number(raw._lcBase) || 0) + newDays, Math.floor(made / target), Math.floor(Number(raw.sewnDays) || 0));
+            const doneKey = manualLc ? 'lcRun' : 'lcDone';
+            if (doneDays > 0) raw[doneKey] = doneDays; else delete raw[doneKey];
+            if (raw.lc && Array.isArray(raw.lc.pct)) raw.lc = lcAtDone(raw, doneDays);
+            if (cutDay) {
+                // inside the cut day: the day's window from its start (the
+                // anchor's own time on the anchor's day) holds what the day
+                // can still make under the curve as it stands now — the bar
+                // starts where exactly the rest of the day's plan is left
+                // (half a piece of margin, so the day reads the whole figure)
+                const d0  = cutDay.day;
+                const we0 = d0.ws0 + d0.span;
+                const dayStart = Math.max(d0.ws0, sameYmd(d0.date, raw.origStart) ? +raw.origStart : d0.ws0);
+                let ft = d0.fullTarget;
+                try { ft = simulateStrip(s, raw, lid, new Date(dayStart)).days.find(x => !x.off)?.fullTarget || ft; } catch { /* the plan's figure */ }
+                const at = we0 - ((cutDay.rest + 0.5) / Math.max(1, ft)) * d0.span;
+                newStart = new Date(Math.floor(Math.min(we0 - 60000, Math.max(dayStart, at)) / 1000) * 1000);
+            }
+            if (newStart >= end && rem > 0) newStart = new Date(end.getTime() - 3600000);
+            // Production FAR ahead of the plan: the plan's point for the rest
+            // lies on a later day than today while the strip is running —
+            // the rest is sewn from NOW, in the line's first free moment
+            // (behind the strips that occupy the line, never on top of them:
+            // "the remaining goes to the next slot with capacity"), not days
+            // away. A rest the plan puts on today or earlier stays where
+            // its day is: that day shows what it still owes.
+            const nowT = new Date();
+            if ((Number(raw.qty) || 0) - made > 0 && ev.startDate <= nowT && ymdOf(newStart) > ymdOf(nowT)) {
+                newStart = clampIntoLineWorkWindow(nowT, lid);
                 const others = barsOnLine(s, lid)
                     .filter(o => o !== ev && o.data?.raw && !o.data.raw.stage && !o.data.raw.parked && o.endDate > newStart)
                     .sort((a, b) => a.startDate - b.startDate);
@@ -11946,25 +12099,6 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                     else break;
                 }
                 newStart = clampIntoLineWorkWindow(newStart, lid);
-            }
-
-            // A bar in production NEVER ramps again (planner, 2026-11-18,
-            // 26H1LEV939: 6,844 of 7,314 made, the 470 left were scheduled at
-            // 20 % / 40 % — Wed 144, Thu 326 — instead of inside Wednesday;
-            // on a bar that crossed Friday the restarted ramp pushed the rest
-            // over the off day to Saturday). The production days already run
-            // are learning days done: the full days the planned rate puts
-            // behind the WHOLE output (made ÷ day target — survives earlier
-            // saves, which lost the ramp history), at least the days this
-            // cut consumed; the ramp continues from the stage after them
-            // (afterProduction — the same rule as deriveLcForPlacement /
-            // applyLearningCurves). raw.lcDone is saved with the bar.
-            const doneDays = Math.max(newDays, Math.floor(made / target));
-            if (doneDays > 0) {
-                raw.lcDone = Math.max(Number(raw.lcDone) || 0, doneDays);
-                if (raw.lc && Array.isArray(raw.lc.pct)) {
-                    raw.lc = { ...raw.lc, ...afterProduction(raw.lc, raw.lcDone, Number(raw.lc.period) || raw.lc.pct.length) };
-                }
             }
 
             // End = when the REMAINING qty is made from the cut start (same
@@ -12139,7 +12273,9 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     const start = firstAct ? startOfWorkDay(new Date(`${firstAct}T00:00:00`))
         : (made > 0 && raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate));
     let sim;
-    try { sim = simulateStrip(s, { ...raw, made : 0 }, lid, start); }
+    // (the ORIGINAL targets: the plain curve — the lag the output has put on
+    // the bar's schedule since, raw.lcLag, is not part of the original plan)
+    try { sim = simulateStrip(s, { ...raw, made : 0, lcLag : undefined }, lid, start); }
     catch { return null; }
     const peakOf = d => (d.factor > 0 ? Math.round(d.fullTarget / d.factor) : d.fullTarget);
     const baseline = sim.days.map(d => ({ ymd : ymdOf(d.date), off : d.off, target : d.q, fullTarget : d.fullTarget, factor : d.factor, lcDay : d.lcDay, peak : peakOf(d) }));
@@ -12637,17 +12773,12 @@ async function spBuild() {
         if (!dbRows.length) {
             for (const [d, q] of Object.entries(store[evId] || {})) actual[d] = { qty : Number(q) || 0, erp : false, manual : true, lines : new Set() };
         }
-        // plan per date: the production model from the bar's ORIGINAL start
-        // with the full qty — past days keep their plan figure
+        // plan per date (dayPlanMap): a date with production keeps the
+        // target it was planned with, the dates after the strip's present
+        // start show the schedule of what is left — the revised targets when
+        // the output has put the curve behind
         const lid = lineIdOf(s, rec);
-        const start = raw.origStart ? new Date(raw.origStart) : new Date(rec.startDate);
-        let planDays = [];
-        try {
-            if (lid && !isHoldId(lid)) planDays = simulateStrip(s, { ...raw, made : raw.origStart ? (Number(raw.madeBase) || 0) : 0 }, lid, start).days;
-        }
-        catch { planDays = []; }
-        const plan = {};
-        for (const d of planDays) plan[ymdOf(d.date)] = { q : d.q, off : d.off };
+        const plan = dayPlanMap(s, rec, lid);
         const dates = [...new Set([...Object.keys(plan), ...Object.keys(actual)])].sort();
         const today = ymdOf(new Date());
         const res  = s.resourceStore.getById(lid);
@@ -12717,6 +12848,9 @@ async function spSave() {
         store[head.evId] ||= {};
         for (const r of changed) store[head.evId][r.d] = Math.max(0, Number(r.prodQty) || 0);
         localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
+        // the day's plan figure goes to the DB with the entry (day_plan_qty)
+        // — known here at once: the curve lag judges the day against it
+        for (const r of changed) if (r.planQ > 0 && !(Number(savedPlanStore[head.evId]?.[r.d]) > 0)) (savedPlanStore[head.evId] ||= {})[r.d] = r.planQ;
         pushUndo(s, `production update ${head.po}`);
         applyProdUpdates(s);
         const payload = changed.map(r => ({

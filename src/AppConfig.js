@@ -69,7 +69,7 @@ function flushWidth(scheduler, ev, renderData) {
     if (!(nextLeft > renderData.left + renderData.width)) return;
     renderData.width = nextLeft - renderData.left;
 }
-import { pickLearningCurve, buildLineLearning, learningDuration, afterProduction } from './learningCurveService.mjs';
+import { pickLearningCurve, buildLineLearning, learningDuration, afterProduction, lagTarget } from './learningCurveService.mjs';
 import { plan as sopPlan } from './sopTimeline.mjs';
 
 // SOP-PLN-01 backward timeline for one bar, using ITS line's capacity params
@@ -184,8 +184,19 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
     const dailyTarget = Math.max(1, Math.floor(manpower * mins * effPct / 100 / smv));
     const res = scheduler?.resourceStore?.getById?.(lineId);
     const lineHours = Number(res?.data?.hours) || LINE_BY_ID[lineId]?.hours;
-    const lc = !isHoldId(lineId) && raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc : null;
+    // The curve BEHIND its plan (planner, 2026-11-18): raw.lcLag = the days
+    // the output of the ramp days so far has put the curve back (shortfall ÷
+    // the day's target, summed — learningCurveService.curveLag, set by the
+    // production cut and saved with the bar). Every ramp day from `start` on
+    // then stands that much earlier on the curve: its target lies between the
+    // previous step's and its own (lagTarget). A bar past its ramp days
+    // ('in-production') keeps ramping until the lag is worked off. No lag =
+    // the plain curve, nothing else changes.
+    const lcRaw = !isHoldId(lineId) && Array.isArray(raw.lc?.pct) && raw.lc.pct.length ? raw.lc : null;
+    const lag = lcRaw ? Math.max(0, Number(raw.lcLag) || 0) : 0;
+    const lc = lcRaw && (lcRaw.applied || (lag > 0 && lcRaw.reason === 'in-production')) ? lcRaw : null;
     const period = lc ? lc.pct.length : 0;
+    const off0 = !lc ? 0 : (lc.applied ? (lc.dayOffset || 0) : Math.max(lc.dayOffset || 0, Number(raw.lcDone) || 0, Number(raw.lcRun) || 0));
     // Production already made (Daily production update / ERP) has cut the bar
     // from the left — only the REMAINING qty is still to be sewn from `start`
     let remaining = Math.max(0, (Number(raw.qty ?? raw.orderQty) || 0) - (Number(raw.made) || 0));
@@ -203,10 +214,18 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
         // > 0 = it works even on a unit off day; else the unit calendar
         const lo  = lineOverrideOf(d, lineId);
         const off = lo !== undefined ? lo <= 0 : (isOffDay(d) || hrsF <= 0);
-        const rampIdx = lc ? (lc.dayOffset || 0) + workIdx : period;
-        const ramping = !!lc && !off && rampIdx < period;
-        const factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
-        const fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        const rampIdx = lc ? off0 + workIdx : period;
+        let ramping = !!lc && !off && rampIdx < period;
+        let factor  = ramping ? lc.pct[rampIdx] / 100 : 1;
+        let fullTarget = Math.max(1, Math.floor(dailyTarget * factor * hrsF));
+        if (lc && lag > 0 && !off) {
+            // the plain target of ramp day k on THIS date (k > period = the full day)
+            const tOf   = k => Math.max(1, Math.floor(dailyTarget * (k > period ? 1 : lc.pct[Math.max(1, k) - 1] / 100) * hrsF));
+            const peakT = tOf(period + 1);
+            fullTarget = lagTarget(lc.pct, rampIdx + 1 - lag, tOf);
+            ramping    = fullTarget < peakT;
+            factor     = peakT > 0 ? fullTarget / peakT : 1;
+        }
         const ws0  = startOfWorkDay(d), we0 = workEndOfDay(d);
         const span = Math.max(60000, we0 - ws0);
         const ws   = Math.max(ws0.getTime(), t0.getTime());
@@ -219,7 +238,7 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
             remaining -= q;
             if (remaining <= 0) finish = new Date(ws + (q / fullTarget) * span);
         }
-        days.push({ date : new Date(d), off, q, fullTarget, factor, winF, span, lcDay : ramping && q > 0 ? rampIdx + 1 : 0 });
+        days.push({ date : new Date(d), off, q, fullTarget, factor, winF, span, ws0 : ws0.getTime(), ramping, lcDay : ramping && q > 0 ? rampIdx + 1 : 0 });
         if (!off) workIdx++;
         d.setDate(d.getDate() + 1);
     }
@@ -227,7 +246,7 @@ export function simulateStrip(scheduler, raw, lineId, start, limitEnd = null) {
         const lastW = [...days].reverse().find(x => !x.off);
         if (lastW) { lastW.q += remaining; remaining = 0; }
     }
-    return { days, finish, dailyTarget, effPct };
+    return { days, finish, dailyTarget, effPct, lag };
 }
 
 export const holdCapacitySet = scheduler => !!scheduler?.resourceStore?.records?.some(r => r.data?.holdingRow && r.data.capSet);
@@ -1227,11 +1246,19 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                     typeKey : typeKeyById.get(ev.id) || raw.productType || '_Default' }
                 : plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
+            // the line-sequence decision itself (before the days already
+            // sewn move the entry on) — the production cut lays the output
+            // over the plan from the bar's anchor with it (lcAtDone)
+            const seqInfo = { applied : info.applied, reason : info.reason, dayOffset : info.dayOffset };
+            const activeCurve = manual || curve;
             // planned for the remaining quantity of an order already in
             // production: the ramp entered after the days already sewn
-            // (saved with the bar) — the line sequence alone would restart it
-            if (!manual && Number(raw.lcDone) > 0) info = afterProduction(info, raw.lcDone, curve.period);
-            const activeCurve = manual || curve;
+            // (saved with the bar) — the line sequence alone would restart it.
+            // A manual curve runs on the bar's OWN days: only the days its
+            // own production has already run (raw.lcRun — the production
+            // cut) move it on, never the order's earlier sewing
+            const ranDays = manual ? Number(raw.lcRun) || 0 : Number(raw.lcDone) || 0;
+            if (ranDays > 0) info = rampAfter(info, ranDays, Number(activeCurve.period) || activeCurve.pct.length);
             // Multiple strip rule: the first bar of a run is the reference;
             // every later strip of the same style + product on the line is
             // auto-linked to it (live) instead of ramping again. Links a
@@ -1253,6 +1280,7 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
                 applied     : info.applied,
                 reason      : info.reason,
                 dayOffset   : info.dayOffset,
+                base        : seqInfo,
                 producedDays : info.producedDays || undefined,
                 typeKey     : String(info.typeKey).split('|')[0],
                 runKey      : info.typeKey,
@@ -1291,6 +1319,25 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
 }
 
 /**
+ * The bar's ramp state with `done` ramp days behind it — from the line-
+ * sequence decision kept in raw.lc.base (the production cut reads the plan
+ * from the bar's anchor with the entry the bar had THERE, not with the entry
+ * later cuts moved it to).
+ */
+export function lcAtDone(raw, done) {
+    const lc = raw?.lc;
+    if (!lc || !Array.isArray(lc.pct)) return lc;
+    const seq = lc.base || { applied : lc.applied, reason : lc.reason, dayOffset : lc.dayOffset };
+    const per = Number(lc.period) || lc.pct.length;
+    return { ...lc, ...seq, producedDays : undefined, ...rampAfter(seq, done, per) };
+}
+// afterProduction, a manual curve still ramping keeps its own name
+function rampAfter(seq, done, per) {
+    const out = afterProduction(seq, done, per);
+    return seq?.reason === 'manual' && out?.applied ? { ...out, reason : 'manual' } : out;
+}
+
+/**
  * Ramp state for ONE bar about to be placed at `startDate` on `lineId` —
  * compares against the bars already on the line (run walk-back included) and
  * writes raw.lc so applyLineFormulaDuration computes a curve-aware duration
@@ -1302,11 +1349,16 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     // A manually applied Build up curve travels with the bar — moving it
     // never clears or re-derives the manual ramp
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
+        const seq = { applied : true, reason : 'manual', dayOffset : 0 };
+        const per = Number(raw.lcManual.period) || raw.lcManual.pct.length;
         raw.lc = {
-            applied : true, reason : 'manual', dayOffset : 0,
+            ...seq,
+            // the days of this curve the bar's own production has already run
+            ...(Number(raw.lcRun) > 0 ? rampAfter(seq, raw.lcRun, per) : null),
+            base : seq,
             typeKey : lcRunKey(raw, lineId),
             profileName : raw.lcManual.name,
-            period : Number(raw.lcManual.period) || raw.lcManual.pct.length,
+            period : per,
             pct : raw.lcManual.pct,
             learnFrac : 0, dayPlan : [], viaPlacement : true
         };
@@ -1328,7 +1380,7 @@ export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     const finish = info => {
         const out = done > 0 ? afterProduction(info, done, curve.period) : info;
         if (done > 0) raw.lcDone = done; else delete raw.lcDone;
-        raw.lc = { ...base, ...out };
+        raw.lc = { ...base, ...out, base : { applied : info.applied, reason : info.reason, dayOffset : info.dayOffset } };
     };
     // Bars already on the line that start BEFORE the placement point — from
     // the per-line cache (one indexed pass per board change). A scan of every
@@ -3542,6 +3594,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Applied', applied ? '<span class="tip-badge tip-ok">Yes</span>' : '<span class="tip-badge tip-pend">No</span>')}
           ${R('Reason', enc(reasonLbl))}
           ${R('Learning day', enc(dayLbl))}
+          ${Number(r.lcLag) > 0 ? R('Curve behind', `<b>${enc(Number(r.lcLag).toFixed(2))}</b> day <span class="t4dim" title="A ramp day below its target leaves the curve behind by shortfall ÷ the day's target; every following ramp day takes the target between the previous step and its own">— ramp output below target; the coming ramp days are planned lower</span>`, 't4-full') : ''}
           ${R('Profile', enc(applied ? (lc.profileName || '—') : '—'))}
           ${R('Product type', enc(lc.typeKey || ptype || '—'))}
           ${R('Base eff', enc(Number(r.stripEff) > 0 && Number(r.stripEff) !== 100
