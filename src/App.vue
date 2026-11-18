@@ -542,7 +542,7 @@ async function verifySavedPlan(s) {
         const data = await loadFromApi(currentUnitId.value || null);
         const db = new Map();
         for (const e of data.events || []) { if (e.dbId != null && !e.raw?.stage) db.set(String(e.dbId), e); }
-        const missing = [], moved = [], seen = new Set();
+        const missing = [], moved = [], movedRows = [], seen = new Set();
         for (const ev of s.eventStore.records) {
             const raw = ev.data?.raw;
             if (!raw || raw.stage) continue;
@@ -554,13 +554,40 @@ async function verifySavedPlan(s) {
             const ds = new Date(row.startDate), de = new Date(row.endDate);
             if (Math.abs(+ev.startDate - +ds) > 60000 || Math.abs(+ev.endDate - +de) > 60000) {
                 moved.push(`${ev.name} ${raw.qty}: screen ${ev.startDate.toISOString().slice(0, 16)} / DB ${ds.toISOString().slice(0, 16)}`);
+                movedRows.push({ id, start : ds, end : de, line : row.resourceId || null });
             }
         }
         const extra = [...db.values()].filter(e => !seen.has(String(e.dbId))).map(e => `${e.name} ${e.raw?.qty} (db-${e.dbId})`);
-        return { missing, moved, extra, dbBars : db.size };
+        return { missing, moved, movedRows, extra, dbBars : db.size };
     }
     catch (e) { return { error : e.message, missing : [], moved : [], extra : [] }; }
 }
+// After a Save: the bars the server stored at another place / on another
+// line are set to the stored position on the screen (no reload — nothing
+// else on the board is touched) and the baseline follows
+function applyStoredPositions(s, rows) {
+    if (!s || !Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    beginBoardInteraction(s, 'batch');
+    try {
+        for (const r of rows) {
+            const rec = s.eventStore.getById(r.id);
+            if (!rec) continue;
+            const raw = rec.data?.raw;
+            rec.set({ startDate : new Date(r.start), endDate : new Date(r.end), duration : elapsedDays(r.start, r.end) });
+            if (raw) { raw.start = new Date(r.start); raw.end = new Date(r.end); }
+            if (r.line && lineIdOf(s, rec) !== r.line) assignEventToLine(s, rec, r.line);
+            if (rec.data) { rec.data.dbStart = +r.start; rec.data.dbEnd = +r.end; }
+            n++;
+        }
+    }
+    finally { endBoardInteraction(s); }
+    invalidateBarsByLine();
+    setBoardBaseline(s);
+    try { s.refreshRows?.(); } catch { /* repaint on the next change */ }
+    return n;
+}
+
 // Bars whose on-screen span / line differ from the DB row they were loaded
 // from (api.js keeps dbStart / dbEnd / dbLine on every DB event). Empty =
 // the load changed nothing. window.__mbm.loadDiff() for support.
@@ -2418,10 +2445,23 @@ async function refreshProdStoreFromDb() {
     catch { return false; }   // endpoint offline — the cached figures stay
 }
 
+// A reload asked for while a strip is in the planner's hand (carry / drag)
+// waits until the strip is put down — the board never reloads under a move
+let pendingReload = null;
 async function reloadBoardForUnit(b, { force = false } = {}) {
     const s = getInstance();
     if (!s || !b) return;
     const uid = b.unitId ?? 3;
+    if (carried.value || uiHooks.boardUserActive) {
+        pendingReload = { b, force };
+        if (!reloadWaitTimer) reloadWaitTimer = setInterval(() => {
+            if (carried.value || uiHooks.boardUserActive) return;
+            clearInterval(reloadWaitTimer); reloadWaitTimer = null;
+            const p = pendingReload; pendingReload = null;
+            if (p) reloadBoardForUnit(p.b, { force : p.force });
+        }, 500);
+        return;
+    }
 
     // This unit's board is ALREADY live — re-opening it from the menu must
     // not reapply cached data: that repacks the board and throws away pinned
@@ -6872,6 +6912,9 @@ let   lockTimer       = null;
 let   lockWorker      = null;        // worker ticks aren't throttled in background tabs
 let   lockActive      = false;       // false = heartbeat stopped: in-flight replies are stale
 let   lockInFlight    = null;        // the acquire currently on the wire (release waits for it)
+let   lockHeldAt      = 0;           // last heartbeat that confirmed OUR edit lock
+let   lockLostAt      = null;        // when our lock was last reported lost (a blip until LOCK_BLIP_MS)
+const LOCK_BLIP_MS    = 3 * 60 * 1000;
 
 async function syncBoardLock() {
     if (!lockActive) return;
@@ -6915,15 +6958,26 @@ async function syncBoardLock() {
                 if (sb) autoCompleteFinished(sb).catch(() => { /* reported by its toasts */ });
             }
             if (wasReadOnly) {
-                toast('Edit access granted — board reloading from the saved plan (test changes discarded)', 'ok');
-                // The sandbox experiments must never be saved by accident:
-                // start editing from the DB truth, not the what-if state
-                if (currentBoard.value) {
-                    reloadBoardForUnit(currentBoard.value, { force : true });
+                // RULE (planner, 2026-11-18): the board never reloads by itself
+                // while the planner works. The edit lock coming back after a
+                // short gap (a heartbeat that did not get through, an API
+                // restart) is a blip — the planner's unsaved work stays. Only a
+                // long read-only spell WITH test changes on the screen starts
+                // again from the saved plan (test changes must never be saved)
+                const blip = lockLostAt && Date.now() - lockLostAt < LOCK_BLIP_MS;
+                if (blip || !boardHasUnsaved()) {
+                    toast('Edit access back — your board stays as it is', 'ok');
+                }
+                else {
+                    toast('Edit access granted — board reloading from the saved plan (test changes discarded)', 'ok');
+                    if (currentBoard.value) reloadBoardForUnit(currentBoard.value, { force : true });
                 }
             }
+            lockLostAt = null;
+            lockHeldAt = Date.now();
         }
         else {
+            if (!boardReadOnly.value && lockHeldAt) lockLostAt = Date.now();
             boardReadOnly.value   = true;
             boardLockHolder.value = r.holder;
             if (!wasReadOnly) {
@@ -11694,7 +11748,8 @@ function applySewingActuals(s = getInstance()) {
         if (fc) n++;
     }
     sewingFeed.forecasts = n;
-    s.refreshRows?.(true);
+    // never repaint under a strip in the planner's hand
+    if (!carried.value && !uiHooks.boardUserActive) { try { s.refreshRows?.(); } catch { /* repaint on the next change */ } }
     return n;
 }
 
@@ -12569,6 +12624,7 @@ function carryOrderToBoard(row) {
 // shallowRef: a deep ref would wrap the Bryntum record in a reactive Proxy
 // and break identity comparisons against store records
 const carried  = shallowRef(null);
+let reloadWaitTimer = null;   // reloadBoardForUnit: waits for the carried strip to be put down
 // Plain holders (shallowRef): nothing in the template watches them, so a
 // pointer move must not run Vue's reactivity on every frame
 const carryPreview = shallowRef({ valid : false, barBox : null });
@@ -14844,7 +14900,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -15117,20 +15173,24 @@ async function saveToDbInner(s) {
             // reloaded from the DB — never discovered two reloads later
             const chk = await verifySavedPlan(s);
             if (chk.error) toast(`⚠ Saved, but the read-back check could not run: ${chk.error}`, 'warn');
-            else if (chk.missing.length || chk.moved.length || chk.extra.length) {
+            else if (chk.missing.length || chk.extra.length) {
                 console.warn('[save check] screen ≠ saved plan', chk);
-                toast(`⚠ SAVE CHECK: ${chk.missing.length} bar(s) on the screen are NOT in the saved plan, ${chk.moved.length} stored at another place, ${chk.extra.length} in the DB but not on the screen — reloading the saved plan (details: console [save check])`, 'error');
+                toast(`⚠ SAVE CHECK: ${chk.missing.length} bar(s) on the screen are NOT in the saved plan, ${chk.extra.length} in the DB but not on the screen — reloading the saved plan (details: console [save check])`, 'error');
                 await reloadBoardForUnit(currentBoard.value, { force : true });
                 return;
             }
-            // …or kept a locked bar as saved although the board sent a change
-            // for it: either way the screen must show what is REALLY stored,
-            // so the next reload changes nothing
-            if (res.adjusted?.length || Number(res.lockedSkipped) > 0) {
+            else if (chk.moved.length) {
+                // RULE (planner, 2026-11-18: "the board reloads by itself while
+                // I move strips — stop it"): a bar the server stored elsewhere
+                // (10-day lock kept it, an overlap shift) is PUT BACK IN PLACE on
+                // the screen — no board reload, nothing else on the screen moves
+                console.warn('[save check] bars stored elsewhere — shown as stored', chk.moved);
+                const patched = applyStoredPositions(s, chk.movedRows);
                 toast(res.adjusted?.length
-                    ? `⚠ ${res.adjusted.length} bar(s) were shifted by the server to avoid an overlap — reloading the saved plan`
-                    : `⚠ ${res.lockedSkipped} change(s) to 10-day-lock bar(s) were not saved (the lock kept them) — reloading the saved plan`, 'warn');
-                await reloadBoardForUnit(currentBoard.value, { force : true });
+                    ? `⚠ ${patched} bar(s) were shifted by the server to avoid an overlap — shown as stored`
+                    : Number(res.lockedSkipped) > 0
+                        ? `⚠ ${res.lockedSkipped} change(s) to 10-day-lock bar(s) were not saved (the lock kept them) — those bars are shown as stored`
+                        : `⚠ ${patched} bar(s) are shown where the server stored them`, 'warn');
             }
         }
         else toast(`Save failed: ${res.error}`, 'error');
