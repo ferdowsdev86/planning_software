@@ -26,6 +26,17 @@
 // production sync uses for the bars of one PO) — never the whole output from
 // every row.
 //
+// A LOT = the rows of one ERP order in one colour sewn in one unit. The ERP
+// books a lot's sewing output to whichever PO the bundle was cut under, not
+// PO by PO: 26H1LEV475 colour 00AFB-0006 — PO 1000659550 (4,309 pcs) booked
+// 4,515, PO 2500076718 (54) booked 26, 2500076881 (50) booked 32; 6,437 pcs
+// sewn on 5,945 and still two POs looked short, the colour's bar stayed at
+// 96 % and 224 pcs "remaining" (planner, 2026-11-18: "sewing complete, the
+// strip is not deducted properly"). So every PO's own output fills its own
+// rows first; what a PO has booked BEYOND its rows' quantity fills the lot's
+// other rows, earliest delivery first. Output booked under another colour or
+// another order is still an issue, never moved.
+//
 // Ambiguous → the row is reported and kept out of new allocations:
 //   * the PO is no longer in mr_purchase_order;
 //   * output of the PO is booked under another colour or another order than
@@ -68,7 +79,8 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
         byPo.get(k).push({ clr : Number(o.clr_id) || 0, unit : Number(o.prod_unit_id) || 0, order : Number(o.order_id) || 0, qty : Number(o.qty) || 0,
             days : Number(o.days) || 0, last : o.last_date ? String(o.last_date).slice(0, 10) : null });
     }
-    const groups = new Map();   // identity → { rows, sewn, issue }
+    const groups = new Map();   // identity → { rows, sewn, issue, lot }
+    const lots   = new Map();   // lot (order : colour : unit) → { groups, rows }
     for (const r of rows || []) {
         const qty = Math.max(0, Number(r.order_quantity) || 0);
         const key = sewKeyOfRow(r);
@@ -105,17 +117,48 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
             };
             groups.set(id, g);
         }
-        g.rows.push({ id : r.id, qty, ship : String(r.shipment_date || '9999'), n : Number(r.id) || 0 });
+        const row = { id : r.id, qty, ship : String(r.shipment_date || '9999'), n : Number(r.id) || 0, g, take : 0 };
+        g.rows.push(row);
+        // the row's lot: its ERP order + colour, sewn in its production unit
+        const lotKey = `${Number(po.order_id) || 0}:${clr}:${unit || Number(r.prod_unit ?? r.unit_id) || 0}`;
+        let lot = lots.get(lotKey);
+        if (!lot) { lot = { groups : new Set(), rows : [] }; lots.set(lotKey, lot); }
+        lot.groups.add(g);
+        lot.rows.push(row);
     }
-    for (const g of groups.values()) {
-        // one deduction for the identity: earliest delivery first, each row up to its own quantity
-        g.rows.sort((a, b) => a.ship.localeCompare(b.ship) || (a.n - b.n));
-        let rest = Math.max(0, g.sewn);
-        for (const r of g.rows) {
-            const take = Math.min(r.qty, rest);
-            rest -= take;
-            out.set(r.id, { sewn : take, remaining : Math.max(0, r.qty - take), issue : g.issue,
-                days : g.sewn > 0 ? g.days : 0, last : g.sewn > 0 ? g.last : null });
+    const byDelivery = (a, b) => a.ship.localeCompare(b.ship) || (a.n - b.n);
+    for (const lot of lots.values()) {
+        // 1. one deduction per identity: its own rows, earliest delivery first, each up to its own quantity
+        let pool = 0, poolDays = 0, poolLast = null;
+        for (const g of lot.groups) {
+            g.rows.sort(byDelivery);
+            let rest = Math.max(0, g.sewn);
+            for (const r of g.rows) {
+                r.take = Math.min(r.qty, rest);
+                rest -= r.take;
+            }
+            // 2. booked beyond the PO's own rows: the lot's pool
+            if (rest > 0) {
+                pool += rest;
+                poolDays = Math.max(poolDays, g.days);
+                if (g.last && (!poolLast || g.last > poolLast)) poolLast = g.last;
+            }
+        }
+        // 3. the pool fills the lot's short rows, earliest delivery first
+        const spilled = new Set();
+        if (pool > 0) {
+            for (const r of [...lot.rows].sort(byDelivery)) {
+                if (!(pool > 0)) break;
+                const add = Math.min(r.qty - r.take, pool);
+                if (add > 0) { r.take += add; pool -= add; spilled.add(r); }
+            }
+        }
+        for (const r of lot.rows) {
+            const g = r.g;
+            const own = g.sewn > 0;
+            out.set(r.id, { sewn : r.take, remaining : Math.max(0, r.qty - r.take), issue : g.issue,
+                days : Math.max(own ? g.days : 0, spilled.has(r) ? poolDays : 0),
+                last : [own ? g.last : null, spilled.has(r) ? poolLast : null].filter(Boolean).sort().pop() || null });
         }
     }
     return out;

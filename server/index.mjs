@@ -330,15 +330,38 @@ async function sewingOutputForRows(rows, q = pool) {
     }
     const poIds = [...new Set([...keys.map(k => k.poId), ...[...osColor.values()].map(o => Number(o.po_id))].filter(v => Number(v) > 0))];
     const poMaster = new Map(), output = [];
+    const PO_SQL = `SELECT po_id, clr_id, mr_order_entry_order_id AS order_id FROM \`${ERP_DB}\`.mr_purchase_order`;
     for (const part of chunks(poIds)) {
-        const [[pos], [outRows]] = await Promise.all([
-            q.query(`SELECT po_id, clr_id, mr_order_entry_order_id AS order_id FROM \`${ERP_DB}\`.mr_purchase_order WHERE po_id IN (${part.map(() => '?').join(',')})`, part),
-            q.query(sewingOutputSql(ERP_DB, part.length), part)
-        ]);
+        const [pos] = await q.query(`${PO_SQL} WHERE po_id IN (${part.map(() => '?').join(',')})`, part);
         for (const r of pos) poMaster.set(Number(r.po_id), r);
+    }
+    // The whole LOT, whatever subset of rows the caller holds: the ERP books a
+    // colour's output to whichever of its POs the bundle was cut under, so
+    // what one PO has beyond its quantity belongs to the colour's other POs
+    // (reconcileSewingOutput). A bar's group, the pool of one unit or a
+    // tooltip sees only some of those rows — the other POs of the same ERP
+    // orders and their planning rows are read here, so every caller gets the
+    // same figure for a row (26H1LEV743 colour 0018: PO 1000668294 sits in
+    // the pool with 222 pcs booked on 210 — its 12 belong to the bar's PO).
+    const orderIds = [...new Set([...poMaster.values()].map(p => Number(p.order_id)).filter(v => v > 0))];
+    for (const part of chunks(orderIds)) {
+        const [pos] = await q.query(`${PO_SQL} WHERE mr_order_entry_order_id IN (${part.map(() => '?').join(',')})`, part);
+        for (const r of pos) poMaster.set(Number(r.po_id), r);
+    }
+    const allPo = [...poMaster.keys()];
+    const have  = new Set(rows.map(r => Number(r.id)));
+    const lotRows = [];
+    for (const part of chunks(allPo.map(String))) {
+        const [sib] = await q.query(
+            `SELECT id, erp_po_id, order_quantity, prod_unit, unit_id, shipment_date FROM planning_orders
+              WHERE erp_po_id IN (${part.map(() => '?').join(',')}) AND planning_status != 'cancelled'`, part);
+        for (const r of sib) { if (!have.has(Number(r.id))) { have.add(Number(r.id)); lotRows.push(r); } }
+    }
+    for (const part of chunks(allPo)) {
+        const [outRows] = await q.query(sewingOutputSql(ERP_DB, part.length), part);
         output.push(...outRows);
     }
-    return reconcileSewingOutput(rows, poMaster, osColor, output);
+    return reconcileSewingOutput([...rows, ...lotRows], poMaster, osColor, output);
 }
 
 // A confirm bar stands for PO rows (its anchor row, or the rows of its colour
