@@ -544,13 +544,26 @@ function finishBoardLoad(uid, data, s) {
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
 }
+// Debounced: the load, every later application of production figures
+// (applyProdUpdates) and a lock arrival ask for ONE sweep; a sweep already
+// running is followed by one more pass (figures may have changed meanwhile)
+let finishedSweepTimer = null, finishedSweepRunning = false, finishedSweepAgain = false;
 function scheduleFinishedSweep(s) {
+    if (!s) return;
     if (boardReadOnly.value) { autoCompleteAfterLock = true; return; }
-    setTimeout(() => {
+    clearTimeout(finishedSweepTimer);
+    finishedSweepTimer = setTimeout(async () => {
         const sb = getInstance();
         if (!sb || sb !== s) return;
         if (carried.value || uiHooks.boardUserActive) { autoCompleteAfterLock = true; return; }
-        autoCompleteFinished(sb).catch(() => { /* reported by its toasts */ });
+        if (finishedSweepRunning) { finishedSweepAgain = true; return; }
+        finishedSweepRunning = true;
+        try { await autoCompleteFinished(sb); }
+        catch { /* reported by its toasts */ }
+        finally {
+            finishedSweepRunning = false;
+            if (finishedSweepAgain) { finishedSweepAgain = false; scheduleFinishedSweep(sb); }
+        }
     }, 1500);
 }
 // After a Save: the plan as the DB now holds it, read back and compared with
@@ -2364,12 +2377,18 @@ function applyApiBoardData(s, data) {
     // move, grow, shrink, leave or appear on its own at load time: no
     // projection → confirm swap, no bar-end re-fit, no full-quantity
     // completion, no gap packing, no sequential settle, no PCD + 8 repair, no
-    // work-window clamp (api.js boardSpanFromDb), no production cut and no
-    // finished-strip sweep. Those rules are applied by Auto plan (and only to
-    // what the run is told to touch), by the production sync the planner
-    // runs, or by the planner's own actions. Production figures are only
-    // ANNOTATED here (made / progress on the bar); loadDiffFromDb below
-    // checks the result against the DB rows and shouts if anything differs.
+    // work-window clamp (api.js boardSpanFromDb), no production cut. Those
+    // rules are applied by Auto plan (and only to what the run is told to
+    // touch), by the production sync the planner runs, or by the planner's
+    // own actions. Production figures are only ANNOTATED here (made /
+    // progress on the bar); loadDiffFromDb below checks the result against
+    // the DB rows and shouts if anything differs. The ONE exception, by the
+    // planner's own rule (2026-11-18, "a saved bar leaves the board only
+    // through the production update or the planner"): a strip whose
+    // production covers its plan quantity has nothing left to make and is
+    // removed by the finished-strip sweep once the edit lock is ours
+    // (scheduleFinishedSweep → autoCompleteFinished, DB rows cancelled by
+    // that save — screen and DB stay one picture).
     beginBoardInteraction(s, 'batch');
     try { applyProdUpdates(s, { push : false, cut : false }); }
     finally { endBoardInteraction(s); }
@@ -11910,6 +11929,9 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
     refreshGrandTotals(s);
     // the daily progress / forecast follows every production change
     try { if (sewingFeed.unitId != null) applySewingActuals(s); } catch (e) { console.warn('[forecast] not refreshed:', e.message); }
+    // …and a strip whose production now covers its plan quantity leaves the
+    // board (planner's rule 2026-11-18; needs the edit lock, debounced)
+    if (boardUnitCache[currentUnitId.value]?.ready) scheduleFinishedSweep(s);
 }
 
 // ---------------------------------------------------------------------------
