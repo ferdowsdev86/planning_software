@@ -22,6 +22,7 @@ import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWind
 import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
+import { afterProduction } from './learningCurveService.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
@@ -11880,10 +11881,12 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             let newStart = rem > 0 ? null : new Date(raw.origStart);
             const d = new Date(raw.origStart);
             let guard = 0;
+            let newDays = 0;   // full production days the new output stands for
             while (rem > 0 && guard++ < 200) {
                 if (!isOffDay(d)) {
                     if (rem >= target) {
                         rem -= target;
+                        newDays++;
                     }
                     else {
                         const sw = startOfWorkDay(d);
@@ -11898,6 +11901,25 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             }
             if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
             if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
+
+            // A bar in production NEVER ramps again (planner, 2026-11-18,
+            // 26H1LEV939: 6,844 of 7,314 made, the 470 left were scheduled at
+            // 20 % / 40 % — Wed 144, Thu 326 — instead of inside Wednesday;
+            // on a bar that crossed Friday the restarted ramp pushed the rest
+            // over the off day to Saturday). The production days already run
+            // are learning days done: the full days the planned rate puts
+            // behind the WHOLE output (made ÷ day target — survives earlier
+            // saves, which lost the ramp history), at least the days this
+            // cut consumed; the ramp continues from the stage after them
+            // (afterProduction — the same rule as deriveLcForPlacement /
+            // applyLearningCurves). raw.lcDone is saved with the bar.
+            const doneDays = Math.max(newDays, Math.floor(made / target));
+            if (doneDays > 0) {
+                raw.lcDone = Math.max(Number(raw.lcDone) || 0, doneDays);
+                if (raw.lc && Array.isArray(raw.lc.pct)) {
+                    raw.lc = { ...raw.lc, ...afterProduction(raw.lc, raw.lcDone, Number(raw.lc.period) || raw.lc.pct.length) };
+                }
+            }
 
             // End = when the REMAINING qty is made from the cut start (same
             // model as the schedule dialog); a finished strip keeps its end
