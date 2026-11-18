@@ -99,13 +99,43 @@ test('several rows of one PO identity: the output is deducted ONCE, earliest del
 test('ambiguous: output under another colour / order, or a PO that is gone → reported', () => {
     const r = reconcileSewingOutput(
         [{ id : 1, erp_po_id : '10', order_quantity : 1000 }, { id : 2, erp_po_id : '99', order_quantity : 50 }, { id : 3, erp_po_id : '11', order_quantity : 700 }],
-        new Map([[10, po(5)], [11, po(6, 901)]]), new Map(),
+        new Map([[10, po(5)], [12, po(8)], [11, po(6, 901)]]), new Map(),      // colour 8 is another PO of order 900
         [{ po_id : 10, clr_id : 5, prod_unit_id : 1, order_id : 900, qty : 200 }, { po_id : 10, clr_id : 8, prod_unit_id : 1, order_id : 900, qty : 90 },
          { po_id : 11, clr_id : 6, prod_unit_id : 1, order_id : 777, qty : 40 }]);
     assert.equal(r.get(1).sewn, 200);
     assert.match(r.get(1).issue, /90 pcs .* another colour/);
     assert.match(r.get(2).issue, /not in mr_purchase_order/);
     assert.match(r.get(3).issue, /40 pcs .* another order/);
+});
+
+test('colour alias: output of a PO under a colour id NO PO of the order carries is the PO\'s own (live case 26H1LEV596)', () => {
+    // PO 1000652836 (po_id 70296, 526 pcs) is colour 23203 "0057W-0014"; the
+    // sewing output — 552 pcs — is booked under 23904, a second master entry
+    // of the same colour; the order (43137) has this one PO
+    const master = new Map([[70296, po(23203, 43137)]]);
+    const out = [{ po_id : 70296, clr_id : 23904, prod_unit_id : 1, order_id : 43137, qty : 552, days : 2, last_date : '2026-10-17' }];
+    const r = reconcileSewingOutput([{ id : 5386, erp_po_id : '70296', order_quantity : 526, prod_unit : 1, shipment_date : '2026-11-05' }], master, new Map(), out);
+    assert.deepEqual(r.get(5386), { sewn : 526, remaining : 0, issue : null, days : 2, last : '2026-10-17' });
+    // own colour + alias add up; the colour of ANOTHER PO of the order stays an issue
+    const r2 = reconcileSewingOutput(
+        [{ id : 1, erp_po_id : '10', order_quantity : 1000 }, { id : 2, erp_po_id : '12', order_quantity : 300 }],
+        new Map([[10, po(5)], [12, po(8)]]), new Map(),
+        [{ po_id : 10, clr_id : 5, prod_unit_id : 1, order_id : 900, qty : 200 }, { po_id : 10, clr_id : 77, prod_unit_id : 1, order_id : 900, qty : 150 },
+         { po_id : 10, clr_id : 8, prod_unit_id : 1, order_id : 900, qty : 90 }]);
+    assert.equal(r2.get(1).sewn, 350);
+    assert.match(r2.get(1).issue, /90 pcs .* another colour/);
+    assert.equal(r2.get(2).sewn, 0);                          // booked under PO 10: never moved to PO 12
+    // an alias of another ORDER's booking is still another order
+    const r3 = reconcileSewingOutput([{ id : 1, erp_po_id : '10', order_quantity : 1000 }], new Map([[10, po(5)]]), new Map(),
+        [{ po_id : 10, clr_id : 77, prod_unit_id : 1, order_id : 555, qty : 60 }]);
+    assert.equal(r3.get(1).sewn, 0);
+    assert.match(r3.get(1).issue, /60 pcs .* another order/);
+    // an OS colour row keeps the exact colour match
+    const r4 = reconcileSewingOutput([{ id : 9, erp_po_id : 'os-c-4', order_quantity : 500, prod_unit : 3 }],
+        new Map([[10, po(5)]]), new Map([[4, { po_id : 10, clr_id : 5 }]]),
+        [{ po_id : 10, clr_id : 77, prod_unit_id : 3, order_id : 900, qty : 120 }]);
+    assert.equal(r4.get(9).sewn, 0);
+    assert.match(r4.get(9).issue, /120 pcs .* another colour/);
 });
 
 test('a projection row has no PO: nothing deducted, no issue', () => {

@@ -37,10 +37,21 @@
 // other rows, earliest delivery first. Output booked under another colour or
 // another order is still an issue, never moved.
 //
+// A colour ALIAS: the ERP's colour master holds one colour under several ids
+// (26H1LEV596 — PO 1000652836 is colour 23203 "0057W-0014", its 552 pcs of
+// sewing output are booked under 23904 "0057W-0014LOOSEOVERALLS…"; the order
+// has ONE PO, the whole order was sewn and its bar still stood on the board
+// with nothing made — planner, 2026-11-18). po_id is the PO identity (one PO
+// in one colour); the colour on a production record is a second label. When
+// NO PO of the order carries that colour, the pieces cannot belong to another
+// PO of the order — they are the PO's own output and count. (In-house PO
+// rows only; an OS colour row keeps the exact colour match.)
+//
 // Ambiguous → the row is reported and kept out of new allocations:
 //   * the PO is no longer in mr_purchase_order;
-//   * output of the PO is booked under another colour or another order than
-//     the PO's own (it cannot be attributed to a colour row with certainty).
+//   * output of the PO is booked under the colour of ANOTHER PO of the same
+//     order, or under another order than the PO's own (it cannot be
+//     attributed to a colour row with certainty).
 // --------------------------------------------------------------------------
 
 // sewing output filter, for a daily_productions alias
@@ -79,6 +90,14 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
         byPo.get(k).push({ clr : Number(o.clr_id) || 0, unit : Number(o.prod_unit_id) || 0, order : Number(o.order_id) || 0, qty : Number(o.qty) || 0,
             days : Number(o.days) || 0, last : o.last_date ? String(o.last_date).slice(0, 10) : null });
     }
+    // the colours the POs of each ERP order carry (colour alias rule)
+    const orderClrs = new Map();
+    for (const p of poMaster?.values?.() || []) {
+        const o = Number(p.order_id) || 0, c = Number(p.clr_id) || 0;
+        if (!o || !c) continue;
+        if (!orderClrs.has(o)) orderClrs.set(o, new Set());
+        orderClrs.get(o).add(c);
+    }
     const groups = new Map();   // identity → { rows, sewn, issue, lot }
     const lots   = new Map();   // lot (order : colour : unit) → { groups, rows }
     for (const r of rows || []) {
@@ -100,7 +119,10 @@ export function reconcileSewingOutput(rows, poMaster, osColor, output) {
         let g = groups.get(id);
         if (!g) {
             const mine = (byPo.get(poId) || []).filter(o => !unit || o.unit === unit);
-            const okClr = o => !clr || !o.clr || o.clr === clr;
+            // an alias: a colour id no PO of the order carries (in-house PO rows)
+            const sibling = orderClrs.get(Number(po.order_id) || 0);
+            const alias = o => key.kind === 'mr' && !!sibling && !sibling.has(o.clr);
+            const okClr = o => !clr || !o.clr || o.clr === clr || alias(o);
             const okOrd = o => !po.order_id || !o.order || o.order === Number(po.order_id);
             const good = mine.filter(o => okClr(o) && okOrd(o));
             const bad  = mine.filter(o => !(okClr(o) && okOrd(o)));
