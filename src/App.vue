@@ -11851,16 +11851,24 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     // ERP, applyProdUpdates) — never less than the quantity production already
     // cut off the saved start (madeBase: the bar stands for the rest only)
     const made = Math.max(Number(raw.made) || 0, Number(raw.madeBase) || 0);
-    const hasAct = !!actDays && Object.keys(actDays).length > 0;
-    if (!hasAct && !(made > 0)) return null;
+    // Only REAL production opens a progress / forecast view: board
+    // production, a hand entry, or ERP output ATTRIBUTED to this strip's
+    // line. PO-level rows the ERP could not put on a line (24 sample pcs
+    // booked lineless on GSL 300137284000) never replace the planned
+    // schedule table with a progress panel on their own — the dialog keeps
+    // showing the strip's plan, exactly like the reference system.
+    const realKeys = Object.keys(actDays || {}).filter(ymd => actDays[ymd]?.attributed !== false).sort();
+    if (!realKeys.length && !(made > 0)) return null;
     const qty = Number(raw.qty) || 0;
     // ORIGINAL daily targets: the day model with the full quantity from the
     // ACTUAL run start (the first day with output — learning days count from
     // there), else from the bar's saved start; a day plan saved with a
     // production entry (day_plan_qty) wins over the model (buildProgressRows)
-    const firstAct = Object.keys(actDays || {}).sort()[0] || null;
+    // the run start = the first day with ATTRIBUTED output (an unattributed
+    // PO-level row must not pull the whole baseline to its date); otherwise
     // the saved production anchor only counts on a bar that HAS production —
     // a stale origStart from an earlier position must not shift the baseline
+    const firstAct = realKeys[0] || null;
     const start = firstAct ? startOfWorkDay(new Date(`${firstAct}T00:00:00`))
         : (made > 0 && raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate));
     let sim;
