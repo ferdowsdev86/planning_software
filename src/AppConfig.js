@@ -3159,6 +3159,17 @@ function refreshTip4(e, r, data) {
     }
 }
 
+// ERP text arrives HTML-escaped (the ERP stores 53" as `53&#34;`): decode it
+// before our own encoding, or the tooltip shows the entity itself
+const ERP_ENTITIES = { quot : '"', amp : '&', lt : '<', gt : '>', apos : "'", nbsp : ' ' };
+export function unescapeErpText(v) {
+    return String(v ?? '').replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(quot|amp|lt|gt|apos|nbsp));/gi, (m, dec, hex, name) => {
+        if (name) return ERP_ENTITIES[name.toLowerCase()];
+        const code = dec ? Number(dec) : parseInt(hex, 16);
+        return code > 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : m;
+    });
+}
+
 function renderTip4(e, r, { detail, poSummary, pending = false }) {
             const enc  = StringHelper.encodeHtml;
             const ymd  = d => {
@@ -3343,7 +3354,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Wash', washLbl)}
           ${R('Techpack', tpHtml)}
         </div>
-        ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(s.stl_description || s.stl_garment_description)}</i>`, 't4-full') : ''}
+        ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(unescapeErpText(s.stl_description || s.stl_garment_description))}</i>`, 't4-full') : ''}
       </div>
     </div>
   </div>

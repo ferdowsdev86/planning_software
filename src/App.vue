@@ -23026,6 +23026,39 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .t4-hist-erp .t4-hist-txt    { color : #0d2b72; font-weight : 600; }
 .t4-hist-note .t4-hist-txt   { font-style : italic; }
 
+/* Nothing ever leaves the card — the last word on tooltip overflow (planner,
+   2026-11-18, second time: "whatever the information is, it must be INSIDE
+   the card; long text wraps, it is never cut"). The label / value rows wrap
+   already; these rules close the remaining ways out:
+   (1) the card is never laid out wider than the tooltip;
+   (2) the two-column grid's columns are capped at half the card — plain 1fr
+       is minmax(auto, 1fr), so ONE value that will not wrap pushes the right
+       column out of the card (the 26SSID-056 "Desc" cut);
+   (3) tables shrink to the card: text cells wrap, only the bounded number
+       cells stay on one line;
+   (4) badges, pills and links wrap instead of running out;
+   (5) the tab strip takes a second row in a narrow tooltip (it scrolled
+       sideways with a hidden scrollbar — a tab could be out of sight). */
+.mb-tip4 .tip4-tabs { flex-wrap : wrap; overflow-x : visible; }
+.b-tooltip.mb-fr-tip .b-tooltip-content > .mb-tip4 { flex : 1 1 auto; min-width : 0; max-width : 100%; }
+.mb-tip4 { overflow-wrap : anywhere; box-sizing : border-box; }
+.mb-tip4 .tip4-2col { grid-template-columns : minmax(0, 1fr) minmax(0, 1fr); }
+.mb-tip4 .tip4-card-body,
+.mb-tip4 .tip4-rows,
+.mb-tip4 .tip4-po-block { min-width : 0; max-width : 100%; }
+.mb-tip4 table { width : 100%; max-width : 100%; table-layout : auto; }
+.mb-tip4 th,
+.mb-tip4 td { white-space : normal; overflow-wrap : anywhere; }
+.mb-tip4 .tip4-po-qty,
+.mb-tip4 .t4num { white-space : nowrap; }
+.mb-tip4 .tip4-badge,
+.mb-tip4 .tip-badge,
+.mb-tip4 .tip4-po-pill,
+.mb-tip4 .tip-link,
+.mb-tip4 .t4-order-no { white-space : normal; overflow-wrap : anywhere; max-width : 100%; min-width : 0; }
+.mb-tip4 .tip4-hdr-name,
+.mb-tip4 .tip4-hdr-badges { max-width : 100%; }
+
 /* Legacy single-section tooltip still works */
 .mb-tip {
     font-size   : 12px;
