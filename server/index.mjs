@@ -44,6 +44,63 @@ const pool = mysql.createPool({
     // after the OS's long TCP timeout — the breaker below takes over
     connectTimeout  : 6000
 });
+// Every connection of THIS API announces itself to the DB guard (see
+// installDbGuard): the triggers let a bar be cancelled / a row be deleted only
+// on a session that set @mbm_api. A legacy API instance, a stray script or a
+// DB client without it is refused by the database itself.
+pool.on('connection', conn => { try { conn.query('SET @mbm_api = 1'); } catch { /* guard off */ } });
+
+// --------------------------------------------------------------------------
+// DB GUARD (planner rule, 2026-11-18): "a bar saved on the board is removed
+// or hidden by nobody but the planner (unplan) or production (complete) — any
+// old or new sync that does it must be stopped." A second API instance with
+// old code (outside AWS) kept cancelling CEIL's GSL / SMS bars 7-8 minutes
+// after every Save and deleting the OS confirm rows it did not know. The DB
+// now refuses, for any session without @mbm_api: cancelling a planning
+// event, deleting a planning event / assignment, deleting a planning_orders
+// row. Installed at start-up (idempotent); MBM_DB_GUARD=0 skips it.
+// --------------------------------------------------------------------------
+const DB_GUARD = process.env.MBM_DB_GUARD !== '0';
+const DB_GUARD_SQL = [
+    `CREATE OR REPLACE TRIGGER mbm_guard_event_cancel BEFORE UPDATE ON planning_events FOR EACH ROW
+     BEGIN
+       IF NEW.event_status = 'cancelled' AND (OLD.event_status IS NULL OR OLD.event_status <> 'cancelled') AND @mbm_api IS NULL THEN
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'MbmPlan guard: a saved bar is cancelled only through the MbmPlan API (SET @mbm_api = 1 for admin work)';
+       END IF;
+     END`,
+    `CREATE OR REPLACE TRIGGER mbm_guard_event_delete BEFORE DELETE ON planning_events FOR EACH ROW
+     BEGIN
+       IF @mbm_api IS NULL THEN
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'MbmPlan guard: planning events are deleted only through the MbmPlan API (SET @mbm_api = 1 for admin work)';
+       END IF;
+     END`,
+    `CREATE OR REPLACE TRIGGER mbm_guard_assign_delete BEFORE DELETE ON planning_assignments FOR EACH ROW
+     BEGIN
+       IF @mbm_api IS NULL THEN
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'MbmPlan guard: planning assignments are deleted only through the MbmPlan API (SET @mbm_api = 1 for admin work)';
+       END IF;
+     END`,
+    `CREATE OR REPLACE TRIGGER mbm_guard_order_delete BEFORE DELETE ON planning_orders FOR EACH ROW
+     BEGIN
+       IF @mbm_api IS NULL THEN
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'MbmPlan guard: planning order rows (ERP mirror, os-c rows included) are never deleted by another process (SET @mbm_api = 1 for admin work)';
+       END IF;
+     END`
+];
+async function installDbGuard() {
+    if (!DB_GUARD) { console.log('[db-guard] off (MBM_DB_GUARD=0)'); return false; }
+    try {
+        for (const sql of DB_GUARD_SQL) await pool.query(sql);
+        const [rows] = await pool.query(
+            `SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'mbm_guard_%'`);
+        console.log(`[db-guard] ${rows.length} trigger(s) in place on ${DB_NAME}: cancels / deletes of plan rows are refused for sessions without @mbm_api`);
+        return true;
+    }
+    catch (e) {
+        console.error(`[db-guard] could not install the triggers (${e.message}) — a DBA with the TRIGGER / SUPER privilege can run them by hand:\n${DB_GUARD_SQL.join(';\n')}`);
+        return false;
+    }
+}
 
 // --------------------------------------------------------------------------
 // DB-unreachable breaker for the per-hover endpoints (bar tooltip ERP detail,
@@ -2207,6 +2264,10 @@ async function findHiddenEvents(conn) {
                e.start_date, e.end_date, e.planned_quantity,
                o.id AS o_id, o.order_code, COALESCE(o.prod_unit, o.unit_id) AS order_unit,
                o.shipment_date, p.shipment_date AS proj_shipment_date,
+               o.planning_status AS o_status,
+               /* a mirror row the last ERP sync did not refresh: its PO / colour
+                  left the ERP — the row is kept (never deleted), the bar stays */
+               (o.synced_at IS NOT NULL AND o.synced_at < (SELECT MAX(x.synced_at) FROM planning_orders x) - INTERVAL 1 HOUR) AS o_stale,
                r.unit_id AS line_unit, r.resource_name
         FROM planning_events e
         LEFT JOIN planning_orders o ON o.id = e.planning_order_id
@@ -2288,6 +2349,7 @@ async function findHiddenEvents(conn) {
         else if (code && notProd.has(code)) reason = 'order dropped in ERP (qty 0) or sample / 2nd quality';
         else if (code && notSource.has(code)) reason = 'order source no longer qualifies (handed to OS, outside MBM / CEIL / AQL, or kept from its other source)';
         else if (e.planning_order_id != null && e.o_id == null) reason = 'order row no longer exists';
+        else if (e.o_id != null && (e.o_status === 'cancelled' || Number(e.o_stale))) reason = 'PO / colour no longer in ERP — row kept, bar stays until you remove it';
         else if (e.planning_order_id == null && code && known && !known.has(code)) reason = 'order unknown to ERP';
         else if (e.o_id != null && e.line_unit != null && e.order_unit != null
             && Number(e.order_unit) !== Number(e.line_unit) && unitRuleOn(e.line_unit)) {
@@ -2544,10 +2606,12 @@ async function retireHiddenEvents(conn, tag = 'sync', { only = null, list = null
 // finds is written on the bar (notes.erpFlag — the board shows it red-dashed
 // with the reason in the tooltip); the planner removes or re-plans it, or
 // the next Auto plan run blanks it like any other bar. Only two findings are
-// certain enough to retire at once: a zero-quantity bar and an order the
-// planner himself marked complete. A projection bar whose row was re-keyed
-// is still moved to its twin row (a repair, not a removal).
-const HYGIENE_RETIRE_REASONS = ['zero quantity', 'order marked complete'];
+// certain enough to retire at once: an order the planner himself marked
+// complete (2026-11-18: a zero-quantity bar is flagged too, not retired — "a
+// saved bar leaves only by the planner or by production"). A projection bar
+// whose row was re-keyed is still moved to its twin row (a repair, not a
+// removal).
+const HYGIENE_RETIRE_REASONS = ['order marked complete'];
 async function flagHiddenEvents(conn, tag = 'sync') {
     const hidden = await findHiddenEvents(conn);
     const certain = hidden.filter(e => HYGIENE_RETIRE_REASONS.includes(e.reason));
@@ -2601,6 +2665,29 @@ async function flagHiddenEvents(conn, tag = 'sync') {
             + Object.entries(why).map(([k, v]) => `${v}× ${k}`).join('; '));
     }
     return { retired : certain.length, flagged, moved, cleared };
+}
+
+// Does a live bar still stand on this planning_orders row? Its anchor, a
+// member of a consolidated bar's PO group (notes.idList), or — for a
+// projection row — an ev-proj bar of its order code. Such a row is never
+// touched by the sync (planner rule, 2026-11-18).
+async function rowHasLiveBar(conn, row) {
+    const id = Number(row.id);
+    const [[a]] = await conn.query(
+        `SELECT COUNT(*) AS n FROM planning_events
+          WHERE event_status != 'cancelled' AND (planning_order_id = ? OR notes LIKE ?)`, [id, `%${id}%`]);
+    if (Number(a.n) > 0) return true;
+    if (String(row.erp_po_id || '').startsWith('proj-')) {
+        const [[cp]] = await conn.query('SELECT order_code FROM planning_orders WHERE id = ?', [id]);
+        const code = cp?.order_code;
+        if (code) {
+            const [[b]] = await conn.query(
+                `SELECT COUNT(*) AS n FROM planning_events
+                  WHERE event_status != 'cancelled' AND (event_code = CONCAT('ev-proj:', ?) OR event_code LIKE CONCAT('ev-proj:', ?, '-%'))`, [code, code]);
+            if (Number(b.n) > 0) return true;
+        }
+    }
+    return false;
 }
 
 // One source per business order — read-only audit of the rule
@@ -2666,6 +2753,16 @@ app.post(`${BASE}/board-hygiene/flag`, async (req, res) => {
         const by = String(req.body?.by || '').trim();
         if (!(await isPlanningManager(by))) return res.status(403).json({ success : false, error : 'Planning Manager only' });
         res.json({ success : true, ...(await flagHiddenEvents(pool, `on demand by ${by}`)) });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
+// The DB guard's triggers as installed (see installDbGuard) — read only
+app.get(`${BASE}/db-guard`, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT TRIGGER_NAME AS name, EVENT_MANIPULATION AS event, EVENT_OBJECT_TABLE AS \`table\`, CREATED AS created
+               FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'mbm_guard_%'`);
+        res.json({ success : true, enabled : DB_GUARD, triggers : rows });
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
@@ -3951,6 +4048,8 @@ async function runAutoSync() {
                     unit_id            = VALUES(unit_id),
                     prod_unit          = COALESCE(VALUES(prod_unit), prod_unit),
                     priority           = COALESCE(VALUES(priority), priority),
+                    -- a row that left the ERP once (kept, 'cancelled') is back in the pool
+                    planning_status    = IF(planning_status = 'cancelled', 'unplanned', planning_status),
                     synced_at          = NOW(),
                     updated_at         = NOW()
             `, params);
@@ -4063,6 +4162,8 @@ async function runAutoSync() {
                     pcd                = COALESCE(VALUES(pcd), pcd),
                     unit_id            = VALUES(unit_id),
                     prod_unit          = COALESCE(VALUES(prod_unit), prod_unit),
+                    -- a projection row that left the ERP once (kept, 'cancelled') is back
+                    planning_status    = IF(planning_status = 'cancelled', 'unplanned', planning_status),
                     synced_at          = NOW(),
                     updated_at         = NOW()
             `, params);
@@ -4111,6 +4212,7 @@ async function runAutoSync() {
         const [projRows] = await conn.query(
             `SELECT id, erp_po_id FROM planning_orders
              WHERE erp_po_id LIKE 'proj-%'
+               AND planning_status NOT IN ('completed', 'cancelled')
                AND (shipment_date IS NULL OR shipment_date >= ?)`,
             [ERP_CUTOFF]);
         // A projection row that leaves because its order is now kept from the
@@ -4142,17 +4244,24 @@ async function runAutoSync() {
                 const [rows] = await conn.query(`SELECT id, erp_po_id FROM planning_orders WHERE erp_po_id IN (${twinKeys.map(() => '?').join(',')})`, twinKeys);
                 for (const r of rows) if (liveOrdKeys.has(String(r.erp_po_id))) twinRow.set(String(r.erp_po_id), Number(r.id));
             }
+            // RULE (planner, 2026-11-18): the sync DELETES NOTHING. A projection
+            // row whose order left the ERP is kept and marked 'cancelled' (out
+            // of the pool) — unless a live bar still stands on it: then the row
+            // and the bar stay exactly as they are (the hygiene flags the bar)
             for (const row of deadProj) {
                 const twinId = twinRow.get(twinKey.get(String(row.erp_po_id)) || '');
                 if (twinId && twinId !== Number(row.id)) {
                     const [u] = await conn.query('UPDATE planning_events SET planning_order_id = ?, updated_at = NOW() WHERE planning_order_id = ?', [twinId, row.id]);
                     projMoved += u.affectedRows || 0;
                 }
-                await conn.query('DELETE FROM planning_orders WHERE id = ?', [row.id]);
-                projDeleted++;
+                if (await rowHasLiveBar(conn, row)) continue;
+                const [u] = await conn.query(
+                    `UPDATE planning_orders SET planning_status = 'cancelled', updated_at = NOW()
+                      WHERE id = ? AND planning_status NOT IN ('completed', 'cancelled')`, [row.id]);
+                projDeleted += u.affectedRows || 0;
             }
         }
-        console.log(`[auto-sync] projections: src=${projSrc.length} os=${osSrc.length} inTable=${projRows.length} deleted=${projDeleted}${projMoved ? ` (${projMoved} bar(s) moved to the twin projection row)` : ''}`);
+        console.log(`[auto-sync] projections: src=${projSrc.length} os=${osSrc.length} inTable=${projRows.length} left the ERP (row kept, status cancelled)=${projDeleted}${projMoved ? ` (${projMoved} bar(s) moved to the twin projection row)` : ''}`);
 
         // Reconcile ERP-side deletions: a PO deleted from mr_purchase_order or
         // set to status 3 must leave the Orders list — and the board — on the
@@ -4186,6 +4295,7 @@ async function runAutoSync() {
              FROM planning_orders
              WHERE erp_po_id IS NOT NULL AND erp_po_id != ''
                AND erp_po_id NOT LIKE 'proj-%'
+               AND planning_status NOT IN ('completed', 'cancelled')
                AND (shipment_date IS NULL OR shipment_date >= ?)`,
             [ERP_CUTOFF]);
         const dead = ploRows.filter(r => !liveIds.has(String(r.erp_po_id)));
@@ -4225,16 +4335,19 @@ async function runAutoSync() {
             twinCache.set(key, rows);
             return rows;
         };
-        let removed = 0, reanchored = 0;
+        // RULE (planner, 2026-11-18): the sync DELETES NOTHING and changes no
+        // bar. A confirm / OS colour row whose PO left the ERP is kept: with
+        // no live bar on it, it is marked 'cancelled' (out of the pool, back to
+        // 'unplanned' the moment the ERP lists it again — see the upsert);
+        // with a live bar, row and bar stay exactly as saved (the hygiene
+        // flags the bar: "PO / colour no longer in ERP — row kept"). A bar
+        // still moves to the row's live twin when there is one (the one-source
+        // rule flipping between syncs — a repair, nothing is lost).
+        let removed = 0, reanchored = 0, kept = 0;
         for (const row of dead) {
             const rowId = Number(row.id);
-            // Events anchored to the dead row: a bar moves to the row's twin
-            // when there is one; otherwise a single-PO bar is deleted and a
-            // consolidated bar loses this member (anchored to a member that
-            // SURVIVES this sync — an anchor that dies later in this loop
-            // left the bar orphaned, and board hygiene then retired it)
             const [evs] = await conn.query(
-                'SELECT id, notes FROM planning_events WHERE planning_order_id = ?', [rowId]);
+                "SELECT id, notes FROM planning_events WHERE planning_order_id = ? AND event_status != 'cancelled'", [rowId]);
             for (const ev of evs) {
                 let ng = {};
                 try { ng = JSON.parse(ev.notes || '{}'); } catch { /* keep {} */ }
@@ -4242,71 +4355,27 @@ async function runAutoSync() {
                 const idx = ids.indexOf(rowId);
                 const po = (Array.isArray(ng.poList) && ng.poList.length === ids.length && idx >= 0) ? ng.poList[idx] : row.po_number;
                 const twins = (await twinRowsFor(po, row.color, row.order_code, row.order_quantity)).filter(t => !ids.includes(Number(t.id)));
-                if (twins.length) {
-                    const twinId = Number(twins[0].id);
-                    if (idx >= 0) ids[idx] = twinId;
-                    else if (ids.length) ids.push(twinId);
-                    if (ids.length) ng.idList = ids;
-                    const anchor = ids.find(i => !deadIds.has(i)) ?? twinId;
-                    await conn.query('UPDATE planning_events SET planning_order_id = ?, notes = ?, updated_at = NOW() WHERE id = ?',
-                        [anchor, JSON.stringify(ng), ev.id]);
-                    reanchored++;
-                    continue;
-                }
-                if (ids.length > 1 && idx >= 0) {
-                    if (Array.isArray(ng.poList) && ng.poList.length === ids.length) ng.poList.splice(idx, 1);
-                    ids.splice(idx, 1);
-                    ng.idList = ids;
-                    const anchor = ids.find(i => !deadIds.has(i)) ?? ids[0];
-                    await conn.query(
-                        `UPDATE planning_events SET planning_order_id = ?, notes = ?,
-                                planned_quantity = GREATEST(planned_quantity - ?, 0), updated_at = NOW()
-                         WHERE id = ?`,
-                        [anchor, JSON.stringify(ng), Number(row.order_quantity) || 0, ev.id]);
-                }
-                else {
-                    await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [ev.id]);
-                    await conn.query('DELETE FROM planning_events WHERE id = ?', [ev.id]);
-                }
+                if (!twins.length) continue;
+                const twinId = Number(twins[0].id);
+                if (idx >= 0) ids[idx] = twinId;
+                else if (ids.length) ids.push(twinId);
+                if (ids.length) ng.idList = ids;
+                const anchor = ids.find(i => !deadIds.has(i)) ?? twinId;
+                await conn.query('UPDATE planning_events SET planning_order_id = ?, notes = ?, updated_at = NOW() WHERE id = ?',
+                    [anchor, JSON.stringify(ng), ev.id]);
+                reanchored++;
             }
-            // Consolidated bars anchored to ANOTHER row that list this row as
-            // a group member: strip the member, keep the bar
-            const [covers] = await conn.query(
-                `SELECT id, notes FROM planning_events
-                 WHERE notes LIKE ? AND (planning_order_id IS NULL OR planning_order_id != ?)`,
-                [`%${rowId}%`, rowId]);
-            for (const ev of covers) {
-                let ng = {};
-                try { ng = JSON.parse(ev.notes || '{}'); } catch { continue; }
-                const ids = Array.isArray(ng.idList) ? ng.idList.map(Number) : [];
-                const idx = ids.indexOf(rowId);
-                if (idx < 0) continue;
-                // the member moves to the row's twin when there is one (quantity kept)
-                const po = (Array.isArray(ng.poList) && ng.poList.length === ids.length) ? ng.poList[idx] : row.po_number;
-                const twins = (await twinRowsFor(po, row.color, row.order_code, row.order_quantity)).filter(t => !ids.includes(Number(t.id)));
-                if (twins.length) {
-                    ids[idx] = Number(twins[0].id);
-                    ng.idList = ids;
-                    await conn.query('UPDATE planning_events SET notes = ?, updated_at = NOW() WHERE id = ?', [JSON.stringify(ng), ev.id]);
-                    reanchored++;
-                    continue;
-                }
-                if (Array.isArray(ng.poList) && ng.poList.length === ids.length) ng.poList.splice(idx, 1);
-                ids.splice(idx, 1);
-                ng.idList = ids;
-                await conn.query(
-                    `UPDATE planning_events SET notes = ?,
-                            planned_quantity = GREATEST(planned_quantity - ?, 0), updated_at = NOW()
-                     WHERE id = ?`,
-                    [JSON.stringify(ng), Number(row.order_quantity) || 0, ev.id]);
-            }
-            await conn.query('DELETE FROM planning_orders WHERE id = ?', [rowId]);
-            removed++;
+            if (await rowHasLiveBar(conn, row)) { kept++; continue; }
+            const [u] = await conn.query(
+                `UPDATE planning_orders SET planning_status = 'cancelled', updated_at = NOW()
+                  WHERE id = ? AND planning_status NOT IN ('completed', 'cancelled')`, [rowId]);
+            removed += u.affectedRows || 0;
         }
 
         await conn.commit();
         console.log(`[auto-sync] ${new Date().toISOString()} — synced ${synced} ERP orders (since ${ERP_CUTOFF})`
-            + (removed ? `, removed ${removed} PO(s) deleted/cancelled in ERP` : '')
+            + (removed ? `, ${removed} PO row(s) left the ERP (kept, status cancelled)` : '')
+            + (kept ? `, ${kept} ERP-dead row(s) kept as they are under live bars` : '')
             + (reanchored ? `, ${reanchored} bar(s) moved to the twin row of a removed PO row` : ''));
         return { synced, removed };
     }
@@ -5359,6 +5428,7 @@ mountHighLevel(app, { pool, BASE, dbFail, ERP_DB, ERP_CUTOFF });
 
 app.listen(PORT, () => {
     console.log(`Planning API listening on http://localhost:${PORT}${BASE} -> MySQL ${DB_HOST}/${DB_NAME}`);
+    installDbGuard().catch(e => console.error('[db-guard]', e.message));
     // Actual production from the ERP: only when PROD_AUTO_SYNC=1 — one-time
     // summary (≤ PROD_SUMMARY_TO, one row per PO) if it is not there yet,
     // catch up daily rows since PROD_SYNC_FROM, then 18:00 / 23:30. Off by
