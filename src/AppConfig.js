@@ -2662,10 +2662,13 @@ export const schedulerProConfig = {
         // sees from any piece that the order as a whole will not ship on time
         const lateSib = pastDelivery ? null : lateSiblingOf(this, e, r);
         if (lateSib) renderData.cls.add('mb-order-late');
+        // forecastLate: the actual-based forecast (daily progress) finishes
+        // after delivery − 7 — the existing late-plan colour, nothing moves
+        if (r.forecastLate) renderData.cls.add('mb-forecast-late');
         const colorKey =
             r.status === 'completed' ? 'grey'
           : pastDelivery ? 'late'
-          : r.latePlan ? 'yellow'
+          : r.latePlan || r.forecastLate ? 'yellow'
           : r.risk.level === 'draft' || r.status === 'draft' ? 'blue'
           : { low : 'green', moderate : 'yellow', high : 'orange', critical : 'red' }[r.risk.level] || 'green';
 
@@ -3419,6 +3422,26 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                     `<span class="t4-done" title="quantity produced (production update / ERP)">✔ Done <b>${enc(fmtQty(made))}</b>${Number(r.erpMade) > 0 ? ` <span class="t4dim" title="actual sewing output of the ERP (Daily Production, sewing out) for this bar's PO — not entered on the board">· ERP ${enc(fmtQty(r.erpMade))}</span>` : ''}</span>` +
                     `<span class="t4-left${left <= 0 ? ' t4-left-zero' : ''}" title="quantity still to be sewn — the bar now stands for this">⏳ Remaining <b>${enc(fmtQty(left))}</b></span>` +
                     `<span class="t4-bar" title="${pct}% of plan qty made"><i style="width:${pct}%"></i></span><span class="t4-pct">${pct}%</span>` +
+                `</span>`, 't4-full t4-prodrow');
+        })()}
+        ${(() => {
+            // Daily progress + actual-based forecast (forecastService): where
+            // the actual output puts the sewing end, against the saved end and
+            // the target (delivery − 7); the adjustment and the data cutoff
+            const fc = r.fc;
+            if (!fc || !fc.forecastEnd) return '';
+            const adj = fc.adj || {};
+            const adjTxt = adj.basis === 'none' ? 'baseline curve (no finalized day with a record)'
+                : `× ${Number(adj.ratio).toFixed(2)} from ${adj.sample} of ${adj.window} finalized day(s), ${adj.basis === 'efficiency' ? 'actual / expected efficiency' : 'output vs target — provisional, working time and manpower not normalized'}`;
+            const late = !!fc.late;
+            const cut = fc.cutoff ? `data to ${ddMon(fc.cutoff)}${fc.provisional ? ' · today provisional' : ''}` : 'no actual data yet';
+            const left = Number(fc.remaining) || 0;
+            return R('Forecast',
+                `<span class="t4-prod">` +
+                    `<span class="${late ? 't4-left' : 't4-done'}" title="projected sewing end from the actual daily output (today's remaining shift, calendars, learning curve, other allocations)">${late ? '⚠' : '✔'} Forecast end <b>${enc(ddMon(fc.forecastEnd))}</b>${late ? ' <span class="t4dim">· after target</span>' : ''}</span>` +
+                    `<span class="t4dim" title="saved bar end · target sewing end = delivery − 7">saved ${enc(ddMon(fc.savedEnd))} · target ${enc(fc.targetEnd ? ddMon(fc.targetEnd) : '—')}</span>` +
+                    `<span class="t4dim" title="remaining sewing quantity = plan qty − verified cumulative actual">⏳ remaining <b>${enc(fmtQty(left))}</b>${fc.unattributed > 0 ? ` · ${enc(fmtQty(fc.unattributed))} PO-level (line not attributed)` : ''}</span>` +
+                    `<span class="t4dim" title="${enc(adj.note || '')}">adj ${enc(adjTxt)} · ${enc(cut)}</span>` +
                 `</span>`, 't4-full t4-prodrow');
         })()}
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}

@@ -1100,6 +1100,17 @@ export function calendarDaysFromRows(rows) {
     return { calendarDays, calendarName, calendarId };
 }
 
+// Daily sewing actuals of a production unit (ERP sewing-out per date × PO ×
+// colour × line) — the board's daily progress and actual-based forecast
+export async function loadSewingActualsDb(unitId, from, to) {
+    const qs = [`unit_id=${Number(unitId) || 0}`];
+    if (from) qs.push(`from=${from}`);
+    if (to)   qs.push(`to=${to}`);
+    const j = await get(`/sewing-actuals?${qs.join('&')}`, 30000);
+    if (!j?.success) throw new Error(j?.error || 'sewing actuals unavailable');
+    return j;
+}
+
 // ERP labels (garment type / buyer short name) for order codes the board
 // has not got them for yet — bars placed from the Orders list this session
 export async function loadErpOrderInfoDb(codes) {

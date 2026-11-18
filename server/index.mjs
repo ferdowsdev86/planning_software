@@ -11,6 +11,7 @@ import cors from 'cors';
 import mysql from 'mysql2/promise';
 import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
 import { reconcileSewingOutput, sewKeyOfRow, sewingOutputSql } from './sewingOutput.mjs';
+import { sewingActualsSql, normalizeActualRows } from './sewingActuals.mjs';
 import { buildBarHistory } from './barHistory.mjs';
 import { resolveEffectivePcd, projectedEligibility } from './pcdService.mjs';
 import { simulateAllocation, pickCurve } from './planAllocation.mjs';
@@ -2756,6 +2757,30 @@ app.post(`${BASE}/board-hygiene/flag`, async (req, res) => {
     }
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
+// Daily sewing ACTUALS of one production unit (sewingActuals.mjs): the ERP's
+// sewing-out entries per date × PO × colour × line, mapped to board line
+// codes, with the line-day manpower where the ERP recorded it. Read only —
+// the board shows daily progress and forecasts from it; nothing is written.
+//   GET /sewing-actuals?unit_id=2&from=2026-10-01&to=2026-11-18
+app.get(`${BASE}/sewing-actuals`, async (req, res) => {
+    try {
+        const unitId = Number(req.query.unit_id) || 0;
+        const unitShort = UNIT_NAMES[unitId];
+        if (!unitShort) return res.status(400).json({ success : false, error : 'unit_id must be 1 (MBM), 2 (CEIL) or 3 (AQL)' });
+        const today = new Date().toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+        const okDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+        const to   = okDate(req.query.to) ? String(req.query.to) : today;
+        const from = okDate(req.query.from) ? String(req.query.from) : new Date(Date.now() - 90 * 86400000).toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
+        const [raw] = await pool.query(sewingActualsSql(ERP_DB), [unitShort, from, to]);
+        const rows = normalizeActualRows(raw, unitShort);
+        const cutoff = rows.reduce((m, r) => (r.date > m ? r.date : m), '') || null;
+        res.json({ success : true, unitId, unit : unitShort, from, to, today, cutoff,
+            source : `${ERP_DB}.daily_productions (status out, operation 2 = sewing) per date × PO × colour × line; manpower from pt_sewing_daily_line_targets`,
+            rows });
+    }
+    catch (e) { res.status(dbFail(e) ? 503 : 500).json({ success : false, error : e.message }); }
+});
+
 // The DB guard's triggers as installed (see installDbGuard) — read only
 app.get(`${BASE}/db-guard`, async (req, res) => {
     try {

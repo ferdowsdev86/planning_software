@@ -34,8 +34,9 @@ import {
     resolveApiBase, apiMode, setApiMode, loadCalendarOverridesDb, loadCalendarOverridesFullDb, saveCalendarOverridesDb, saveHoldingCapacityDb,
     skippedDbEvents, registerBoardLines, loadAllLinesDb, setLineActiveDb, loadCalendarsDb, syncOpts,
     loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb,
-    loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, whatIfView
+    loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, whatIfView, loadSewingActualsDb
 } from './api.js';
+import { attributeActualsToBars, buildProgressRows, performanceAdjustment, forecastRemaining, FORECAST_WINDOW_DAYS } from './forecastService.mjs';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
     backwardPass, feasibility, sequenceOptions, autoPlanOrders
@@ -2396,12 +2397,21 @@ async function refreshProdStoreFromDb() {
         // ERP rows of a projection bar come per PO as "db-<id>:po<po_id>" —
         // summed onto the bar ("db-<id>")
         const store = {};
+        // daily progress (forecastService): the hand-entered rows per day and
+        // the day-plan figure saved with them (the ORIGINAL target of that day)
+        const manual = {}, savedPlan = {};
         for (const r of rows) {
             const key  = String(r.event_ref).split(':po')[0];
             const date = String(r.save_date).slice(0, 10);
             if (!store[key]) store[key] = {};
             store[key][date] = (store[key][date] || 0) + (Number(r.prod_qty) || 0);
+            if (!isAutoProdRow(r)) {
+                (manual[key] ||= {})[date] = (manual[key][date] || 0) + (Number(r.prod_qty) || 0);
+                if (Number(r.day_plan_qty) > 0) (savedPlan[key] ||= {})[date] = Number(r.day_plan_qty);
+            }
         }
+        manualDayStore = manual;
+        savedPlanStore = savedPlan;
         localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
         return true;
     }
@@ -2464,6 +2474,8 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
         applyBoardFilter();
         finishBoardLoad(uid, data, s);
         await revealBoard(s);
+        // daily progress + forecast from the ERP's sewing output — annotation only
+        loadSewingActualsForBoard(s).catch(() => {});
     }
     catch (err) {
         // Three tries failed: this board shows NOTHING (not the previous
@@ -2575,6 +2587,7 @@ async function hydrateBoardFromApi() {
             if (s) {
                 applyApiBoardData(s, boardUnitCache[unitId].apiData);
                 finishBoardLoad(unitId, data, s);
+                loadSewingActualsForBoard(s).catch(() => {});
             }
             else {
                 dataSource.value = 'db';
@@ -3972,8 +3985,13 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         if (!isPoGroup(r) || !r.id) continue;
         const id = rowKey(r);
         let g = groups.get(id);
-        if (!g) { g = { rows : Number(r.groupQty), sewn : Number(r.groupSewn) || 0, sewnDays : 0, done : Number(r.groupDone) || 0, issue : r.groupIssue || null, bars : [] }; groups.set(id, g); }
+        if (!g) { g = { rows : Number(r.groupQty), sewn : Number(r.groupSewn) || 0, sewnDays : 0, done : Number(r.groupDone) || 0, issue : r.groupIssue || null, bars : [], ratioW : 0, ratioN : 0 }; groups.set(id, g); }
         g.sewnDays = Math.max(g.sewnDays, Number(r.groupSewnDays) || 0);
+        // the order's actual performance (daily progress forecast): the
+        // bars' adjustment ratios weighted by their finalized-day samples —
+        // the re-plan of the remaining quantity runs at that pace
+        const adj = r.fc?.adj;
+        if (adj && adj.basis !== 'none' && adj.sample > 0) { g.ratioW += adj.ratio * adj.sample; g.ratioN += adj.sample; }
         g.bars.push(ev);
     }
     const plan = new Map();   // order row → { toPlan (ERP pcs), sewn, cover }
@@ -3987,7 +4005,8 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
             rowsQty : g.rows, erpSewn : g.sewn, doneRemoved : Math.round(g.done / (planQtyOf(1000) / 1000)),
             bars : g.bars.map(ev => { const r = ev.data.raw; return { base : baseOf(r), made : Number(r.made) || 0, completed : r.status === 'completed', kept : keptSet.has(ev), start : ev.startDate, end : ev.endDate }; })
         });
-        plan.set(id, { ...p, rows : g.rows, sewnDays : g.sewnDays, issue : g.issue || null });
+        plan.set(id, { ...p, rows : g.rows, sewnDays : g.sewnDays, issue : g.issue || null,
+            perfRatio : g.ratioN > 0 ? Math.round(g.ratioW / g.ratioN * 1000) / 1000 : 0 });
     }
 
     const have = new Set(unplanned.value.map(u => String(u.id)));
@@ -4106,6 +4125,9 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // continues after them (deriveLcForPlacement), it does not restart
         row.sewnDays = p.sewnDays || 0;
         row.lockCover = p.cover;
+        // actual pace of the order so far (forecast adjustment) — the new
+        // bars run at it (capped at the configured efficiency = peak)
+        row.perfRatio = p.perfRatio || 0;
         out.push(asBalance(row));
     }
     s.eventStore.remove(gone);
@@ -4237,6 +4259,7 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         g.baseQty  = (Number(g.baseQty) || 0) + (Number(o.baseQty) || 0);
         g.sewn     = (Number(g.sewn) || 0) + (Number(o.sewn) || 0);
         g.sewnDays = Math.max(Number(g.sewnDays) || 0, Number(o.sewnDays) || 0);
+        if (Number(o.perfRatio) > 0) g.perfRatio = Number(g.perfRatio) > 0 ? Math.round((Number(g.perfRatio) + Number(o.perfRatio)) / 2 * 1000) / 1000 : Number(o.perfRatio);
         g.idList   = union(g.idList, o.idList, o.dbId ? [o.dbId] : []);
         g.poList   = union(g.poList, o.poList, o.po ? [o.po] : []) || [];
         g.poCount  = g.poList.length || 1;
@@ -4255,7 +4278,12 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
         const base = cid.startsWith('proj:') ? `ev-${cid}` : (o.dbId ? `EV-C${o.dbId}-SEW` : poBaseEventCode(o.po));
         return o.balance ? nextStripEventCode(s, o.po, base) : base;
     };
-    const baseRawOf = o => { const { members, _smvW, _q, ...rest } = o; return { ...rest, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color }; };
+    // an order already in production runs its remaining quantity at its
+    // ACTUAL pace (forecast adjustment, capped at the configured efficiency):
+    // the strip efficiency carries it — the bar's formula, tooltip ("Eff 60 %
+    // × strip 87 %") and the saved notes all show it
+    const baseRawOf = o => { const { members, _smvW, _q, ...rest } = o; return { ...rest, orderQty : o.orderQty ?? o.qty, progress : 0, status : 'draft', userPinned : true, manualGap : false, smv : o.smv, pcd : o.pcd, ship : o.ship, matReady : o.matReady || o.pcd, mbmOrder : o.mbmOrder, productType : o.productType, color : o.color,
+        stripEff : Number(o.perfRatio) > 0 ? Math.max(10, Math.round(Math.min(1, Number(o.perfRatio)) * 100)) : o.stripEff }; };
     const tmpRaw = (o, qty) => ({ ...baseRawOf(o), qty, lc : undefined, lcDone : undefined });
     // the board's own production model as the engine's capacity model
     const model = {
@@ -5933,6 +5961,49 @@ const plDailyRows = computed(() => {
         r.cum = cum;
     }
     return rows;
+});
+
+// Daily progress + forecast of the strip (raw.fc, see computeBarForecast):
+// one row per day — original target, actual, achievement, variance,
+// cumulative variance, forecast — plus the forecast days after the data
+const plProgress = computed(() => {
+    plTick.value;
+    const raw = plRaw.value;
+    const fc = raw?.fc;
+    if (!fc || !Array.isArray(fc.rows)) return null;
+    const fcDay = new Map((fc.forecastDays || []).map(d => [d.ymd, d.qty]));
+    const seen = new Set();
+    const rows = [];
+    const statusLbl = { final : 'ERP', zero : 'zero output', provisional : 'today · provisional', open : 'today · no record yet', missing : 'no record', off : 'off', none : '', future : 'planned' };
+    for (const r of fc.rows) {
+        seen.add(r.ymd);
+        const d = new Date(`${r.ymd}T00:00:00`);
+        rows.push({
+            ymd : r.ymd, day : DAY_ABBR[d.getDay()], date : fmtDate(d), lcDay : r.lcDay, factor : r.factor,
+            target : r.target, savedTarget : r.savedTarget, actual : r.actual, ach : r.achievement, variance : r.variance, cumVar : r.cumVariance,
+            forecast : fcDay.get(r.ymd) ?? null, status : statusLbl[r.status] || r.status, kind : r.status,
+            src : r.manual && r.erp ? 'ERP + manual' : r.manual ? 'manual' : r.erp ? 'ERP' : '', attributed : r.attributed, off : r.off
+        });
+    }
+    for (const [ymd, q] of fcDay) {
+        if (seen.has(ymd)) continue;
+        const d = new Date(`${ymd}T00:00:00`);
+        rows.push({ ymd, day : DAY_ABBR[d.getDay()], date : fmtDate(d), lcDay : 0, factor : 1, target : null, actual : null, ach : null, variance : null, cumVar : null, forecast : q, status : 'forecast', kind : 'forecast', src : '', attributed : true, off : false });
+    }
+    rows.sort((a, b) => a.ymd.localeCompare(b.ymd));
+    const adj = fc.adj || {};
+    return {
+        rows, fc,
+        head : {
+            savedEnd : fmtDate(fc.savedEnd), forecastEnd : fc.forecastEnd ? fmtDate(fc.forecastEnd) : (fc.exhausted ? '—' : 'beyond the planning horizon'),
+            targetEnd : fc.targetEnd ? fmtDate(fc.targetEnd) : '—', late : !!fc.late,
+            cutoff : fc.cutoff ? fmtDate(new Date(`${fc.cutoff}T00:00:00`)) : '—', provisional : !!fc.provisional,
+            remaining : fc.remaining, made : fc.made, unattributed : fc.unattributed,
+            adj : adj.basis === 'none' ? 'baseline curve (no finalized day with a record)'
+                : `× ${Number(adj.ratio).toFixed(2)} · ${adj.sample} of ${adj.window} finalized day(s) · ${adj.basis === 'efficiency' ? 'actual / expected efficiency (working-time weighted)' : 'output vs original target — provisional: working time and manpower not normalized'}`,
+            lcDone : fc.consumedLcDays
+        }
+    };
 });
 
 // Aggregated view for Weekly / Monthly periods
@@ -11446,6 +11517,172 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
         s.eventStore?.resumeEvents?.();
     }
     refreshGrandTotals(s);
+    // the daily progress / forecast follows every production change
+    try { if (sewingFeed.unitId != null) applySewingActuals(s); } catch (e) { console.warn('[forecast] not refreshed:', e.message); }
+}
+
+// ---------------------------------------------------------------------------
+// DAILY PROGRESS + ACTUAL-BASED FORECAST (planner spec, 2026-11-18).
+// The ERP's sewing-out entries (GET /sewing-actuals: date × PO × colour ×
+// line, summed at that grain) are attributed to the bars — the ERP LINE
+// decides; a PO sewn on a line where it has no bar is PO-level ("line not
+// attributed") — merged with the hand-entered production rows (a day both
+// hold is taken once: the larger figure, never the sum), and every bar in
+// production gets raw.fc (forecastService.mjs): the day rows (original
+// target / actual / achievement / variance / cumulative variance), the
+// performance adjustment (last FORECAST_WINDOW_DAYS finalized days) and the
+// forecast of the remaining quantity → forecast sewing end. Shown in the
+// tooltip ("Forecast" row), the Planned schedule dialog and as the late-plan
+// colour when the forecast end passes delivery − 7. NOTHING MOVES: saved
+// line, dates, split quantities and original targets stay; only an explicit
+// Auto plan uses the remaining quantity and the adjustment (perfRatio).
+// ---------------------------------------------------------------------------
+const sewingFeed = { unitId : null, rows : [], cutoff : null, today : null, unattributed : [], loadedAt : 0, error : null, bars : 0, forecasts : 0 };
+let manualDayStore = {};   // barKey → { ymd : qty }           hand-entered rows (no ':po' in event_ref)
+let savedPlanStore = {};   // barKey → { ymd : day_plan_qty }  the day's plan figure saved with a production entry
+const lineCodeOfId = lid => { const m = /^([lmc])(\d+)$/i.exec(String(lid || '')); return m ? `${m[1].toUpperCase()}${String(Number(m[2])).padStart(2, '0')}` : null; };
+
+async function loadSewingActualsForBoard(s = getInstance()) {
+    if (!s || whatIfView.id) return false;
+    const unit = Number(currentUnitId.value) || null;
+    if (!unit) return false;
+    const today = ymdOf(new Date());
+    // from the earliest bar start on the board (− 7 days), at most 120 days back
+    let from = null;
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const d = ymdOf(new Date(raw.origStart || ev.startDate));
+        if (!from || d < from) from = d;
+    }
+    const floor = ymdOf(addCalDays(new Date(), -120));
+    if (!from || from < floor) from = floor;
+    from = ymdOf(addCalDays(new Date(`${from}T00:00:00`), -7));
+    try {
+        const j = await loadSewingActualsDb(unit, from, today);
+        Object.assign(sewingFeed, { unitId : unit, rows : j.rows || [], cutoff : j.cutoff || null, today : j.today || today, loadedAt : Date.now(), error : null });
+    }
+    catch (e) { sewingFeed.error = e.message; console.warn('[forecast] sewing actuals unavailable:', e.message); return false; }
+    const n = applySewingActuals(s);
+    console.log(`[forecast] ${sewingFeed.rows.length} ERP sewing-out row(s) ${from} → ${today} (data to ${sewingFeed.cutoff || '—'}), ${n} bar(s) with a daily progress / forecast, ${sewingFeed.unattributed.length} row(s) not attributed to a line`);
+    return true;
+}
+
+function applySewingActuals(s = getInstance()) {
+    if (!s || sewingFeed.unitId == null || Number(sewingFeed.unitId) !== Number(currentUnitId.value)) return 0;
+    const index = buildLineIndex(s);
+    const bars = [], recs = new Map();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        const lid = lineIdOf(s, ev, index);
+        const pos = [...new Set([raw.po, ...(Array.isArray(raw.poList) ? raw.poList : [])].filter(Boolean).map(String))];
+        const code = mbmOrderNo(raw.po, raw.mbmOrder);
+        const tw = orderTwinOf(code);
+        // the ERP books an OS order's output under its MR code — both numbers match
+        const orderCodes = [...new Set([code, tw.twin, raw.os?.mbm, raw.os?.code].filter(Boolean).map(String))];
+        bars.push({ id : String(ev.id), lineCode : lineCodeOfId(lid), pos, orderCodes,
+            startYmd : ymdOf(new Date(raw.origStart || ev.startDate)), endYmd : ymdOf(new Date(ev.endDate)) });
+        recs.set(String(ev.id), ev);
+    }
+    const { byBar, unattributed } = attributeActualsToBars(sewingFeed.rows, bars);
+    sewingFeed.unattributed = unattributed;
+    sewingFeed.bars = bars.length;
+    const todayYmd = sewingFeed.today || ymdOf(new Date());
+    let n = 0;
+    for (const [id, ev] of recs) {
+        const raw = ev.data.raw;
+        const days = {};
+        for (const [ymd, d] of Object.entries(byBar.get(id)?.days || {})) days[ymd] = { ...d };
+        for (const [ymd, q] of Object.entries(manualDayStore[id] || {})) {
+            const m = Number(q) || 0;
+            const d = days[ymd];
+            // the same day entered by hand AND booked in the ERP: one figure (the larger), never both
+            if (d) { d.manual = true; d.both = true; d.manualQty = m; d.qty = Math.max(d.qty, m); }
+            else days[ymd] = { qty : m, attributed : true, manMin : 0, smv : 0, n : 1, erp : false, manual : true, lines : [] };
+        }
+        raw.actDays = Object.keys(days).length ? days : undefined;
+        const fc = computeBarForecast(s, ev, raw.actDays, todayYmd);
+        raw.fc = fc || undefined;
+        raw.forecastEnd  = fc?.forecastEnd || undefined;
+        raw.forecastLate = !!fc?.late;
+        if (fc) n++;
+    }
+    sewingFeed.forecasts = n;
+    s.refreshRows?.(true);
+    return n;
+}
+
+// One bar: baseline day model from its ORIGINAL start (the saved targets —
+// puDayPlan's rule), progress rows, the performance adjustment over the last
+// finalized days, and the forecast of the remaining quantity from now on
+// (today's remaining shift share, calendars, the learning curve advanced by
+// the production working days already run, the line's other allocations are
+// the bar's own window — the forecast never claims another bar's time).
+function computeBarForecast(s, ev, actDays, todayYmd) {
+    const raw = ev.data?.raw;
+    if (!raw || raw.stage) return null;
+    const lid = lineIdOf(s, ev);
+    if (!lid || isHoldId(lid)) return null;
+    // verified cumulative actual = what the board holds as made (hand entries +
+    // ERP, applyProdUpdates) — never less than the quantity production already
+    // cut off the saved start (madeBase: the bar stands for the rest only)
+    const made = Math.max(Number(raw.made) || 0, Number(raw.madeBase) || 0);
+    const hasAct = !!actDays && Object.keys(actDays).length > 0;
+    if (!hasAct && !(made > 0)) return null;
+    const qty = Number(raw.qty) || 0;
+    // ORIGINAL daily targets: the day model with the full quantity from the
+    // ACTUAL run start (the first day with output — learning days count from
+    // there), else from the bar's saved start; a day plan saved with a
+    // production entry (day_plan_qty) wins over the model (buildProgressRows)
+    const firstAct = Object.keys(actDays || {}).sort()[0] || null;
+    const start = firstAct ? startOfWorkDay(new Date(`${firstAct}T00:00:00`))
+        : (raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate));
+    let sim;
+    try { sim = simulateStrip(s, { ...raw, made : 0 }, lid, start); }
+    catch { return null; }
+    const peakOf = d => (d.factor > 0 ? Math.round(d.fullTarget / d.factor) : d.fullTarget);
+    const baseline = sim.days.map(d => ({ ymd : ymdOf(d.date), off : d.off, target : d.q, fullTarget : d.fullTarget, factor : d.factor, lcDay : d.lcDay, peak : peakOf(d) }));
+    const barKey = String(ev.id);
+    const rows = buildProgressRows({ baseline, actuals : actDays || {}, savedPlan : savedPlanStore[barKey] || {}, cutoffYmd : sewingFeed.cutoff, todayYmd });
+    const adj = performanceAdjustment({ rows, window : FORECAST_WINDOW_DAYS, smv : raw.smv, expectedEffPct : sim.effPct, qty });
+    // remaining sewing quantity; what is left inside the +3 % plan allowance
+    // counts as complete (the order's ERP quantity is made)
+    const remainingRaw = Math.max(0, qty - made);
+    const allowance = Math.max(0, qty - (Number(raw.baseQty) > 0 ? Number(raw.baseQty) : qty));
+    const remaining = remainingRaw <= allowance ? 0 : remainingRaw;
+    // learning days consumed = production working days from the first actual through yesterday
+    const consumed = firstAct ? rows.filter(r => !r.off && r.ymd >= firstAct && r.ymd < todayYmd).length : 0;
+    const now = new Date();
+    const lcNext = raw.lc?.applied && Array.isArray(raw.lc.pct) ? { ...raw.lc, dayOffset : (raw.lc.dayOffset || 0) + consumed } : raw.lc;
+    let capacityDays = [];
+    if (remaining > 0) {
+        try {
+            const capSim = simulateStrip(s, { ...raw, made : 0, qty : Math.max(1000, remaining * 4), lc : lcNext }, lid, now);
+            capacityDays = capSim.days.map(d => ({ ymd : ymdOf(d.date), off : d.off, fullTarget : d.fullTarget, peak : peakOf(d), winF : d.winF, span : d.span }));
+        }
+        catch { capacityDays = []; }
+    }
+    // simulateStrip already gives today only the window from now (winF) — no second today factor
+    const fc = forecastRemaining({ remaining, capacityDays, ratio : adj.ratio, todayYmd, todayFrac : 1 });
+    let forecastEnd = null;
+    if (remaining <= 0) forecastEnd = new Date(Math.min(+now, +ev.endDate));
+    else if (fc.finishYmd) {
+        const d = new Date(`${fc.finishYmd}T00:00:00`);
+        const ws = startOfWorkDay(d), we = workEndOfDay(d);
+        const from = fc.finishYmd === todayYmd ? Math.max(+ws, +now) : +ws;
+        forecastEnd = new Date(from + fc.finishFrac * Math.max(0, +we - from));
+    }
+    const targetDay = sewTargetDay(raw.ship);
+    const targetEnd = targetDay ? endOfWorkDay(targetDay) : null;
+    const unattributed = rows.reduce((a, r) => a + (r.actual != null && !r.attributed ? r.actual : 0), 0);
+    return {
+        rows, adj, remaining, remainingRaw, made, qty, forecastEnd, savedEnd : new Date(ev.endDate), targetEnd,
+        late : !!(forecastEnd && targetEnd && forecastEnd > targetEnd),
+        cutoff : sewingFeed.cutoff, provisional : !!(actDays && actDays[todayYmd]),
+        unattributed, forecastDays : fc.days, consumedLcDays : consumed, exhausted : fc.exhausted, left : fc.left,
+        baseEff : Math.round(sim.effPct), computedAt : Date.now()
+    };
 }
 
 function openProdUpdate() {
@@ -14502,7 +14739,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()),
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -17484,7 +17721,48 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </div>
                         </div>
                         <div class="pl-right">
-                        <table class="st-table pl-table">
+                        <!-- Daily progress + actual-based forecast (bars in production) -->
+                        <template v-if="plProgress && plPeriod === 'daily'">
+                        <div class="pl-fc-head">
+                            <span><b>Saved end</b> {{ plProgress.head.savedEnd }}</span>
+                            <span :class="{ 'pl-fc-late' : plProgress.head.late }"><b>Forecast end</b> {{ plProgress.head.forecastEnd }}<i v-if="plProgress.head.late"> · after target</i></span>
+                            <span><b>Target end</b> {{ plProgress.head.targetEnd }} <i>(delivery − 7)</i></span>
+                            <span><b>Made</b> {{ fmtQty(plProgress.head.made) }} · <b>Remaining</b> {{ fmtQty(plProgress.head.remaining) }}<i v-if="plProgress.head.unattributed > 0"> · {{ fmtQty(plProgress.head.unattributed) }} PO-level, line not attributed</i></span>
+                            <span><b>Actual data to</b> {{ plProgress.head.cutoff }}<i v-if="plProgress.head.provisional"> · today provisional until the production day is closed</i></span>
+                            <span><b>Forecast adjustment</b> {{ plProgress.head.adj }} · learning days run {{ plProgress.head.lcDone }}</span>
+                        </div>
+                        <table class="st-table pl-table pl-fc-table">
+                            <thead>
+                                <tr>
+                                    <th>Day</th>
+                                    <th>Date</th>
+                                    <th class="od-num" title="production working day of the learning curve and its factor">LC</th>
+                                    <th class="od-num" title="original daily target (saved day plan when one was saved, else the day model from the bar's original start)">Target</th>
+                                    <th class="od-num" title="actual sewing output (ERP sewing out / hand entry)">Actual</th>
+                                    <th class="od-num" title="actual ÷ original target">Ach %</th>
+                                    <th class="od-num" title="actual − original target">Var</th>
+                                    <th class="od-num" title="cumulative actual − cumulative original target, over days with a record">Cum var</th>
+                                    <th class="od-num" title="forecast daily output of the remaining quantity">Forecast</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="r in plProgress.rows" :key="r.ymd" :class="{ 'pl-off' : r.off, 'pl-lc' : r.lcDay > 0, 'pl-fc-prov' : r.kind === 'provisional' || r.kind === 'open', 'pl-fc-miss' : r.kind === 'missing', 'pl-fc-fut' : r.kind === 'forecast' || r.kind === 'future' }">
+                                    <td class="st-user">{{ r.day }}</td>
+                                    <td>{{ r.date }}</td>
+                                    <td class="od-num"><span v-if="r.lcDay" class="pl-lc-tag">D{{ r.lcDay }} · {{ Math.round(r.factor * 100) }}%</span><span v-else-if="r.target != null && !r.off">peak</span></td>
+                                    <td class="od-num">{{ r.target != null ? fmtQty(r.target) : '' }}<i v-if="r.savedTarget" title="the day plan saved with the production entry">*</i></td>
+                                    <td class="od-num">{{ r.actual != null ? fmtQty(r.actual) : (r.kind === 'missing' ? '—' : '') }}<i v-if="r.actual != null && !r.attributed" title="PO-level output — the ERP line has no bar of this PO"> ◌</i></td>
+                                    <td class="od-num">{{ r.ach != null ? r.ach + '%' : (r.actual != null ? 'N/A' : '') }}</td>
+                                    <td class="od-num" :class="{ 'pl-fc-neg' : r.variance < 0, 'pl-fc-pos' : r.variance > 0 }">{{ r.variance != null ? (r.variance > 0 ? '+' : '') + fmtQty(r.variance) : '' }}</td>
+                                    <td class="od-num" :class="{ 'pl-fc-neg' : r.cumVar < 0, 'pl-fc-pos' : r.cumVar > 0 }">{{ r.cumVar != null ? (r.cumVar > 0 ? '+' : '') + fmtQty(r.cumVar) : '' }}</td>
+                                    <td class="od-num">{{ r.forecast != null ? fmtQty(r.forecast) : '' }}</td>
+                                    <td>{{ r.status }}<span v-if="r.src" class="t4dim"> · {{ r.src }}</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        </template>
+                        <table v-else class="st-table pl-table">
                             <thead>
                                 <tr>
                                     <th>Day</th>
@@ -21432,6 +21710,17 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 
 /* Planned-schedule rows on learning-curve days */
 .pl-lc td { background : #fff8e8; }
+/* Daily progress + forecast block of the Planned schedule dialog */
+.pl-fc-head { display : flex; flex-wrap : wrap; gap : 4px 18px; font-size : 12px; padding : 4px 6px 8px; color : #2c3e50; }
+.pl-fc-head b { color : #1f3b63; margin-right : 3px; }
+.pl-fc-head i { color : #6b7a8a; font-style : italic; }
+.pl-fc-head .pl-fc-late { color : #b23b2a; }
+.pl-fc-table td, .pl-fc-table th { white-space : nowrap; }
+.pl-fc-table tr.pl-fc-prov td { background : #fff8e1; }
+.pl-fc-table tr.pl-fc-miss td { color : #8a8a8a; font-style : italic; }
+.pl-fc-table tr.pl-fc-fut td { color : #4a5a6a; }
+.pl-fc-table td.pl-fc-neg { color : #b23b2a; }
+.pl-fc-table td.pl-fc-pos { color : #1e7d45; }
 .pl-lc-tag {
     display       : inline-block;
     margin-left   : 5px;
