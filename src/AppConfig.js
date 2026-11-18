@@ -7,7 +7,7 @@ import {
     startOfWorkDay, endOfWork, endOfWorkDay, workEndOfDay, nextStartAfter, workDaysBetween,
     clampIntoWorkWindow,
     elapsedDays, orderTypeOf, barDisplayLine, barStyleLine, barProductLine, addCalDays, randSmv, productTypeFor,
-    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, orderTwinOf, osInfoOf, barOrderNo, barStyleOf, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
+    mbmOrderNo, orderDeliveryOf, fmtDateDdMonRr, erpOrderInfo, orderTwinOf, osInfoOf, barOrderNo, barStyleOf, barBuyerOf, buyerShortOf, garmentTypeOf, resolveProfileType, resolveProfileEfficiency,
     formulaWorkingDays, applyFormulaToRaw, snapWorkMinutes, WORK_MIN_PER_DAY, WORK_SNAP_MIN, isLateVsDelivery, isLateVsTarget, earliestSewStart, sewTargetDay,
     dayCapacityFactor, hmToHours, calendarState,
     workDayUnits, planQtyOf, workingMinutesBetween,
@@ -442,7 +442,8 @@ export function itemLabelOf(r) {
 export function barModeLine(r, mode, compact = false) {
     if (!r) return '';
     switch (mode) {
-        case 'buyer'    : return buyerShortOf(r.buyer) || 'N/A';
+        // an OS order (GSL-…) reads the MAIN order's buyer (one face)
+        case 'buyer'    : return buyerShortOf(barBuyerOf(r)) || 'N/A';
         case 'product'  : return itemLabelOf(r) || 'N/A';
         // an OS order reads its ERP style / MBM order here too (one face)
         case 'ptype'    : return barStyleOf(r) || barOrderNo(r) || 'N/A';
@@ -2689,7 +2690,7 @@ export const schedulerProConfig = {
         }
         else if (q) {
             const hay = [
-                r.buyer, r.po, r.style, r.status, r.productType, buyerShortOf(r.buyer), itemLabelOf(r),
+                r.buyer, barBuyerOf(r), r.po, r.style, r.status, r.productType, buyerShortOf(r.buyer), buyerShortOf(barBuyerOf(r)), itemLabelOf(r),
                 orderTypeOf(r.po, r.orderType), barDisplayLine(r), barStyleLine(r), e.name,
                 // an OS order is found by either number / either style
                 mbmOrderNo(r.po, r.mbmOrder), barOrderNo(r), barStyleOf(r)
@@ -2707,7 +2708,7 @@ export const schedulerProConfig = {
         // planner acts
         if (r.erpFlag) renderData.cls.add('mb-erp-flag');
         const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
-        if (colorState.mode === 'buyer')        paint(buyerColorOf(r.buyer));
+        if (colorState.mode === 'buyer')        paint(buyerColorOf(barBuyerOf(r) || r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));
         else if (colorState.mode === 'style')   paint(styleColorOf(barStyleOf(r) || barOrderNo(r)));
         else if (colorState.mode === 'ptype') {

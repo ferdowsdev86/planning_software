@@ -56,3 +56,17 @@ test('compact variant drops the date but keeps style and colour', () => {
     const line = barStyleLine({ style : 'MSK-3', color : 'Red', po : 'PO-1', orderType : 'confirm' }, true);
     assert.equal(line, 'MSK-3 : Red');
 });
+
+test('OS order bar reads the MAIN order buyer (saved snapshot / server twin), other bars their own', async () => {
+    const { barBuyerOf, barDisplayLine, mergeErpInfo } = await import('./planningData.js');
+    // saved snapshot on the bar
+    const snap = { buyer : 'GREAT SYNERGY LTD.', mbmOrder : 'GSL-251153', po : '300137220533', style : 'GSLB-44-180',
+        os : { code : 'GSL-251153', mbm : '26SPJCP088', mbmBuyer : 'JCP', erpStyle : '300193' } };
+    assert.equal(barBuyerOf(snap), 'JCP');
+    assert.equal(barDisplayLine(snap, true), 'JCP:26SPJCP088');
+    // no snapshot yet: the server's twin labels
+    mergeErpInfo({ erpByOrder : { 'GSL-251199' : { twin : '26SPJCP099', twinBuyer : 'JCP', twinStyle : '300194' } } });
+    assert.equal(barBuyerOf({ buyer : 'GREAT SYNERGY LTD.', mbmOrder : 'GSL-251199', po : 'P1' }), 'JCP');
+    // an ordinary order keeps its own buyer
+    assert.equal(barBuyerOf({ buyer : 'Nautica', mbmOrder : '26SPNAU024', po : 'P2' }), 'Nautica');
+});

@@ -535,10 +535,11 @@ export function orderDeliveryOf(ship) {
 // full confirm:    Buyer : Style : PO : color : po_delivery
 export function barDisplayLine(raw, compact = false) {
     if (!raw) return '';
-    // an OS order (GSL-…) reads as its MBM order + ERP style (barOrderNo / barStyleOf)
+    // an OS order (GSL-…) reads as its MBM order + ERP style + the MAIN
+    // order's buyer (barOrderNo / barStyleOf / barBuyerOf)
     const mbm   = barOrderNo(raw);
     const style = barStyleOf(raw);
-    const buyer = raw.buyer || '—';
+    const buyer = barBuyerOf(raw) || '—';
     if (compact) return `${buyer}:${mbm}`;
     const type = orderTypeOf(raw.po, raw.orderType);
     if (type === 'projection') {
@@ -571,7 +572,7 @@ export function barProductLine(raw, compact = false) {
     const type = String(raw.productType || productTypeFor(raw.po, raw.productType) || '').trim() || 'N/A';
     if (compact) return type;
     const mbm = barOrderNo(raw);
-    return `${type} : ${raw.buyer || '—'} : ${barStyleOf(raw) || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
+    return `${type} : ${barBuyerOf(raw) || '—'} : ${barStyleOf(raw) || '—'} : ${mbm} : ${fmtQty(raw.qty)} pcs : ${fmtDateDdMonRr(orderDeliveryOf(raw.ship))}`;
 }
 
 // ERP labels the server sends with the board / the unplanned list:
@@ -651,6 +652,17 @@ export function barOrderNo(raw) {
     const code = mbmOrderNo(raw.po, raw.mbmOrder);
     if (raw.os && raw.os.mbm) return String(raw.os.mbm);
     return orderTwinOf(code).twin || code;
+}
+// the buyer the BAR reads (planner, 2026-11-18: "GSL orders — show the MAIN
+// order's buyer on the board"): for an OS order the buyer of the MBM order it
+// is a part of (JCP for GSL-251153 / 26SPJCP088), from the saved snapshot or
+// the server's twin labels; the OS buyer (GREAT SYNERGY LTD.) stays in the
+// tooltip's OS card. Any other bar: its own buyer.
+export function barBuyerOf(raw) {
+    if (!raw) return '';
+    if (raw.os && raw.os.mbmBuyer) return String(raw.os.mbmBuyer).trim();
+    const tw = orderTwinOf(mbmOrderNo(raw.po, raw.mbmOrder));
+    return (tw.twin && tw.twinBuyer) || String(raw.buyer || '').trim();
 }
 // the style the BAR reads: the ERP style behind an OS style name, else the style
 export function barStyleOf(raw) {
