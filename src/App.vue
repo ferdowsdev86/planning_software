@@ -22498,8 +22498,11 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     box-shadow    : 0 4px 18px rgba(0,0,0,.22), 0 1px 4px rgba(0,0,0,.12);
     padding       : 0;
     color         : #222;
-    max-width     : 440px;
+    max-width     : 460px;
     min-width     : 340px;
+    /* never taller than the window: the card scrolls inside instead of
+       being cut at the screen edge */
+    max-height    : calc(100vh - 16px);
     z-index       : 9999 !important;
 }
 
@@ -22522,8 +22525,10 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     border-radius  : 10px;
     background     : #f4f6fb;
     min-height     : 0;
+    max-height     : calc(100vh - 16px);
     overflow-y     : auto;
     overflow-x     : hidden;
+    overscroll-behavior : contain;
     scrollbar-width: thin;
     scrollbar-color: #c5d4ea #f4f6fb;
 }
@@ -22542,10 +22547,10 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     font-size   : 12px;
     font-weight : 700;
     letter-spacing : .3px;
-    white-space : nowrap;
-    overflow    : hidden;
-    text-overflow : ellipsis;
-    max-width   : 260px;
+    /* the full name, wrapped — never "…" */
+    white-space : normal;
+    overflow-wrap : anywhere;
+    line-height : 1.3;
 }
 .tip4-hdr-badges { display : flex; gap : 5px; flex-wrap : wrap; justify-content : flex-end; flex : 1 1 auto; min-width : 0; }
 .tip4-hdr { flex-wrap : wrap; }
@@ -22557,7 +22562,7 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 
 /* Cards */
 .tip4-card {
-    margin      : 6px 8px;
+    margin      : 5px 7px;
     border-radius : 7px;
     overflow    : hidden;
     background  : #fff;
@@ -22578,7 +22583,7 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 }
 
 .tip4-card-body {
-    padding : 5px 9px 6px;
+    padding : 4px 8px 5px;
 }
 .tip4-has-img {
     display : flex;
@@ -22613,9 +22618,11 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 }
 
 /* Single label:value row */
+/* Nothing in a row is ever cut: label and value both wrap (planner,
+   2026-11-18: "no information may be cut off — everything visible") */
 .t4r {
     display     : flex;
-    align-items : baseline;
+    align-items : flex-start;
     gap         : 4px;
     padding     : 2px 0;
     min-width   : 0;
@@ -22625,22 +22632,24 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .t4-full  { grid-column : span 2; }
 
 .t4l {
-    flex        : 0 0 62px;
+    flex        : 0 0 66px;
     font-size   : 10px;
     font-weight : 600;
     color       : #7a8faa;
-    white-space : nowrap;
-    line-height : 1.5;
+    white-space : normal;
+    overflow-wrap : anywhere;
+    line-height : 1.4;
+    padding-top : 1px;
 }
 .t4v {
     flex       : 1;
     font-size  : 11.5px;
     color      : #18284a;
     min-width  : 0;
-    overflow   : hidden;
-    text-overflow : ellipsis;
-    white-space   : nowrap;
-    line-height   : 1.5;
+    overflow   : visible;
+    white-space   : normal;
+    overflow-wrap : anywhere;
+    line-height   : 1.45;
 }
 .t4v b  { font-weight : 700; color : #0d2b72; }
 .t4dim  { color : #aab; font-style : italic; }
@@ -22649,9 +22658,9 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 /* Production row: done (green) and the highlighted REMAINING qty (amber) */
 .t4-prodrow .t4v { white-space : normal; overflow : visible; }
 .t4-prod { display : inline-flex; align-items : center; gap : 6px; flex-wrap : wrap; row-gap : 3px; }
-.t4-done { background : #e6f4ea; color : #1e6b3a; border : 1px solid #b7dfc4; border-radius : 10px; padding : 0 7px; font-size : 10.5px; white-space : nowrap; }
+.t4-done { background : #e6f4ea; color : #1e6b3a; border : 1px solid #b7dfc4; border-radius : 10px; padding : 0 7px; font-size : 10.5px; white-space : normal; max-width : 100%; }
 .t4-done b { color : #1e6b3a; }
-.t4-left { background : #fff3cd; color : #7a4b00; border : 1px solid #f1c232; border-radius : 10px; padding : 0 8px; font-size : 11px; font-weight : 700; white-space : nowrap; box-shadow : 0 0 0 2px #ffe08a inset; }
+.t4-left { background : #fff3cd; color : #7a4b00; border : 1px solid #f1c232; border-radius : 10px; padding : 0 8px; font-size : 11px; font-weight : 700; white-space : normal; max-width : 100%; box-shadow : 0 0 0 2px #ffe08a inset; }
 .t4-left b { color : #7a4b00; font-size : 12px; }
 .t4-left-zero { background : #e6f4ea; color : #1e6b3a; border-color : #b7dfc4; box-shadow : none; }
 .t4-left-zero b { color : #1e6b3a; }
@@ -22797,6 +22806,7 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .tip4-po-tbl td {
     padding       : 4px 7px;
     border-bottom : 1px solid #f0f4fc;
+    overflow-wrap : anywhere;
 }
 .tip4-po-tbl tr:last-child td { border-bottom : none; }
 .tip4-po-tbl tr:nth-child(even) { background : #f8faff; }

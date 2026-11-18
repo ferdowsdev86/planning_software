@@ -2552,8 +2552,14 @@ export const schedulerProConfig = {
         hideOnScroll         : true,
         allowOver            : true,
         // Open BELOW the hovered bar so the Holding-Row day-qty chips at the
-        // top stay visible while the tooltip is up
-        align                : 't-b',
+        // top stay visible while the tooltip is up. When neither below nor
+        // above has room for (nearly) the whole card, it opens BESIDE the bar
+        // with the full window height instead of being squeezed and cut
+        // (axisLock 'flexible' tries b-t, then r-l / l-r; minHeight is the
+        // align spec's "shrink no further than this" — not an element style).
+        // Whatever the zone, the card scrolls inside rather than overflow the
+        // window (CSS max-height on .mb-fr-tip / .mb-tip4).
+        align                : { align : 't-b', axisLock : 'flexible', minHeight : 640 },
         // Content is built synchronously whenever the ERP detail is already
         // cached — prefetched while the pointer rests on the bar for the hover
         // delay — so the tooltip opens with its data, no "Loading…" flash. A
@@ -3335,9 +3341,9 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${R('Style No', `<b>${enc(s.stl_no || erpStyleShown || r.style || '—')}</b>${osStyle ? ` <span class="t4dim" title="OS style name">· ${enc(osStyle)}</span>` : ''}`)}
           ${R('Product', enc(garmentTypeOf(r) || s.erp_garment_type || s.stl_product_name || (ptype !== '_Default' && ptype) || '—'))}
           ${R('Wash', washLbl)}
+          ${R('Techpack', tpHtml)}
         </div>
         ${(s.stl_description || s.stl_garment_description) ? R('Desc', `<i class="t4dim">${enc(s.stl_description || s.stl_garment_description)}</i>`, 't4-full') : ''}
-        ${R('Techpack', tpHtml, 't4-full')}
       </div>
     </div>
   </div>
@@ -3361,9 +3367,9 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
     <div class="tip4-card-body">
       <div class="tip4-rows">
         ${R('Order No', `<b class="t4-order-no">${enc(shownOrder || s.order_code || order || '—')}</b>${osCode ? ` <span class="t4dim">/ ${enc(osCode)}</span>` : ''}`, 't4-full')}
-        ${R('Buyer', `${enc(r.buyer || '—')}${twinBuyer ? ` / ${enc(twinBuyer)}` : ''}`, 't4-full')}
-        ${R('Color', colorHtml, 't4-full')}
         <div class="tip4-2col">
+          ${R('Buyer', `${enc(r.buyer || '—')}${twinBuyer ? ` / ${enc(twinBuyer)}` : ''}`)}
+          ${R('Color', colorHtml)}
           ${(() => {
               // Order Qty = the ORDER's full ERP quantity; when this bar is a
               // piece of it, its own share follows ("strip N") — the Plan Qty
@@ -3392,7 +3398,7 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
           ${r.erpFlag ? R('ERP check', `<b style="color:#c62828">${enc(r.erpFlag)}</b> <span class="t4dim">— the ERP sync no longer finds this order as a plannable order; the bar stays until you remove it or run Auto plan</span>`) : ''}
           ${r.parked && r.holdReason ? R('Holding Row', `<b style="color:#b45309" title="the Auto plan parked this order here instead of planning it late — split it, subcontract, or agree a new delivery, then plan it by hand">⏸ ${enc(r.holdReason)}</b>`, 't4-full') : ''}
           ${R('SMV / Eff', `${enc(String(smv))}${r.smvMissing ? ' <span class="t4dim" title="ERP has no SMV for this style — placeholder; right-click → Recalculate duration to enter the real SMV">(est.)</span>' : (Number(r.smvManual) > 0 ? ' <span class="t4dim">(entered)</span>' : '')} / ${enc(String(eff ?? '—'))}`)}
-          ${R('Stage', enc(stage))}
+          ${stage !== 'Sew' ? R('Stage', enc(stage)) : ''}
         </div>
         ${(() => {
             // Projection bar whose order has confirm POs by now: their actual
