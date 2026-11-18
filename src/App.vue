@@ -13310,9 +13310,9 @@ function showDayPlanChips(s, rec) {
                 resourceId : firstHoldId(s),
                 startDate  : new Date(d),
                 endDate    : next,
-                name       : info.off
-                    ? 'off'
-                    : `${fmtQty(info.qty)}${info.lcDay ? ` · LC D${info.lcDay}` : ''}`,
+                // the day's quantity only (planner, 2026-11-18: "do not show
+                // LC D1, LC D2 — only the qty"); a ramp day keeps its colour
+                name       : info.off ? 'off' : fmtQty(info.qty),
                 cls        : 'mb-dayqty-range'
                     + (info.off ? ' mb-dayqty-off' : '')
                     + (!info.off && info.lcDay ? ' mb-dayqty-lc' : '')
