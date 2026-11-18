@@ -632,6 +632,9 @@ function loadDiffFromDb(s = getInstance()) {
         const d = ev.data || {};
         const raw = d.raw;
         if (!raw || raw.stage || d.dbStart == null) continue;
+        // a bar the production cut moved stands for its remaining quantity —
+        // that is the production update's doing, not a load-path defect
+        if (raw._prodCut) continue;
         const lid = lineIdOf(s, ev, index);
         const why = [];
         if (Math.abs(+ev.startDate - d.dbStart) > 60000) why.push(`start ${new Date(d.dbStart).toISOString().slice(0, 16)} → ${ev.startDate.toISOString().slice(0, 16)}`);
@@ -2389,10 +2392,29 @@ function applyApiBoardData(s, data) {
     // production covers its plan quantity has nothing left to make and is
     // removed by the finished-strip sweep once the edit lock is ours
     // (scheduleFinishedSweep → autoCompleteFinished, DB rows cancelled by
-    // that save — screen and DB stay one picture).
+    // that save — screen and DB stay one picture) — and, the same rule, a
+    // strip IN production stands for its REMAINING quantity only (planner,
+    // 2026-11-18, 26H1LEV939: "the strip holds 2.7 days of space; dropped at
+    // the same position it takes only what is left — why different"): the
+    // production cut applies at load (cut : true — start where the output
+    // leaves it, never before now; end = the remaining quantity's schedule,
+    // the ramp continued, not restarted), exactly what a production entry on
+    // the board does. Those bars are marked raw._prodCut: loadDiffFromDb
+    // leaves them out of its "load must change nothing" check and the next
+    // Save writes them (boardDbState was taken before this).
     beginBoardInteraction(s, 'batch');
-    try { applyProdUpdates(s, { push : false, cut : false }); }
+    const beforeCut = snapshotBoardState(s);
+    try { applyProdUpdates(s, { push : true, cut : true }); }
     finally { endBoardInteraction(s); }
+    // every bar the production cut moved — the cut strips and the followers
+    // a grown strip pushed — is the production update's doing
+    const afterCut = snapshotBoardState(s);
+    for (const [id, st] of Object.entries(afterCut)) {
+        if (beforeCut[id] && !sameBarState(beforeCut[id], st)) {
+            const raw = s.eventStore.getById(id)?.data?.raw;
+            if (raw) raw._prodCut = true;
+        }
+    }
     try {
         const short = shortConfirmGroups(s);
         if (short.length) {
@@ -11901,6 +11923,30 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
             }
             if (!newStart) newStart = startOfWorkDay(nextWorkingDay(d));
             if (newStart >= end) newStart = new Date(end.getTime() - 3600000);
+            // A strip that has STARTED (its start is behind us) stands for
+            // what is left, and that is sewn from NOW on: the remaining piece
+            // starts at the current working minute (the next working day
+            // after hours / on an off day) — never in the past, and never at
+            // the planned rate's point in the future (production ahead of
+            // plan put the rest days away and pushed the followers behind
+            // it). A strip that has not started yet keeps the planned-rate
+            // cut from its own start (planner, 2026-11-18, 26H1LEV939)
+            if ((Number(raw.qty) || 0) - made > 0 && ev.startDate <= new Date()) {
+                newStart = clampIntoLineWorkWindow(new Date(), lid);
+                // …in the line's first free moment from now: when another
+                // strip is running on the line right now (the line moved on
+                // while this one waited for its last pieces), the rest goes
+                // behind the strips that occupy the line, never on top of
+                // them ("the remaining goes to the next slot with capacity")
+                const others = barsOnLine(s, lid)
+                    .filter(o => o !== ev && o.data?.raw && !o.data.raw.stage && !o.data.raw.parked && o.endDate > newStart)
+                    .sort((a, b) => a.startDate - b.startDate);
+                for (const o of others) {
+                    if (o.startDate <= newStart) { if (o.endDate > newStart) newStart = new Date(o.endDate); }
+                    else break;
+                }
+                newStart = clampIntoLineWorkWindow(newStart, lid);
+            }
 
             // A bar in production NEVER ramps again (planner, 2026-11-18,
             // 26H1LEV939: 6,844 of 7,314 made, the 470 left were scheduled at
@@ -11939,6 +11985,7 @@ function applyProdUpdates(s, { push = true, cut = true } = {}) {
                 });
                 raw.start = newStart;
                 raw.end   = newEnd;
+                raw._prodCut = true;   // moved by production, not by the planner (loadDiffFromDb)
                 if (grew && push) pushFollowers(s, lid, ev);
             }
             raw._cutStart = ev.startDate.getTime();
@@ -15401,10 +15448,15 @@ async function saveToDbInner(s) {
         if (lockFix) toast(`10-day plan lock: ${lockFix} locked bar(s) were put back as they were saved`, 'warn');
     }
     const changes = collectPendingChanges(s);
-    if (!changes.length) {
+    // bars the production cut moved at load (raw._prodCut) are not the
+    // planner's changes, but the DB must hold the picture on screen — a Save
+    // with nothing else still writes them
+    const derivedOnly = !changes.length ? derivedUnsavedIds(s).length : 0;
+    if (!changes.length && !derivedOnly) {
         toast('No changes to save — move an order first, then click Save', 'warn');
         return;
     }
+    if (!changes.length) toast(`${derivedOnly} strip(s) stand for their remaining quantity after production — saving those positions`, 'ok');
     // Connection pre-check: a dead API/DB is reported IMMEDIATELY instead of
     // the save silently doing nothing while the user keeps clicking
     // Reachability check is advisory: a slow ping must not block the save —
