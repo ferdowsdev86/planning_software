@@ -2761,6 +2761,10 @@ function openPlannedSchedule(rec) {
         toast('Could not open planned schedule for this strip', 'error');
         return;
     }
+    // bars may have moved since the actuals were attributed (pull forward,
+    // auto plan, a drag) — re-attribute and re-forecast on the CURRENT
+    // positions so the dialog never shows a stale period
+    try { applySewingActuals(getInstance()); } catch { /* the dialog still opens on the last forecast */ }
     plRec.value = rec;
     plPeriod.value = 'daily';
     // raw.lc / raw.qty are plain (non-reactive) fields on the record: bump a
@@ -5447,11 +5451,13 @@ function computePullForward(opts = {}) {
             let ns = anchorEnd === null ? clampIntoWorkWindow(new Date(anchorStart)) : nextDayStartAfter(anchorEnd);
             // Range rule: a pulled bar never crosses BEFORE the From date
             if (rangeFrom && ns < rangeFrom) ns = clampIntoWorkWindow(new Date(rangeFrom));
-            // Planning rule: sewing never starts before PCD + 8 days — a pull
-            // stops at the order's earliest sewing start (the bar keeps its
-            // gap in front of it when it already sits there)
-            const floor = raw.pcd && !(Number(raw.made) > 0) ? earliestSewStart(raw.pcd) : null;
-            if (floor && ns < floor) ns = clampIntoWorkWindow(new Date(floor));
+            // NO PCD barrier (planner, 2026-11-18: "in pull forward remove the
+            // PCD date barrier — the planner moves the bars as needed"): the
+            // pull used to stop at the order's earliest sewing start
+            // (PCD + 8 days) and left the gap standing. Pull forward is the
+            // planner's own move — the bar goes where the gap ends; the ones
+            // that now start before PCD + 8 are only COUNTED (preview / toast).
+            // Auto plan keeps its PCD + 8 rule.
             // Nothing is ever PULLED INTO THE PAST: sewing cannot start
             // yesterday. Every pull stops at today's first working hour —
             // a bar already standing before today simply stays where it is
@@ -5476,11 +5482,14 @@ function computePullForward(opts = {}) {
                 ne = endOfWork(ns, tmp.dur || raw.dur || elapsedDays(oldStart, oldEnd) || 1);
             }
             catch { ne = endOfWork(ns, raw.dur || elapsedDays(oldStart, oldEnd) || 1); }
+            // information only: the bar now starts before PCD + 8 (it did not before the pull)
+            const sewFloor = raw.pcd && !(Number(raw.made) > 0) ? earliestSewStart(raw.pcd) : null;
             changes.push({
                 id : ev.id, line : res.id, lineName : res.name,
                 order : mbmOrderNo(raw.po, raw.mbmOrder),
                 oldStart, oldEnd, newStart : ns, newEnd : ne,
-                gap : Math.round((oldStart - ns) / 864e5 * 10) / 10
+                gap : Math.round((oldStart - ns) / 864e5 * 10) / 10,
+                beforePcd : !!(sewFloor && ns < sewFloor && oldStart >= sewFloor)
             });
             anchorEnd = ne;
         }
@@ -5491,6 +5500,7 @@ function computePullForward(opts = {}) {
             lines     : new Set(changes.map(c => c.line)).size,
             moved     : changes.length,
             gapDays   : Math.round(changes.reduce((a, c) => a + c.gap, 0) * 10) / 10,
+            beforePcd : changes.filter(c => c.beforePcd).length,
             unchanged,
             skipped
         }
@@ -5566,14 +5576,14 @@ function applyPullForward(plan = null, { mouse = null } = {}) {
         // saved until the planner saves or leaves pick mode
         pfPulls.bars += p.changes.length;
         pfPulls.lines.add(mouse.lineId);
-        toast(`Pulled ${p.changes.length} bar(s) on ${mouse.lineName} up to ${fmtClock(mouse.date)} · so far ${pfPulls.bars} bar(s) on ${pfPulls.lines.size} line(s) — click another point, or the ⇤ button / Esc to finish`, 'ok');
+        toast(`Pulled ${p.changes.length} bar(s) on ${mouse.lineName} up to ${fmtClock(mouse.date)}${p.summary?.beforePcd ? ` (${p.summary.beforePcd} now before PCD + ${SEW_START_AFTER_PCD_DAYS})` : ''} · so far ${pfPulls.bars} bar(s) on ${pfPulls.lines.size} line(s) — click another point, or the ⇤ button / Esc to finish`, 'ok');
         return;
     }
     if (boardReadOnly.value) {
         toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s) — NOT saved (this board is read only for you)`, 'warn');
         return;
     }
-    toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s) — saving…`, 'ok');
+    toast(`Plan pulled forward: ${p.summary.moved} bars on ${p.summary.lines} line(s)${p.summary.beforePcd ? ` (${p.summary.beforePcd} now before PCD + ${SEW_START_AFTER_PCD_DAYS})` : ''} — saving…`, 'ok');
     // "Save and Apply": the button saves. Wait for the board's own re-fit of
     // the moved bars (scheduleBoardSettle), then save without a second
     // confirmation — the pull was already confirmed above.
@@ -11786,8 +11796,15 @@ function applySewingActuals(s = getInstance()) {
         const tw = orderTwinOf(code);
         // the ERP books an OS order's output under its MR code — both numbers match
         const orderCodes = [...new Set([code, tw.twin, raw.os?.mbm, raw.os?.code].filter(Boolean).map(String))];
+        // origStart is the PRODUCTION-CUT anchor: it only means something on a
+        // bar that has production. A bar replanned to a new date with no
+        // production keeps the old anchor in its notes — used as the window
+        // start it pulled ANOTHER period's output onto the wrong strip
+        // (GSL ⊞2: the 29/11 strip claimed the 10-18/11 PO-level rows at
+        // distance 0 and its whole schedule panel showed the phantom run)
+        const anchored = (Number(raw.made) > 0 || Number(raw.madeBase) > 0) && raw.origStart;
         bars.push({ id : String(ev.id), lineCode : lineCodeOfId(lid), pos, orderCodes,
-            startYmd : ymdOf(new Date(raw.origStart || ev.startDate)), endYmd : ymdOf(new Date(ev.endDate)) });
+            startYmd : ymdOf(new Date(anchored ? raw.origStart : ev.startDate)), endYmd : ymdOf(new Date(ev.endDate)) });
         recs.set(String(ev.id), ev);
     }
     const { byBar, unattributed } = attributeActualsToBars(sewingFeed.rows, bars);
@@ -11842,8 +11859,10 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     // there), else from the bar's saved start; a day plan saved with a
     // production entry (day_plan_qty) wins over the model (buildProgressRows)
     const firstAct = Object.keys(actDays || {}).sort()[0] || null;
+    // the saved production anchor only counts on a bar that HAS production —
+    // a stale origStart from an earlier position must not shift the baseline
     const start = firstAct ? startOfWorkDay(new Date(`${firstAct}T00:00:00`))
-        : (raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate));
+        : (made > 0 && raw.origStart ? new Date(raw.origStart) : new Date(ev.startDate));
     let sim;
     try { sim = simulateStrip(s, { ...raw, made : 0 }, lid, start); }
     catch { return null; }
@@ -18442,6 +18461,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             Affected Lines: <b>{{ pfPrev.summary.lines }}</b> ·
                             Bars to Move: <b>{{ pfPrev.summary.moved }}</b> ·
                             Total Gap Removed: <b>{{ pfPrev.summary.gapDays }}</b> days ·
+                            <template v-if="pfPrev.summary.beforePcd">Before PCD + 8: <b>{{ pfPrev.summary.beforePcd }}</b> ·</template>
                             Unchanged: <b>{{ pfPrev.summary.unchanged }}</b> ·
                             Locked/Skipped: <b>{{ pfPrev.summary.skipped }}</b>
                         </div>
@@ -18463,7 +18483,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="st-hint">
                         প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
                         কোনো bar কখনো পরে যায় না, line/sequence বদলায় না · শুধু completed bar স্থির থাকে
-                        (production চলা bar-ও টেনে আনা হয়) · Save and Apply (scope mode) = সরানোর পর সাথে সাথে DB-তে save হয় · mouse mode = pick mode শেষে একবার save confirmation
+                        (production চলা bar-ও টেনে আনা হয়) · PCD-র কোনো বাধা নেই: bar PCD + 8-এর আগেও টেনে আনা যায় (শুধু আজকের আগে নয়) · Save and Apply (scope mode) = সরানোর পর সাথে সাথে DB-তে save হয় · mouse mode = pick mode শেষে একবার save confirmation
                     </div>
                 </div>
             </div>

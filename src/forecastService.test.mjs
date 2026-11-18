@@ -141,3 +141,22 @@ test('forecast: remaining allocated exactly once at baseline × ratio, capped at
     assert.equal(up.exhausted, false);
     assert.equal(up.left, 1000);
 });
+
+test('PO-level output before every strip starts lands on the EARLIEST strip — with planned (not stale-anchor) windows', () => {
+    // GSL ⊞2 case: output booked 10-18/11, strips planned 23-29/11 and
+    // 29/11-02/12. With the stale production anchor the 29/11 strip claimed
+    // the rows at distance 0; with the planned windows the first strip wins.
+    const bars = [
+        { id : 's1', lineCode : null, pos : ['P1'], orderCodes : ['GSL-X'], startYmd : '2026-11-23', endYmd : '2026-11-29' },
+        { id : 's2', lineCode : null, pos : ['P1'], orderCodes : ['GSL-X'], startYmd : '2026-11-29', endYmd : '2026-12-02' }
+    ];
+    const rows = [
+        { date : '2026-11-10', poNo : 'P1', orderCode : 'GSL-X', lineCode : null, qty : 12 },
+        { date : '2026-11-12', poNo : 'P1', orderCode : 'GSL-X', lineCode : null, qty : 12 }
+    ];
+    const { byBar } = attributeActualsToBars(rows, bars);
+    assert.ok(byBar.has('s1'), 'the earliest strip takes the pre-plan PO-level rows');
+    assert.ok(!byBar.has('s2'), 'the later strip takes none of them');
+    assert.equal(Object.keys(byBar.get('s1').days).length, 2);
+    assert.equal(byBar.get('s1').days['2026-11-10'].attributed, false, 'still marked PO-level (line not attributed)');
+});
