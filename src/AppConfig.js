@@ -3303,25 +3303,10 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                 : (e.name || r.buyer || '—');
             const erpStyleShown = barStyleOf(r);
             const osStyle = osi?.style && String(osi.style) !== String(erpStyleShown) ? String(osi.style) : '';
-            const osCard = osi ? `
-  <div class="tip4-card tip4-os-card">
-    <div class="tip4-card-hd">🏷 OS order (${enc(String(osi.code || '').split('-')[0] || 'OS')})</div>
-    <div class="tip4-card-body">
-      <div class="tip4-rows">
-        ${R('OS Order', `<b>${enc(String(osi.code || '—'))}</b>${osi.mbm ? ` <span class="t4dim">· MBM ${enc(String(osi.mbm))}</span>` : ''}`, 't4-full')}
-        ${R('OS Buyer', enc(String(osi.buyer || r.buyer || '—')), 't4-full')}
-        <div class="tip4-2col">
-          ${R('OS Style', enc(String(osi.style || '—')))}
-          ${R('ERP Style', enc(String(osi.erpStyle || erpStyleShown || '—')))}
-          ${R('OS Qty', osi.qty ? `<b>${enc(fmtQty(Number(osi.qty)))}</b>` : '—')}
-          ${R('Product', enc(String(osi.ptype || '—')))}
-          ${R('OS Delivery', enc(ddMon(osi.odd)))}
-          ${R('OS PCD', enc(ddMon(osi.pcd)))}
-        </div>
-        ${r.os ? '' : `<div class="t4dim">saved with the bar on the next Save</div>`}
-      </div>
-    </div>
-  </div>` : '';
+            // No separate "OS order" card (planner, 2026-11-18: "no need to
+            // show this part — remove it"): the GSL side is already in the
+            // header (buyer / main buyer | MBM order / GSL code), the Order
+            // No row and the Style No row (ERP style · OS style)
 
             return `
 <div class="mb-tip4" data-tip-ev="${enc(String(e.id))}">
@@ -3469,7 +3454,6 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
       </div>
     </div>
   </div>
-  ${osCard}
   </div>
 
   <!-- PURCHASE ORDERS TAB -->
