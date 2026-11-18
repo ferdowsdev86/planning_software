@@ -531,8 +531,27 @@ function finishBoardLoad(uid, data, s) {
             console.warn(`[board load] ${diff.length} bar(s) are not where the DB holds them after load:`, diff.slice(0, 50));
             toast(`⚠ ${diff.length} bar(s) are not where the saved plan holds them after load (load must change nothing) — see the console: [board load]`, 'warn');
         }
+        // RULE (planner, 2026-11-18, 26H1LEV577: "production update shows on
+        // the board but the bar is not removed — balance 0 must remove it"):
+        // the ONE thing the production update may do to a saved bar is end it.
+        // A strip whose production (ERP sewing out / board entry) covers its
+        // plan quantity has nothing left to make and leaves the board; the
+        // order completes when no open strip of it is left (the same sweep
+        // that runs after a production save). It needs the edit lock — it
+        // writes the DB — so it runs now when the lock is ours, else the
+        // moment the lock arrives (syncBoardLock); never a layout change.
+        scheduleFinishedSweep(s);
     }
     if (AUTO_PLAN_ON_LOAD) scheduleBackgroundPlan(s);
+}
+function scheduleFinishedSweep(s) {
+    if (boardReadOnly.value) { autoCompleteAfterLock = true; return; }
+    setTimeout(() => {
+        const sb = getInstance();
+        if (!sb || sb !== s) return;
+        if (carried.value || uiHooks.boardUserActive) { autoCompleteAfterLock = true; return; }
+        autoCompleteFinished(sb).catch(() => { /* reported by its toasts */ });
+    }, 1500);
 }
 // After a Save: the plan as the DB now holds it, read back and compared with
 // the screen. missing = on the screen, not in the DB; moved = in the DB at
@@ -9067,7 +9086,17 @@ async function autoCompleteFinished(s) {
     // 1,038, board entry 0 — the bar stayed Active under the old
     // board-entry-only rule).
     const totalMade = r => Number(r.made) || 0;
-    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && totalMade(r) >= Number(r.qty);
+    // done = nothing left to make: the plan quantity is made, or what is
+    // left lies inside the +3 % plan allowance (the strip's ERP quantity is
+    // sewn — an allowance nobody will sew never keeps a bar on the board;
+    // the same rule as the forecast's "remaining 0", computeBarForecast)
+    const leftOf = r => {
+        const q = Number(r.qty) || 0;
+        const allowance = Math.max(0, q - (Number(r.baseQty) > 0 ? Number(r.baseQty) : q));
+        const left = Math.max(0, q - totalMade(r));
+        return left <= allowance ? 0 : left;
+    };
+    const isDone = r => r && !r.stage && r.status !== 'completed' && Number(r.qty) > 0 && totalMade(r) > 0 && leftOf(r) === 0;
     const done = s.eventStore.records.filter(ev => isDone(ev.data?.raw));
     if (!done.length) return;
     const codes = [...new Set(done.map(ev => String(ev.data.raw.mbmOrder || '')).filter(Boolean))];
@@ -9097,11 +9126,14 @@ async function autoCompleteFinished(s) {
     const coversFullOrder = code => (covOf.get(code) || 0) + 0.5 >= (reqOf.get(code) || 0);
     const fullyDone = codes.filter(code => coversFullOrder(code) && s.eventStore.records.every(ev => {
         const r = ev.data?.raw;
-        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || totalMade(r) >= Number(r.qty);
+        return !r || r.stage || String(r.mbmOrder || '') !== code || r.status === 'completed' || leftOf(r) === 0;
     }));
     const fullSet = new Set(fullyDone);
     const pieces = done.filter(ev => !fullSet.has(String(ev.data.raw.mbmOrder || '')));
-    if (pieces.length) await removeFinishedStrips(s, pieces, `${pieces.length} finished strip(s) removed from the board (production reached the plan qty)`);
+    if (pieces.length) {
+        const names = [...new Set(pieces.map(ev => mbmOrderNo(ev.data.raw.po, ev.data.raw.mbmOrder) || ev.data.raw.po || ''))].filter(Boolean);
+        await removeFinishedStrips(s, pieces, `${pieces.length} finished strip(s) removed from the board — production reached the plan qty, nothing left to make: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ` +${names.length - 5}` : ''}`);
+    }
     if (fullyDone.length) {
         try { await completeOrders(fullyDone); }
         catch (e) { toast(`Auto complete failed: ${e.message}`, 'error'); }
@@ -16128,11 +16160,15 @@ function runFind() {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
         const info = findRowInfo(s, ev);
-        if (!findAny(mStyle, [raw.style])) continue;
         // an OS order is found by its own number / buyer AND by the MBM order's
         const tw = orderTwinOf(mbmOrderNo(raw.po, raw.mbmOrder));
-        if (!findAny(mOrder, [raw.mbmOrder, tw.twin, raw.po, ...(Array.isArray(raw.poList) ? raw.poList : [])])) continue;
-        if (!findAny(mProd,  [`${raw.style || ''} :: ${raw.color || ''}`, raw.color, raw.productType, raw.product])) continue;
+        // …and by BOTH styles: the list / bar face show "398448 / GSLB-44-635"
+        // (ERP style / OS style), so the find takes either number — matching
+        // raw.style alone found nothing for the ERP style the row displays
+        const os = raw.os && raw.os.code ? raw.os : null;
+        if (!findAny(mStyle, [raw.style, tw.twinStyle, os?.style, os?.erpStyle])) continue;
+        if (!findAny(mOrder, [raw.mbmOrder, tw.twin, raw.po, os?.code, os?.mbm, ...(Array.isArray(raw.poList) ? raw.poList : [])])) continue;
+        if (!findAny(mProd,  [`${raw.style || ''} :: ${raw.color || ''}`, `${tw.twinStyle || ''} :: ${raw.color || ''}`, raw.color, raw.productType, raw.product])) continue;
         if (!findAny(mBuyer, [raw.buyer, tw.twinBuyer])) continue;
         if (from || to) {
             if (!info.ship || Number.isNaN(+info.ship)) continue;
