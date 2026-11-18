@@ -97,6 +97,7 @@ export function sopForRaw(scheduler, raw, lineId, extra = {}) {
 }
 import { resolveDropPosition, snapToleranceDays } from './snapService.mjs';
 import { cursorSplit } from './splitRules.mjs';
+import { placeBarTip } from './tipPlace.mjs';
 
 // ---------------------------------------------------------------------------
 // Colour-by state (toolbar dropdown): risk (default) | buyer | status
@@ -2110,7 +2111,51 @@ function installTip4Tabs() {
         const key  = btn.dataset.tab;
         root.querySelectorAll('.tip4-tab').forEach(b => b.classList.toggle('tip4-tab-on', b === btn));
         root.querySelectorAll('.tip4-panel').forEach(p => p.classList.toggle('tip4-panel-on', p.dataset.panel === key));
+        // another tab is another size: the card STAYS where it is (the tabs
+        // remain under the pointer — placing it anew could take it away from
+        // the pointer and close it) and only slides back inside the window
+        // when the new panel runs out of the lower / right edge
+        try {
+            const tip = uiHooks.instance?.features?.eventTooltip?.tooltip;
+            const el  = tip?.isVisible ? tip.element : null;
+            if (el) {
+                const r = el.getBoundingClientRect(), pad = 8;
+                const x = Math.max(pad, Math.min(r.left, window.innerWidth - pad - r.width));
+                const y = Math.max(pad, Math.min(r.top, window.innerHeight - pad - r.height));
+                if (Math.abs(x - r.left) > 0.5 || Math.abs(y - r.top) > 0.5) tip.setXY(Math.round(x), Math.round(y));
+            }
+        } catch { /* placement only */ }
     }, true);
+}
+
+// The pointer, for the tooltip of a bar as wide as the board (the card then
+// stands by the pointer — tipPlace.mjs)
+const tipMouse = { x : NaN, y : NaN };
+if (typeof document !== 'undefined') {
+    document.addEventListener('mousemove', ev => { tipMouse.x = ev.clientX; tipMouse.y = ev.clientY; }, { passive : true, capture : true });
+}
+
+// Bar tooltip position (planner, 2026-11-18): RIGHT of the hovered bar, else
+// LEFT of it, else BELOW it — never above (tipPlace.mjs holds the rule).
+// Bryntum's own zone search cannot leave one side out, so the spot is handed
+// to it as a fixed position on every (re)alignment; `spec.target` is the part
+// of the bar that is on screen, the card is measured as rendered.
+function placeTipBesideBar(spec) {
+    const tip  = uiHooks.instance?.features?.eventTooltip?.tooltip || spec?.source;
+    const el   = tip?.element;
+    const t    = spec?.target;
+    if (!el || !t || !Number.isFinite(t.x) || !Number.isFinite(t.width)) return;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return;
+    const at = placeBarTip({
+        bar   : { x : t.x, y : t.y, right : t.x + t.width, bottom : t.y + t.height },
+        card  : { w : r.width, h : r.height },
+        view  : { w : window.innerWidth, h : window.innerHeight },
+        mouse : Number.isFinite(tipMouse.x) ? tipMouse : null
+    });
+    spec.position = { x : Math.round(at.x), y : Math.round(at.y) };
+    spec.offset   = 0;
+    el.dataset.tipZone = at.zone;
 }
 
 // ---------------------------------------------------------------------------
@@ -2552,15 +2597,16 @@ export const schedulerProConfig = {
         hideOnDelegateChange : true,
         hideOnScroll         : true,
         allowOver            : true,
-        // Open BELOW the hovered bar so the Holding-Row day-qty chips at the
-        // top stay visible while the tooltip is up. When neither below nor
-        // above has room for (nearly) the whole card, it opens BESIDE the bar
-        // with the full window height instead of being squeezed and cut
-        // (axisLock 'flexible' tries b-t, then r-l / l-r; minHeight is the
-        // align spec's "shrink no further than this" — not an element style).
-        // Whatever the zone, the card scrolls inside rather than overflow the
-        // window (CSS max-height on .mb-fr-tip / .mb-tip4).
-        align                : { align : 't-b', axisLock : 'flexible', minHeight : 640 },
+        // Beside the hovered bar — right, else left — or below it, NEVER above
+        // (planner, 2026-11-18): placeTipBesideBar hands Bryntum the spot on
+        // every alignment. `align` below is only the fallback of the same
+        // rule should the spot not be computable (right, else left); the card
+        // scrolls inside rather than overflow the window (CSS max-height on
+        // .mb-fr-tip / .mb-tip4).
+        align                : { align : 'l0-r0', axisLock : true },
+        onBeforeAlign(spec) {
+            try { placeTipBesideBar(spec); } catch { /* Bryntum's own alignment stands */ }
+        },
         // Content is built synchronously whenever the ERP detail is already
         // cached — prefetched while the pointer rests on the bar for the hover
         // delay — so the tooltip opens with its data, no "Loading…" flash. A
