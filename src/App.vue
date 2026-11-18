@@ -4365,6 +4365,80 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
             const many = p.pieces.length > 1;
             if (many) splitPieces += p.pieces.length;
             noteDone(o);
+            // A GROUP (several PO / colour rows of one order) is PLANNED as one
+            // unit — one line, one after the other — but SHOWN as the confirm
+            // order is: one strip per colour row with its own colour, quantity
+            // and PO row (planner, 2026-11-18: 26SPJCP115 BLACK + 2nd colour
+            // came as ONE 3,847-pc bar). The engine's span is cut into
+            // consecutive strips colour by colour (the day model sets each
+            // inner boundary, the last strip keeps the engine's end, so a
+            // synchronized split still finishes together); a colour that runs
+            // over a piece boundary continues as its own piece on the next line.
+            const members = Array.isArray(o.members) && o.members.length > 1 ? o.members.filter(m => Number(m.qty) > 0) : null;
+            if (members) {
+                const pool = members.map(m => ({ m, left : Math.round(Number(m.qty) || 0), parts : 0 }));
+                const totalM = pool.reduce((a, x) => a + x.left, 0), totalP = p.pieces.reduce((a, pc) => a + pc.qty, 0);
+                if (totalM !== totalP && pool.length) pool[pool.length - 1].left = Math.max(0, pool[pool.length - 1].left + (totalP - totalM));
+                let cur = 0;
+                const seq = new Map();   // member id → pieces placed so far (for split ids / codes)
+                p.pieces.forEach((pc, k) => {
+                    const segs = [];
+                    let need = pc.qty;
+                    while (need > 0 && cur < pool.length) {
+                        if (pool[cur].left <= 0) { cur++; continue; }
+                        const take = Math.min(need, pool[cur].left);
+                        segs.push({ m : pool[cur].m, qty : take });
+                        pool[cur].left -= take; need -= take;
+                        if (pool[cur].left <= 0) cur++;
+                    }
+                    if (need > 0 && segs.length) segs[segs.length - 1].qty += need;   // rounding remainder stays in the piece
+                    let segStart = new Date(pc.start);
+                    segs.forEach((sg, j) => {
+                        const m = sg.m;
+                        const mid = String(m.id);
+                        const n = (seq.get(mid) || 0) + 1;
+                        seq.set(mid, n);
+                        const mWhole = Math.round(Number(m.qty) || 0) === sg.qty && n === 1 && pool.find(x => x.m === m)?.left === 0;
+                        const mCode = codeOf(m);
+                        const code = n === 1 ? mCode : nextStripEventCode(s, m.po, mCode);
+                        // the strip's own end from the day model; the last strip of the piece keeps the engine's end
+                        let segEnd = new Date(pc.end);
+                        if (j < segs.length - 1) {
+                            try {
+                                const probe = { ...baseRawOf({ ...m, perfRatio : o.perfRatio }), qty : sg.qty, made : 0, lc : undefined, lcDone : undefined };
+                                deriveLcForPlacement(s, probe, pc.line.id, segStart);
+                                const fin = simulateStrip(s, probe, pc.line.id, segStart).finish;
+                                if (fin && fin > segStart && fin < pc.end) segEnd = new Date(fin);
+                                else segEnd = new Date(+segStart + (+pc.end - +segStart) * (sg.qty / Math.max(1, pc.qty)));
+                            }
+                            catch { segEnd = new Date(+segStart + (+pc.end - +segStart) * (sg.qty / Math.max(1, pc.qty))); }
+                        }
+                        const raw = { ...baseRawOf({ ...m, perfRatio : o.perfRatio }), qty : sg.qty, reqMin : Math.round(sg.qty * (Number(m.smv) || 0)), eventCode : code,
+                            start : new Date(segStart), end : new Date(segEnd), dur : elapsedDays(segStart, segEnd), latePlan : !!p.late, lc : undefined, lcDone : undefined,
+                            risk : calcRisk({ start : segStart, end : segEnd, ship : m.ship, matReady : m.matReady || m.pcd, lineUtil : 0, status : 'draft' }) };
+                        if (!mWhole) {
+                            // a colour row planned in several strips (over a piece boundary): pieces of ITS row
+                            const share = sg.qty / Math.max(1, Number(m.qty) || 1);
+                            raw.orderQty = Math.round((Number(m.orderQty ?? m.qty) || 0) * share);
+                            raw.baseQty  = Number(m.baseQty) > 0 ? Math.round(Number(m.baseQty) * share) : m.baseQty;
+                            raw.id = n === 1 ? m.id : (code.startsWith('ev-') ? code.slice(3) : code);
+                            raw.keepSeparate = true;
+                            raw.split = { of : m.id, part : n, parts : n };   // parts fixed below once the member is placed
+                        }
+                        try { deriveLcForPlacement(s, raw, pc.line.id, segStart); } catch { /* no curve */ }
+                        const [rec] = s.eventStore.add({ id : n === 1 ? `ev-${mid}` : `ev-${mid}-sp${n}`, startDate : new Date(segStart), endDate : new Date(segEnd), duration : elapsedDays(segStart, segEnd), durationUnit : 'day',
+                            manuallyScheduled : true, name : `${m.buyer} | ${m.mbmOrder || m.po}`, percentDone : 0, draggable : true, resizable : true, raw });
+                        if (rec) { assignEventToLine(s, rec, pc.line.id); invalidateBarsByLine(); }
+                        segStart = segEnd;
+                    });
+                });
+                // every piece of a colour row knows how many pieces its row has
+                for (const [mid, parts] of seq) {
+                    if (parts < 2) continue;
+                    for (const r of s.eventStore.records) { const rr = r.data?.raw; if (rr?.split && String(rr.split.of) === mid) rr.split.parts = parts; }
+                }
+                continue;
+            }
             p.pieces.forEach((pc, k) => {
                 const code = k === 0 ? baseCode : nextStripEventCode(s, o.po, baseCode);
                 const raw = { ...baseRawOf(o), qty : pc.qty, reqMin : Math.round(pc.qty * (Number(o.smv) || 0)), eventCode : code, start : new Date(pc.start), end : new Date(pc.end),
