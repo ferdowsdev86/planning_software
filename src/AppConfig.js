@@ -3436,12 +3436,15 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
             const late = !!fc.late;
             const cut = fc.cutoff ? `data to ${ddMon(fc.cutoff)}${fc.provisional ? ' · today provisional' : ''}` : 'no actual data yet';
             const left = Number(fc.remaining) || 0;
+            const cv = fc.curve;
+            const curveTxt = cv ? (cv.done ? 'curve done — peak from the next day' : `curve: next day D${cv.stage + 1} = ${cv.nextPct} % (set by the output)`) : '';
             return R('Forecast',
                 `<span class="t4-prod">` +
                     `<span class="${late ? 't4-left' : 't4-done'}" title="projected sewing end from the actual daily output (today's remaining shift, calendars, learning curve, other allocations)">${late ? '⚠' : '✔'} Forecast end <b>${enc(ddMon(fc.forecastEnd))}</b>${late ? ' <span class="t4dim">· after target</span>' : ''}</span>` +
                     `<span class="t4dim" title="saved bar end · target sewing end = delivery − 7">saved ${enc(ddMon(fc.savedEnd))} · target ${enc(fc.targetEnd ? ddMon(fc.targetEnd) : '—')}</span>` +
                     `<span class="t4dim" title="remaining sewing quantity = plan qty − verified cumulative actual">⏳ remaining <b>${enc(fmtQty(left))}</b>${fc.unattributed > 0 ? ` · ${enc(fmtQty(fc.unattributed))} PO-level (line not attributed)` : ''}</span>` +
                     `<span class="t4dim" title="${enc(adj.note || '')}">adj ${enc(adjTxt)} · ${enc(cut)}</span>` +
+                    (curveTxt ? `<span class="t4dim" title="adaptive learning curve: each production day's output against the line's full-day capacity sets the stage the next day expects">${enc(curveTxt)}</span>` : '') +
                 `</span>`, 't4-full t4-prodrow');
         })()}
         ${R('Scheduled', `<span class="t4dim">${ymdHm(e.startDate || r.start)} → ${ymdHm(e.endDate || r.end)}</span>`, 't4-full')}

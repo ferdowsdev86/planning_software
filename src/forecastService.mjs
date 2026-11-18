@@ -116,7 +116,7 @@ export function buildProgressRows({ baseline = [], actuals = {}, savedPlan = {},
         const counts = status === 'final' || status === 'zero' || status === 'provisional';
         if (counts && (!cutoffYmd || ymd <= cutoffYmd || status === 'provisional')) { cumT += target; cumA += actual; }
         rows.push({
-            ymd, off : !!b?.off, lcDay : num(b?.lcDay), factor : b ? num(b.factor) : 1,
+            ymd, off : !!b?.off, lcDay : num(b?.lcDay), factor : b ? num(b.factor) : 1, peak : num(b?.peak),
             // a full production day of the plan (not the sliver of a start / end
             // day) — only such days are a fair sample for the adjustment
             full : !!b && !b.off && num(b.fullTarget) > 0 && target >= 0.25 * num(b.fullTarget),
@@ -131,14 +131,27 @@ export function buildProgressRows({ baseline = [], actuals = {}, savedPlan = {},
     return rows;
 }
 
+// The run's tail: when the day began, less than a full day's work was left
+// (remaining < the day's full capacity) or ≥ 90 % was made — a low output
+// there says "little left", not "slow sewing"
+export function isTailDay(r, qty) {
+    if (!(num(qty) > 0) || r.cumActual == null) return false;
+    const begun = r.cumActual - num(r.actual);
+    if (begun >= 0.9 * num(qty)) return true;
+    const peak = num(r.peak) > 0 ? num(r.peak) : num(r.target);
+    return peak > 0 && (num(qty) - begun) < peak;
+}
+
 // rows: buildProgressRows output; expectedEffPct: the plan efficiency the day
 // model used (the curve factor of each row is applied on top)
-export function performanceAdjustment({ rows = [], window = FORECAST_WINDOW_DAYS, smv = 0, expectedEffPct = 0, qty = 0 } = {}) {
+export function performanceAdjustment({ rows = [], window = FORECAST_WINDOW_DAYS, smv = 0, expectedEffPct = 0, qty = 0, peakOnly = false } = {}) {
     // finalized full production days; a day that began with 90 % of the
     // quantity already made is the run's tail (little left to sew — its low
-    // output says nothing about the pace) and is no sample
+    // output says nothing about the pace) and is no sample; peakOnly = the
+    // ramp days are judged by the adaptive curve instead (adaptCurve)
     const finalized = rows.filter(r => (r.status === 'final' || r.status === 'zero') && r.target > 0 && r.full !== false
-        && !(num(qty) > 0 && r.cumActual != null && (r.cumActual - r.actual) >= 0.9 * num(qty)));
+        && !(peakOnly && (r.factor || 1) < 1)
+        && !isTailDay(r, qty));
     const sample = finalized.slice(-Math.max(1, window));
     if (!sample.length) return { ratio : 1, sample : 0, window, basis : 'none', days : [], note : 'no finalized production day with a record — baseline curve' };
     const effOk = num(smv) > 0 && num(expectedEffPct) > 0 && sample.every(r => r.manMin > 0);
@@ -163,6 +176,46 @@ export function performanceAdjustment({ rows = [], window = FORECAST_WINDOW_DAYS
             ? `actual / expected efficiency over the last ${sample.length} finalized day(s), working-time weighted`
             : `actual / original target output over the last ${sample.length} finalized day(s) — provisional: working time and manpower not normalized`
     };
+}
+
+// ADAPTIVE LEARNING CURVE (planner, 2026-11-18): the configured curve
+// (e.g. 20 / 40 / 70 / 100 %) is the plan; from the first production day on,
+// the NEXT day's curve stage is set by the output achieved — the day's actual
+// against the line's full-day (100 %) capacity names the stage it reached;
+// the next day expects the step after that stage. Less than the plan → the
+// curve stays at (or falls back to) the stage the output supports; more →
+// it moves on faster. Days without a record carry no information.
+//   pct: curve steps, rows: buildProgressRows output (needs peak)
+// → { stage (0-based index of the step the next day expects), steps,
+//     nextPct, done (ramp finished), history : [{ ymd, expectedPct, achievedPct, reached, nextStage }] }
+export function adaptCurve({ pct = [], rows = [], qty = 0 } = {}) {
+    const steps = (pct || []).map(Number).filter(v => Number.isFinite(v) && v > 0);
+    const N = steps.length;
+    if (!N) return { stage : 0, steps, nextPct : 100, done : true, history : [] };
+    let stage = 0;
+    const history = [];
+    for (const r of rows) {
+        if (!(r.status === 'final' || r.status === 'zero')) continue;
+        if (!(num(r.peak) > 0) || r.full === false) continue;
+        // the run's tail: the day began with less than a full day's work left
+        // (or ≥ 90 % made) — its output cannot show the pace, no information
+        if (isTailDay(r, qty)) continue;
+        const achieved = Math.round(num(r.actual) / num(r.peak) * 1000) / 10;   // % of the full-day capacity
+        const expected = steps[Math.min(stage, N - 1)];
+        let reached = -1;
+        for (let k = 0; k < N; k++) if (achieved >= steps[k] - 1e-9) reached = k;
+        const next = Math.max(0, Math.min(N, reached + 1));
+        history.push({ ymd : r.ymd, expectedPct : expected, achievedPct : achieved, reached, nextStage : next });
+        stage = next;
+    }
+    return { stage, steps, nextPct : stage >= N ? 100 : steps[stage], done : stage >= N, history };
+}
+// the curve factor of the i-th coming working day when the next day expects `stage`
+export function curveFactorAt(steps, stage, i) {
+    const N = (steps || []).length;
+    if (!N) return 1;
+    const k = stage + i;
+    return k >= N ? 1 : steps[k] / 100;
 }
 
 // capacityDays: [{ ymd, off, fullTarget, peak, winF, span, ws }] from the day

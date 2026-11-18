@@ -36,7 +36,7 @@ import {
     loadStripNotesDb, addStripNoteDb, deleteStripNoteDb, tooltipBulkDb, loadBuyerColorsDb, saveBuyerColorsDb, setPlanLockDb, loadErpOrderInfoDb,
     loadWhatIfDb, createWhatIfDb, renameWhatIfDb, deleteWhatIfDb, whatIfView, loadSewingActualsDb
 } from './api.js';
-import { attributeActualsToBars, buildProgressRows, performanceAdjustment, forecastRemaining, FORECAST_WINDOW_DAYS } from './forecastService.mjs';
+import { attributeActualsToBars, buildProgressRows, performanceAdjustment, forecastRemaining, adaptCurve, curveFactorAt, FORECAST_WINDOW_DAYS } from './forecastService.mjs';
 import {
     PLANNING_MASTERS, classifyVolume, blockDuration, forwardPass,
     backwardPass, feasibility, sequenceOptions, autoPlanOrders
@@ -3992,6 +3992,10 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // the re-plan of the remaining quantity runs at that pace
         const adj = r.fc?.adj;
         if (adj && adj.basis !== 'none' && adj.sample > 0) { g.ratioW += adj.ratio * adj.sample; g.ratioN += adj.sample; }
+        // the learning-curve stage the output reached (adaptive curve): the
+        // re-plan continues the ramp from there, not from the days elapsed
+        const cv = r.fc?.curve;
+        if (cv && cv.history.length) g.curveStage = Math.max(g.curveStage ?? -1, cv.stage);
         g.bars.push(ev);
     }
     const plan = new Map();   // order row → { toPlan (ERP pcs), sewn, cover }
@@ -4006,7 +4010,8 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
             bars : g.bars.map(ev => { const r = ev.data.raw; return { base : baseOf(r), made : Number(r.made) || 0, completed : r.status === 'completed', kept : keptSet.has(ev), start : ev.startDate, end : ev.endDate }; })
         });
         plan.set(id, { ...p, rows : g.rows, sewnDays : g.sewnDays, issue : g.issue || null,
-            perfRatio : g.ratioN > 0 ? Math.round(g.ratioW / g.ratioN * 1000) / 1000 : 0 });
+            perfRatio : g.ratioN > 0 ? Math.round(g.ratioW / g.ratioN * 1000) / 1000 : 0,
+            curveStage : g.curveStage ?? -1 });
     }
 
     const have = new Set(unplanned.value.map(u => String(u.id)));
@@ -4128,6 +4133,9 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // actual pace of the order so far (forecast adjustment) — the new
         // bars run at it (capped at the configured efficiency = peak)
         row.perfRatio = p.perfRatio || 0;
+        // adaptive curve: the ramp of the new bars starts at the stage the
+        // output reached (deriveLcForPlacement reads the days as done)
+        if (p.curveStage >= 0) { row.sewnDays = p.curveStage; row.lcDone = p.curveStage; }
         out.push(asBalance(row));
     }
     s.eventStore.remove(gone);
@@ -5982,6 +5990,8 @@ const plProgress = computed(() => {
             ymd : r.ymd, day : DAY_ABBR[d.getDay()], date : fmtDate(d), lcDay : r.lcDay, factor : r.factor,
             target : r.target, savedTarget : r.savedTarget, actual : r.actual, ach : r.achievement, variance : r.variance, cumVar : r.cumVariance,
             forecast : fcDay.get(r.ymd) ?? null, status : statusLbl[r.status] || r.status, kind : r.status,
+            achievedPct : r.achievedPct ?? null, curveExpected : r.curveExpected ?? null,
+            curveNext : r.curveNext != null ? (fc.curve && r.curveNext >= fc.curve.steps.length ? 'peak' : `D${r.curveNext + 1} ${fc.curve ? fc.curve.steps[r.curveNext] : ''}%`) : null,
             src : r.manual && r.erp ? 'ERP + manual' : r.manual ? 'manual' : r.erp ? 'ERP' : '', attributed : r.attributed, off : r.off
         });
     }
@@ -6001,7 +6011,8 @@ const plProgress = computed(() => {
             remaining : fc.remaining, made : fc.made, unattributed : fc.unattributed,
             adj : adj.basis === 'none' ? 'baseline curve (no finalized day with a record)'
                 : `× ${Number(adj.ratio).toFixed(2)} · ${adj.sample} of ${adj.window} finalized day(s) · ${adj.basis === 'efficiency' ? 'actual / expected efficiency (working-time weighted)' : 'output vs original target — provisional: working time and manpower not normalized'}`,
-            lcDone : fc.consumedLcDays
+            lcDone : fc.consumedLcDays,
+            curve : fc.curve ? (fc.curve.done ? `curve done — peak capacity from the next day (set by the output)` : `next day expects stage D${fc.curve.stage + 1} = ${fc.curve.nextPct}% of the configured curve ${fc.curve.steps.join(' / ')} — set by the output achieved`) : null
         }
     };
 });
@@ -11645,7 +11656,17 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     const baseline = sim.days.map(d => ({ ymd : ymdOf(d.date), off : d.off, target : d.q, fullTarget : d.fullTarget, factor : d.factor, lcDay : d.lcDay, peak : peakOf(d) }));
     const barKey = String(ev.id);
     const rows = buildProgressRows({ baseline, actuals : actDays || {}, savedPlan : savedPlanStore[barKey] || {}, cutoffYmd : sewingFeed.cutoff, todayYmd });
-    const adj = performanceAdjustment({ rows, window : FORECAST_WINDOW_DAYS, smv : raw.smv, expectedEffPct : sim.effPct, qty });
+    // ADAPTIVE LEARNING CURVE (planner, 2026-11-18): the configured curve is
+    // the plan; from the first production day the next day's stage follows
+    // the output achieved (adaptCurve) — the pace ratio below is then read
+    // from the peak days only, the ramp days are the curve's business
+    const steps = raw.lc?.applied && Array.isArray(raw.lc.pct) ? raw.lc.pct.map(Number) : null;
+    const curve = steps ? adaptCurve({ pct : steps, rows, qty }) : null;
+    if (curve) {
+        const byYmd = new Map(curve.history.map(h => [h.ymd, h]));
+        for (const r of rows) { const h = byYmd.get(r.ymd); if (h) { r.achievedPct = h.achievedPct; r.curveExpected = h.expectedPct; r.curveNext = h.nextStage; } }
+    }
+    const adj = performanceAdjustment({ rows, window : FORECAST_WINDOW_DAYS, smv : raw.smv, expectedEffPct : sim.effPct, qty, peakOnly : !!curve });
     // remaining sewing quantity; what is left inside the +3 % plan allowance
     // counts as complete (the order's ERP quantity is made)
     const remainingRaw = Math.max(0, qty - made);
@@ -11654,19 +11675,29 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     // learning days consumed = production working days from the first actual through yesterday
     const consumed = firstAct ? rows.filter(r => !r.off && r.ymd >= firstAct && r.ymd < todayYmd).length : 0;
     const now = new Date();
-    const lcNext = raw.lc?.applied && Array.isArray(raw.lc.pct) ? { ...raw.lc, dayOffset : (raw.lc.dayOffset || 0) + consumed } : raw.lc;
     let capacityDays = [];
     if (remaining > 0) {
         try {
-            const capSim = simulateStrip(s, { ...raw, made : 0, qty : Math.max(1000, remaining * 4), lc : lcNext }, lid, now);
-            capacityDays = capSim.days.map(d => ({ ymd : ymdOf(d.date), off : d.off, fullTarget : d.fullTarget, peak : peakOf(d), winF : d.winF, span : d.span }));
+            // the line's full-day capacity per coming day (no ramp inside the
+            // model) — the adapted curve stage sets each day's factor here
+            const capSim = simulateStrip(s, { ...raw, made : 0, qty : Math.max(1000, remaining * 4), lc : curve ? undefined : raw.lc }, lid, now);
+            let i = 0;
+            capacityDays = capSim.days.map(d => {
+                const peak = curve ? d.fullTarget : peakOf(d);
+                const factor = curve ? curveFactorAt(curve.steps, curve.stage, d.off ? i : i++) : d.factor;
+                return { ymd : ymdOf(d.date), off : d.off, fullTarget : curve ? Math.max(1, Math.round(peak * factor)) : d.fullTarget, peak, factor, winF : d.winF, span : d.span };
+            });
         }
         catch { capacityDays = []; }
     }
     // simulateStrip already gives today only the window from now (winF) — no second today factor
     const fc = forecastRemaining({ remaining, capacityDays, ratio : adj.ratio, todayYmd, todayFrac : 1 });
     let forecastEnd = null;
-    if (remaining <= 0) forecastEnd = new Date(Math.min(+now, +ev.endDate));
+    if (remaining <= 0) {
+        // sewn in full: the sewing ended on the last day with output
+        const lastAct = Object.keys(actDays || {}).sort().pop() || null;
+        forecastEnd = lastAct ? workEndOfDay(new Date(`${lastAct}T00:00:00`)) : new Date(Math.min(+now, +ev.endDate));
+    }
     else if (fc.finishYmd) {
         const d = new Date(`${fc.finishYmd}T00:00:00`);
         const ws = startOfWorkDay(d), we = workEndOfDay(d);
@@ -11677,7 +11708,7 @@ function computeBarForecast(s, ev, actDays, todayYmd) {
     const targetEnd = targetDay ? endOfWorkDay(targetDay) : null;
     const unattributed = rows.reduce((a, r) => a + (r.actual != null && !r.attributed ? r.actual : 0), 0);
     return {
-        rows, adj, remaining, remainingRaw, made, qty, forecastEnd, savedEnd : new Date(ev.endDate), targetEnd,
+        rows, adj, curve, remaining, remainingRaw, made, qty, forecastEnd, savedEnd : new Date(ev.endDate), targetEnd,
         late : !!(forecastEnd && targetEnd && forecastEnd > targetEnd),
         cutoff : sewingFeed.cutoff, provisional : !!(actDays && actDays[todayYmd]),
         unattributed, forecastDays : fc.days, consumedLcDays : consumed, exhausted : fc.exhausted, left : fc.left,
@@ -17730,6 +17761,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <span><b>Made</b> {{ fmtQty(plProgress.head.made) }} · <b>Remaining</b> {{ fmtQty(plProgress.head.remaining) }}<i v-if="plProgress.head.unattributed > 0"> · {{ fmtQty(plProgress.head.unattributed) }} PO-level, line not attributed</i></span>
                             <span><b>Actual data to</b> {{ plProgress.head.cutoff }}<i v-if="plProgress.head.provisional"> · today provisional until the production day is closed</i></span>
                             <span><b>Forecast adjustment</b> {{ plProgress.head.adj }} · learning days run {{ plProgress.head.lcDone }}</span>
+                            <span v-if="plProgress.head.curve"><b>Learning curve</b> {{ plProgress.head.curve }}</span>
                         </div>
                         <table class="st-table pl-table pl-fc-table">
                             <thead>
@@ -17739,6 +17771,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <th class="od-num" title="production working day of the learning curve and its factor">LC</th>
                                     <th class="od-num" title="original daily target (saved day plan when one was saved, else the day model from the bar's original start)">Target</th>
                                     <th class="od-num" title="actual sewing output (ERP sewing out / hand entry)">Actual</th>
+                                    <th class="od-num" title="actual as % of the line's full-day capacity, and the curve stage the NEXT day expects because of it">Reached → next</th>
                                     <th class="od-num" title="actual ÷ original target">Ach %</th>
                                     <th class="od-num" title="actual − original target">Var</th>
                                     <th class="od-num" title="cumulative actual − cumulative original target, over days with a record">Cum var</th>
@@ -17753,6 +17786,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     <td class="od-num"><span v-if="r.lcDay" class="pl-lc-tag">D{{ r.lcDay }} · {{ Math.round(r.factor * 100) }}%</span><span v-else-if="r.target != null && !r.off">peak</span></td>
                                     <td class="od-num">{{ r.target != null ? fmtQty(r.target) : '' }}<i v-if="r.savedTarget" title="the day plan saved with the production entry">*</i></td>
                                     <td class="od-num">{{ r.actual != null ? fmtQty(r.actual) : (r.kind === 'missing' ? '—' : '') }}<i v-if="r.actual != null && !r.attributed" title="PO-level output — the ERP line has no bar of this PO"> ◌</i></td>
+                                    <td class="od-num">{{ r.achievedPct != null ? r.achievedPct + '% → ' + r.curveNext : '' }}</td>
                                     <td class="od-num">{{ r.ach != null ? r.ach + '%' : (r.actual != null ? 'N/A' : '') }}</td>
                                     <td class="od-num" :class="{ 'pl-fc-neg' : r.variance < 0, 'pl-fc-pos' : r.variance > 0 }">{{ r.variance != null ? (r.variance > 0 ? '+' : '') + fmtQty(r.variance) : '' }}</td>
                                     <td class="od-num" :class="{ 'pl-fc-neg' : r.cumVar < 0, 'pl-fc-pos' : r.cumVar > 0 }">{{ r.cumVar != null ? (r.cumVar > 0 ? '+' : '') + fmtQty(r.cumVar) : '' }}</td>

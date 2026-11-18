@@ -1,6 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attributeActualsToBars, buildProgressRows, performanceAdjustment, forecastRemaining } from './forecastService.mjs';
+import { attributeActualsToBars, buildProgressRows, performanceAdjustment, forecastRemaining, adaptCurve, curveFactorAt } from './forecastService.mjs';
+
+test('adaptive curve: the next day expects the step after the stage the output reached — below plan stays / falls back, above plan moves on', () => {
+    const pct = [20, 40, 70, 100];
+    const peak = 1000;
+    const day = (ymd, actual) => ({ ymd, status : 'final', full : true, peak, actual, target : 1 });
+    // day 1 planned 20 %, made 15 % → not even stage 1 reached → day 2 expects 20 % again
+    let c = adaptCurve({ pct, rows : [day('2026-11-10', 150)] });
+    assert.equal(c.stage, 0); assert.equal(c.nextPct, 20); assert.equal(c.history[0].reached, -1);
+    // day 1 made 45 % (stage 2 reached) → day 2 expects 70 %
+    c = adaptCurve({ pct, rows : [day('2026-11-10', 450)] });
+    assert.equal(c.stage, 2); assert.equal(c.nextPct, 70);
+    // day 2 then made 50 % (only stage 2) → day 3 expects 70 % again; day 3 made 72 % → day 4 expects 100 %; made 100 % → done
+    c = adaptCurve({ pct, rows : [day('2026-11-10', 450), day('2026-11-11', 500), day('2026-11-12', 720), day('2026-11-13', 1000)] });
+    assert.deepEqual(c.history.map(h => [h.expectedPct, h.achievedPct, h.nextStage]), [[20, 45, 2], [70, 50, 2], [70, 72, 3], [100, 100, 4]]);
+    assert.equal(c.done, true);
+    // a bad day after a good one falls back: expected 100 %, made 30 % → next day 40 %
+    c = adaptCurve({ pct, rows : [day('2026-11-10', 1000), day('2026-11-11', 300)] });
+    assert.equal(c.nextPct, 40);
+    // the coming days follow the curve from the adapted stage; no record / sliver days carry no information
+    assert.equal(curveFactorAt(pct, 2, 0), 0.7); assert.equal(curveFactorAt(pct, 2, 1), 1); assert.equal(curveFactorAt(pct, 4, 0), 1);
+    c = adaptCurve({ pct, rows : [day('2026-11-10', 450), { ymd : '2026-11-11', status : 'missing', peak, actual : null }, { ymd : '2026-11-12', status : 'final', full : false, peak, actual : 50 }] });
+    assert.equal(c.stage, 2);
+    // the run's tail: a day that began with less than a full day's work left (or ≥ 90 % made) does not pull the curve back
+    c = adaptCurve({ pct, qty : 2000, rows : [{ ...day('2026-11-10', 1000), cumActual : 1000 }, { ...day('2026-11-11', 900), cumActual : 1900 }, { ...day('2026-11-12', 100), cumActual : 2000 }] });
+    assert.equal(c.history.length, 2, 'the tail day (began with 100 left of a 1,000 day) is skipped');
+    assert.equal(c.nextPct, 100);
+    c = adaptCurve({ pct, qty : 1500, rows : [{ ...day('2026-11-10', 1000), cumActual : 1000 }, { ...day('2026-11-11', 300), cumActual : 1300 }] });
+    assert.equal(c.history.length, 1, 'day 2 began with 500 left of a 1,000 day — tail, skipped');
+    assert.equal(c.done, true);
+});
 
 const base = (ymd, target, extra = {}) => ({ ymd, off : false, target, fullTarget : target, factor : 1, lcDay : 0, peak : target, ...extra });
 
