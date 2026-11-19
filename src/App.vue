@@ -4312,8 +4312,11 @@ const apT = async (label, fn) => {
 // line hours, holidays, manpower, efficiency, learning curve) and the free
 // windows of every line; the engine returns the bars; nothing else moves.
 // ---------------------------------------------------------------------------
-async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = {}) {
-    const today = snapToWorkStart(new Date(boardToday()));
+// startFrom : nothing is searched before this day (the automatic run of new
+//             orders starts behind the plan lock); onlyRows : the pool rows
+//             the run may plan (default: every eligible row)
+async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, startFrom = null, onlyRows = null } = {}) {
+    const today = snapToWorkStart(new Date(startFrom && +startFrom > +boardToday() ? startFrom : boardToday()));
     const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
     const shipGate = from ? dayStart(addCalDays(from, -1)) : null;
     const shipBefore = to ? dayStart(to) : null;
@@ -4361,7 +4364,7 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null } = 
     // a row already on the board, a replaced projection, a completed row, a row
     // without PCD / SMV or with a sewing-output issue is not planned)
     const strictRowKeys = u => (u.balance ? [String(u.id)] : [u.id != null ? String(u.id) : null, u.dbId ? `dbo-${u.dbId}` : null, ...(Array.isArray(u.idList) ? u.idList.map(i => `dbo-${i}`) : [])].filter(Boolean));
-    const source = [...unplanned.value];
+    const source = onlyRows ? unplanned.value.filter(onlyRows) : [...unplanned.value];
     for (const u of source) {
         if (isProjRow(u) || !u.mbmOrder || u.status === 'completed' || u.replaced || u.status === 'replaced') continue;
         if (currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) continue;
@@ -8821,7 +8824,7 @@ function orderSortVal(r, k) {
 // are counted over the list as the search / column filters leave it
 // (baseErpOrders), never over the tile's own rows.
 //   projected / confirm       rows of that type
-//   planned / holding / unplanned / fresh
+//   planned / holding / unplanned
 //                              rows with a share of that quantity (rowShares)
 //   today / last3             orders created today / in the last 3 days
 // The two quantity tiles (Order Qty, PO Qty) sort, as before.
@@ -8835,7 +8838,7 @@ function recentCutoff(mode) {
     return mode === 'today' ? startToday : new Date(+startToday - 2 * 86400000);
 }
 
-const ORDER_TILES = new Set(['projected', 'confirm', 'planned', 'holding', 'unplanned', 'fresh', 'today', 'last3']);
+const ORDER_TILES = new Set(['projected', 'confirm', 'planned', 'holding', 'unplanned', 'today', 'last3']);
 function tileAction(what) {
     if (what === 'orderQty')  { toggleOrderSort('orderQty'); return; }
     if (what === 'poQty')     { toggleOrderSort('qty'); return; }
@@ -8987,9 +8990,11 @@ function projPartialInfo(r) {
 //   hold   on the Holding Row                       → Holding Qty
 //   lock   not on the board, and the plan lock (or a board that cannot be
 //          changed) keeps it off                    → Unplanned
-//   fresh  not on the board, nothing in the way: a new order / PO nobody has
-//          planned yet (the next Auto plan takes it) → Not planned yet
-// Planned + Holding Qty + Unplanned + Not planned yet = Order Qty.
+//   fresh  not on the board, nothing in the way — no tile (planner,
+//          2026-11-19: "switch it off, Auto plan on"): the board plans a
+//          new order by itself (autoPlanNewOrders); what is left here —
+//          PO rows already sewn, the part of an order no PO has been issued
+//          for yet — is named in the Order Qty tile's tooltip.
 // A row the board knows (overlayBoardPlacements) brings its plan pieces on
 // lines / on the Holding Row; a row the board does not know is read from
 // its status.
@@ -9012,6 +9017,8 @@ function rowShares(r) {
         hold = !board && r.status === 'holding' ? q - line : sh.hold;
     }
     const rest = Math.max(0, q - line - hold);
+    // nothing of the order can be planned on a board this user cannot change
+    if (rest > 0 && boardFrozenNow()) locked = true;
     return { q, line, hold, lock : locked ? rest : 0, fresh : locked ? 0 : rest };
 }
 
@@ -9036,7 +9043,7 @@ const confSharesByOrder = computed(() => {
 // tiles count the OPEN order book, each order ONCE (its projected row) — a
 // completed order, which only shows while a filter / search is on, adds to
 // none of them:
-//   Order Qty = Planned + Holding Qty + Unplanned + Not planned yet (rowShares)
+//   Planned / Holding Qty / Unplanned = the order's shares (rowShares)
 //   PO Qty    = the confirm rows of the open orders
 // A view without projected rows (Type = confirm) counts its confirm rows.
 const ordersSummary = computed(() => {
@@ -10071,7 +10078,85 @@ function scheduleQtyUpdates(s) {
         if (r.locked.length && !qtyUpdateAfterLock) {
             toast(`🔒 ${r.locked.length} order(s) changed in the ERP but stand in the plan lock — ${fmtQty(r.locked.reduce((t, x) => t + x.blocked, 0))} pcs stay Unplanned until the lock is over (${r.locked.slice(0, 4).map(x => x.order).join(', ')})`, 'warn');
         }
+        // …and the orders nobody has planned yet get their plan
+        if (!qtyUpdateAfterLock) autoPlanNewOrders(sb).catch(e => console.warn('[auto plan new orders] skipped:', e));
     }, 2500);
+}
+
+// ---------------------------------------------------------------------------
+// NEW ORDERS ARE PLANNED BY THE BOARD ITSELF (planner, 2026-11-19: "switch
+// 'Not planned yet' off and Auto plan on — planned by the planning rules,
+// behind the lock when there is one, or to the Holding Row").
+// After a load (and when the edit lock arrives), every pool row of this unit
+// that has no bar — a new order / PO the ERP brought since the last run — is
+// planned by the Auto Plan v2 rules (runAutoPlanV2: PCD + 8, delivery − 7,
+// line ranking, confirm orders group-wise, product continuity) into the FREE
+// time of the lines: nothing on the board is blanked, moved or pushed. With
+// the plan lock ticked (Auto plan dialog, 10 / 30 days) the search starts on
+// the first day after it; what no line finishes in time, or has no SMV / PCD,
+// goes to the Holding Row with its reason — nothing stays without a bar.
+// Left alone: a confirm row whose order still has its PROJECTION bar on the
+// board (the projection → confirm swap takes it when the quantities match —
+// planning it here would put the order on the board twice). The run is the
+// board's own edit: unsaved changes with a toast, one Undo step, Save writes.
+// ---------------------------------------------------------------------------
+let lastNewOrderPlan = { rows : 0, planned : 0, parked : 0 };
+let newOrderPlanBusy = false;
+async function autoPlanNewOrders(s) {
+    const out = { rows : 0, planned : 0, parked : 0 };
+    lastNewOrderPlan = out;
+    if (!s || newOrderPlanBusy || apBusy.value || whatIfActive.value || boardFrozenNow()) return out;
+    // an Auto plan run waiting for its Save has planned the pool already
+    if (apLockGuard && apLockGuard.unitId === currentUnitId.value) return out;
+    const unit = currentUnitId.value;
+    const isProj = x => String(x.id || '').startsWith('proj:') || orderTypeOf(x.po, x.orderType) === 'projection';
+    const onBoard = new Set(), projStill = new Set();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        for (const k of orderBoardKeys(raw, ev.id)) onBoard.add(k);
+        if (Array.isArray(raw.idList)) for (const i of raw.idList) onBoard.add(`dbo-${i}`);
+        if (isProj(raw) && raw.mbmOrder) projStill.add(String(raw.mbmOrder).trim());
+    }
+    const keysOf = u => (u.balance ? [String(u.id)] : [u.id != null ? String(u.id) : null, u.dbId ? `dbo-${u.dbId}` : null, ...(Array.isArray(u.idList) ? u.idList.map(i => `dbo-${i}`) : [])].filter(Boolean));
+    const eligible = u => {
+        if (u.status === 'completed' || u.replaced || u.status === 'replaced') return false;
+        if (unit && u.unitId && u.unitId !== unit) return false;
+        if (!String(u.buyer || '').trim() || !((Number(u.qty ?? u.orderQty) || 0) > 0)) return false;
+        if (keysOf(u).some(k => onBoard.has(k))) return false;
+        // the order's projection bar is still on the board: the swap decides
+        if (!isProj(u) && u.mbmOrder && projStill.has(String(u.mbmOrder).trim())) return false;
+        return true;
+    };
+    const rows = unplanned.value.filter(eligible);
+    out.rows = rows.length;
+    if (!rows.length) return out;
+    const lock = qtyLockWindow();
+    const horizonEnd = apHorizonEnd();
+    if (!horizonEnd) return out;
+    newOrderPlanBusy = true;
+    try {
+        toast(`Planning ${rows.length} new order row(s) by the Auto plan rules…`, 'ok');
+        await yieldUi();
+        pushUndo(s, 'auto plan of new orders');
+        const pick = new Set(rows);
+        const r = await runAutoPlanV2(s, { horizonEnd, startFrom : lock ? lock.firstEditable : null, onlyRows : u => pick.has(u) });
+        out.planned = r?.planned || 0;
+        out.parked  = r?.parked || 0;
+        try { apFlagLateOrders(s); } catch { /* flags only */ }
+        syncOrdersListFromBoard();
+        recalcCapacity(s);
+        if (out.planned || out.parked) {
+            markBoardDirty();
+            touchBoardCache(s);
+        }
+        s.refreshRows?.();
+        if (out.planned || out.parked) {
+            toast(`New orders planned by the Auto plan rules: ${out.planned} on a line${lock ? ` (from ${fmtDate(lock.firstEditable)}, after the ${lock.days}-day lock)` : ''}, ${out.parked} on the Holding Row — Undo takes it back, Save keeps it`, 'ok');
+        }
+    }
+    finally { newOrderPlanBusy = false; }
+    return out;
 }
 
 // what the last load's completion pass put on the board (toast / tests)
@@ -15714,7 +15799,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, newOrderPlan : { run : () => autoPlanNewOrders(getInstance()), last : () => lastNewOrderPlan }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -17439,7 +17524,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span class="od-sum-tile od-sum-conf od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'confirm' }" title="Confirm orders — click to show only those rows (the figures stay)"
                         @click="tileAction('confirm')"><b>{{ fmtQty(ordersSummary.conf) }}</b> confirm</span>
                     <span class="od-sum-tile od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'planned' }"
-                        title="Quantity planned on a sewing line (Planned + Holding Qty + Unplanned + Not planned yet = Order Qty) — click to show the rows it comes from"
+                        title="Quantity planned on a sewing line — click to show the rows it comes from"
                         @click="tileAction('planned')">Planned <b>{{ fmtQty(ordersSummary.plannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-hold od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'holding' }"
                         title="Quantity planned on the Holding Row — on the board, not on a line yet — click to show the rows it comes from"
@@ -17447,11 +17532,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span class="od-sum-tile od-sum-unpl od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'unplanned' }"
                         title="The order quantity changed in the ERP, but the plan lock (or a board that cannot be changed) keeps the order's bar as it is — this part is not on the board. Click to show the rows it comes from"
                         @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
-                    <span v-if="ordersSummary.freshQty > 0" class="od-sum-tile od-sum-fresh od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'fresh' }"
-                        title="New orders / POs nobody has planned yet — not on the board, nothing in the way: the next Auto plan puts them on a line or on the Holding Row. Click to show the rows"
-                        @click="tileAction('fresh')">Not planned yet <b>{{ fmtQty(ordersSummary.freshQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
                         :title="'Order qty of the open orders (= Available + Planned in Available Order) — click to sort'
+                            + (ordersSummary.freshQty > 0 ? ` · ${fmtQty(ordersSummary.freshQty)} pcs of these orders are in none of the three tiles: PO rows already sewn, a part no PO has been issued for yet, or a new order the board's Auto plan has not placed yet` : '')
                             + (ordersSummary.doneOrderQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.doneOrderQty)}` : '')"
                         @click="tileAction('orderQty')">Order Qty <b>{{ fmtQty(ordersSummary.orderQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
@@ -20315,7 +20398,6 @@ body {
 .od-sum-done  { background : #eceff1; border-color : #b0bec5; }
 .od-sum-unpl  { background : #ffebee; border-color : #ef9a9a; }
 .od-sum-hold  { background : #fff8e1; border-color : #ffcc80; }
-.od-sum-fresh { background : #eceff1; border-color : #b0bec5; }
 .od-onboard.od-onboard-lock { color : #b71c1c; }
 .od-sum-recent { background : #e8f5e9; border-color : #81c784; }
 .od-sum-on { outline : 2px solid #1e88e5; outline-offset : 1px; }
