@@ -3497,6 +3497,36 @@ app.get(`${BASE}/all-orders`, async (req, res) => {
             return !erpInfo?.erp || erpListOkRow(erpInfo);
         });
 
+        // Actual sewing output of each confirm row (ERP daily_productions per
+        // PO row — the figures the pool and the bars carry): the list's
+        // quantity tiles count what has already left the line with Planned,
+        // so Planned + Holding Qty + Unplanned add up to the Order Qty
+        try {
+            const sewIds = [...new Set(filteredConf.flatMap(r => (r.po_details || []).map(d => Number(d.id))).filter(i => i > 0))];
+            const sewRows = [];
+            for (let i = 0; i < sewIds.length; i += 1500) {
+                const part = sewIds.slice(i, i + 1500);
+                const [rs] = await pool.query(
+                    `SELECT id, erp_po_id, order_quantity, prod_unit, unit_id, shipment_date FROM planning_orders
+                      WHERE id IN (${part.map(() => '?').join(',')})`, part);
+                sewRows.push(...rs);
+            }
+            if (sewRows.length) {
+                const sew = await sewingOutputForRows(sewRows);
+                for (const r of filteredConf) {
+                    let sewn = 0;
+                    for (const d of r.po_details || []) {
+                        const so = sew.get(Number(d.id));
+                        if (!so) continue;
+                        d.sewn = Number(so.sewn) || 0;
+                        sewn += Math.min(Number(d.qty) || 0, d.sewn);
+                    }
+                    r.sewn_qty = sewn;
+                }
+            }
+        }
+        catch (e) { console.warn(`[all-orders] sewing output skipped: ${e.message}`); }
+
         const allRows = [...projRows, ...filteredConf];
         // ERP garments type per order (mr_style.gmt_id → Blazer, Chino, 5 Pocket…;
         // an OS order through its MBM twin) — the list's "Product" column

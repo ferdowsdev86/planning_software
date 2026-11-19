@@ -1035,6 +1035,9 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         // the share of a partly planned group that is already on a line
         onBoardQty   : partOnLine(r) ? Number(r.planned_qty) || 0 : 0,
         onBoardLines : partOnLine(r) ? (r.planned_lines || '') : '',
+        // pieces of this row the ERP has as sewn already (per PO row, never
+        // more than the PO's quantity) — the quantity tiles count them as Planned
+        sewnQty      : Number(r.sewn_qty) || 0,
         // Dates only for a planned row — an unplanned row's simulated start/end
         // (the proposal behind "Pending Line Selection") never shows beside "unplanned"
         start        : !onHoldRes(r) && isPlannedStatus(r) && r.start_date ? new Date(r.start_date) : null,

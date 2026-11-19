@@ -8890,7 +8890,7 @@ function rowInTile(r, tile, countedType) {
     // a quantity tile: the rows it is counted from, with a share of it
     if ((r.orderType === 'confirm' ? 'confirm' : 'projected') !== countedType) return false;
     const sh = rowShares(r);
-    return (tile === 'planned' ? sh.line : tile === 'holding' ? sh.hold : tile === 'unplanned' ? sh.lock : sh.fresh) > 0;
+    return (tile === 'planned' ? sh.line + sh.sewn : tile === 'holding' ? sh.hold : sh.lock + sh.fresh) > 0;
 }
 
 // The list as the search and the column filters leave it — what the tiles count
@@ -9022,28 +9022,41 @@ function projPartialInfo(r) {
     return { confQty, orderQty, diff : orderQty - confQty };
 }
 
-// WHERE AN ORDER'S QUANTITY STANDS (ERP pieces) — the four quantity tiles:
+// WHERE AN ORDER'S QUANTITY STANDS (ERP pieces) — the three quantity tiles
+// ADD UP TO THE ORDER QTY (planner, 2026-11-19, CEIL: Planned 2,362,329 +
+// Holding Qty 600,832 + Unplanned 13,326 against an Order Qty of 3,063,785 —
+// "why not match with total order qty"; the 87,298 pcs in no tile were
+// 53,989 pcs already sewn — PO rows sewn in full, and the sewn part of rows
+// whose rest stands on the Holding Row — and 33,309 pcs of orders no PO has
+// been issued for yet; asked where they belong: "sewn → Planned, no PO yet →
+// Unplanned"):
 //   line   on a sewing line                         → Planned
+//   sewn   not on the board any more: the ERP has it as sewn (a PO row sewn
+//          in full, the sewn part of a row whose rest is on the Holding Row
+//          or still to plan)                        → Planned — as the sewn
+//          part of a bar on a line has always counted
 //   hold   on the Holding Row                       → Holding Qty
 //   lock   not on the board, and the plan lock (or a board that cannot be
 //          changed) keeps it off                    → Unplanned
-//   fresh  not on the board, nothing in the way — no tile (planner,
-//          2026-11-19: "switch it off, Auto plan on"): the board plans a
-//          new order by itself (autoPlanNewOrders); what is left here —
-//          PO rows already sewn, the part of an order no PO has been issued
-//          for yet — is named in the Order Qty tile's tooltip.
+//   fresh  not on the board, nothing in the way: the part of an order no PO
+//          has been issued for yet, a new order the board's Auto plan has
+//          not placed yet                           → Unplanned
 // A row the board knows (overlayBoardPlacements) brings its plan pieces on
 // lines / on the Holding Row; a row the board does not know is read from
 // its status.
 function rowShares(r) {
     const q = Number(r.orderType === 'confirm' ? r.qty : r.orderQty) || 0;
-    if (!(q > 0) || r.status === 'completed' || r.status === 'sewn') return { q : 0, line : 0, hold : 0, lock : 0, fresh : 0 };
-    let line = 0, hold = 0, locked = !!r.restLocked;
+    if (!(q > 0) || r.status === 'completed' || r.status === 'sewn') return { q : 0, line : 0, hold : 0, sewn : 0, lock : 0, fresh : 0 };
+    // what the ERP has as sewn of it: a confirm row's own PO rows, a
+    // projection's confirm rows
+    const conf = r.orderType !== 'confirm' ? confSharesByOrder.value.get(r.mbmOrder) : null;
+    let line = 0, hold = 0, sewnMax = r.orderType === 'confirm' ? Number(r.sewnQty) || 0 : 0, locked = !!r.restLocked;
     if (r.orderType !== 'confirm' && (r.replaced || r.status === 'replaced')) {
         // confirm POs took the projection's place: the order stands where its PO rows stand
-        const c = confSharesByOrder.value.get(r.mbmOrder) || { line : 0, hold : 0, lock : false };
+        const c = conf || { line : 0, hold : 0, sewn : 0, lock : false };
         line = Math.min(q, c.line);
         hold = Math.min(q - line, c.hold);
+        sewnMax = c.sewn;
         locked = c.lock;
     }
     else if (r.planned || r.status === 'planned') line = q;
@@ -9052,24 +9065,31 @@ function rowShares(r) {
         const sh = orderShares({ qty : q, onLine : board ? r.lineQtyPlan : r.onBoardQty, onHold : board ? r.holdQtyPlan : 0, factor : planQtyOf(1000) / 1000 });
         line = sh.line;
         hold = !board && r.status === 'holding' ? q - line : sh.hold;
+        // a projection without a bar of its own whose PO rows are being sewn
+        if (!board && conf) sewnMax = conf.sewn;
     }
-    const rest = Math.max(0, q - line - hold);
+    // sewn already and on the board no more — never more than what is missing there
+    const sewn = Math.min(Math.max(0, q - line - hold), Math.max(0, sewnMax));
+    const rest = Math.max(0, q - line - hold - sewn);
     // nothing of the order can be planned on a board this user cannot change
     if (rest > 0 && boardFrozenNow()) locked = true;
-    return { q, line, hold, lock : locked ? rest : 0, fresh : locked ? 0 : rest };
+    return { q, line, hold, sewn, lock : locked ? rest : 0, fresh : locked ? 0 : rest };
 }
 
 // The confirm PO rows of each order, over the WHOLE list (whatever filter
 // hides them): what stands on lines / on the Holding Row, and whether a
-// missing part is kept off the board by the lock — a 'replaced' order's shares
+// missing part is kept off the board by the lock — a 'replaced' order's shares.
+// `sewn` = what has left the line for good: PO rows sewn in full (the list
+// says "sewn"), and the sewn part of the rows still open.
 const confSharesByOrder = computed(() => {
     const m = new Map();
     for (const r of erpAllOrders.value) {
         if (r.orderType !== 'confirm' || !r.mbmOrder) continue;
+        const c = m.get(r.mbmOrder) || { line : 0, hold : 0, sewn : 0, lock : false };
+        if (r.status === 'sewn') { c.sewn += Number(r.qty) || 0; m.set(r.mbmOrder, c); continue; }
         const sh = rowShares(r);
         if (!sh.q) continue;
-        const c = m.get(r.mbmOrder) || { line : 0, hold : 0, lock : false };
-        c.line += sh.line; c.hold += sh.hold; c.lock = c.lock || sh.lock > 0;
+        c.line += sh.line; c.hold += sh.hold; c.sewn += sh.sewn; c.lock = c.lock || sh.lock > 0;
         m.set(r.mbmOrder, c);
     }
     return m;
@@ -9080,17 +9100,18 @@ const confSharesByOrder = computed(() => {
 // tiles count the OPEN order book, each order ONCE (its projected row) — a
 // completed order, which only shows while a filter / search is on, adds to
 // none of them:
-//   Planned / Holding Qty / Unplanned = the order's shares (rowShares)
+//   Planned / Holding Qty / Unplanned = the order's shares (rowShares);
+//   the three add up to the Order Qty (PO Qty in a confirm-only view)
 //   PO Qty    = the confirm rows of the open orders
 // A view without projected rows (Type = confirm) counts its confirm rows.
 const ordersSummary = computed(() => {
     let proj = 0, conf = 0, orderQty = 0, poQty = 0, doneOrderQty = 0, donePoQty = 0, openProj = 0;
     let todayQty = 0, last3Qty = 0;
-    const P = { line : 0, hold : 0, lock : 0, fresh : 0 }, C = { line : 0, hold : 0, lock : 0, fresh : 0 };
+    const P = { line : 0, hold : 0, sewn : 0, lock : 0, fresh : 0 }, C = { line : 0, hold : 0, sewn : 0, lock : 0, fresh : 0 };
     const cutToday = recentCutoff('today');
     const cut3     = recentCutoff('last3');
     const rowQty = r => Number(r.orderType === 'confirm' ? r.qty : r.orderQty) || 0;
-    const add = (t, sh) => { t.line += sh.line; t.hold += sh.hold; t.lock += sh.lock; t.fresh += sh.fresh; };
+    const add = (t, sh) => { t.line += sh.line; t.hold += sh.hold; t.sewn += sh.sewn; t.lock += sh.lock; t.fresh += sh.fresh; };
     const base = baseErpOrders.value;
     for (const r of base) {
         const done = r.status === 'completed' || r.status === 'sewn';
@@ -9115,7 +9136,10 @@ const ordersSummary = computed(() => {
     return { rows : base.length, proj, conf, orderQty, doneOrderQty, poQty, donePoQty,
         // the rows the quantity tiles are counted from (a tile click shows those)
         counted : openProj ? 'projected' : 'confirm',
-        plannedQty : T.line, holdingQty : T.hold, unplannedQty : T.lock, freshQty : T.fresh, todayQty, last3Qty };
+        // sewn already (off the board) counts as Planned; what is not on the
+        // board — lock or not — is Unplanned: the three add up to the Order Qty
+        plannedQty : T.line + T.sewn, holdingQty : T.hold, unplannedQty : T.lock + T.fresh,
+        sewnQty : T.sewn, lockQty : T.lock, freshQty : T.fresh, todayQty, last3Qty };
 });
 
 // ---------------------------------------------------------------------------
@@ -17561,17 +17585,21 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span class="od-sum-tile od-sum-conf od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'confirm' }" title="Confirm orders — click to show only those rows (the figures stay)"
                         @click="tileAction('confirm')"><b>{{ fmtQty(ordersSummary.conf) }}</b> confirm</span>
                     <span class="od-sum-tile od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'planned' }"
-                        title="Quantity planned on a sewing line — click to show the rows it comes from"
+                        :title="'Quantity planned on a sewing line'
+                            + (ordersSummary.sewnQty > 0 ? `, and ${fmtQty(ordersSummary.sewnQty)} pcs already sewn that are on the board no more (a PO sewn in full, the sewn part of an order whose rest is on the Holding Row)` : '')
+                            + ' — click to show the rows it comes from'"
                         @click="tileAction('planned')">Planned <b>{{ fmtQty(ordersSummary.plannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-hold od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'holding' }"
                         title="Quantity planned on the Holding Row — on the board, not on a line yet — click to show the rows it comes from"
                         @click="tileAction('holding')">Holding Qty <b>{{ fmtQty(ordersSummary.holdingQty) }}</b></span>
                     <span class="od-sum-tile od-sum-unpl od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'unplanned' }"
-                        title="The order quantity changed in the ERP, but the plan lock (or a board that cannot be changed) keeps the order's bar as it is — this part is not on the board. Click to show the rows it comes from"
+                        :title="'Quantity that is not on the board'
+                            + (ordersSummary.lockQty > 0 ? ` · ${fmtQty(ordersSummary.lockQty)} pcs: the order quantity changed in the ERP, but the plan lock (or a board that cannot be changed) keeps the order's bar as it is` : '')
+                            + (ordersSummary.freshQty > 0 ? ` · ${fmtQty(ordersSummary.freshQty)} pcs: the part of an order no PO has been issued for yet, or a new order the board's Auto plan has not placed yet` : '')
+                            + ' — click to show the rows it comes from'"
                         @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
-                        :title="'Order qty of the open orders (= Available + Planned in Available Order) — click to sort'
-                            + (ordersSummary.freshQty > 0 ? ` · ${fmtQty(ordersSummary.freshQty)} pcs of these orders are in none of the three tiles: PO rows already sewn, a part no PO has been issued for yet, or a new order the board's Auto plan has not placed yet` : '')
+                        :title="'Order qty of the open orders (= Available + Planned in Available Order) = Planned + Holding Qty + Unplanned — click to sort'
                             + (ordersSummary.doneOrderQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.doneOrderQty)}` : '')"
                         @click="tileAction('orderQty')">Order Qty <b>{{ fmtQty(ordersSummary.orderQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
