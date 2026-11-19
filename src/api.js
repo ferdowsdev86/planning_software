@@ -418,6 +418,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         groupSewnDays : orderId ? (Number(e.group_sewn_days) || 0) : undefined,
         // ramp days the order had already consumed when this bar was planned
         // for its remaining quantity (the curve continues after them)
+        // a projection bar: what its order holds in the ERP NOW (the bar keeps
+        // the quantity it was planned with — the board compares the two and
+        // re-plans a changed order, see applyErpQtyUpdates)
+        erpQty     : projId && Number(e.order_quantity) > 0 ? Number(e.order_quantity) : undefined,
         lcDone     : Number(noteGroup.lcDone) > 0 ? Number(noteGroup.lcDone) : undefined,
         lcLag      : Number(noteGroup.lcLag) > 0 ? Number(noteGroup.lcLag) : undefined,
         lcRun      : Number(noteGroup.lcRun) > 0 ? Number(noteGroup.lcRun) : undefined,
