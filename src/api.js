@@ -411,6 +411,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // order carries the same figure) and the plan qty of its pieces that
         // left the board finished — the re-plan restores the difference
         groupQty  : orderId && Number(e.group_qty) > 0 ? Number(e.group_qty) : undefined,
+        // …and those PO rows one by one when they hold SEVERAL delivery dates
+        // ({ id, po, qty, sewn, remaining, ship }): Auto plan plans the bar
+        // again as its confirm order rows (order + colour + delivery date)
+        poRows    : orderId && Array.isArray(e.group_rows) && e.group_rows.length ? e.group_rows : undefined,
         groupDone : orderId ? (Number(e.group_done) || 0) : undefined,
         // actual sewing output of those PO rows (ERP daily_productions) and
         // the POs whose output could not be reconciled (no new allocation)
@@ -1228,7 +1232,11 @@ export async function loadFromApi(unitId = null) {
         const smv   = Number(e.smv) > 0 ? Number(e.smv) : (noteSmv > 0 ? noteSmv : randSmv(e.po_number));
         const { start, end, dur, dbStart, dbEnd } = boardSpanFromDb(e);
         const status = e.event_status === 'completed' ? 'completed' : e.event_status;
-        const ship  = asDate(e.shipment_date);
+        // a confirm bar that stands for several PO rows carries the FIRST
+        // delivery of the rows still to sew (server: group_first_ship) — the
+        // date the pool gave the colour group — not the date of the row it was
+        // saved on (2620BES060: 21/12 … 10/02 in one bar, shown as 13/01)
+        const ship  = asDate(e.group_first_ship || e.shipment_date);
         // Saved projection events (event_code 'ev-proj:…') have no
         // planning_orders join, so buyer_name is NULL — their identity lives
         // in the event itself and they must NOT be dropped here

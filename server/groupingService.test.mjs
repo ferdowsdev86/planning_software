@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    simulateCompletion, groupAndSplit, deliveryStatus, normaliseEfficiency, DEFAULT_CALENDAR, isoDay
+    simulateCompletion, groupAndSplit, deliveryStatus, normaliseEfficiency, DEFAULT_CALENDAR, isoDay, firstGroupDelivery
 } from './groupingService.mjs';
 
 const LINE = { name : 'Line 01', manpower : 50, efficiency : 58, availableFrom : '2026-09-01' };
@@ -162,4 +162,41 @@ test('delivery status: At Risk within 3 days, On Time beyond', () => {
     });
     assert.equal(deliveryStatus(mk('2026-09-09')), 'At Risk');
     assert.equal(deliveryStatus(mk('2026-09-01')), 'On Time');
+});
+
+// ---- the delivery of a bar that stands for several PO rows ----------------
+test('2620BES060: POs due 21/12 … 10/02 in one bar — the bar\'s delivery is the FIRST one, whatever row it was saved on', () => {
+    const rows = [
+        { ship : '2027-01-13', qty : 45 },        // the row the bar was saved on (lowest id at the time)
+        { ship : '2027-01-13', qty : 7614 },
+        { ship : '2026-12-21', qty : 150 },
+        { ship : '2026-12-28', qty : 165 },
+        { ship : '2027-01-05', qty : 330 },
+        { ship : '2027-02-10', qty : 3014 }
+    ];
+    assert.equal(firstGroupDelivery(rows), '2026-12-21');
+});
+
+test('a PO sewn in full no longer sets the delivery; the next open PO does', () => {
+    const rows = [
+        { ship : '2026-11-14', qty : 400, remaining : 0 },
+        { ship : '2026-12-31', qty : 3000, remaining : 2100 },
+        { ship : '2027-01-28', qty : 2000, remaining : null }
+    ];
+    assert.equal(firstGroupDelivery(rows), '2026-12-31');
+    // an unsewn PO whose delivery is past still counts — the bar IS late
+    assert.equal(firstGroupDelivery([{ ship : '2026-11-14', qty : 400, remaining : 400 }, { ship : '2026-12-31', qty : 3000 }]), '2026-11-14');
+});
+
+test('nothing left to sew (sewn out, or no quantity), or no date at all: null — the bar keeps its date', () => {
+    assert.equal(firstGroupDelivery([{ ship : '2026-12-21', qty : 150, remaining : 0 }, { ship : '2027-01-13', qty : 45, remaining : 0 }]), null);
+    assert.equal(firstGroupDelivery([{ ship : '2027-01-13', qty : 0 }, { ship : '2026-12-21', qty : 0 }]), null);
+    assert.equal(firstGroupDelivery([{ ship : null, qty : 10 }, { qty : 5 }]), null);
+    assert.equal(firstGroupDelivery([]), null);
+    assert.equal(firstGroupDelivery(null), null);
+});
+
+test('the date comes back as the row carries it (a Date stays the same Date)', () => {
+    const d1 = new Date('2026-12-21T00:00:00'), d2 = new Date('2027-01-13T00:00:00');
+    assert.equal(firstGroupDelivery([{ ship : d2, qty : 45 }, { ship : d1, qty : 150 }]), d1);
 });

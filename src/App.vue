@@ -24,6 +24,7 @@ import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { curveLag, consumePlan } from './learningCurveService.mjs';
 import { planQtyChange, orderShares, qtyTol } from './qtyUpdateService.mjs';
+import { splitByDelivery, mergeSameSource } from './deliveryRows.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
     loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
@@ -3899,9 +3900,11 @@ const apKeepStarted = ref(true);           // keep completed / production-starte
 //                         no slot before it: "Not Available Space", no bar
 const AP_SEW_START_AFTER_PCD = SEW_START_AFTER_PCD_DAYS;      // 8 calendar days
 const AP_FINISH_BUFFER_DAYS  = SEW_END_BEFORE_DELIVERY_DAYS;  // 7 calendar days
-// confirm orders group-wise: PO / colour rows of one order whose deliveries lie
-// within this many days of the group's first delivery are ONE planning unit
-const AP_GROUP_DELIVERY_WINDOW_DAYS = 7;
+// confirm orders group-wise: the confirm order rows (order + colour + delivery
+// date) of one order whose deliveries lie within this many days of the group's
+// first delivery are ONE planning unit (planner, 2026-11-19: "within 7 to 10
+// days they are planned together and the first delivery counts" — 7 before)
+const AP_GROUP_DELIVERY_WINDOW_DAYS = 10;
 // product continuity: a same-product slot may start at most this many days
 // after the earliest on-time start and still be preferred (autoPlanV2)
 const AP_CONTINUITY_DELAY_DAYS = 3;
@@ -4045,6 +4048,15 @@ function openAutoPlanAvail() {
 // Blank the board: the bars leave the lines, their orders return to the
 // unplanned pool (the same source the planner reads), the DB rows are
 // cancelled on Save. Returns how many bars left / stayed.
+// The PO rows a bar stands for, with each row's delivery: what the server
+// attached at load (raw.poRows — only bars whose rows have several delivery
+// dates carry it) or, for a bar placed in this session, the pool row's own.
+function barPoRows(r) {
+    const list = Array.isArray(r?.poRows) && r.poRows.length ? r.poRows : (Array.isArray(r?.poDetails) ? r.poDetails : []);
+    const seen = new Set();
+    const out = list.filter(d => d && d.id != null && !seen.has(Number(d.id)) && seen.add(Number(d.id)));
+    return out.length ? out : undefined;
+}
 function blankBoardForAutoPlan(s, keepStarted, lock = null) {
     const index = buildLineIndex(s);
     const bars = [];
@@ -4189,6 +4201,10 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         // afterwards as "another unit's" and never re-planned)
         pcd : r.pcd || null, ship : r.ship || null, matReady : r.matReady || null, unitId : currentUnitId.value ?? r.unitId ?? null,
         dbId : r.dbId, status : 'unplanned', parked : false, suitable : r.suitable, idList : r.idList,
+        // the bar's PO rows with their deliveries (server: group_rows; a bar of
+        // this session still has the pool row's) — the planner cuts the row
+        // into its confirm order rows by them
+        poDetails : barPoRows(r),
         sewnDays : Number(r.groupSewnDays) || 0,
         // a projection keeps what it knows of its confirm POs: with any, the
         // planner leaves it replaced instead of planning it again
@@ -4230,6 +4246,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
             prev.baseQty   = prev.baseQty != null && r.baseQty != null ? Number(prev.baseQty) + Number(r.baseQty) : undefined;
             prev.idList    = union(prev.idList, r.idList);
             prev.poList    = union(prev.poList, r.poList);
+            prev.poDetails = barPoRows({ poDetails : [...(prev.poDetails || []), ...(barPoRows(r) || [])] });
             continue;
         }
         if (have.has(String(id))) continue;
@@ -4410,8 +4427,19 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, sta
     const groupsByKey = new Map();
     const grouped = [];
     const dayMs = 24 * 60 * 60 * 1000;
+    // AS PER CONFIRM ORDER ROW (planner, 2026-11-19, 2620BES060 — one colour,
+    // POs due 21/12 · 28/12 · 05/01 · 13/01 · 10/02): the pool holds ONE row a
+    // colour with every delivery in it, so the whole colour was one planning
+    // unit with one target. Each pool row is cut into the confirm order rows
+    // of the Orders list first — one per delivery date still to sew
+    // (deliveryRows.mjs) — and THOSE are grouped: within the window of the
+    // group's first delivery they are planned together for that delivery, a
+    // later delivery is a group of its own with its own target. The quantity
+    // rule stays the existing one (over 10,000 pcs several lines, 3,000 a
+    // piece at least). A balance row and a projection are not cut.
+    const planRows = orders.flatMap(o => (orderTypeOf(o.po, o.orderType) === 'confirm' && o.mbmOrder ? splitByDelivery(o) : [o]));
     // earliest delivery first, so a group's first member holds its earliest ship
-    const ordersByShip = [...orders].sort((a, b) => (+new Date(a.ship || 0)) - (+new Date(b.ship || 0)));
+    const ordersByShip = [...planRows].sort((a, b) => (+new Date(a.ship || 0)) - (+new Date(b.ship || 0)));
     for (const o of ordersByShip) {
         const confirm = orderTypeOf(o.po, o.orderType) === 'confirm';
         if (!confirm || o.balance || !o.mbmOrder || !o.ship) { grouped.push(o); continue; }
@@ -4443,6 +4471,14 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, sta
         g._smvW += (Number(o.smv) || 0) * (Number(o.qty) || 0); g._q += Number(o.qty) || 0;
         g.smv = g._q > 0 ? Math.round(g._smvW / g._q * 100) / 100 : g.smv;
         g.color = `${g.members[0].color || ''} +${g.members.length - 1} colour${g.members.length > 2 ? 's' : ''}`;
+    }
+    // the deliveries of ONE colour inside a group are one member — one strip
+    // on the row of its first delivery; only another colour is another strip
+    for (const g of grouped) {
+        if (!Array.isArray(g.members) || g.members.length < 2) continue;
+        g.members = mergeSameSource(g.members);
+        const colours = [...new Set(g.members.map(m => m.color || ''))];
+        g.color = colours.length > 1 ? `${colours[0]} +${colours.length - 1} colour${colours.length > 2 ? 's' : ''}` : colours[0];
     }
     const profOf = o => o.profileType || o.productType;
     const codeOf = o => {
@@ -4497,7 +4533,8 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, sta
     const fmtD = d => (d ? fmtDate(new Date(d)) : '—');
     // every pool row this run gave a bar (on a line or parked) leaves the pool
     const doneIds = new Set();
-    const noteDone = o => { doneIds.add(String(o.id)); for (const m of (o.members || [])) doneIds.add(String(m.id)); };
+    // (a row cut into its confirm order rows leaves as the pool row it came from)
+    const noteDone = o => { for (const x of [o, ...(o.members || [])]) { doneIds.add(String(x.id)); if (x.srcId != null) doneIds.add(String(x.srcId)); } };
     const parkRow = (o, reason, floor, days = 1) => {
         if (!hid) return false;
         noteDone(o);

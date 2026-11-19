@@ -193,3 +193,30 @@ export function deliveryStatus(group) {
     if (slackMs < 3 * DAY_MS) return 'At Risk';
     return 'On Time';
 }
+
+// ---------------------------------------------------------------------------
+// THE DELIVERY OF A BAR THAT STANDS FOR SEVERAL PO ROWS (planner, 2026-11-19,
+// 2620BES060: one colour, 14 POs due 21/12 · 28/12 · 05/01 · 13/01 · 10/02 —
+// the bar showed 13/01 and was planned for 13/01 − 7).
+//
+// A colour group is planned for its FIRST delivery: the pool gives it the
+// earliest delivery of its POs, so no PO is late. The bar on the board must
+// carry the same date — not the date of whichever row it was saved on. A row
+// that is sewn in full has nothing left to deliver from this bar and no
+// longer counts. When no row has anything left to sew (the group is sewn
+// out, or its rows carry no quantity) there is no first delivery to plan
+// for: null — the bar keeps the date it has.
+//
+// rows: [{ ship, qty, remaining }] — remaining null/undefined = no sewing
+// output known (the whole quantity is open). Returns the row's own `ship`
+// value (never re-formatted), or null.
+// ---------------------------------------------------------------------------
+export function firstGroupDelivery(rows) {
+    let open = null;
+    for (const r of rows || []) {
+        if (!r || !r.ship || Number.isNaN(+new Date(r.ship))) continue;
+        const left = r.remaining == null || !Number.isFinite(Number(r.remaining)) ? Number(r.qty) || 0 : Number(r.remaining);
+        if (left > 0 && (open == null || +new Date(r.ship) < +new Date(open))) open = r.ship;
+    }
+    return open;
+}

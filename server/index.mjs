@@ -9,7 +9,7 @@ import express from 'express';
 import compression from 'compression';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
-import { groupAndSplit, deliveryStatus } from './groupingService.mjs';
+import { groupAndSplit, deliveryStatus, firstGroupDelivery } from './groupingService.mjs';
 import { reconcileSewingOutput, sewKeyOfRow, sewingOutputSql } from './sewingOutput.mjs';
 import { sewingActualsSql, normalizeActualRows } from './sewingActuals.mjs';
 import { buildBarHistory } from './barHistory.mjs';
@@ -409,16 +409,33 @@ async function attachGroupTotals(events) {
     try { sew = await sewingOutputForRows(rows); }
     catch (e) { console.warn(`[scheduler-data] sewing output skipped: ${e.message}`); }
     const poNoOf = new Map(rows.map(r => [Number(r.id), r.po_number]));
+    const shipOf = new Map(rows.map(r => [Number(r.id), r.shipment_date]));
     for (const e of events) {
         const ids = byAnchor.get(Number(e.planning_order_id));
         if (!ids) continue;
         let q = 0, d = 0, sewn = 0, days = 0;
         const issues = [];
+        const ships = [];
         for (const i of ids) {
             q += qtyOf.get(i) || 0; d += doneOf.get(i) || 0;
             const so = sew.get(i);
             if (so) { sewn += so.sewn; days = Math.max(days, so.days || 0); if (so.issue) issues.push(`PO ${poNoOf.get(i) || i}: ${so.issue}`); }
+            if (shipOf.get(i)) ships.push({ id : i, po : poNoOf.get(i) || null, ship : shipOf.get(i), qty : qtyOf.get(i) || 0, sewn : so ? Number(so.sewn) || 0 : null, remaining : so ? Number(so.remaining) : null });
         }
+        // THE BAR'S DELIVERY IS THE FIRST DELIVERY OF ITS PO ROWS (planner,
+        // 2026-11-19, 2620BES060: POs due 21/12 … 10/02 in one bar; the bar
+        // stood on the row of a 13/01 PO, so it showed 13/01 and Auto plan
+        // re-planned it for 13/01 − 7). The pool gives a colour group its
+        // EARLIEST delivery (MIN(shipment_date)); the bar on the board took
+        // the date of its anchor row instead — whichever row had the lowest
+        // id when it was planned. Rows already sewn in full no longer count;
+        // a group with nothing left to sew keeps the date it has.
+        const first = firstGroupDelivery(ships);
+        if (first) e.group_first_ship = first;
+        // PO rows with SEVERAL delivery dates go with the bar one by one: Auto
+        // plan plans such a bar again as its confirm order rows (order +
+        // colour + delivery date), each for its own delivery
+        if (new Set(ships.map(x => +new Date(x.ship))).size > 1) e.group_rows = ships;
         e.group_qty   = q;
         e.group_done  = d;
         e.group_sewn  = sewn;
