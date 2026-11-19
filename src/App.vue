@@ -19,7 +19,7 @@ import {
     isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS, workingMinutesBetween
 } from './planningData.js';
 import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo, orderTwinOf, WORK_SNAP_MIN } from './planningData.js';
-import { AP_LOCK_DAYS, AP_HOLD_LOCK, AP_HOLD_SPACE, lockWindow, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
+import { AP_LOCK_DAYS, AP_LOCK_CHOICES, AP_HOLD_SPACE, lockWindow, lockHoldReason, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { curveLag, consumePlan } from './learningCurveService.mjs';
@@ -3920,9 +3920,25 @@ function boardToday() {
     const t = new Date(); t.setHours(0, 0, 0, 0);
     return t;
 }
-// lock window: [from, firstEditable) — firstEditable = today + 10 days
+// lock length the planner ticked in the Auto plan dialog: "Apply the 10-day
+// lock" (default) or "Apply the 30-day lock" (planner, 2026-11-19); the
+// choice is remembered on this browser
+const AP_LOCK_DAYS_KEY = 'mbm-ap-lock-days';
+const apLockDays = ref((() => {
+    try { const v = Number(localStorage.getItem(AP_LOCK_DAYS_KEY)); return AP_LOCK_CHOICES.includes(v) ? v : AP_LOCK_DAYS; }
+    catch { return AP_LOCK_DAYS; }
+})());
+watch(apLockDays, v => { try { localStorage.setItem(AP_LOCK_DAYS_KEY, String(v)); } catch { /* quota */ } });
+// one tick per lock length: ticking "30-day" unticks "10-day" and vice versa;
+// unticking the ticked one = lock OFF (first full run)
+const apLockTicked = n => apApplyLock.value && apLockDays.value === n;
+function apTickLock(n, on) {
+    if (on) { apLockDays.value = n; apApplyLock.value = true; }
+    else if (apLockDays.value === n) apApplyLock.value = false;
+}
+// lock window: [from, firstEditable) — firstEditable = today + the ticked days
 function apLockWindow() {
-    return lockWindow(boardToday(), AP_LOCK_DAYS);
+    return lockWindow(boardToday(), apLockDays.value);
 }
 const apYmd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const apTo          = ref('');             // delivery on / before this date (empty = open ended)
@@ -4082,6 +4098,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
     }
     apLockGuard = {
         unitId : currentUnitId.value,
+        days   : lock ? lock.days : 0,
         ids    : frozen.map(ev => ev.data.dbId ?? (String(ev.id).startsWith('db-') ? Number(String(ev.id).slice(3).split('-')[0]) : null)).filter(v => v != null),
         snap   : apSnapshotBars(s, frozen)
     };
@@ -4630,9 +4647,9 @@ async function runAutoPlanAvail() {
     if (!horizonEnd || horizonEnd <= firstEditable) { toast('The planning horizon must be after the first editable day', 'warn'); return; }
     const ok = window.confirm(`Auto plan ${currentBoard.value.unitName} board from the available orders?\n\n`
         + (lock
-            ? `• 10-DAY LOCK ${fmtDate(lock.from)} → ${fmtDate(lock.lastLocked)}: the ${st.locked} bar(s) that overlap it stay exactly as they are (line, dates, quantity)\n`
+            ? `• ${lock.days}-DAY LOCK ${fmtDate(lock.from)} → ${fmtDate(lock.lastLocked)}: the ${st.locked} bar(s) that overlap it stay exactly as they are (line, dates, quantity)\n`
               + `• ${st.blank} bar(s) that start on / after ${fmtDate(lock.firstEditable)} leave the board and are planned again${st.keep - st.locked > 0 ? ` (${st.keep - st.locked} more stay: ended before today, completed or production started)` : ''}\n`
-            : `• FIRST FULL RUN — 10-day lock OFF: every bar without production leaves the board and is planned again (${st.keep} stay: completed or production started)\n`)
+            : `• FIRST FULL RUN — plan lock OFF: every bar without production leaves the board and is planned again (${st.keep} stay: completed or production started)\n`)
         + `• only the REMAINING sewing quantity is planned: PO qty − actual sewing output (ERP daily production) − what the staying bars still have to make\n`
         + `• every available order with delivery ${to ? `${fmtDate(from)} → ${fmtDate(to)}` : `on / after ${fmtDate(from)}`}, earliest target first\n`
         + `• 1. earliest sewing start = PCD + ${AP_SEW_START_AFTER_PCD} calendar days — hard, for every piece; target sewing end = delivery − ${AP_FINISH_BUFFER_DAYS} calendar days\n`
@@ -4743,7 +4760,7 @@ async function runAutoPlanAvail() {
     // rows still waiting in the run's delivery window (a replaced projection is planned as its confirm POs)
     const left = apReview.value?.summary ? apReview.value.summary.unplannedOrders
         : unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed' && !u.replaced && u.status !== 'replaced').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${r?.gapFill?.pieces ? ` · NO IDLE LINE: ${r.gapFill.pieces} piece(s) of ${r.gapFill.orders} waiting order(s) (${fmtQty(r.gapFill.qty)} pcs) fill ${r.gapFill.gaps} idle stretch(es)` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the 10-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${r?.gapFill?.pieces ? ` · NO IDLE LINE: ${r.gapFill.pieces} piece(s) of ${r.gapFill.orders} waiting order(s) (${fmtQty(r.gapFill.qty)} pcs) fill ${r.gapFill.gaps} idle stretch(es)` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the ${lock?.days || apLockDays.value}-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
 }
 // The run's review (planner spec 2026-11-12): line plan is the board itself;
 // here the shipment check per bar (PCD, earliest sewing start, latest sewing
@@ -4772,7 +4789,7 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
         const kept = locked || x.status === 'completed' || Number(x.made) > 0;
         // a split order is late by its LAST piece (x.projSewEnd)
         const proj = x.projSewEnd ? new Date(x.projSewEnd) : end;
-        const status = locked ? (x.groupIssue ? 'Kept — PO not reconciled' : 'Locked — 10-day plan lock')
+        const status = locked ? (x.groupIssue ? 'Kept — PO not reconciled' : `Locked — ${lock?.days || apLockDays.value}-day plan lock`)
             : kept ? (end > latest ? 'Kept — in production (late)' : 'Kept — in production') : !latest ? 'No delivery' : (x.latePlan || proj > latest) ? 'Late' : slackDays <= 1 ? 'At Risk' : 'On Time';
         rows.push({ id : String(ev.id), line : s.resourceStore.getById(lid)?.name || lid, unit : x.unitId ?? '', order : x.mbmOrder || '', po : x.po || '', style : x.style || '', color : x.color || '',
             qty : Number(x.qty) || 0, pcd : x.pcd ? new Date(x.pcd) : null, earliest, latest, start : new Date(ev.startDate), end, proj, ready, status, slackDays, kept, locked,
@@ -4803,7 +4820,7 @@ function buildAutoPlanReview(s, { from, to, floor, infeasible, blanked, r, dropp
                     // fill mode: a bar may be pulled down to its PCD (cut date), so "ready" = PCD before the gap
                     // an order is ready for a gap only from its earliest sewing start (PCD + 8)
                     const compat = pool.filter(u => { const lo = apEarliestStartOf(u); return lo && lo <= gapEnd; });
-                    const reason = gapEnd <= (lock?.firstEditable || 0) ? 'inside the 10-day lock — nothing new is planned here'
+                    const reason = gapEnd <= (lock?.firstEditable || 0) ? `inside the ${lock.days}-day lock — nothing new is planned here`
                         : !compat.length ? 'no order is ready before the gap (earliest sewing start = PCD + 8 days)'
                         : h < 24 ? 'gap too short for a run' : 'the ready orders are planned or held; the next bar waits for its earliest sewing start';
                     gaps.push({ from : new Date(cursor), to : new Date(gapEnd), hours : h, reason });
@@ -15589,7 +15606,7 @@ async function saveToDbInner(s) {
     const lockIds = apLockGuard && apLockGuard.unitId === currentUnitId.value && !whatIfActive.value ? apLockGuard.ids : null;
     if (lockIds) {
         const lockFix = apRestoreLocked(s);
-        if (lockFix) toast(`10-day plan lock: ${lockFix} locked bar(s) were put back as they were saved`, 'warn');
+        if (lockFix) toast(`${apLockGuard.days || apLockDays.value}-day plan lock: ${lockFix} locked bar(s) were put back as they were saved`, 'warn');
     }
     const changes = collectPendingChanges(s);
     // bars the production cut moved at load (raw._prodCut) are not the
@@ -15698,7 +15715,7 @@ async function saveToDbInner(s) {
                 toast(res.adjusted?.length
                     ? `⚠ ${patched} bar(s) were shifted by the server to avoid an overlap — shown as stored`
                     : Number(res.lockedSkipped) > 0
-                        ? `⚠ ${res.lockedSkipped} change(s) to 10-day-lock bar(s) were not saved (the lock kept them) — those bars are shown as stored`
+                        ? `⚠ ${res.lockedSkipped} change(s) to plan-lock bar(s) were not saved (the lock kept them) — those bars are shown as stored`
                         : `⚠ ${patched} bar(s) are shown where the server stored them`, 'warn');
             }
         }
@@ -18692,15 +18709,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Board</legend>
-                            <label class="pf-radio pf-mouse"><input type="checkbox" v-model="apApplyLock"> Apply the 10-day lock</label>
-                            <div v-if="apApplyLock" class="pf-line-hint"><b>10-day lock {{ fmtDate(apStats.lock.from) }} → {{ fmtDate(apStats.lock.lastLocked) }}</b> (board date, Asia/Dhaka): the <b>{{ apStats.locked }}</b> bar(s) that overlap it stay exactly as they are — line, dates, quantity. First editable day: <b>{{ fmtDate(apStats.lock.firstEditable) }}</b></div>
-                            <div v-else class="pf-line-hint"><b>First full run — lock OFF:</b> every bar without production leaves the board and is planned again by all the rules from today; nothing is frozen or held for the lock. Tick the lock again for the runs after this one.</div>
+                            <label v-for="n in AP_LOCK_CHOICES" :key="n" class="pf-radio pf-mouse ap-lock-tick"><input type="checkbox" :checked="apLockTicked(n)" @change="apTickLock(n, $event.target.checked)"> Apply the {{ n }}-day lock</label>
+                            <div v-if="apApplyLock" class="pf-line-hint"><b>{{ apStats.lock.days }}-day lock {{ fmtDate(apStats.lock.from) }} → {{ fmtDate(apStats.lock.lastLocked) }}</b> (board date, Asia/Dhaka): the <b>{{ apStats.locked }}</b> bar(s) that overlap it stay exactly as they are — line, dates, quantity. First editable day: <b>{{ fmtDate(apStats.lock.firstEditable) }}</b></div>
+                            <div v-else class="pf-line-hint"><b>First full run — lock OFF:</b> every bar without production leaves the board and is planned again by all the rules from today; nothing is frozen or held for the lock. Tick a lock again for the runs after this one.</div>
                             <label class="pf-radio pf-mouse" style="margin-top:8px"><input type="checkbox" v-model="apKeepStarted"> Keep bars with production already reported</label>
                             <div class="pf-line-hint">Bars on the board now: <b>{{ apStats.bars }}</b> · leave and are planned again: <b>{{ apStats.blank }}</b> · stay: <b>{{ apStats.keep }}</b> ({{ apApplyLock ? `locked ${apStats.locked} + ended before today ${apStats.past} + ` : '' }}completed{{ apKeepStarted ? ' + production started' : '' }})</div>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Rules</legend>
-                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order is ONE unit (never PO by PO) — deliveries within 7 days of the first one belong together, the earliest sets the target; a later delivery wave is its own unit; <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 3b. <b>Product continuity</b>: priorities in this order — the most orders by their target, the least lateness for the rest, the fewest product changes (the same product runs on after itself on a line; a same-product slot may start up to 3 days after the earliest on-time start), then the least idle time and the stronger product efficiency; a continuity gain never outranks an on-time completion; after the run, adjacent swaps and moves into a same-product gap that cost no order its completion; the review compares the board before and after (on time / late, product changes per line, idle hours, orders that got worse) · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the 10-day lock keeps its bars</div>
+                            <div class="pf-line-hint">1. <b>Earliest sewing start = PCD + 8 calendar days</b> — hard for every allocation (split pieces too); <b>target sewing end = delivery − 7 calendar days</b>; capacity from the line calendars, hours, holidays and the Build up (learning) curve · 2. <b>Line ranking</b>: product match (efficiency profile lists the product) → earliest feasible start on / after PCD + 8 → higher product efficiency → line id · 3. <b>Confirm orders group-wise</b>: every PO / colour of an order is ONE unit (never PO by PO) — deliveries within 7 days of the first one belong together, the earliest sets the target; a later delivery wave is its own unit; <b>up to 10,000 pcs → one line</b> when it finishes by the target, split over several lines only when the plan would be late; <b>over 10,000 pcs → several lines</b> (two, then three… the fewest that meet the target); <b>every piece at least 3,000 pcs</b> (under 6,000 is never split); every piece finishes at the same time — a slow line may run up to 2 days behind — whole pieces by each line's effective capacity from its own start · 3b. <b>Product continuity</b>: priorities in this order — the most orders by their target, the least lateness for the rest, the fewest product changes (the same product runs on after itself on a line; a same-product slot may start up to 3 days after the earliest on-time start), then the least idle time and the stronger product efficiency; a continuity gain never outranks an on-time completion; after the run, adjacent swaps and moves into a same-product gap that cost no order its completion; the review compares the board before and after (on time / late, product changes per line, idle hours, orders that got worse) · 4. <b>Nothing stays unplanned</b>: an order no line finishes by the target (late), one with no slot inside the planning horizon (Not Available Space), or one without SMV / PCD goes to the <b>Holding Row</b> at its suggested start (PCD + 8) with the reason in its tooltip and the Orders list · 5. Only the remaining sewing quantity (PO qty − ERP sewing output − what the staying bars still make); the ticked plan lock (10-day or 30-day) keeps its bars</div>
                         </fieldset>
                     </div>
                     <div class="st-actions">
@@ -18766,10 +18783,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="pf-sum" style="margin-top:4px">
                         <b>Remaining sewing quantity</b> — {{ apReview.recon.groups }} PO group(s) of the board reconciled: actual sewing output <b>{{ fmtQty(apReview.recon.sewn) }}</b> pcs deducted ·
                         unfinished quantity covered by the bars that stay <b>{{ fmtQty(apReview.recon.covered) }}</b> pcs · {{ apReview.recon.fullySewn }} group(s) fully sewn / covered (no new bar){{ apReview.recon.reduced ? ` · ${apReview.recon.reduced} group(s) planned for less than before (−${fmtQty(apReview.recon.reducedQty)} pcs already sewn)` : '' }}{{ apReview.summary.poolSewnRows ? ` · ${apReview.summary.poolSewnRows} unplanned PO group(s) already fully sewn (${fmtQty(apReview.summary.poolSewnQty)} pcs) — not planned` : '' }}
-                        <template v-if="apReview.lock"> · <b>10-day lock</b> {{ fmtDate(apReview.lock.from) }} → {{ fmtDate(apReview.lock.lastLocked) }}: {{ apReview.recon.locked }} bar(s) kept as they are, first editable day {{ fmtDate(apReview.lock.firstEditable) }}</template>
+                        <template v-if="apReview.lock"> · <b>{{ apReview.lock.days }}-day lock</b> {{ fmtDate(apReview.lock.from) }} → {{ fmtDate(apReview.lock.lastLocked) }}: {{ apReview.recon.locked }} bar(s) kept as they are, first editable day {{ fmtDate(apReview.lock.firstEditable) }}</template>
                         <template v-if="apReview.horizonEnd"> · planning horizon {{ fmtDate(apReview.horizonEnd) }}</template>
                     </div>
-                    <div v-if="apReview.held.length" class="st-hint ap-rev-h">⏸ Holding ({{ apReview.held.length }} · {{ fmtQty(apReview.summary.heldQty) }} pcs) — "{{ AP_HOLD_LOCK }}": the earliest sewing start falls inside the lock, no line, no bar · "{{ AP_HOLD_SPACE }}": no line finishes it by its target sewing end — parked on the Holding Row, no late plan; both are looked at again on the next run</div>
+                    <div v-if="apReview.held.length" class="st-hint ap-rev-h">⏸ Holding ({{ apReview.held.length }} · {{ fmtQty(apReview.summary.heldQty) }} pcs) — "{{ lockHoldReason(apReview.lock?.days) }}": the earliest sewing start falls inside the lock, no line, no bar · "{{ AP_HOLD_SPACE }}": no line finishes it by its target sewing end — parked on the Holding Row, no late plan; both are looked at again on the next run</div>
                     <div v-if="apReview.held.length" class="pf-table ap-rev-tbl">
                         <table>
                             <thead><tr><th>Order</th><th>PO</th><th>Colour</th><th>Remaining qty (+3%)</th><th>Sewn</th><th>PCD</th><th>Earliest sew start</th><th>Delivery</th><th>Target sew end</th><th>Reason</th></tr></thead>
@@ -22241,6 +22258,8 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 .pf-scope, .pf-dates { border : 1px solid #b9c4d0; border-radius : 4px; padding : 8px 12px; flex : 1; }
 .pf-scope legend, .pf-dates legend { font-weight : 700; font-size : 12px; padding : 0 6px; }
 .pf-radio { display : flex; gap : 8px; align-items : center; font-size : 13px; padding : 4px 0; cursor : pointer; }
+/* Auto plan: "Apply the 10-day lock" / "Apply the 30-day lock" — one tick at a time */
+.pf-dates label.ap-lock-tick + label.ap-lock-tick { padding-top : 0; }
 .pf-disabled { color : #9aa2ac; cursor : default; }
 .pf-dates label { display : flex; gap : 10px; align-items : center; font-size : 13px; padding : 4px 0; }
 .pf-dates input[type=date] { font : inherit; padding : 3px 6px; border : 1px solid #b9c4d0; border-radius : 3px; }

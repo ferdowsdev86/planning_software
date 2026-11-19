@@ -1,18 +1,26 @@
 // Auto Plan rules (planner spec 2026-11-14) — pure maths, no board, no DB.
 
 export const AP_LOCK_DAYS = 10;
+// the lock lengths the planner can choose (Auto plan dialog, 2026-11-19:
+// "add option Apply the 30-day lock") — 10 is the default
+export const AP_LOCK_CHOICES = [10, 30];
 export const AP_HOLD_LOCK = '10-Day Plan Lock';
+// hold reason of a lock window of any length ('10-Day Plan Lock', '30-Day Plan Lock')
+export const lockHoldReason = days => `${Number(days) || AP_LOCK_DAYS}-Day Plan Lock`;
+export const isLockHold = reason => /^\d+-Day Plan Lock$/.test(String(reason || ''));
 // no line finishes the order by its target sewing end (delivery − 7): no late
 // plan on a line — the order is parked on the Holding Row for the planner
 export const AP_HOLD_SPACE = 'Capacity — no line finishes it by delivery − 7';
 
 const day = (d, add = 0) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + add); return x; };
 
-// 10-day lock: today … today + 9 (inclusive) are locked; the first editable
-// day is today + 10. `today` is the board's local date.
+// plan lock: today … today + days − 1 (inclusive) are locked; the first
+// editable day is today + days (10-day lock: today … today + 9, first
+// editable today + 10). `today` is the board's local date.
 export function lockWindow(today, days = AP_LOCK_DAYS) {
+    const n = Math.max(1, Math.round(Number(days)) || AP_LOCK_DAYS);
     const from = day(today);
-    return { from, lastLocked : day(from, days - 1), firstEditable : day(from, days) };
+    return { from, lastLocked : day(from, n - 1), firstEditable : day(from, n), days : n };
 }
 
 // a bar overlaps the lock window (it started before the first editable day
@@ -26,7 +34,7 @@ export const overlapsLock = (start, end, lock) => !!lock && new Date(start) < lo
 export function holdReason(earliestStart, lock) {
     if (!earliestStart || !lock) return null;
     const e = day(earliestStart);
-    return e >= lock.from && e < lock.firstEditable ? AP_HOLD_LOCK : null;
+    return e >= lock.from && e < lock.firstEditable ? lockHoldReason(lock.days) : null;
 }
 
 // where the search for a slot starts: never inside the lock, never before

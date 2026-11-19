@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lockWindow, overlapsLock, holdReason, searchFrom, remainingToPlan, attributeErpOutput, AP_HOLD_LOCK } from './autoPlanRules.mjs';
+import { lockWindow, overlapsLock, holdReason, searchFrom, remainingToPlan, attributeErpOutput, AP_HOLD_LOCK, isLockHold } from './autoPlanRules.mjs';
 
 const d = s => new Date(`${s}T00:00:00`);
 const ymd = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
@@ -10,6 +10,23 @@ test('10-day lock: today … today + 9 inclusive, first editable day = today + 1
     assert.equal(ymd(w.from), '2026-11-14');
     assert.equal(ymd(w.lastLocked), '2026-11-23');
     assert.equal(ymd(w.firstEditable), '2026-11-24');
+});
+
+test('30-day lock option: today … today + 29 locked, first editable day = today + 30, hold reason names the length', () => {
+    const w = lockWindow(d('2026-11-19'), 30);
+    assert.equal(w.days, 30);
+    assert.equal(ymd(w.from), '2026-11-19');
+    assert.equal(ymd(w.lastLocked), '2026-12-18');
+    assert.equal(ymd(w.firstEditable), '2026-12-19');
+    assert.equal(overlapsLock('2026-12-18T08:00', '2026-12-22T17:00', w), true);    // starts on the last locked day
+    assert.equal(overlapsLock('2026-12-19T08:00', '2026-12-22T17:00', w), false);   // starts on the first editable day
+    assert.equal(holdReason(d('2026-12-18'), w), '30-Day Plan Lock');
+    assert.equal(holdReason(d('2026-12-19'), w), null);
+    assert.equal(isLockHold('30-Day Plan Lock'), true);
+    assert.equal(isLockHold(AP_HOLD_LOCK), true);
+    assert.equal(isLockHold('Capacity'), false);
+    assert.equal(lockWindow(d('2026-11-19')).days, 10);                               // default unchanged
+    assert.equal(holdReason(d('2026-11-20'), lockWindow(d('2026-11-19'))), AP_HOLD_LOCK);
 });
 
 test('a bar overlaps the lock when any part of it is inside today … today + 9', () => {
