@@ -22570,27 +22570,21 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
        from the day lines; "the joint must be plain, black or another
        colour") */
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 2px solid #000;   /* order-to-order joint (FastReact) */
-    border-right  : 2px solid #000;
+    border-left   : 3px solid #000;   /* order-to-order joint (FastReact): one thick plain black bar, nothing else */
+    border-right  : 3px solid #000;
     border-radius : 0;
     box-shadow    : none;
 }
 
 /* Overlay layer kept for the hatch patterns (qty mismatch …) — no fill of
-   its own, so the bar shows its plain base colour. Its left / right edge is
-   a light hairline INSIDE the black edge: the gap FastReact leaves between
-   two boxes, so the joint reads on a dark / grey bar as well */
+   its own, so the bar shows its plain base colour */
 .b-sch-event::before {
     content        : '';
     position       : absolute;
     inset          : 0;
     pointer-events : none;
     background     : none;
-    border-left    : 1px solid rgba(255, 255, 255, .85);
-    border-right   : 1px solid rgba(255, 255, 255, .85);
 }
-/* a tiny piece (best-fit label) keeps every pixel for its text */
-.b-sch-event:has(.mb-bar-tiny)::before { border-left : none; border-right : none; }
 
 
 .mb-bar { width : 100%; }
@@ -22626,6 +22620,9 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
     );
     border-right   : 2px dashed rgba(0,0,0,.55);
 }
+/* the ramp covers the whole bar: its end IS the bar's end — no dashed end
+   beside the black joint with the next order */
+.mb-lc-seg.mb-lc-full { border-right : none; }
 
 /* Learning-curve marker: a small purple corner triangle at the bar's top-left
    (replaces the old "LC" text badge) */
@@ -23175,8 +23172,8 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
     border-radius : 0 !important;
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 2px solid #000;   /* black joint between orders */
-    border-right  : 2px solid #000;
+    border-left   : 3px solid #000;   /* black joint between orders */
+    border-right  : 3px solid #000;
     box-shadow    : none !important;
     font-weight   : 600 !important;
     overflow      : hidden;

@@ -2943,7 +2943,7 @@ export const schedulerProConfig = {
         // purple corner triangle at the bar's top-left as the marker
         const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
         const lcHtml = lcFrac > 0.005
-            ? `<div class="mb-lc-seg" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-mark" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}"></span>`
+            ? `<div class="mb-lc-seg${lcFrac >= 0.995 ? ' mb-lc-full' : ''}" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-mark" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}"></span>`
             : '';
         // Multiple strip handling: live-linked bars carry a small link badge
         const lk = r.lcLink;
