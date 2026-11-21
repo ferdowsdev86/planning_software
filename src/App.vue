@@ -22950,6 +22950,27 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     padding         : 0 4px 0 6px;
 }
 .mb-bar-center .mb-bar-l1 { text-overflow : ellipsis; overflow : hidden; }
+/* Best-fit label of a small bar (barLabelFit.mjs): the text starts at the
+   bar's very edge, is cut at its end without "…", sits above the learning-
+   curve hatch, and takes a second line (order / style) when the bar is tall
+   enough — the font size comes from the renderer (10 → 8 px) */
+.mb-bar-center.mb-bar-tiny {
+    flex-direction  : column;
+    align-items     : flex-start;
+    justify-content : center;
+    padding         : 0 1px;
+    line-height     : 1.1;
+    position        : relative;
+    z-index         : 3;
+}
+.mb-bar-center.mb-bar-tiny .mb-bar-l1 { text-overflow : clip; max-width : 100%; }
+/* Bryntum keeps 10 px of air on each side of a bar's content — on a 43-px
+   strip that left 13 px for the text ("0.."). A small bar gives it all to
+   the label. */
+.b-sch-event > .b-sch-event-content:has(> .mb-bar-tiny) { margin : 0 !important; }
+.mb-bar-tiny .mb-bar-t2 { font-weight : 600; }
+/* the link badge of a small bar: smaller, under the text */
+.mb-linked-badge.mb-linked-badge-sm { font-size : 7px; opacity : .7; z-index : 2; }
 /* Colour by: Product — the product type as a pill at the start of the bar,
    above the LC hatch / marker, readable on any bar colour */
 .mb-bar-product { position : relative; z-index : 3; }

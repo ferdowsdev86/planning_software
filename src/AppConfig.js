@@ -13,6 +13,7 @@ import {
     workDayUnits, planQtyOf, workingMinutesBetween,
     buyerDefaultEff, deliveryMonthColor
 } from './planningData.js';
+import { fitBarLabel, tinyLabelLines, TINY_MAX_WIDTH } from './barLabelFit.mjs';
 
 // ---------------------------------------------------------------------------
 // Flush bars (FastReact): a bar that ends at its line's working-day end and
@@ -24,6 +25,31 @@ import {
 // ---------------------------------------------------------------------------
 let flushMap = null, flushMapAt = 0, flushMapCount = -1;
 const lateQtyCache = new Map();   // Late strip qty mode: per bar position → qty after the desired finish
+
+// Width of a bar label at a font size of 1 px (bold, the board's own font) —
+// measured on a canvas once per text; the best-fit label of a small bar
+// (barLabelFit.mjs) sizes itself with it
+const labelEmCache = new Map();
+let labelCtx = null, labelFont = null;
+function labelEm(scheduler, text) {
+    const t = String(text ?? '');
+    const hit = labelEmCache.get(t);
+    if (hit !== undefined) return hit;
+    let em = t.length * 0.62;
+    try {
+        if (!labelCtx) labelCtx = document.createElement('canvas').getContext('2d');
+        if (!labelFont) {
+            const fam = scheduler?.element ? getComputedStyle(scheduler.element).fontFamily : '';
+            labelFont = `bold 20px ${fam || 'Tahoma, "Segoe UI", Verdana, sans-serif'}`;
+        }
+        labelCtx.font = labelFont;
+        em = labelCtx.measureText(t).width / 20;
+    }
+    catch { /* no canvas: the average character width */ }
+    if (labelEmCache.size > 6000) labelEmCache.clear();
+    labelEmCache.set(t, em);
+    return em;
+}
 function flushNextOf(scheduler, ev) {
     const now = performance.now();
     const count = scheduler.eventStore?.count ?? 0;
@@ -2860,6 +2886,23 @@ export const schedulerProConfig = {
         const w = renderData.width || 0;
         const compact = w > 0 && w < full.length * 6.8 + 12;
         const text = compact ? line(rr, true) : full;
+        // A SMALL bar its one-line text does not fit in gets the best-fit
+        // label (barLabelFit.mjs): from the bar's very edge, no "…", a font
+        // that steps down to 8 px, and the order (or style) on a second line
+        // when the bar is tall enough — 26H1LEV871's 2-day strip read "0.."
+        let tiny = null;
+        // (the normal label loses 32 px of the bar: Bryntum's 10-px content
+        // margin on each side, the label's own 6 + 4 px, the border)
+        if (w > 0 && w < TINY_MAX_WIDTH && labelEm(this, colorState.mode === 'product' ? full : text) * 10 + 32 > w) {
+            const ident = tinyLabelLines(colorState.mode, {
+                buyer   : buyerShortOf(barBuyerOf(rr)) || barBuyerOf(rr) || '',
+                product : itemLabelOf(rr) || '',
+                style   : barStyleOf(rr) || '',
+                order   : barOrderNo(rr) || '',
+                date    : rr.ship ? fmtDateDdMonRr(orderDeliveryOf(rr.ship)) : ''
+            });
+            tiny = fitBarLabel({ ...ident, width : w, height : (this.rowHeight || 48) / 2, measure : t => labelEm(this, t) });
+        }
         // Learning-curve ramp: hatched overlay on the bar's head — a shade on
         // top of (never replacing) the status/risk colour — plus a small
         // purple corner triangle at the bar's top-left as the marker
@@ -2870,13 +2913,13 @@ export const schedulerProConfig = {
         // Multiple strip handling: live-linked bars carry a small link badge
         const lk = r.lcLink;
         const linkHtml = lk
-            ? `<span class="mb-linked-badge" title="${StringHelper.encodeHtml(
+            ? `<span class="mb-linked-badge${tiny ? ' mb-linked-badge-sm' : ''}" title="${StringHelper.encodeHtml(
                 `Linked Build-Up Curve\nReference: ${lk.refOrder || lk.refId}\nCurve: ${lk.curve || '—'} (v${lk.version || 1}, ${lk.mode || 'copy'})\nLast Updated: ${String(lk.lastSync || lk.linkedAt || '').slice(0, 10)}`)}">🔗</span>`
             : '';
         // Product mode: the type sits in the MIDDLE of the bar as a pill that
         // stays readable over the learning-curve hatch and its corner marker
         let inner = StringHelper.encodeHtml(text);
-        if (colorState.mode === 'product') {
+        if (colorState.mode === 'product' && !tiny) {
             inner = `<span class="mb-ptype">${StringHelper.encodeHtml(full)}</span>`;
         }
         // Late strip qty mode: blue overlay from the delivery date to the bar's
@@ -2916,6 +2959,12 @@ export const schedulerProConfig = {
         const sibHtml = lateSib
             ? `<span class="mb-order-late-dot" title="${StringHelper.encodeHtml(`Another bar of this order is late: ${lateSib.label} ends ${fmtDate(lateSib.end)} — delivery ${fmtDate(lateSib.ship)}`)}"></span>`
             : '';
+        if (tiny) {
+            return `
+            ${lateHtml}${lcHtml}${linkHtml}${consolHtml}${sibHtml}<div class="mb-bar mb-bar-center mb-bar-tiny" style="font-size:${tiny.font}px">${
+                tiny.lines.map((t, i) => `<div class="mb-bar-l1${i ? ' mb-bar-t2' : ''}">${StringHelper.encodeHtml(t)}</div>`).join('')
+            }</div>`;
+        }
         return `
             ${lateHtml}${lcHtml}${linkHtml}${consolHtml}${sibHtml}<div class="mb-bar mb-bar-center${colorState.mode === 'product' ? ' mb-bar-product' : ''}">
                 <div class="mb-bar-l1">${inner}</div>
