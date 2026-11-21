@@ -2918,8 +2918,13 @@ export const schedulerProConfig = {
         if (stripNotesOf(r).length) renderData.cls.add('mb-has-note');
 
         const q = (searchState.query || '').trim().toLowerCase();
+        // (the dim class goes on the WRAP too: the joint mark is the wrap's
+        // ::after and must fade with its bar — planner, 2026-11-21, "the
+        // marked lines should dim like the strips")
         if (searchState.ids) {
-            renderData.cls.add(searchState.ids.has(String(e.id)) ? 'mb-search-hit' : 'mb-search-dim');
+            const hit = searchState.ids.has(String(e.id));
+            renderData.cls.add(hit ? 'mb-search-hit' : 'mb-search-dim');
+            if (!hit) renderData.wrapperCls?.add('mb-search-dim');
         }
         else if (q) {
             const hay = [
@@ -2928,7 +2933,9 @@ export const schedulerProConfig = {
                 // an OS order is found by either number / either style
                 mbmOrderNo(r.po, r.mbmOrder), barOrderNo(r), barStyleOf(r)
             ].join(' ').toLowerCase();
-            renderData.cls.add(hay.includes(q) ? 'mb-search-hit' : 'mb-search-dim');
+            const hit = hay.includes(q);
+            renderData.cls.add(hit ? 'mb-search-hit' : 'mb-search-dim');
+            if (!hit) renderData.wrapperCls?.add('mb-search-dim');
         }
 
         // The fill is the chosen colour mode's colour and NOTHING else — one

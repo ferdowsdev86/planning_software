@@ -23195,6 +23195,10 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
     opacity : 0.18;
     filter  : grayscale(0.45);
 }
+/* the black joint mark (the wrap's ::after) fades with its dimmed bar */
+.b-sch-event-wrap.mb-search-dim.mb-joint-end::after {
+    opacity : 0.18;
+}
 
 .b-sch-event.mb-search-hit,
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event.mb-search-hit {
