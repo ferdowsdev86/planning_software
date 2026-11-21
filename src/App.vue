@@ -23113,23 +23113,11 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 /* blue (draft) -> grey */
 .b-sch-event.mb-risk-blue   { background : #b8b8b8; color : #222; }
 
-/* Confirm order — red top stripe */
-.b-sch-event.mb-confirm-order {
-    box-shadow : none;
-    overflow   : visible;
-}
-.b-sch-event.mb-confirm-order::after {
-    content      : '';
-    position     : absolute;
-    top          : 0;
-    left         : 0;
-    right        : 0;
-    height       : 2.4px;   /* 40% of the previous 6px strip */
-    background   : #ff1744;
-    border-radius: 0;
-    pointer-events : none;
-    z-index      : 5;
-}
+/* Confirm order: no top stripe any more (planner, 2026-11-21: "I don't want
+   this colour on the head of the bars — remove it"; the red stripe over
+   every confirm-order bar read as a mark at the joint of two orders). The
+   class stays on the bar for the tooltip / scripts. */
+.b-sch-event.mb-confirm-order { box-shadow : none; }
 
 /* Risk red/late bars — blue top stripe */
 .b-sch-event.mb-risk-red,

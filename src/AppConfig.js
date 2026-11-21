@@ -2943,7 +2943,10 @@ export const schedulerProConfig = {
         // purple corner triangle at the bar's top-left as the marker
         const lcFrac = r.lc?.applied ? Math.min(1, Number(r.lc.learnFrac) || 0) : 0;
         const lcHtml = lcFrac > 0.005
-            ? `<div class="mb-lc-seg${lcFrac >= 0.995 ? ' mb-lc-full' : ''}" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-mark" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}"></span>`
+            // the ramp's dashed end is left off when it reaches the bar's end
+            // or comes within a few px of it: the only mark at the seam of two
+            // orders is the black joint (planner, 2026-11-21)
+            ? `<div class="mb-lc-seg${lcFrac >= 0.995 || (w > 0 && w * (1 - lcFrac) < 8) ? ' mb-lc-full' : ''}" style="width:${(lcFrac * 100).toFixed(1)}%"></div><span class="mb-lc-mark" title="Learning curve — ${StringHelper.encodeHtml(r.lc.profileName || '')}"></span>`
             : '';
         // Multiple strip handling: live-linked bars carry a small link badge
         const lk = r.lcLink;
