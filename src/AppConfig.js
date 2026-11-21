@@ -977,6 +977,30 @@ export function isHoldingRes(res) {
 export const isHoldId = id => id === 'hold' || String(id || '').startsWith('hold-');
 export const firstHoldId = scheduler =>
     scheduler?.resourceStore?.records.find(r => r.data?.holdingRow)?.id || 'hold';
+// Which Holding Row a parked bar goes to (planner, 2026-11-21, CEIL: "three
+// Holding Rows, every order on the first one, overlapping — place them by
+// the orders"): the row it was dropped on (`prefer`), else the Holding Row
+// with the FEWEST bars across the bar's span — a free row first, else the
+// orders share the rows by their count (the first row on a tie). `current`
+// = the row the bar stands on: it stays unless another row has strictly
+// fewer bars there (no churn between loads); `freeOnly` answers null when
+// no row is free. A board with one Holding Row keeps it.
+export function pickHoldId(scheduler, start, end, { prefer = null, exclude = null, current = null, freeOnly = false } = {}) {
+    const rows = scheduler?.resourceStore?.records.filter(r => r.data?.holdingRow) || [];
+    if (!rows.length) return 'hold';
+    if (prefer && rows.some(r => r.id === prefer)) return prefer;
+    if (rows.length === 1) return rows[0].id;
+    const s0 = +new Date(start), e0 = +new Date(end);
+    const counts = rows.map(r => ({
+        id : r.id,
+        n  : barsOnLine(scheduler, r.id).filter(ev => ev !== exclude && ev.data?.raw && !ev.data.raw.stage && +ev.startDate < e0 && +ev.endDate > s0).length
+    }));
+    const min = Math.min(...counts.map(c => c.n));
+    if (freeOnly && min > 0) return null;
+    const cur = current ? counts.find(c => c.id === current) : null;
+    if (cur && cur.n <= min) return current;
+    return counts.find(c => c.n === min).id;
+}
 // "Floor-02" (MBM's floors are its two sub-units: "Unit-1")
 export function floorLabelOf(unit, floor) {
     const n = String(floor || '1').replace(/\D/g, '') || '1';
@@ -2051,7 +2075,9 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
         progress : 0, status : parkHold ? 'unplanned' : 'draft'
     };
 
-    const targetId = parkHold ? firstHoldId(scheduler) : line.id;
+    // a bar dropped on a Holding Row stays on THAT row (it went to the first
+    // Holding Row of the board before, whichever floor's row it was put on)
+    const targetId = parkHold ? resourceRecord.id : line.id;
     scheduler.eventStore.add({
         id : `ev-${order.id}`,
         startDate  : startFinal,

@@ -4,7 +4,7 @@ import { BryntumSchedulerPro } from '@bryntum/schedulerpro-vue-3';
 import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
-    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
+    pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, pickHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
     refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, lcAtDone, rampDaysRun, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
@@ -1490,8 +1490,7 @@ async function runLiveOrderPlan(s, {
         const [rec] = s.eventStore.add({ id : `ev-${o.id}`, startDate : start, endDate : end, duration : elapsedDays(start, end), durationUnit : 'day', manuallyScheduled : true,
             name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : false, raw });
         if (!rec) return false;
-        assignEventToLine(s, rec, hid);
-        invalidateBarsByLine();
+        parkOnHoldRow(s, rec);
         parkedIds.add(String(o.id));
         parkedN++;
         return true;
@@ -2420,6 +2419,13 @@ function applyApiBoardData(s, data) {
             if (raw) raw._prodCut = true;
         }
     }
+    // parked bars that overlap on one Holding Row spread over the board's
+    // Holding Rows (planner, 2026-11-21); Save writes the new rows
+    try {
+        const spread = spreadHoldRows(s);
+        if (spread) console.info(`[hold] ${spread} parked bar(s) moved to a free Holding Row — Save keeps them there`);
+    }
+    catch (e) { console.warn('[hold] spread failed', e); }
     try {
         const short = shortConfirmGroups(s);
         if (short.length) {
@@ -4557,8 +4563,7 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, sta
         const [rec] = s.eventStore.add({ id : `ev-${o.id}`, startDate : start, endDate : end, duration : elapsedDays(start, end), durationUnit : 'day', manuallyScheduled : true,
             name : `${o.buyer} | ${o.mbmOrder || o.po}`, percentDone : 0, draggable : true, resizable : false, raw });
         if (!rec) return false;
-        assignEventToLine(s, rec, hid);
-        invalidateBarsByLine();
+        parkOnHoldRow(s, rec);
         parked++;
         held.push({ order : o, reason, capacity : true });
         return true;
@@ -5279,7 +5284,7 @@ function apParkLateBars(s, r, { floor, horizonEnd }) {
             const start = clampIntoWorkWindow(new Date(Math.max(+(floor || lo), +lo)));
             const dur = Math.max(1, elapsedDays(ev.startDate, ev.endDate) || Number(x.dur) || 1);
             const end = endOfWork(start, dur);
-            assignEventToLine(s, ev, hid);
+            parkOnHoldRow(s, ev, { start, end });
             ev.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
             x.start = start; x.end = end; x.parked = true; x.holdReason = AP_HOLD_SPACE; x.latePlan = false; x.filledLate = false;
             delete x.projSewEnd;
@@ -10113,10 +10118,10 @@ function applyErpQtyUpdates(s) {
                 const [rec] = s.eventStore.add({ id : evId, startDate : start, endDate : end, duration : elapsedDays(start, end), durationUnit : 'day', manuallyScheduled : true,
                     name : src.ev.name, percentDone : 0, draggable : true, resizable : false, raw : raw2 });
                 if (rec) {
-                    assignEventToLine(s, rec, hid);
-                    kept.push({ ev : rec, raw : rec.data.raw, lid : hid, hold : true });
+                    const hid2 = parkOnHoldRow(s, rec);
+                    kept.push({ ev : rec, raw : rec.data.raw, lid : hid2, hold : true });
                     out.toHold += plan.toHold;
-                    touched.add(hid);
+                    touched.add(hid2);
                 }
             }
         }
@@ -13548,7 +13553,7 @@ function buildDraftRec(s, src, u) {
         raw
     });
     rec = s.eventStore.getById(evId);
-    if (rec) assignEventToLine(s, rec, firstHoldId(s));
+    if (rec) parkOnHoldRow(s, rec);
     if (rec && u) unplanned.value = unplanned.value.filter(x => x !== u);
     return rec;
 }
@@ -15578,6 +15583,41 @@ function assignEventToLine(s, rec, targetId) {
         s.assignmentStore.add({ eventId : rec.id, resourceId : targetId });
     }
 }
+// Park a bar on a Holding Row (planner, 2026-11-21 — CEIL's three Holding
+// Rows: "placed by the orders, not all overlapping on the top row"): the
+// first Holding Row free across the bar's span, else the least loaded one
+// (pickHoldId). `start` / `end` when the bar's dates are set afterwards.
+function parkOnHoldRow(s, rec, { start = rec.startDate, end = rec.endDate, prefer = null } = {}) {
+    const hid = pickHoldId(s, start, end, { prefer, exclude : rec });
+    assignEventToLine(s, rec, hid);
+    invalidateBarsByLine();
+    return hid;
+}
+// Holding Rows at load (same rule): every parked bar goes to the Holding Row
+// with the fewest bars across its span — it stays on the row it was saved on
+// (notes.holdFloor) unless another row has strictly fewer there, so the
+// orders share the board's Holding Rows by their count instead of all
+// overlapping on the first one. Deterministic (rows in order, bars by start,
+// then id); Save writes the new rows (holdFloor) — loadDiffFromDb never
+// checks a Holding Row.
+function spreadHoldRows(s) {
+    const rows = s?.resourceStore?.records.filter(r => r.data?.holdingRow) || [];
+    if (rows.length < 2) return 0;
+    let moved = 0;
+    for (const row of rows) {
+        const bars = barsOnLine(s, row.id).filter(ev => ev.data?.raw && !ev.data.raw.stage)
+            .sort((a, b) => (a.startDate - b.startDate) || String(a.id).localeCompare(String(b.id)));
+        for (const ev of bars) {
+            const to = pickHoldId(s, ev.startDate, ev.endDate, { exclude : ev, current : row.id });
+            if (to === row.id) continue;
+            assignEventToLine(s, ev, to);
+            invalidateBarsByLine();
+            moved++;
+        }
+    }
+    if (moved) s.refreshRows?.();
+    return moved;
+}
 
 // ---------------------------------------------------------------------------
 // Calendars dialog (FastReact style): weekday working hours configuration
@@ -16087,7 +16127,7 @@ async function saveToDbInner(s) {
         toast('No changes to save — move an order first, then click Save', 'warn');
         return;
     }
-    if (!changes.length) toast(`${derivedOnly} strip(s) stand for their remaining quantity after production — saving those positions`, 'ok');
+    if (!changes.length) toast(`${derivedOnly} bar(s) stand where the production update / the Holding Row spread put them — saving those positions`, 'ok');
     // Connection pre-check: a dead API/DB is reported IMMEDIATELY instead of
     // the save silently doing nothing while the user keeps clicking
     // Reachability check is advisory: a slow ping must not block the save —

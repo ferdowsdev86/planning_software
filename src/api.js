@@ -1278,7 +1278,12 @@ export async function loadFromApi(unitId = null) {
                 endDate    : end,
                 duration   : elapsedDays(start, end),
                 durationUnit : 'day',
-                manuallyScheduled : !!e.manually_scheduled,
+                // the saved span, as saved: Save writes manually_scheduled = 0
+                // for a Holding Row bar, and with the flag off Bryntum's engine
+                // re-ends the bar from start + duration on the project calendar
+                // (whole-day shifts → load diff + phantom changes; seen when the
+                // Holding Row spread saved 222 parked bars, 2026-11-21)
+                manuallyScheduled : true,
                 name       : e.event_name,
                 percentDone : Number(e.percent_done) || 0,
                 draggable  : status !== 'completed',
