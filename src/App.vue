@@ -3943,6 +3943,10 @@ const AP_GROUP_DELIVERY_WINDOW_DAYS = 10;
 const AP_CONTINUITY_DELAY_DAYS = 3;
 const AP_HORIZON_DAYS = 180;
 const AP_NO_SPACE     = 'Not Available Space';
+// right-click → Return strip to Auto plan Holding Row (planner, 2026-11-21):
+// the bar parks on the automatic lane with this reason — the gap filling of
+// the next run may take it again, like a Capacity / Not Available Space park
+const AP_HOLD_RETURNED = 'Returned to the Holding Row by the planner';
 // NO UNPLANNED ORDER (planner rule, 2026-11-16): an order the run cannot put
 // on a line is parked on the Holding Row with the reason — never left
 // invisible in the Orders list
@@ -5139,7 +5143,7 @@ function apFillLineGaps(s, r, { horizonEnd = null } = {}) {
         const lid = lineIdOf(s, ev, index);
         if (!lid) continue;
         if (isHoldId(lid)) {
-            if (x.parked && (x.holdReason === AP_HOLD_SPACE || x.holdReason === AP_NO_SPACE) && x.status !== 'completed' && !(Number(x.made) > 0) && Number(x.qty) > 0 && Number(x.smv) > 0) sources.push(ev);
+            if (x.parked && (x.holdReason === AP_HOLD_SPACE || x.holdReason === AP_NO_SPACE || x.holdReason === AP_HOLD_RETURNED) && x.status !== 'completed' && !(Number(x.made) > 0) && Number(x.qty) > 0 && Number(x.smv) > 0) sources.push(ev);
             continue;
         }
         (byLine.get(lid) || byLine.set(lid, []).get(lid)).push(ev);
@@ -14703,6 +14707,58 @@ function openEqualOrder(rec = null) {
 }
 uiHooks.onEqualOrder = openEqualOrder;
 
+// Right-click → Return strip to Auto plan Holding Row (planner, 2026-11-21:
+// "an order the Auto plan had in Holding, once planned on the board, cannot
+// be sent back to the Auto plan Holding Row — the user has to park it by
+// hand; right-click → return → confirm → it goes to the Auto plan Holding Row
+// again"). After the confirm the bar leaves its line and parks the way the
+// Auto plan parks: the UPPER (automatic) lane, start = its earliest sewing
+// start (PCD + 8, never before today), its length kept, reason
+// AP_HOLD_RETURNED. The gap it leaves stays open (nothing is pulled forward).
+// Only this bar moves (a split order's other pieces stay where they are).
+function returnToHold(rec) {
+    const s   = getInstance();
+    const raw = rec?.data?.raw;
+    if (!s || !raw || raw.stage) return;
+    if (uiHooks.boardFrozen) { toast('This plan is locked by another user', 'warn'); return; }
+    if (raw.status === 'completed') { toast(`${raw.po || rec.name}: a completed strip cannot be returned to the Holding Row`, 'warn'); return; }
+    if (Number(raw.made) > 0) { toast(`${raw.po || rec.name}: ${fmtQty(raw.made)} pcs already sewn — split the unsewn part off first, then return that`, 'warn'); return; }
+    const sourceLid = lineIdOf(s, rec);
+    const fromHold  = isHoldId(sourceLid);
+    if (fromHold && raw.parked && !raw.holdManual) { toast(`${raw.po || rec.name} is already on the Auto plan Holding Row`, 'info'); return; }
+    if (carried.value) cancelCarry();
+    const from  = fromHold ? 'your own parks lane of the Holding Row' : (s.resourceStore.getById(sourceLid)?.name || 'its line');
+    const today = clampIntoWorkWindow(new Date(boardToday()));
+    const lo    = apEarliestStartOf(raw);
+    const start = clampIntoWorkWindow(new Date(Math.max(+today, lo && !Number.isNaN(+lo) ? +lo : 0)));
+    const dur   = Math.max(1, elapsedDays(rec.startDate, rec.endDate) || Number(raw.dur) || 1);
+    const end   = endOfWork(start, dur);
+    if (!window.confirm(`Return ${raw.po || rec.name} (${fmtQty(raw.qty)} pcs) to the Auto plan Holding Row?\n\n`
+        + `The strip leaves ${from} and parks on the Holding Row's automatic lane at ${fmtDate(start)}${lo ? ' (earliest sewing start, PCD + 8)' : ''}. `
+        + `The gap it leaves stays open; the next Auto plan may take the order again, or plan it by hand.\n\nSave to keep, Undo to go back.`)) return;
+    pushUndo(s, `return ${raw.po || rec.name} to Holding`);
+    const hid = parkOnHoldRow(s, rec, { start, end });
+    rec.set({ startDate : start, endDate : end, duration : elapsedDays(start, end) });
+    rec.data.resourceId = hid;
+    raw.start = start; raw.end = end; raw.dur = dur;
+    raw.parked = true; raw.holdManual = false; raw.holdReason = AP_HOLD_RETURNED;
+    raw.suggestedStart = lo && !Number.isNaN(+lo) ? new Date(lo) : undefined;
+    raw.latePlan = false; raw.filledLate = false; raw.manualGap = false;
+    if (raw.status === 'unplanned') raw.status = 'draft';
+    delete raw.projSewEnd;
+    raw.risk = calcRisk({ start, end, ship : raw.ship, matReady : raw.matReady, lineUtil : 0, status : raw.status });
+    if (sourceLid && !fromHold) {
+        // the line it left: ramp badges of the bars after it re-derive
+        try { applyLearningCurves(s, { lineIds : [sourceLid] }); } catch (e) { console.warn('[hold] learning curves after return', e); }
+    }
+    clearMultiSelect();
+    s.refresh?.();
+    markBoardDirty();
+    touchBoardCache(s);
+    toast(`${raw.po || rec.name} returned to the Auto plan Holding Row (${s.resourceStore.getById(hid)?.name || 'Holding Row'}) at ${fmtDate(start)} — Save to keep, Undo to go back`, 'ok');
+}
+uiHooks.onReturnHold = returnToHold;
+
 async function applyEqualOrder() {
     const s = getInstance();
     const plan = eqPlan.value;
@@ -21228,6 +21284,7 @@ body {
 .b-float-root .b-menu .b-fa-scale-balanced::before { content : '\f24e'; }
 .b-float-root .b-menu .b-fa-industry::before       { content : '\f275'; }
 .b-float-root .b-menu .b-fa-layer-group::before    { content : '\f5fd'; }
+.b-float-root .b-menu .b-fa-rotate-left::before    { content : '\f0e2'; }   /* Return strip to Auto plan Holding Row */
 .b-float-root .b-menu .b-menu-item:hover,
 .b-float-root .b-menu .b-menu-item.b-focused {
     background : #e3edff !important;

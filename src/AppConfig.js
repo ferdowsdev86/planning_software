@@ -590,6 +590,7 @@ export const uiHooks = {
     onOpenStripProd  : null,   // right-click → Production update (one strip, day by day)
     onOpenStripNotes : null,   // right-click → Strip notes (FastReact Notes window)
     onEqualOrder     : null,   // right-click / toolbar → Equal Order (balance an order's splits)
+    onReturnHold     : null,   // right-click → Return strip to Auto plan Holding Row (upper lane, after a confirm)
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
     lineSel          : null,   // Set of selected LINE ids (Ctrl+click on the line cell) — the cell shows the ☒ box
@@ -2640,6 +2641,19 @@ export const schedulerProConfig = {
                     if (rec) uiHooks.onOpenStripNotes?.(rec);
                 }
             },
+            returnHold : {
+                // planner, 2026-11-21: an order the Auto plan had parked and
+                // the planner then put on a line could only be parked again
+                // BY HAND (lower lane) — this sends it back to the automatic
+                // lane, after a confirm
+                text   : 'Return strip to Auto plan Holding Row',
+                icon   : 'b-fa b-fa-rotate-left',
+                weight : 237,
+                onItem({ eventRecord }) {
+                    const rec = eventRecord || menuSplitCtx?.rec;
+                    if (rec) uiHooks.onReturnHold?.(rec);
+                }
+            },
             multiStrip : {
                 text   : 'Multiple strip handling',
                 icon   : 'b-fa b-fa-layer-group',
@@ -2699,12 +2713,15 @@ export const schedulerProConfig = {
                 items.mergeSel      = false;
                 items.multiStrip    = false;
                 items.stripNotes    = false;
+                items.returnHold    = false;
                 return;
             }
             if (raw.status === 'completed' && items.buildUpCurve) {
                 items.buildUpCurve = false;
             }
-            if (raw.status === 'completed') { items.splitPieces = false; items.mergeSel = false; }
+            if (raw.status === 'completed') { items.splitPieces = false; items.mergeSel = false; items.returnHold = false; }
+            // already on the automatic lane of a Holding Row: nothing to return
+            if (raw.parked && !raw.holdManual && isHoldId(lineIdOf(s, rec))) items.returnHold = false;
             // the merge item only when two or more bars are Ctrl+click selected
             if ((uiHooks.multiSelCount || 0) < 2) items.mergeSel = false;
             let date = null;
