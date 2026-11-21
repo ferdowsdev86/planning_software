@@ -3647,22 +3647,6 @@ function openMultiStrip(rec) {
 }
 uiHooks.onOpenMultiStrip = openMultiStrip;
 
-// Change strip efficiency: the reference bar's base figure (plan / buyer /
-// profile / line efficiency) × the strip % typed = the % the capacity formula
-// actually runs on — shown live under the input
-const mshEffPreview = computed(() => {
-    const s = getInstance();
-    const rec = mshRec.value;
-    const raw = mshRaw.value;
-    if (!s || !rec || !raw) return null;
-    const lid = lineIdOf(s, rec);
-    if (!lid) return null;
-    const probe = { ...raw, stripEff : 100 };
-    const base  = lineCalcParams(s, probe, lid).effPct;
-    const strip = Math.max(1, Math.min(500, Number(mshStripEff.value) || 0));
-    return { base : Math.round(base * 10) / 10, strip, eff : Math.round(base * strip / 10) / 10 };
-});
-
 // ---- Change strip efficiency: every selected strip (and the reference bar
 // when ticked) takes the typed strip %; each bar is re-sized from its OWN
 // start (start / line / qty / SMV unchanged), overlaps push later as usual
@@ -19794,32 +19778,22 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="msh-mid">
                         <div class="msh-actions">
                             <div class="cal-label">What do you want to do with the selected strips</div>
-                            <div class="msh-action-list">
-                                <div
-                                    v-for="a in MSH_ACTIONS"
-                                    :key="a.id"
-                                    :class="{ 'msh-act-sel' : mshAction === a.id, 'msh-act-soon' : a.soon || a.id === 'nothing' }"
-                                    @click="!(a.soon || a.id === 'nothing') && (mshAction = a.id)"
-                                >{{ a.label }}<span v-if="a.soon" class="msh-soon">phase 2</span></div>
-                            </div>
+                            <!-- a list of values (planner, 2026-11-21): one dropdown, the
+                                 phase-2 entries shown but not selectable -->
+                            <select v-model="mshAction" class="msh-build-sel msh-action-sel">
+                                <option v-for="a in MSH_ACTIONS" :key="a.id" :value="a.id" :disabled="a.soon || a.id === 'nothing'">{{ a.label }}{{ a.soon ? ' — phase 2' : '' }}</option>
+                            </select>
                         </div>
                         <div v-if="mshAction === 'stripeff'" class="msh-side">
                             <div class="cal-label">Strip efficiency</div>
+                            <!-- the typed figure only (planner, 2026-11-21: no quick
+                                 buttons, no reference / base table) -->
                             <div class="msh-eff-box">
                                 <div class="ef-row">
                                     <label>Strip efficiency</label>
                                     <input v-model.number="mshStripEff" class="cal-in ef-in" type="number" min="1" max="500" step="1" @keydown.enter="mshImplement">
                                     <span class="pr-dim">% (1 – 500)</span>
                                 </div>
-                                <div class="msh-eff-quick">
-                                    <button v-for="q in [50, 75, 90, 100, 110, 125]" :key="q" class="cal-btn st-btn msh-eff-q" :class="{ 'msh-eff-q-on' : mshStripEff === q }" @click="mshStripEff = q">{{ q }}%</button>
-                                </div>
-                                <table v-if="mshEffPreview" class="msh-eff-tbl">
-                                    <tr><th>Reference now</th><td>{{ mshRaw.stripEff > 0 ? mshRaw.stripEff : 100 }}%</td></tr>
-                                    <tr><th>Base efficiency</th><td>{{ mshEffPreview.base }}%</td></tr>
-                                    <tr><th>× strip {{ mshEffPreview.strip }}%</th><td><b>{{ mshEffPreview.eff }}%</b> runs the formula</td></tr>
-                                </table>
-                                <div class="msh-eff-note">100% = line / profile efficiency as it is · below 100 = slower (longer bar) · above 100 = faster</div>
                             </div>
                             <label class="msh-live"><input type="checkbox" v-model="mshEffRef"> Apply to the reference bar too</label>
                             <button class="cal-btn cal-btn-primary st-btn msh-impl" @click="mshImplement">✔ Implement</button>
@@ -23028,11 +23002,7 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .msh-ref-grid input { font : inherit; font-size : 12px; padding : 3px 6px; border : 1px solid #c6ccd4; background : #f6f8fa; border-radius : 3px; }
 .msh-mid { display : flex; gap : 14px; margin-bottom : 10px; }
 .msh-actions { flex : 1 1 auto; }
-.msh-action-list { border : 1px solid #b9c4d0; border-radius : 4px; max-height : 190px; overflow-y : auto; }
-.msh-action-list div { padding : 6px 10px; cursor : pointer; font-size : 13px; display : flex; justify-content : space-between; }
-.msh-action-list div:hover { background : #eaf1fb; }
-.msh-act-sel { background : #2f6fb4 !important; color : #fff; }
-.msh-act-soon { color : #9aa2ac; cursor : default !important; }
+.msh-action-sel { width : 100%; max-width : 420px; }
 .msh-soon { font-size : 10px; background : #eef1f5; color : #8a94a0; border-radius : 8px; padding : 1px 7px; align-self : center; }
 .msh-side { flex : 0 0 300px; display : flex; flex-direction : column; gap : 8px; }
 .msh-build-sel { font : inherit; font-size : 13px; padding : 5px 6px; border : 1px solid #b9c4d0; border-radius : 4px; }
@@ -23047,13 +23017,6 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .msh-eff-box .ef-row { display : flex; gap : 6px; align-items : center; font-size : 12px; }
 .msh-eff-box .ef-row label { font-weight : 600; }
 .msh-eff-box .ef-in { width : 70px; text-align : right; }
-.msh-eff-quick { display : flex; gap : 4px; flex-wrap : wrap; }
-.msh-eff-q { padding : 2px 7px; font-size : 11px; }
-.msh-eff-q-on { background : #2f6fb4; color : #fff; border-color : #2f6fb4; }
-.msh-eff-tbl { border-collapse : collapse; width : 100%; font-size : 11px; }
-.msh-eff-tbl th { text-align : left; font-weight : 600; color : #5b6673; padding : 2px 4px; border-bottom : 1px solid #e9edf2; }
-.msh-eff-tbl td { padding : 2px 4px; border-bottom : 1px solid #e9edf2; }
-.msh-eff-note { font-size : 11px; color : #5b6673; }
 .msh-eff-off { color : #a35b00; font-weight : 700; }
 .msh-impl { align-self : flex-start; }
 .msh-list-hd { display : flex; gap : 10px; align-items : center; margin-bottom : 6px; font-weight : 600; font-size : 13px; }
