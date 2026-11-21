@@ -22563,17 +22563,30 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
     white-space   : nowrap;
     text-overflow : ellipsis;
     font-weight   : 600;
-    /* Flat (2D) bar: solid colour, thin dark edge, no shadow, no gradient.
-       Start / end: a 2 px BLACK edge — two orders side by side meet in a
-       clear black joint, as FastReact draws its boxes (planner, 2026-11-21:
-       a 1 px #111 edge on a grey bar next to a grey bar could not be told
-       from the day lines; "the joint must be plain, black or another
-       colour") */
+    /* Flat (2D) bar: solid colour, thin dark edge (the renderer's inline
+       border-color makes it black), no shadow, no gradient. The joint of two
+       orders is NOT a border: a bar whose end meets the next bar's start gets
+       mb-joint-end on its wrap, and that wrap paints one black mark over the
+       seam (below) — a lone end stays a plain 1 px edge (planner,
+       2026-11-21: "no gap in the joint mark; no separate colour at the end
+       of a bar") */
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 3px solid #000;   /* order-to-order joint (FastReact): one thick plain black bar, nothing else */
-    border-right  : 3px solid #000;
     border-radius : 0;
     box-shadow    : none;
+}
+/* the joint: one black mark, 5 px wide, from 3 px inside this bar's end to
+   2 px past it — over the sub-pixel seam between the two boxes, so it never
+   shows a white line in the middle (FastReact's black joint) */
+.b-sch-event-wrap.mb-joint-end::after {
+    content        : '';
+    position       : absolute;
+    top            : 0;
+    bottom         : 0;
+    right          : -2px;
+    width          : 5px;
+    background     : #000;
+    pointer-events : none;
+    z-index        : 7;
 }
 
 /* Overlay layer kept for the hatch patterns (qty mismatch …) — no fill of
@@ -23160,8 +23173,6 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
     border-radius : 0 !important;
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 3px solid #000;   /* black joint between orders */
-    border-right  : 3px solid #000;
     box-shadow    : none !important;
     font-weight   : 600 !important;
     overflow      : hidden;

@@ -2833,6 +2833,21 @@ export const schedulerProConfig = {
             renderData.cls.add('mb-consol-head');
             consolHtml = `<span class="mb-consol-badge" title="Consolidated — ${cg.count} bars of the same order · ${StringHelper.encodeHtml(fmtQty(cg.qty))} pcs">⧉${cg.count} · ${StringHelper.encodeHtml(fmtQty(cg.qty))}</span>`;
         }
+        // The joint of two orders (planner, 2026-11-21, FastReact beside
+        // MbmPlan): where the next bar on the line starts where this one ends,
+        // ONE black mark is painted over the seam — by this bar's wrap
+        // (mb-joint-end, CSS), 2 px past its end so the sub-pixel gap between
+        // two boxes never shows white; a bar's lone end keeps the plain 1 px
+        // edge. A consolidated head joints with the bar after its last member.
+        if (!r.stage && renderData.width > 0) {
+            let nx = flushNextOf(this, e);
+            if (cg?.head) while (nx && nx.endDate <= cg.lastEnd) nx = flushNextOf(this, nx);
+            if (nx) {
+                let nxLeft = null;
+                try { nxLeft = this.getCoordinateFromDate(nx.startDate, true); } catch { nxLeft = null; }
+                if (nxLeft != null && Math.abs(nxLeft - (renderData.left + renderData.width)) <= 2) renderData.wrapperCls?.add('mb-joint-end');
+            }
+        }
         const rr = cg?.head ? { ...r, qty : cg.qty } : r;
 
         const pastDelivery = r.status !== 'completed'
