@@ -22563,23 +22563,34 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
     white-space   : nowrap;
     text-overflow : ellipsis;
     font-weight   : 600;
-    /* Flat (2D) bar: solid colour, thin dark edge, no shadow, no gradient */
+    /* Flat (2D) bar: solid colour, thin dark edge, no shadow, no gradient.
+       Start / end: a 2 px BLACK edge — two orders side by side meet in a
+       clear black joint, as FastReact draws its boxes (planner, 2026-11-21:
+       a 1 px #111 edge on a grey bar next to a grey bar could not be told
+       from the day lines; "the joint must be plain, black or another
+       colour") */
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 1px solid #111;   /* order-to-order separator (FastReact) */
-    border-right  : 1px solid #111;
+    border-left   : 2px solid #000;   /* order-to-order joint (FastReact) */
+    border-right  : 2px solid #000;
     border-radius : 0;
     box-shadow    : none;
 }
 
 /* Overlay layer kept for the hatch patterns (qty mismatch …) — no fill of
-   its own, so the bar shows its plain base colour */
+   its own, so the bar shows its plain base colour. Its left / right edge is
+   a light hairline INSIDE the black edge: the gap FastReact leaves between
+   two boxes, so the joint reads on a dark / grey bar as well */
 .b-sch-event::before {
     content        : '';
     position       : absolute;
     inset          : 0;
     pointer-events : none;
     background     : none;
+    border-left    : 1px solid rgba(255, 255, 255, .85);
+    border-right   : 1px solid rgba(255, 255, 255, .85);
 }
+/* a tiny piece (best-fit label) keeps every pixel for its text */
+.b-sch-event:has(.mb-bar-tiny)::before { border-left : none; border-right : none; }
 
 
 .mb-bar { width : 100%; }
@@ -23164,8 +23175,8 @@ body.mb-color-latesplit .b-sch-event .mb-bar { position : relative; z-index : 2;
 .mb-fr-vscroll-on .b-timeline-sub-grid .b-sch-event {
     border-radius : 0 !important;
     border        : 1px solid rgba(0, 0, 0, 0.35);
-    border-left   : 1px solid #111;
-    border-right  : 1px solid #111;
+    border-left   : 2px solid #000;   /* black joint between orders */
+    border-right  : 2px solid #000;
     box-shadow    : none !important;
     font-weight   : 600 !important;
     overflow      : hidden;

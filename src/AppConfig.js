@@ -2883,23 +2883,26 @@ export const schedulerProConfig = {
         // parked by hand: the Holding Row's lower lane (CSS shifts the wrap
         // down half a row; automatic parks keep the upper lane)
         if (r.holdManual && r.parked) renderData.wrapperCls?.add('mb-hold-manual');
-        const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
+        // border-color black: the bar's start / end edge is the joint between
+        // two orders (CSS .b-sch-event, 2 px) — the inline colour must not
+        // soften it (#222 did)
+        const paint = bg => { renderData.style = `background-color:${bg};border-color:#000;color:${textOnColor(bg)}`; };
         if (colorState.mode === 'buyer')        paint(buyerColorOf(barBuyerOf(r) || r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));
         else if (colorState.mode === 'style')   paint(styleColorOf(barStyleOf(r) || barOrderNo(r)));
         else if (colorState.mode === 'ptype') {
             const c = PLAN_STATE_COLORS[planStateOf(r, e.startDate, e.endDate)];
-            renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
+            renderData.style = `background-color:${c.bg};border-color:#000;color:${c.fg}`;
         }
         else if (colorState.mode === 'latesplit') {
             // Late strip qty: the part planned up to the delivery date stays
             // grey, the part after it is blue (overlay below) — one bar, two parts
-            renderData.style = 'background-color:#9e9e9e;border-color:#222;color:#fff';
+            renderData.style = 'background-color:#9e9e9e;border-color:#000;color:#fff';
         }
         else {
             // Product delivery: the bar wears its delivery month's colour
             const c = deliveryMonthColor(r.ship);
-            if (c) renderData.style = `background-color:${c.bg};border-color:#222;color:${c.fg}`;
+            if (c) renderData.style = `background-color:${c.bg};border-color:#000;color:${c.fg}`;
         }
 
         if (r.stage) {
