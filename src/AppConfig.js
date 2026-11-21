@@ -2469,6 +2469,30 @@ export const schedulerProConfig = {
     // a plain click on a row never highlights it
     selectionMode : { row : false, cell : false, multiSelect : false, dragSelect : false },
 
+    // Right-click on EMPTY board space (planner, 2026-11-21): Change working
+    // hours for the day and line under the pointer — the dialog opens with
+    // that date as the period and that line ticked (Selected lines); nothing
+    // else of Bryntum's schedule menu (no "Add event")
+    scheduleMenuFeature : {
+        items : {
+            addEvent    : false,
+            changeHours : {
+                text   : 'Change working hours',
+                icon   : 'b-fa b-fa-clock',
+                weight : 100,
+                onItem({ date, resourceRecord }) {
+                    uiHooks.onOpenWorkHours?.(null, { date, resourceRecord });
+                }
+            }
+        },
+        processItems(context) {
+            const de = context.domEvent || context.event;
+            if (uiHooks.modifierHeld || de?.ctrlKey || de?.metaKey) return false;
+            // plan locked by another user: no calendar change from the board
+            if (uiHooks.boardFrozen) return false;
+        }
+    },
+
     // FastReact-style strip context menu (right-click on a bar)
     eventMenuFeature : {
         items : {

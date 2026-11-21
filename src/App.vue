@@ -2984,7 +2984,12 @@ function chClearLineFigures(lineOv, ymds) {
     return n;
 }
 
-function openWorkHours(rec) {
+// rec: the bar it was opened from (period = the bar's span); cell: the empty
+// board cell it was opened from — { date, resourceRecord } of a right-click on
+// empty space (planner, 2026-11-21): period = that day, and that line ticked
+// under Selected lines when it is a line row (the planner can switch to the
+// whole calendar in the dialog)
+function openWorkHours(rec, cell = null) {
     openMenu.value = null;
     // Prefill the period with the clicked bar's span when opened from a bar
     const raw = eventRawOf(rec);
@@ -2993,6 +2998,15 @@ function openWorkHours(rec) {
     if (!raw) {
         chFrom.value = isoInputDate(new Date());
         chTo.value   = isoInputDate(addCalDays(new Date(), 6));
+    }
+    if (cell?.date instanceof Date && !isNaN(cell.date)) {
+        chFrom.value = isoInputDate(cell.date);
+        chTo.value   = isoInputDate(cell.date);
+        // that day's weekday ticked under "Selected days only", so Apply
+        // acts on the clicked day as it stands
+        for (const k of Object.keys(chDays.value)) chDays.value[k] = false;
+        chDays.value[cell.date.getDay()] = true;
+        chDayMode.value = 'selected';
     }
     chCalId.value = calendarState.id || 1;
     // Lines selected on the board (row selection) come in pre-ticked, like
@@ -3003,6 +3017,10 @@ function openWorkHours(rec) {
     const selLines = (s?.resourceStore?.records || []).filter(r => r?.data?.lineRow && lineSel.has(String(r.id)));
     if (selLines.length) {
         for (const r of selLines) chLineSel.value[r.id] = true;
+        chTargetMode.value = 'lines';
+    }
+    else if (cell?.resourceRecord?.data?.lineRow) {
+        chLineSel.value[cell.resourceRecord.id] = true;
         chTargetMode.value = 'lines';
     }
     const allowed = new Set(dpUnits.value.map(u => u.unitId));
