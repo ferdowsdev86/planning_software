@@ -5,7 +5,7 @@ import HighLevelBoard from './HighLevelBoard.vue';
 import {
     schedulerProConfig, uiHooks, colorState, searchState, stripNotesFor, noteKeyOf, stripNotesOf, setStripNotes, tipPoQuery, tipKeyOf, tipDataFromCache, warmTipCache, fetchBarHistory, barHistoryIds, invalidateBarHistory, buyerColorOf, autoBuyerColor, buyerKey, textOnColor, BUYER_PALETTE, styleColorOf, productTypeColor, PLAN_STATE_COLORS, recalcCapacity, planOrderDrop,
     pushFollowers, pullFlushFollowers, packBoardGaps, enforceSequentialLines, buildLineIndex, computeInsertStart, invalidateBarsByLine, barsOnLine, tryMergeAdjacent, splitBarIntoPieces, mergeBars, nextStripEventCode, noteManualGap, lineIdOf, isHoldingRes, isSewingRes, isHoldId, firstHoldId, pickHoldId, floorLabelOf, setBarTooltipEnabled, removedDbEventIds, applyLearningCurves, deriveLcForPlacement, invalidateWorkDayCache,
-    refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting,
+    refreshGrandTotals, beginBoardInteraction, endBoardInteraction, isBoardInteracting, BAR_H_RATIO,
     applyLineFormulaDuration, sopForRaw, lineCalcParams, tooltipEfficiency, simulateStrip, lcAtDone, rampDaysRun, holdCapacitySet, itemLabelOf, headerDayQty, prof
 } from './AppConfig.js';
 import { plan as sopPlan } from './sopTimeline.mjs';
@@ -14095,7 +14095,7 @@ function computeCarryPreview(s, rec, clientX, clientY) {
     if (leftX == null || rightX == null) return floatingCarrySnap(clientX, clientY);
 
     // Same geometry rule as rendered bars: half the row, hugging its top line
-    const height = Math.max(16, Math.round((s.rowHeight || 48) / 2));
+    const height = Math.max(16, Math.round((s.rowHeight || 48) * BAR_H_RATIO));
     const width = Math.max(32, rightX - leftX);
     lastCarrySize.width = width;
     lastCarrySize.height = height;
@@ -14135,7 +14135,7 @@ function computeCarryOrigin(s, rec) {
     const leftX  = dateToClientX(s, rec.startDate);
     const rightX = dateToClientX(s, rec.endDate);
     if (leftX == null || rightX == null) return empty;
-    const height = Math.max(16, Math.round((s.rowHeight || 48) / 2));
+    const height = Math.max(16, Math.round((s.rowHeight || 48) * BAR_H_RATIO));
     return {
         valid  : true,
         left   : leftX,
@@ -15084,7 +15084,7 @@ function pickUp(rec, domEvent, { grab = false, group = null } = {}) {
     // grabbed on the board: pointer offset inside the bar, left-anchored
     const barEl = grab && domEvent ? s.getElementFromEventRecord?.(rec) : null;
     const barRect = barEl?.getBoundingClientRect?.();
-    const barH = Math.max(16, Math.round((s.rowHeight || 48) / 2));
+    const barH = Math.max(16, Math.round((s.rowHeight || 48) * BAR_H_RATIO));
     if (barRect && barRect.width > 0) {
         carryGrabPx = Math.min(GRAB_MAX_PX, Math.max(4, domEvent.clientX - barRect.left));
         carryGrabPy = Math.min(barRect.height - 2, Math.max(2, domEvent.clientY - barRect.top));
@@ -22536,17 +22536,18 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
 /* ------------------------------------------------------------------ */
 /* Order bars (document 10)                                           */
 /* ------------------------------------------------------------------ */
-/* FastReact-style bars: barHeight = rowHeight × 0.5, vertically CENTERED in
-   the line. --mb-row-h follows the current rowHeight (vertical zoom), so the
-   ratio holds at every zoom, and the height is identical in normal /
-   selected / hovered / dragging / resizing states — geometry never jumps. */
+/* FastReact-style bars: barHeight = rowHeight × 0.42 (BAR_H_RATIO in
+   AppConfig.js — keep the two equal), hugging the row's top line. --mb-row-h
+   follows the current rowHeight (vertical zoom), so the ratio holds at every
+   zoom, and the height is identical in normal / selected / hovered /
+   dragging / resizing states — geometry never jumps. */
 .b-sch-event-wrap {
     /* Bars never slide (FastReact): a placed / pushed / re-sized bar is
        painted where it now is — Bryntum's animated transition is off */
     transition : none !important;
     --b-sch-event-transition : none;
     /* Keep Bryntum's per-row `top` so bars stay on their assigned line */
-    height     : calc(var(--mb-row-h, 48px) / 2) !important;
+    height     : calc(var(--mb-row-h, 48px) * 0.42) !important;
     margin-top : 0;   /* bar sticks to the row's top line (common rule) */
     /* a tiny piece at a narrow zoom still has a measurable box — the
        resize feature's handle maths needs a positive width */
@@ -22574,16 +22575,17 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
     border-radius : 0;
     box-shadow    : none;
 }
-/* the joint: one black mark, 5 px wide, from 3 px inside this bar's end to
-   2 px past it — over the sub-pixel seam between the two boxes, so it never
-   shows a white line in the middle (FastReact's black joint) */
+/* the joint: one black mark, 3 px wide, from 2 px inside this bar's end to
+   1 px past it — over the sub-pixel seam between the two boxes, so it never
+   shows a white line in the middle (FastReact's black joint; "a little
+   thinner", planner 2026-11-21) */
 .b-sch-event-wrap.mb-joint-end::after {
     content        : '';
     position       : absolute;
     top            : 0;
     bottom         : 0;
-    right          : -2px;
-    width          : 5px;
+    right          : -1px;
+    width          : 3px;
     background     : #000;
     pointer-events : none;
     z-index        : 7;

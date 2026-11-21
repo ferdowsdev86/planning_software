@@ -14,6 +14,10 @@ import {
     buyerDefaultEff, deliveryMonthColor
 } from './planningData.js';
 import { fitBarLabel, tinyLabelLines, TINY_MAX_WIDTH } from './barLabelFit.mjs';
+// Bar height as a share of the row (CSS --mb-row-h × this; the drop ghost and
+// the best-fit label use the same figure). Was ½ the row; the planner wanted
+// the bars "pressed a little" (2026-11-21) — they hug the row's top line.
+export const BAR_H_RATIO = 0.42;
 
 // ---------------------------------------------------------------------------
 // Flush bars (FastReact): a bar that ends at its line's working-day end and
@@ -2951,7 +2955,7 @@ export const schedulerProConfig = {
                 order   : barOrderNo(rr) || '',
                 date    : rr.ship ? fmtDateDdMonRr(orderDeliveryOf(rr.ship)) : ''
             });
-            tiny = fitBarLabel({ ...ident, width : w, height : (this.rowHeight || 48) / 2, measure : t => labelEm(this, t) });
+            tiny = fitBarLabel({ ...ident, width : w, height : (this.rowHeight || 48) * BAR_H_RATIO, measure : t => labelEm(this, t) });
         }
         // Learning-curve ramp: hatched overlay on the bar's head — a shade on
         // top of (never replacing) the status/risk colour — plus a small
