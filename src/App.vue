@@ -2833,6 +2833,15 @@ function openPlannedSchedule(rec) {
     try { applySewingActuals(getInstance()); } catch { /* the dialog still opens on the last forecast */ }
     plRec.value = rec;
     plPeriod.value = 'daily';
+    // FastReact "Group strips within this stage by": a consolidated bar opens
+    // on its whole run (planner, 2026-11-18), any other bar on itself; the
+    // planner switches with the dropdown. The plain planned schedule (Day /
+    // Date / Quantity / cumulative / Efficiency / Hours) is what opens —
+    // the progress / forecast detail is behind its own link (planner,
+    // 2026-11-21: "too many columns, copy the FastReact view as it is")
+    const cg = consolidate.value ? uiHooks.consol?.get(String(rec.id)) : null;
+    plGroupBy.value = cg && cg.count >= 2 ? 'consol' : 'strip';
+    plShowProgress.value = false;
     // raw.lc / raw.qty are plain (non-reactive) fields on the record: bump a
     // tick so the day rows recompute for THIS opening instead of serving the
     // rows cached from an earlier open of the same bar (pre learning-curve)
@@ -6219,15 +6228,37 @@ const plLine = computed(() => {
 // shows on the consolidated bar), not just the bar under the pointer
 // (planner, 2026-11-18: "click on a consolidated order must give the plan
 // schedule and the production update on the full quantity")
-const plMembers = computed(() => {
+const plGroupBy = ref('strip');          // strip | consol | order  (FastReact "Group strips within this stage by")
+const plShowProgress = ref(false);        // the progress / forecast detail table (off: the plain planned schedule)
+// the consolidated run the clicked bar belongs to (Consolidate orders ON)
+const plConsolRecs = computed(() => {
     plTick.value;
     const s = getInstance();
     const rec = plRec.value;
     if (!s || !rec) return [];
     const g = consolidate.value ? uiHooks.consol?.get(String(rec.id)) : null;
-    if (!g || g.count < 2) return [rec];
+    if (!g || g.count < 2) return [];
     const recs = g.members.map(m => s.eventStore.getById(m.id)).filter(r => r && eventRawOf(r));
-    return recs.length ? recs : [rec];
+    return recs.length >= 2 ? recs : [];
+});
+// every strip of the same order on this board (split pieces, colours), start order
+const plOrderRecs = computed(() => {
+    plTick.value;
+    const s = getInstance();
+    const raw = plRaw.value;
+    if (!s || !raw) return [];
+    const code = String(raw.mbmOrder || '');
+    if (!code) return [];
+    return s.eventStore.records
+        .filter(e => e.data?.raw && !e.data.raw.stage && String(e.data.raw.mbmOrder || '') === code)
+        .sort((a, b) => a.startDate - b.startDate);
+});
+const plMembers = computed(() => {
+    const rec = plRec.value;
+    if (!rec) return [];
+    if (plGroupBy.value === 'consol' && plConsolRecs.value.length >= 2) return plConsolRecs.value;
+    if (plGroupBy.value === 'order'  && plOrderRecs.value.length  >= 2) return plOrderRecs.value;
+    return [rec];
 });
 const memberMade = raw => Math.max(Number(raw.made) || 0, Math.round((Number(raw.qty) || 0) * (Number(raw.progress) || 0) / 100));
 const plGroup = computed(() => {
@@ -18846,7 +18877,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <label>Customer</label><input class="cal-in pr-ro" :value="plRaw.buyer" readonly>
                         <label>Line</label><input class="cal-in pr-ro" :value="plLine?.name" readonly>
                         <!-- Consolidate orders ON: the figures are the consolidated run's (every member bar) -->
-                        <label>{{ plGroup ? 'Consolidated' : 'This strip' }}</label><input class="cal-in pr-ro" :value="plGroup ? `${fmtQty(plGroup.qty)}   (${fmtDate(plGroup.end)})  ·  ⧉ ${plGroup.count} bars as one` : `${fmtQty(plRaw.qty)}   (${plRaw.end ? fmtDate(plRaw.end) : '—'})`" readonly>
+                        <label>{{ plGroup ? (plGroupBy === 'order' ? 'Order strips' : 'Consolidated') : 'This strip' }}</label><input class="cal-in pr-ro" :value="plGroup ? `${fmtQty(plGroup.qty)}   (${fmtDate(plGroup.end)})  ·  ${plGroupBy === 'order' ? `${plGroup.count} strips of the order` : `⧉ ${plGroup.count} bars as one`}` : `${fmtQty(plRaw.qty)}   (${plRaw.end ? fmtDate(plRaw.end) : '—'})`" readonly>
                         <label>All strips</label><input class="cal-in pr-ro" :value="`${fmtQty(plAllStrips.qty)} in ${plAllStrips.count} strip(s)`" readonly>
                         <label>Starting</label><input class="cal-in pr-ro" :value="plGroup ? `${fmtDate(plGroup.start)}  =>  ${fmtDate(plGroup.end)}` : `${fmtDate(plRaw.start)}  =>  ${plRaw.end ? fmtDate(plRaw.end) : '—'}`" readonly>
                         <label>Made</label><input class="cal-in pr-ro" :value="fmtQty(plGroup ? plGroup.made : Math.round(plRaw.qty * plRaw.progress / 100))" readonly>
@@ -18854,6 +18885,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </div>
                     <div class="pl-cols">
                         <div class="pl-left">
+                            <fieldset class="pr-box">
+                                <legend>Group strips within this stage by</legend>
+                                <select v-model="plGroupBy" class="cal-in pl-groupby">
+                                    <option value="strip">This strip only</option>
+                                    <option v-if="plConsolRecs.length > 1" value="consol">Consolidated run — {{ plConsolRecs.length }} bars as one</option>
+                                    <option v-if="plOrderRecs.length > 1" value="order">All strips of this order on the board ({{ plOrderRecs.length }})</option>
+                                </select>
+                            </fieldset>
                             <fieldset class="pr-box">
                                 <legend>Period</legend>
                                 <div class="pl-period">
@@ -18872,8 +18911,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </div>
                         </div>
                         <div class="pl-right">
+                        <!-- a bar in production: the progress / forecast detail is one click away;
+                             the plain planned schedule (FastReact view) is what opens -->
+                        <div v-if="plProgress && plPeriod === 'daily'" class="pl-toggle">
+                            <a href="#" @click.prevent="plShowProgress = !plShowProgress">{{ plShowProgress ? '◀ Planned schedule' : 'Progress / forecast details ▶' }}</a>
+                            <span v-if="!plShowProgress" class="t4dim"> · made {{ fmtQty(plProgress.head.made) }} · remaining {{ fmtQty(plProgress.head.remaining) }} · forecast end {{ plProgress.head.forecastEnd }}</span>
+                        </div>
                         <!-- Daily progress + actual-based forecast (bars in production) -->
-                        <template v-if="plProgress && plPeriod === 'daily'">
+                        <template v-if="plProgress && plPeriod === 'daily' && plShowProgress">
                         <div class="pl-fc-head">
                             <span><b>Saved end</b> {{ plProgress.head.savedEnd }}</span>
                             <span :class="{ 'pl-fc-late' : plProgress.head.late }"><b>Forecast end</b> {{ plProgress.head.forecastEnd }}<i v-if="plProgress.head.late"> · after target</i></span>
@@ -21651,6 +21696,9 @@ body {
 }
 
 .pl-schedlist { height : 130px; margin-top : 10px; font-size : 11px; }
+select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align : left; box-sizing : border-box; }
+.pl-toggle { font-size : 12px; padding : 2px 6px 6px; }
+.pl-toggle a { color : #1b52ad; text-decoration : none; font-weight : bold; }
 
 .pl-table th, .pl-table td { padding : 4px 8px; white-space : nowrap; }
 .pl-table .st-user { color : #17356b; }
