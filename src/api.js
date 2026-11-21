@@ -188,6 +188,9 @@ function eventNotesPayload(raw, onHold, unitId = null) {
         // has no line, so this is what keeps it on its own unit's board
         unit       : Number(unitId) > 0 ? Number(unitId) : undefined,
         holdFloor  : onHold && raw.holdFloor ? raw.holdFloor : undefined,
+        // parked BY HAND (the planner moved it onto the Holding Row): the
+        // lower lane of the row; automatic parks sit in the upper lane
+        holdManual : onHold && raw.holdManual ? true : undefined,
         // why the Auto plan parked it here (e.g. "Capacity — no line finishes it by delivery − 7")
         holdReason : onHold && raw.holdReason ? String(raw.holdReason) : undefined,
         erpFlag    : raw.erpFlag ? String(raw.erpFlag) : undefined,
@@ -348,6 +351,8 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         os       : osSnap || undefined,
         // floor whose Holding Row the bar was parked on
         holdFloor : noteGroup.holdFloor || null,
+        // parked by hand → the Holding Row's lower lane
+        holdManual : !!noteGroup.holdManual,
         // whole-order quantity of a colour piece (all colour groups together)
         fullOrderQty : Number(noteGroup.fullOrderQty) > 0 ? Number(noteGroup.fullOrderQty)
             : (orderId && Number(e.order_total_qty) > 0 ? Number(e.order_total_qty) : undefined),
@@ -1605,6 +1610,7 @@ export async function syncToApi(scheduler, { eventIds = null, unitId = null, pla
         if (!onHold) raw.parked = false;
         // which floor's Holding Row the bar sits on — a reload puts it back there
         raw.holdFloor = onHold ? (scheduler.resourceStore.getById(rid)?.data?.holdFloor || null) : null;
+        if (!onHold) raw.holdManual = false;
         const resourceDbId = resolveResourceDbId(scheduler, rid);
         const eventCode = eventCodeOf(ev, raw);
         if (!raw.eventCode) raw.eventCode = eventCode;

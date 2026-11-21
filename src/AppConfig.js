@@ -993,7 +993,8 @@ export function pickHoldId(scheduler, start, end, { prefer = null, exclude = nul
     const s0 = +new Date(start), e0 = +new Date(end);
     const counts = rows.map(r => ({
         id : r.id,
-        n  : barsOnLine(scheduler, r.id).filter(ev => ev !== exclude && ev.data?.raw && !ev.data.raw.stage && +ev.startDate < e0 && +ev.endDate > s0).length
+        // bars parked by hand sit in the row's lower lane — they do not crowd the upper one
+        n  : barsOnLine(scheduler, r.id).filter(ev => ev !== exclude && ev.data?.raw && !ev.data.raw.stage && !ev.data.raw.holdManual && +ev.startDate < e0 && +ev.endDate > s0).length
     }));
     const min = Math.min(...counts.map(c => c.n));
     if (freeOnly && min > 0) return null;
@@ -2072,7 +2073,9 @@ export function planOrderDrop(scheduler, order, resourceRecord, date) {
     const raw = {
         ...order, reqMin, dur, start : startFinal, end,
         orderQty : order.orderQty ?? order.qty,
-        progress : 0, status : parkHold ? 'unplanned' : 'draft'
+        progress : 0, status : parkHold ? 'unplanned' : 'draft',
+        // dropped on the Holding Row by hand → its lower lane
+        holdManual : parkHold ? true : undefined
     };
 
     // a bar dropped on a Holding Row stays on THAT row (it went to the first
@@ -2877,6 +2880,9 @@ export const schedulerProConfig = {
         // dashed outline, reason in the tooltip — the bar stays until the
         // planner acts
         if (r.erpFlag) renderData.cls.add('mb-erp-flag');
+        // parked by hand: the Holding Row's lower lane (CSS shifts the wrap
+        // down half a row; automatic parks keep the upper lane)
+        if (r.holdManual && r.parked) renderData.wrapperCls?.add('mb-hold-manual');
         const paint = bg => { renderData.style = `background-color:${bg};border-color:#222;color:${textOnColor(bg)}`; };
         if (colorState.mode === 'buyer')        paint(buyerColorOf(barBuyerOf(r) || r.buyer));
         else if (colorState.mode === 'product') paint(productTypeColor(itemLabelOf(r)));

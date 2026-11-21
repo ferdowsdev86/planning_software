@@ -15443,9 +15443,14 @@ async function placeCarried(date, resourceRecord) {
         end   = endOfWork(start, raw.dur || 1);
         raw.status = 'unplanned';
         raw.parked = true;
+        // put here BY HAND → the Holding Row's lower lane (planner,
+        // 2026-11-21: "the upper part is the automatic orders; below, marked
+        // apart, the ones the user moves off a line to keep")
+        raw.holdManual = true;
     }
     else {
         raw.parked = false;
+        raw.holdManual = false;
         // FastReact insertion rule (drag-reschedule spec): the dropped bar
         // sits at the EXACT user-selected point (clamped only into the work
         // calendar — off day / after hours → next working hour; a locked or
@@ -15605,7 +15610,8 @@ function spreadHoldRows(s) {
     if (rows.length < 2) return 0;
     let moved = 0;
     for (const row of rows) {
-        const bars = barsOnLine(s, row.id).filter(ev => ev.data?.raw && !ev.data.raw.stage)
+        // (a bar the planner parked by hand stays on the row they chose — lower lane)
+        const bars = barsOnLine(s, row.id).filter(ev => ev.data?.raw && !ev.data.raw.stage && !ev.data.raw.holdManual)
             .sort((a, b) => (a.startDate - b.startDate) || String(a.id).localeCompare(String(b.id)));
         for (const ev of bars) {
             const to = pickHoldId(s, ev.startDate, ev.endDate, { exclude : ev, current : row.id });
@@ -22479,6 +22485,17 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
 .mb-subtotal-row .b-grid-cell,
 .b-grid-row.mb-subtotal-row .b-grid-cell {
     background : #ffff00 !important;
+}
+/* Holding Row, two lanes (planner, 2026-11-21): the upper half — yellow —
+   holds the bars the system parks (Auto plan, ERP changes, Unplan); the
+   lower half — pale yellow — holds the bars the planner moves off a line
+   by hand, so the two are told apart at a glance */
+.b-grid-row.mb-hold-row .b-grid-cell {
+    background : linear-gradient(to bottom, #ffff00 0, #ffff00 50%, #fff8b0 50%, #fff8b0 100%) !important;
+}
+/* a bar parked by hand: wrap shifted down into the lower lane */
+.b-sch-event-wrap.mb-hold-manual {
+    margin-top : calc(var(--mb-row-h, 48px) / 2);
 }
 
 .fr-line-foot {
