@@ -228,15 +228,26 @@ async function erpOrderInfo(codes) {
     if (!list.length) return out;
     try {
         const ph = list.map(() => '?').join(',');
+        // + the order's CM (mr_order_bom_other_costing.cm, one row per order;
+        //   text in the ERP — ".95", "1.5000") and whether the style has a
+        //   wash (mr_stl_wash_type rows, or a wash booking on the order) —
+        //   the Orders list's CM / Wash columns (planner, 2026-11-22)
         const [rows] = await pool.query(
-            `SELECT oe.order_code, MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype
+            `SELECT oe.order_code, MAX(gt.gmt_name) AS gmt, MAX(pt.prd_type_name) AS ptype,
+                    MAX(c.cm) AS cm,
+                    MAX(CASE WHEN w.n > 0 OR oe.wash_booking > 0 THEN 1 ELSE 0 END) AS wash
                FROM \`${ERP_DB}\`.mr_order_entry oe
                JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+               LEFT JOIN (SELECT mr_order_entry_order_id AS oid, MAX(cm) AS cm
+                            FROM \`${ERP_DB}\`.mr_order_bom_other_costing GROUP BY mr_order_entry_order_id) c ON c.oid = oe.order_id
+               LEFT JOIN (SELECT mr_style_stl_id AS sid, COUNT(*) AS n
+                            FROM \`${ERP_DB}\`.mr_stl_wash_type GROUP BY mr_style_stl_id) w ON w.sid = s.stl_id
               WHERE oe.order_code IN (${ph})
               GROUP BY oe.order_code`, list);
-        for (const r of rows) out[r.order_code] = { gmt : r.gmt || null, ptype : r.ptype || null };
+        const cmNum = v => { const n = parseFloat(String(v ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; };
+        for (const r of rows) out[r.order_code] = { gmt : r.gmt || null, ptype : r.ptype || null, cm : cmNum(r.cm), wash : r.wash == null ? null : Number(r.wash) === 1 };
         // an OS order (GSL-…): the MBM order it is a part of and that order's
         // ORIGINAL buyer — the list, the tooltip and Find show both numbers
         // and both buyers ("GSL-251176 / 26SPJCP098", "GREAT SYNERGY / JCP")
@@ -252,7 +263,9 @@ async function erpOrderInfo(codes) {
                     MAX(COALESCE(NULLIF(s.stl_no, ''), o.mr_style)) AS twin_style,
                     MAX(o.style) AS os_style, MAX(ob.b_name) AS os_buyer, MAX(o.order_qty) AS os_qty,
                     MAX(o.odd) AS os_odd, MAX(CASE WHEN o.pcd >= '2020-01-01' THEN o.pcd END) AS os_pcd,
-                    MAX(o.product_type) AS os_ptype, MAX(o.os_unit_id) AS os_unit
+                    MAX(o.product_type) AS os_ptype, MAX(o.os_unit_id) AS os_unit,
+                    MAX(CASE WHEN o.approved_cm > 0 THEN o.approved_cm ELSE o.cm END) AS os_cm,
+                    MAX(CASE WHEN w.n > 0 OR oe.wash_booking > 0 THEN 1 WHEN oe.order_id IS NULL THEN NULL ELSE 0 END) AS os_wash
                FROM \`${OS_DB}\`.os_orders o
                LEFT JOIN \`${ERP_DB}\`.mr_order_entry oe ON oe.order_id = o.mr_order_id AND oe.order_code = o.mr_order_code
                LEFT JOIN \`${ERP_DB}\`.mr_buyer b ON b.b_id = oe.mr_buyer_b_id
@@ -260,6 +273,8 @@ async function erpOrderInfo(codes) {
                LEFT JOIN \`${ERP_DB}\`.mr_style s ON s.stl_id = oe.mr_style_stl_id
                LEFT JOIN \`${ERP_DB}\`.mr_garment_type gt ON gt.gmt_id = s.gmt_id
                LEFT JOIN \`${ERP_DB}\`.mr_product_type pt ON pt.prd_type_id = s.prd_type_id
+               LEFT JOIN (SELECT mr_style_stl_id AS sid, COUNT(*) AS n
+                            FROM \`${ERP_DB}\`.mr_stl_wash_type GROUP BY mr_style_stl_id) w ON w.sid = s.stl_id
               WHERE o.os_order_code IN (${ph}) OR o.mr_order_code IN (${ph})
               GROUP BY o.os_order_code, o.mr_order_code, b.b_name`, [...list, ...list]);
         const want = new Set(list);
@@ -276,7 +291,11 @@ async function erpOrderInfo(codes) {
                 buyer : r.os_buyer || null, qty : Number(r.os_qty) || 0, odd : ymd(r.os_odd), pcd : ymd(r.os_pcd), ptype : r.os_ptype || null };
             if (want.has(r.os_order_code)) {
                 const cur = out[r.os_order_code] || {};
+                // an OS order's CM is the OS side's own (approved first); its wash
+                // comes from the MBM twin's style
+                const osCm = Number(r.os_cm) > 0 ? Number(r.os_cm) : (cur.cm ?? null);
                 out[r.os_order_code] = { gmt : cur.gmt || r.gmt || null, ptype : cur.ptype || r.ptype || null,
+                    cm : osCm, wash : r.os_wash == null ? (cur.wash ?? null) : Number(r.os_wash) === 1,
                     twin : r.mr_order_code && r.mr_order_code !== r.os_order_code ? r.mr_order_code : null,
                     twinBuyer : r.mr_buyer || null, twinStyle : r.twin_style || null, os : osSide };
             }

@@ -994,6 +994,10 @@ export async function loadErpAllOrders(prodUnit = null, only = '') {
         // Chino, 5 Pocket…; an OS order through its MBM twin), the planning
         // product category (Jacket, Pant) only when the ERP has none
         productType  : erpBy[r.order_code]?.gmt || r.product_category || '',
+        // CM (ERP costing / OS order's CM) and whether the style has a wash —
+        // the list's CM / Wash columns (planner, 2026-11-22)
+        cm           : erpBy[r.order_code]?.cm ?? null,
+        wash         : erpBy[r.order_code]?.wash ?? null,
         mbmOrder     : r.order_code || '',
         // OS order (GSL-…): the MBM order it is a part of (mr_order_code) — shown
         // beside the OS code so the row is found by either number

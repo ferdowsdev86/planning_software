@@ -8700,7 +8700,7 @@ const ORDER_COLS = [
     'done',
     'orderType', 'status', 'deliveryStatus',
     'unit', 'prodUnitName', 'buyer', 'style', 'productType', 'mbmOrder',
-    'orderQty', 'smv', 'pcd', 'pcdSource', 'orderDelivery', 'planMonth',
+    'orderQty', 'smv', 'pcd', 'cm', 'wash', 'orderDelivery', 'planMonth',
     'ppStart', 'prodStart', 'prodEnd',
     'po', 'color', 'qty', 'planQty', 'poDelivery', 'grouping',
     'line', 'start', 'end'
@@ -8719,7 +8719,10 @@ const ORDER_COL_LABELS = {
     orderQty     : 'Order Qty',
     smv          : 'SMV',
     pcd          : 'PCD',
-    pcdSource    : 'PCD Src',
+    // PCD Src → CM and Wash (planner, 2026-11-22): the order's CM from the
+    // ERP costing (an OS order: its own CM), wash = Yes / No from the style
+    cm           : 'CM',
+    wash         : 'Wash',
     orderDelivery: 'Order Delivery',
     planMonth    : 'Planning Month',
     ppStart      : 'PP Start',
@@ -8840,9 +8843,8 @@ function orderCellText(r, key) {
         case 'mbmOrder'      : return r.erpOrder ? `${r.mbmOrder} / ${r.erpOrder}` : String(r.mbmOrder ?? '');
         case 'buyer'         : return r.erpBuyer ? `${r.buyer} / ${r.erpBuyer}` : String(r.buyer ?? '');
         case 'style'         : return r.erpStyle ? `${r.style} / ${r.erpStyle}` : String(r.style ?? '');
-        case 'pcdSource'     : return r.pcdSource === 'order_pcd' ? 'ERP PCD'
-                                    : r.pcdSource === 'delivery_minus_30' ? 'Delivery-30'
-                                    : (r.pcdStatus === 'missing' ? 'missing' : '');
+        case 'cm'            : return r.cm > 0 ? (Math.round(r.cm * 100) / 100).toFixed(2) : '';
+        case 'wash'          : return r.wash === true ? 'Yes' : r.wash === false ? 'No' : '';
         case 'deliveryStatus': return hidePoFields
             ? (projPartialInfo(r) ? 'Partial' : '')
             : String(r.deliveryStatus ?? '');
@@ -8862,7 +8864,7 @@ function toggleGroupExpand(row) {
 // Column filter queries: quantity columns accept >N <N >=N <=N =N;
 // date columns accept the same operators with a date (2026-09-01, 01-09-26,
 // 15-SEP-26, 01/09/2026 …). Anything else falls back to text contains.
-const QTY_FILTER_COLS  = new Set(['orderQty', 'qty', 'planQty', 'smv']);
+const QTY_FILTER_COLS  = new Set(['orderQty', 'qty', 'planQty', 'smv', 'cm']);
 const DATE_FILTER_COLS = new Set(['pcd', 'orderDelivery', 'poDelivery', 'start', 'end', 'ppStart', 'prodStart', 'prodEnd']);
 const MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -8907,6 +8909,7 @@ function matchColFilter(r, k, q) {
                 const cell = k === 'orderQty' ? (Number(r.orderQty) || 0)
                     : k === 'smv' ? (r.smvMissing ? 0 : Number(r.smv) || 0)
                     : k === 'planQty' ? (Number(r.planQty ?? planQtyOf(r.qty)) || 0)
+                    : k === 'cm' ? (Number(r.cm) || 0)
                     : (Number(r.qty) || 0);
                 return cmpApply(op, cell, val);
             }
@@ -8944,6 +8947,7 @@ function orderSortVal(r, k) {
     if (k === 'qty') return Number(r.qty) || 0;
     if (k === 'planQty') return Number(r.planQty ?? planQtyOf(r.qty)) || 0;
     if (k === 'smv') return r.smvMissing ? 0 : Number(r.smv) || 0;
+    if (k === 'cm') return Number(r.cm) || 0;
     if (DATE_FILTER_COLS.has(k)) { const d = rowDateVal(r, k); return d instanceof Date ? d.getTime() : 0; }
     return orderCellText(r, k).toLowerCase();
 }
@@ -17791,7 +17795,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <thead>
                             <tr>
                                 <th v-for="k in ORDER_COLS" :key="k"
-                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
+                                    :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv' || k === 'cm', 'od-sortable' : k !== 'done', 'od-sorted' : orderSort.key === k }]"
                                     :title="k === 'done' ? '' : 'Click to sort (asc → desc → off)'"
                                     @click="k !== 'done' && toggleOrderSort(k)"
                                 >
@@ -17848,7 +17852,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                     @dblclick.prevent="odRowDblClick(row)"
                                 >
                                     <td v-for="k in ORDER_COLS" :key="k"
-                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv', 'st-user' : k === 'po' }]"
+                                        :class="['od-c-' + k, { 'od-num' : k === 'qty' || k === 'planQty' || k === 'orderQty' || k === 'smv' || k === 'cm', 'st-user' : k === 'po' }]"
                                         :data-full="['done','orderType','status','deliveryStatus','grouping'].includes(k) ? null
                                             : (k === 'planMonth' ? (planMonthTitle(row) || null) : (orderCellText(row, k) || null))"
                                     >
@@ -20957,6 +20961,12 @@ body {
 .od-table .od-c-po      { max-width : 104px; overflow : hidden; text-overflow : ellipsis; }
 .od-table .od-c-line    { max-width : 76px;  overflow : hidden; text-overflow : ellipsis; }
 .od-table .od-c-deliveryStatus { max-width : 88px; overflow : hidden; text-overflow : ellipsis; }
+/* Status a little narrower (planner, 2026-11-22): the badge and its "N on
+   Line" chips wrap inside 96 px instead of stretching the column */
+.od-table .od-c-status  { max-width : 96px; }
+.od-table .od-c-status .od-onboard { max-width : 96px; overflow : hidden; text-overflow : ellipsis; }   /* the chip's full text stays in its title */
+.od-table .od-c-cm      { max-width : 48px; }
+.od-table .od-c-wash    { max-width : 42px; }
 .od-table .od-c-done    { width : 24px; }
 .od-filterrow .od-filter { min-width : 30px; }
 .od-c-deliveryStatus .od-status,
