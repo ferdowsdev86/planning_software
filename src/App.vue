@@ -2944,32 +2944,6 @@ watch([chCalId, chCalendars], async () => {
     }
     catch { chTargetOv.value = {}; chTargetLineOv.value = {}; }
 });
-// Hours the planner has SET for that weekday inside the chosen period
-// (Change working hours overrides only) — "11:00 / 12:00" when they differ
-// by date. Blank = no override: the day runs on its Normal hours.
-const chPeriodHours = wd => {
-    const from = new Date(chFrom.value + 'T00:00:00'), to = new Date(chTo.value + 'T00:00:00');
-    if (Number.isNaN(+from) || Number.isNaN(+to) || from > to) return '';
-    const ov = chTargetOv.value || {};
-    const lov = chTargetLineOv.value || {};
-    // Selected lines: what those lines run on (their own figure, else the unit's)
-    const lineKeys = chTargetMode.value === 'lines' ? chSelectedLines.value.map(l => String(l.dbId)) : [null];
-    const seen = [];
-    const d = new Date(from);
-    for (let g = 0; d <= to && g < 400; g++, d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== wd) continue;
-        const k = ymdOf(d);
-        for (const lk of lineKeys) {
-            const v = lk ? (lov[lk]?.[k] ?? ov[k]) : ov[k];
-            if (v == null || v === '') continue;
-            const t = hoursToHm(Number(v) || 0);
-            if (!seen.includes(t)) seen.push(t);
-        }
-    }
-    if (!seen.length) return '';
-    return seen.length <= 2 ? seen.join(' / ') : `${seen[0]} …`;
-};
-
 // "Whole calendar — every line": the planner's decision for those dates
 // applies to EVERY line, so any line-specific figure (Selected lines) on
 // them goes — otherwise a line's earlier "Friday 10:00" would still beat
@@ -19155,11 +19129,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <div class="ch-head">Which days do you want to change</div>
                             <fieldset class="pr-box">
                                 <legend>Select days</legend>
-                                <div class="ch-dayrow ch-dayrow-h"><span></span><span>Normal hours</span><span title="Hours the calendar runs on inside the selected period (changed hours included)">Current (period)</span></div>
+                                <!-- Normal hours only — the "Current (period)" column went
+                                     (planner, 2026-11-22: a shorter view) -->
+                                <div class="ch-dayrow ch-dayrow-h"><span></span><span>Normal hours</span></div>
                                 <div v-for="wd in CH_DAY_ORDER" :key="wd" class="ch-dayrow">
                                     <label><input v-model="chDays[wd]" type="checkbox"> {{ DAY_NAMES[wd] }}</label>
                                     <input class="cal-in ch-nh" :value="chNormalHours(wd)" readonly>
-                                    <input class="cal-in ch-nh ch-cur" :value="chPeriodHours(wd)" readonly>
                                 </div>
                                 <div class="ch-modes">
                                     <label><input v-model="chDayMode" type="radio" value="selected"> Selected days only</label>
@@ -19194,38 +19169,36 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </fieldset>
                         </div>
                     </div>
-                    <div class="ch-cols">
-                        <fieldset class="pr-box ch-period">
-                            <legend>Period to change</legend>
-                            <div class="ch-timerow">
-                                <label>Apply changes from</label>
-                                <input v-model="chFrom" class="cal-in ch-date" type="date">
-                                <label>to</label>
-                                <input v-model="chTo" class="cal-in ch-date" type="date">
-                            </div>
-                        </fieldset>
-                        <fieldset class="pr-box ch-target">
-                            <legend>Apply changes to</legend>
-                            <label v-for="c in chCalendars" :key="c.id" class="ch-opt">
-                                <input type="radio" name="ch-cal" :value="c.id" v-model="chCalId"> {{ c.name }}<span class="ls-dim"> · {{ c.unitName }}</span>
+                    <!-- Period and target on ONE row (planner, 2026-11-22: the unit as
+                         its short name only, the lines side by side, the Period box's
+                         room used — so the dialog stays short) -->
+                    <fieldset class="pr-box ch-where">
+                        <legend>Period to change · Apply changes to</legend>
+                        <div class="ch-where-row">
+                            <label>From</label>
+                            <input v-model="chFrom" class="cal-in ch-date" type="date">
+                            <label>to</label>
+                            <input v-model="chTo" class="cal-in ch-date" type="date">
+                            <span class="ch-sep"></span>
+                            <label v-for="c in chCalendars" :key="c.id" class="ch-opt ch-inline" :title="c.name">
+                                <input type="radio" name="ch-cal" :value="c.id" v-model="chCalId"> {{ c.unitName || c.name }}
                             </label>
-                            <label v-if="!chCalendars.length" class="ch-opt"><input type="radio" checked> {{ calendarState.name }}</label>
-                            <div class="ch-scope">
-                                <label class="ch-opt"><input v-model="chTargetMode" type="radio" value="calendar"> Whole calendar — every line</label>
-                                <label class="ch-opt"><input v-model="chTargetMode" type="radio" value="lines"> Selected lines only</label>
-                                <div v-if="chTargetMode === 'lines'" class="ch-lines">
-                                    <div class="ch-lines-tools">
-                                        <a href="#" @click.prevent="chLinesAll(true)">all</a> · <a href="#" @click.prevent="chLinesAll(false)">none</a>
-                                        · {{ chSelectedLines.length }} line(s) selected
-                                    </div>
-                                    <div class="ch-lines-list">
-                                        <label v-for="l in chLineOptions" :key="l.id" class="ch-line"><input v-model="chLineSel[l.id]" type="checkbox"> {{ l.name }}</label>
-                                        <div v-if="!chLineOptions.length" class="bc-empty">এই unit-এর line list পাওয়া যায়নি</div>
-                                    </div>
-                                </div>
+                            <label v-if="!chCalendars.length" class="ch-opt ch-inline"><input type="radio" checked> {{ currentBoard?.unitName || calendarState.name }}</label>
+                            <span class="ch-sep"></span>
+                            <label class="ch-opt ch-inline"><input v-model="chTargetMode" type="radio" value="calendar"> Whole calendar</label>
+                            <label class="ch-opt ch-inline"><input v-model="chTargetMode" type="radio" value="lines"> Selected lines</label>
+                        </div>
+                        <div v-if="chTargetMode === 'lines'" class="ch-lines">
+                            <div class="ch-lines-tools">
+                                <a href="#" @click.prevent="chLinesAll(true)">all</a> · <a href="#" @click.prevent="chLinesAll(false)">none</a>
+                                · {{ chSelectedLines.length }} line(s) selected
                             </div>
-                        </fieldset>
-                    </div>
+                            <div class="ch-lines-list">
+                                <label v-for="l in chLineOptions" :key="l.id" class="ch-line"><input v-model="chLineSel[l.id]" type="checkbox"> {{ l.name }}</label>
+                                <div v-if="!chLineOptions.length" class="bc-empty">এই unit-এর line list পাওয়া যায়নি</div>
+                            </div>
+                        </div>
+                    </fieldset>
                     <div class="ch-actions">
                         <button class="cal-btn cal-btn-primary st-btn ch-apply" @click="chApply">✔ Apply</button>
                         <span class="ch-note">these changes to calendar ⇒ <b>{{ chTargetLabel }}</b></span>
@@ -22840,8 +22813,7 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
     gap             : 10px;
 }
 .ch-dayrow label { flex : 1; }
-.ch-dayrow-h span:not(:first-child) { width : 84px; text-align : center; }
-.ch-cur { width : 84px; background : #eef3ff; font-weight : bold; }
+.ch-dayrow-h span:not(:first-child) { width : 70px; text-align : center; }
 .ch-dayrow-x {
     margin          : 2px 0;
 }
@@ -22859,15 +22831,19 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
     flex-wrap   : wrap;
 }
 .ch-time  { width : 90px; text-align : center; }
-.ch-date  { width : 150px; }
-.ch-period { flex : 2 1 0; }
-.ch-target { flex : 1 1 0; }
-.ch-scope { margin-top : 6px; padding-top : 6px; border-top : 1px dashed #c9c5b8; }
-.ch-lines-tools { font-size : 11px; color : #555; margin : 4px 0; }
+.ch-date  { width : 140px; }
+/* period + target in one row; the line list under it, side by side */
+.ch-where { margin-bottom : 10px; }
+.ch-where-row { display : flex; flex-wrap : wrap; align-items : center; gap : 6px 10px; }
+.ch-where-row > label { font-weight : 600; }
+.ch-opt.ch-inline { margin : 0; font-weight : normal; }
+.ch-sep { width : 1px; height : 18px; background : #c9c5b8; margin : 0 2px; }
+.ch-lines { margin-top : 6px; padding-top : 6px; border-top : 1px dashed #c9c5b8; }
+.ch-lines-tools { font-size : 11px; color : #555; margin : 0 0 4px; }
 .ch-lines-tools a { color : #1b52ad; text-decoration : none; }
 .ch-lines-list {
-    max-height : 84px; overflow-y : auto; background : #fff; border : 1px solid #c9c5b8;
-    padding : 4px 6px; display : grid; grid-template-columns : 1fr 1fr 1fr; gap : 2px 8px; font-size : 12px;
+    max-height : 110px; overflow-y : auto; background : #fff; border : 1px solid #c9c5b8;
+    padding : 4px 8px; display : flex; flex-wrap : wrap; gap : 3px 14px; font-size : 12px;
 }
 .ch-line { display : flex; align-items : center; gap : 4px; white-space : nowrap; }
 .ch-actions {
