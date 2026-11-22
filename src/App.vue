@@ -3524,7 +3524,7 @@ function applyCurveDialog() {
 // ---------------------------------------------------------------------------
 const mshOpen     = ref(false);
 const mshRec      = shallowRef(null);      // reference bar record
-const mshAction   = ref('link');           // 'link' | 'unlink' (others = phase 2)
+const mshAction   = ref('stripeff');       // 'stripeff' | 'link' | 'unlink' (others = phase 2) — opens on Change strip efficiency, the top entry
 const mshLive     = ref(false);            // Linked checkbox (live sync)
 const mshSearch   = ref('');
 const mshSel      = ref([]);               // selected event ids
@@ -3533,12 +3533,12 @@ const mshStripEff = ref(100);              // Change strip efficiency: the % to 
 const mshEffRef   = ref(true);             // … apply it to the reference bar as well
 let   mshLastIdx  = -1;                    // for shift-click ranges
 
-// the working entries first, the phase-2 ones after them (planner, 2026-11-22:
-// "bring the active ones to the top")
+// the working entries first — Change strip efficiency on top — the phase-2
+// ones after them (planner, 2026-11-22)
 const MSH_ACTIONS = [
+    { id : 'stripeff', label : 'Change strip efficiency' },
     { id : 'link',     label : 'Link strip build up curve' },
     { id : 'unlink',   label : 'Unlink selected strips' },
-    { id : 'stripeff', label : 'Change strip efficiency' },
     { id : 'nothing',  label : '(nothing)' },
     { id : 'unload',   label : 'Unload selected strips', soon : true },
     { id : 'clearlc',  label : 'Clear previous update for build up curve', soon : true },
@@ -3637,7 +3637,7 @@ function openMultiStrip(rec) {
     const raw = eventRawOf(rec);
     if (!raw || raw.stage) return;
     mshRec.value   = rec;
-    mshAction.value = 'link';
+    mshAction.value = 'stripeff';   // the dialog opens on its top entry
     mshLive.value  = false;
     mshSearch.value = '';
     mshSel.value   = [];
