@@ -491,6 +491,23 @@ export async function loadProdUpdatesDb() {
 
 // Bars running on `date` on the lines of the given units, from the SAVED plan
 // (the boards the planner may write but has not open) — day plan estimated
+// ERP sewing output vs the MbmPlan production table for one date, per unit and
+// per line (Daily production update dialog — "ERP = MbmPlan" check)
+export async function loadProdReconcile(date) {
+    const data = await get(`/production-reconcile?date=${encodeURIComponent(date)}`, 30000);
+    if (!data.success) throw new Error(data.error || 'reconcile failed');
+    return data.rows || [];
+}
+// Pull the ERP's sewing output of a date range into the production table now
+export async function runProdSync(from, to) {
+    const res = await apiFetch(`${API_BASE}/production-sync`, {
+        method : 'POST', headers : { 'Content-Type' : 'application/json' },
+        body : JSON.stringify({ from, to })
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'sync failed');
+    return j;
+}
 export async function loadProdDayBars(date, unitIds) {
     const ids = (unitIds || []).map(Number).filter(u => u > 0);
     if (!ids.length) return [];

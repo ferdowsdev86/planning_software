@@ -189,9 +189,7 @@ const EVENT_SQL_HEAD = `
                        that quantity must not be cut off again on load (used
                        when the bar's notes carry no explicit madeBase) */
                     (SELECT COALESCE(SUM(d.prod_qty), 0) FROM day_production_update_plan d
-                      WHERE d.event_id = e.id AND d.created_at <= e.updated_at
-                        /* MBM / CEIL: ERP-synced rows (":po") never count — hand-entered only */
-                        AND NOT (d.event_ref LIKE '%:po%' AND d.unit IN ('MBM', 'CEIL'))) AS made_at_save
+                      WHERE d.event_id = e.id AND d.created_at <= e.updated_at) AS made_at_save
              FROM planning_events e
              LEFT JOIN planning_orders o ON o.id = e.planning_order_id
              /* saved projection bars (ev-proj:<code>[-n]) carry no order link —
@@ -1514,11 +1512,11 @@ app.get(`${BASE}/production-day-bars`, async (req, res) => {
                                      ORDER BY (x.erp_po_id LIKE 'proj-%') DESC, x.id LIMIT 1)
                   WHERE e.event_status NOT IN ('cancelled', 'completed')
                     AND e.start_date <= ? AND e.end_date >= DATE_SUB(?, INTERVAL 45 DAY)`, [...units, dayEnd, dayStart]),
-            // production already made per bar (MBM / CEIL: hand-entered rows only)
+            // production already made per bar (ERP-synced and hand-entered rows, every unit)
             pool.query(
                 `SELECT SUBSTRING_INDEX(event_ref, ':po', 1) AS ref, SUM(prod_qty) AS made
                    FROM day_production_update_plan
-                  WHERE event_ref LIKE 'db-%' AND NOT (event_ref LIKE '%:po%' AND unit IN ('MBM', 'CEIL'))
+                  WHERE event_ref LIKE 'db-%'
                   GROUP BY SUBSTRING_INDEX(event_ref, ':po', 1)`),
             completedOrderCodes()
         ]);
@@ -5179,7 +5177,12 @@ const OS_PROD_UNIT    = 20;                  // mbm_os.os_units id for AQL (orde
 // ERP production is pulled for AQL only. MBM and CEIL report production BY
 // HAND on the board (planner decision 2026-10-10): no automatic deduction
 // there — their rows in day_production_update_plan come from the dialogs.
-const PROD_UNITS   = { AQL : 'L' };   // hr_unit_short_name → code prefix
+// hr_unit_short_name → board line-code prefix. All three units since
+// 2026-11-22 (planner: "line-wise, PO-wise production — a planned order's
+// output is never missed, the ERP daily production report and the MbmPlan
+// production must be equal; line to line, else order / PO to PO"). Before,
+// only AQL was synced and MBM / CEIL production was typed by hand.
+const PROD_UNITS   = { AQL : 'L', MBM : 'M', CEIL : 'C' };
 const PROD_AUTO_UNIT_NAMES = Object.keys(PROD_UNITS);
 let   lineByCode   = new Map();                               // resource_code → { name, floor_id, unit_id }
 async function loadLineCodes() {
@@ -5295,9 +5298,13 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                     // read-only row (key erp-<po>:po<po>:<ERP line>) — the Daily production update
                     // lists it like output on another line, so the board shows per line exactly
                     // what the ERP reports, planned on the board or not
-                    const erpRes = erpLineToBoard(r.erp_unit, r.erp_line);
-                    if (!erpRes) { skipped++; continue; }
-                    const ref  = `erp-${r.po_id}:po${r.po_id}:${String(r.erp_line).trim()}`;
+                    // a line the board does not have (MBM "TC", CEIL "Pilot Line", an
+                    // entry without a line): still kept, under the ERP's own name, so
+                    // the day's MbmPlan total equals the ERP's (planner, 2026-11-22)
+                    const erpRes = erpLineToBoard(r.erp_unit, r.erp_line)
+                        || { name : `ERP ${String(r.erp_line || '').trim() || 'no line'}`, floor_id : null };
+                    if (!erpLineToBoard(r.erp_unit, r.erp_line)) skipped++;
+                    const ref  = `erp-${r.po_id}:po${r.po_id}:${String(r.erp_line || 'none').trim()}`;
                     const unit = String(r.erp_unit || 'AQL').toUpperCase();
                     const date = typeof r.prod_date === 'string' ? r.prod_date.slice(0, 10) : new Date(r.prod_date).toLocaleDateString('en-CA');
                     await conn.query(`
@@ -5401,13 +5408,17 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
                 // (output re-spread over the order's bars after a plan change,
                 // a deleted ERP entry, an OS lump figure of the past) goes
                 // (auto-synced units only — MBM / CEIL rows are the planners' own)
+                // …and a hand-typed row (plain "db-<id>") inside the synced window
+                // goes the same way: the ERP's daily production report IS the
+                // MbmPlan production (planner, 2026-11-22) — a day the ERP books
+                // nothing on a bar is nothing on it here too
                 const pairs = [...writtenRefs.entries()].flatMap(([wk, refs]) => { const date = wk.split('|')[1]; return [...refs].map(ref => `${ref}|${date}`); });
                 const [gone] = await conn.query(
                     `DELETE FROM day_production_update_plan
-                     WHERE save_date BETWEEN ? AND ? AND event_ref LIKE '%:po%'
+                     WHERE save_date BETWEEN ? AND ?
                        AND unit IN (${PROD_AUTO_UNIT_NAMES.map(() => '?').join(',')})${pairs.length ? ` AND CONCAT(event_ref, '|', DATE_FORMAT(save_date, '%Y-%m-%d')) NOT IN (${pairs.map(() => '?').join(',')})` : ''}`,
                     [summary ? PROD_SUMMARY_TO : from, summary ? PROD_SUMMARY_TO : to, ...PROD_AUTO_UNIT_NAMES, ...pairs]);
-                if (gone.affectedRows) console.log(`[prod-sync] removed ${gone.affectedRows} row(s) no longer reported by the ERP`);
+                if (gone.affectedRows) console.log(`[prod-sync] removed ${gone.affectedRows} row(s) the ERP does not report in ${from} → ${to}`);
             }
             // The summary row (save_date = PROD_SUMMARY_TO) already contains
             // everything up to that date — older daily rows would count twice
@@ -5430,7 +5441,7 @@ async function syncErpProduction({ from, to, summary = false } = {}) {
             }
         }
         finally { conn.release(); }
-        console.log(`[prod-sync] ${summary ? `summary ≤ ${PROD_SUMMARY_TO}` : `${from} → ${to}`}: ${written} row(s) written (${unplannedRows} under the ERP line without a board bar), ${skipped} without a line`);
+        console.log(`[prod-sync] ${summary ? `summary ≤ ${PROD_SUMMARY_TO}` : `${from} → ${to}`}: ${written} row(s) written (${unplannedRows} under the ERP line without a board bar, ${skipped} of them under an ERP line the board does not have)`);
         return { written, skipped, unplannedRows };
     }
     catch (e) { console.error('[prod-sync] failed:', e.message); return { error : e.message }; }
@@ -5447,6 +5458,56 @@ async function prodSyncTick() {
     const from = new Date(now.getTime() - 2 * 864e5).toLocaleDateString('en-CA', { timeZone : SNAP_TZ });
     await syncErpProduction({ from, to : date });
 }
+
+// Reconciliation of one date: per unit the ERP's sewing output (daily_productions,
+// every line) against what day_production_update_plan holds, and the same per
+// line — the Daily production update dialog shows them side by side so the
+// planner sees at once that the two are equal (planner, 2026-11-22)
+app.get(`${BASE}/production-reconcile`, async (req, res) => {
+    const date = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ success : false, error : 'date=YYYY-MM-DD required' });
+    try {
+        await loadLineCodes();
+        const units = Object.keys(PROD_UNITS);
+        const ph = units.map(() => '?').join(',');
+        const [[erp], [plan]] = await Promise.all([
+            pool.query(`
+                SELECT u.hr_unit_short_name AS unit, hl.hr_line_name AS erp_line, SUM(d.prod_qty) AS qty, COUNT(DISTINCT d.po_id) pos
+                  FROM \`${ERP_DB}\`.daily_productions d
+                  LEFT JOIN \`${ERP_DB}\`.hr_unit u ON u.hr_unit_id = d.prod_unit_id
+                  LEFT JOIN \`${ERP_DB}\`.hr_line hl ON hl.hr_line_id = d.hr_line_id
+                 WHERE d.mr_operation_type_id = 2 AND d.status = 'Out' AND DATE(d.prod_date) = ?
+                   AND u.hr_unit_short_name IN (${ph})
+                 GROUP BY u.hr_unit_short_name, hl.hr_line_name`, [date, ...units]),
+            pool.query(`
+                SELECT unit, line, SUM(prod_qty) AS qty, COUNT(DISTINCT po_number) pos
+                  FROM day_production_update_plan
+                 WHERE save_date = ? AND unit IN (${ph})
+                 GROUP BY unit, line`, [date, ...units])
+        ]);
+        const out = {};
+        const U = u => (out[u] ||= { unit : u, erpTotal : 0, planTotal : 0, lines : {} });
+        for (const r of erp) {
+            const u = U(String(r.unit).toUpperCase());
+            const board = erpLineToBoard(r.unit, r.erp_line);
+            const name = board?.name || `ERP ${String(r.erp_line || '').trim() || 'no line'}`;
+            u.erpTotal += Number(r.qty) || 0;
+            const L = (u.lines[name] ||= { line : name, erpLine : String(r.erp_line || '') || null, erpQty : 0, planQty : 0 });
+            L.erpQty += Number(r.qty) || 0;
+        }
+        for (const r of plan) {
+            const u = U(String(r.unit).toUpperCase());
+            u.planTotal += Number(r.qty) || 0;
+            const name = r.line || '—';
+            const L = (u.lines[name] ||= { line : name, erpLine : null, erpQty : 0, planQty : 0 });
+            L.planQty += Number(r.qty) || 0;
+        }
+        const rows = Object.values(out).map(u => ({ ...u, diff : u.planTotal - u.erpTotal,
+            lines : Object.values(u.lines).map(l => ({ ...l, diff : l.planQty - l.erpQty })).sort((a, b) => String(a.line).localeCompare(String(b.line), undefined, { numeric : true })) }));
+        res.json({ success : true, date, rows });
+    }
+    catch (e) { res.status(500).json({ success : false, error : e.message }); }
+});
 
 // Manual / catch-up: POST { from, to } or { summary : true }
 app.post(`${BASE}/production-sync`, async (req, res) => {

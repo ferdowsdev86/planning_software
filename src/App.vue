@@ -27,7 +27,7 @@ import { planQtyChange, orderShares, qtyTol } from './qtyUpdateService.mjs';
 import { splitByDelivery, mergeSameSource } from './deliveryRows.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
-    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
+    loadFromApi, syncToApi, pingApi, loadProdUpdatesDb, loadProdDayBars, loadProdReconcile, runProdSync, saveProdUpdatesDb, saveLineEfficiencyDb, fetchBoardHygiene,
     saveEffProfilesDb, loadEffProfilesDb, saveLearningCurvesDb, loadLearningCurvesDb, loadUnplannedDb, loadUnplannedDbPaged, API_BASE,
     loadBoardSnapshots, createBoardSnapshot, compareBoardSnapshot, restoreBoardSnapshot,
     resolveResourceDbId, poBaseEventCode, loadErpAllOrders, loadPlanAllocation, completeOrdersDb, reopenOrdersDb,
@@ -13229,6 +13229,36 @@ function openProdUpdate() {
     puMin.value = false;
 }
 
+// ERP = MbmPlan check for the dialog's date (planner, 2026-11-22: "line-wise,
+// PO-wise production; the ERP daily production report and the MbmPlan
+// production must be equal"): per unit the ERP's sewing output against the
+// production table, and the lines whose figures differ
+const puRecon     = ref([]);
+const puReconBusy = ref(false);
+const puReconErr  = ref('');
+async function loadPuRecon() {
+    puReconBusy.value = true; puReconErr.value = '';
+    try { puRecon.value = await loadProdReconcile(puDate.value); }
+    catch (e) { puRecon.value = []; puReconErr.value = e.message; }
+    finally { puReconBusy.value = false; }
+}
+const puReconLinesOff = u => (u.lines || []).filter(l => Math.abs(l.diff) >= 1);
+// pull the ERP's output of the dialog's date (and the two days before, the
+// sync's own window) into the table now, then reload the rows and the check
+async function puSyncErpNow() {
+    if (puBusy.value) return;
+    puBusy.value = true;
+    try {
+        const to = puDate.value;
+        const from = isoInputDate(addCalDays(new Date(to + 'T00:00:00'), -2));
+        const r = await runProdSync(from, to);
+        toast(`ERP production synced ${from} → ${to}: ${r.written} row(s)${r.unplannedRows ? ` (${r.unplannedRows} under an ERP line without a board bar)` : ''}`, 'ok');
+        await buildPuRows();
+    }
+    catch (e) { toast(`ERP sync failed: ${e.message}`, 'error'); }
+    finally { puBusy.value = false; }
+}
+
 // Rows for the selected date = the strips running on the board that day
 // PLUS every bar that has production saved for that date in
 // day_production_update_plan (ERP-synced / manual) even if its bar is not
@@ -13236,6 +13266,7 @@ function openProdUpdate() {
 async function buildPuRows() {
     const s = getInstance();
     const date = puDate.value;
+    loadPuRecon();                                   // the ERP = MbmPlan check, in parallel
     let dbRows = [];
     try { dbRows = await loadProdRowsApplied(); } catch { /* offline — local store only */ }
     // Fresh store from the DB (per-PO rows of a projection bar summed onto the bar)
@@ -19038,6 +19069,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <input v-model="puDate" class="cal-in dp-date" type="date">
                         </label>
                         <button class="dp-act dp-act-gen" @click="buildPuRows">⟳ Load</button>
+                        <button class="dp-act dp-act-gen" :disabled="puBusy" title="Pull the ERP's sewing output of this date (and the two days before) into the production table now — line to line, else the PO's / order's bars" @click="puSyncErpNow">⬇ Sync ERP now</button>
                         <button class="dp-act dp-act-xls" :disabled="!puRows.length" @click="saveProdUpdate">💾 Save</button>
                     </template>
                     <template v-else>
@@ -19048,6 +19080,21 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </template>
                     <span class="dp-flex"></span>
                     <button class="dp-act dp-act-close" @click="puOpen = false">✕ Close</button>
+                </div>
+                <!-- ERP = MbmPlan check of the date: per unit, and the lines that differ -->
+                <div v-if="puMode === 'day'" class="pu-recon">
+                    <span v-if="puReconBusy" class="ls-dim">checking the ERP's output for {{ puDate }}…</span>
+                    <span v-else-if="puReconErr" class="pu-recon-bad">ERP check failed: {{ puReconErr }}</span>
+                    <template v-else-if="puRecon.length">
+                        <span class="pu-recon-t">ERP vs MbmPlan · {{ puDate }}:</span>
+                        <span v-for="u in puRecon" :key="u.unit" class="pu-recon-u" :class="Math.abs(u.diff) < 1 ? 'pu-recon-ok' : 'pu-recon-bad'"
+                            :title="puReconLinesOff(u).length ? 'Lines that differ: ' + puReconLinesOff(u).map(l => `${l.line} ERP ${fmtQty(l.erpQty)} / plan ${fmtQty(l.planQty)}`).join(' · ') : 'every line equal'">
+                            <b>{{ u.unit }}</b> ERP {{ fmtQty(u.erpTotal) }} · MbmPlan {{ fmtQty(u.planTotal) }}
+                            <template v-if="Math.abs(u.diff) < 1">✔</template>
+                            <template v-else>✘ {{ u.diff > 0 ? '+' : '' }}{{ fmtQty(u.diff) }} · {{ puReconLinesOff(u).length }} line(s) differ — Sync ERP now</template>
+                        </span>
+                    </template>
+                    <span v-else class="ls-dim">no ERP sewing output on {{ puDate }}</span>
                 </div>
                 <div v-if="puMode === 'range'" class="st-body od-body dp-body">
                     <div v-if="puBusy" class="ls-dim">Loading…</div>
@@ -21992,6 +22039,12 @@ body {
 .pu-total .pu-total-prod { font-size : 13px; }
 .pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
 .pu-rtable td, .pu-rtable th { white-space : nowrap; }
+/* ERP = MbmPlan check line of the Daily production update dialog */
+.pu-recon { display : flex; flex-wrap : wrap; gap : 6px 12px; align-items : center; padding : 4px 10px; font-size : 12px; border-bottom : 1px solid #e3e0d6; background : #fafaf7; }
+.pu-recon-t { font-weight : 700; color : #333; }
+.pu-recon-u { padding : 2px 8px; border-radius : 4px; border : 1px solid transparent; }
+.pu-recon-ok  { background : #e8f5e9; border-color : #a5d6a7; color : #1b5e20; }
+.pu-recon-bad { background : #ffebee; border-color : #ef9a9a; color : #b71c1c; }
 .pu-rtable tr.pu-grp td { background : #dde8f5; border-top : 2px solid #9db3d3; }
 .pu-rtable .pu-last { background : #fff8e1; }
 .pu-rtable .pu-tot  { background : #e8f5e9; }
