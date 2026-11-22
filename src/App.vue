@@ -3533,15 +3533,17 @@ const mshStripEff = ref(100);              // Change strip efficiency: the % to 
 const mshEffRef   = ref(true);             // … apply it to the reference bar as well
 let   mshLastIdx  = -1;                    // for shift-click ranges
 
+// the working entries first, the phase-2 ones after them (planner, 2026-11-22:
+// "bring the active ones to the top")
 const MSH_ACTIONS = [
-    { id : 'nothing',  label : '(nothing)' },
-    { id : 'unload',   label : 'Unload selected strips', soon : true },
     { id : 'link',     label : 'Link strip build up curve' },
     { id : 'unlink',   label : 'Unlink selected strips' },
+    { id : 'stripeff', label : 'Change strip efficiency' },
+    { id : 'nothing',  label : '(nothing)' },
+    { id : 'unload',   label : 'Unload selected strips', soon : true },
     { id : 'clearlc',  label : 'Clear previous update for build up curve', soon : true },
     { id : 'capfac',   label : 'Change capacity factor', soon : true },
     { id : 'clearcap', label : 'Clear capacity factor', soon : true },
-    { id : 'stripeff', label : 'Change strip efficiency' },
     { id : 'route',    label : 'Change strip route', soon : true }
 ];
 
