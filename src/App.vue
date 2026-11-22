@@ -19,7 +19,7 @@ import {
     isLateVsTarget, earliestSewStart, sewTargetDay, SEW_START_AFTER_PCD_DAYS, SEW_END_BEFORE_DELIVERY_DAYS, workingMinutesBetween
 } from './planningData.js';
 import { deliveryMonthColor, lineOverrideOf, isLineOffDay, clampIntoLineWorkWindow, productTypeFor, erpOrderInfo, orderTwinOf, WORK_SNAP_MIN } from './planningData.js';
-import { AP_LOCK_DAYS, AP_LOCK_CHOICES, AP_HOLD_SPACE, lockWindow, lockHoldReason, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
+import { AP_LOCK_DAYS, AP_LOCK_CHOICES, AP_HOLD_SPACE, AP_GROUP_DELIVERY_WINDOW_DAYS, joinsDeliveryGroup, lockWindow, lockHoldReason, overlapsLock, holdReason, remainingToPlan, attributeErpOutput } from './autoPlanRules.mjs';
 import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { curveLag, consumePlan } from './learningCurveService.mjs';
@@ -3970,10 +3970,10 @@ const apKeepStarted = ref(true);           // keep completed / production-starte
 const AP_SEW_START_AFTER_PCD = SEW_START_AFTER_PCD_DAYS;      // 8 calendar days
 const AP_FINISH_BUFFER_DAYS  = SEW_END_BEFORE_DELIVERY_DAYS;  // 7 calendar days
 // confirm orders group-wise: the confirm order rows (order + colour + delivery
-// date) of one order whose deliveries lie within this many days of the group's
-// first delivery are ONE planning unit (planner, 2026-11-19: "within 7 to 10
-// days they are planned together and the first delivery counts" — 7 before)
-const AP_GROUP_DELIVERY_WINDOW_DAYS = 10;
+// date) of one order — the same delivery always together; a later delivery
+// within AP_GROUP_DELIVERY_WINDOW_DAYS (10) of the group's first delivery only
+// while the group stays small (joinsDeliveryGroup, autoPlanRules.mjs —
+// planner 2026-11-19 / 2026-11-22)
 // product continuity: a same-product slot may start at most this many days
 // after the earliest on-time start and still be preferred (autoPlanV2)
 const AP_CONTINUITY_DELAY_DAYS = 3;
@@ -4518,7 +4518,12 @@ async function runAutoPlanV2(s, { from = null, to = null, horizonEnd = null, sta
         if (!confirm || o.balance || !o.mbmOrder || !o.ship) { grouped.push(o); continue; }
         const k = String(o.mbmOrder);
         let g = groupsByKey.get(k);
-        if (g && (+new Date(o.ship) - +new Date(g.ship)) > AP_GROUP_DELIVERY_WINDOW_DAYS * dayMs) g = null;   // a later delivery wave: its own group
+        // SAME DELIVERY TOGETHER (planner, 2026-11-22, GSL-251164): a row joins
+        // the order's open group when its delivery is the group's delivery; a
+        // later delivery inside the window joins only while the group stays
+        // ≤ 10,000 pcs — a big order is one group per delivery date (each
+        // split over lines by the quantity rule, 3,000 a piece at least)
+        if (g && !joinsDeliveryGroup({ groupShip : g.ship, groupQty : g.qty, rowShip : o.ship, rowQty : o.qty, windowDays : AP_GROUP_DELIVERY_WINDOW_DAYS })) g = null;
         if (!g) {
             g = { ...o, members : [o], idList : union(o.idList, o.dbId ? [o.dbId] : []), poList : union(o.poList, o.po ? [o.po] : []) || [], poDetails : [...(o.poDetails || [])],
                 _smvW : (Number(o.smv) || 0) * (Number(o.qty) || 0), _q : Number(o.qty) || 0 };

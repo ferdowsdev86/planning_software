@@ -14,6 +14,35 @@ export const AP_HOLD_SPACE = 'Capacity — no line finishes it by delivery − 7
 
 const day = (d, add = 0) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + add); return x; };
 
+// ---------------------------------------------------------------------------
+// WHICH CONFIRM ORDER ROWS ARE PLANNED TOGETHER (planner, 2026-11-22,
+// GSL-251164 / 26SPJCP081: 17 colour rows, 30,397 pcs due 08/12 + 2,259 due
+// 15/12, were ONE group — two strips of 15,630 cut through every colour and
+// both deliveries: "not like that — the rows of the SAME delivery are planned
+// together; over 10,000 pcs it may go on another line, 3,000 at least"):
+//   · rows of one order with the SAME delivery date are always one group
+//     (every colour of that delivery together — one run or one synchronized
+//     split, strips per colour);
+//   · a row of a LATER delivery joins the group only while the group stays
+//     SMALL — together at most `smallQty` (the engine's one-line limit,
+//     10,000) — and within `windowDays` of the group's first delivery (the
+//     planner's 2026-11-19 rule: "small quantity, deliveries within 7–10 days
+//     → planned together, the first delivery counts"); a big order is one
+//     group per delivery date, each with its own target;
+//   · the quantity rule is unchanged: over 10,000 pcs the group is split over
+//     several lines, 3,000 pcs a piece at least (autoPlanV2 bigQty / minPiece).
+// ---------------------------------------------------------------------------
+export const AP_GROUP_DELIVERY_WINDOW_DAYS = 10;
+export const AP_GROUP_SMALL_QTY = 10000;
+export function joinsDeliveryGroup({ groupShip, groupQty, rowShip, rowQty, windowDays = AP_GROUP_DELIVERY_WINDOW_DAYS, smallQty = AP_GROUP_SMALL_QTY }) {
+    if (!groupShip || !rowShip) return false;
+    const g = day(groupShip), r = day(rowShip);
+    if (+g === +r) return true;                                   // the same delivery: always together
+    const diffDays = Math.round((+r - +g) / 86400000);
+    if (diffDays < 0 || diffDays > windowDays) return false;      // a later wave: its own group
+    return (Number(groupQty) || 0) + (Number(rowQty) || 0) <= smallQty;   // close deliveries, only while small
+}
+
 // plan lock: today … today + days − 1 (inclusive) are locked; the first
 // editable day is today + days (10-day lock: today … today + 9, first
 // editable today + 10). `today` is the board's local date.

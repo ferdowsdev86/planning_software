@@ -143,3 +143,23 @@ test('ERP output on the board: planned order, started bars only, never beyond a 
     // a finished strip that left the board already took its share
     assert.equal(attributeErpOutput({ erpSewn : 3000, doneRemoved : 3000, now, bars : [{ id : 'b', base : 3000, hand : 0, start : d('2026-11-10') }] }).size, 0);
 });
+
+test('planning group: the same delivery always joins; a later delivery (≤ 10 days) only while the group stays ≤ 10,000; beyond the window never (planner 2026-11-22, GSL-251164)', async () => {
+    const { joinsDeliveryGroup, AP_GROUP_SMALL_QTY, AP_GROUP_DELIVERY_WINDOW_DAYS } = await import('./autoPlanRules.mjs');
+    assert.equal(AP_GROUP_SMALL_QTY, 10000);
+    assert.equal(AP_GROUP_DELIVERY_WINDOW_DAYS, 10);
+    // GSL-251164: 30,397 pcs due 08/12 — the 15/12 rows (7 days later) do NOT join: the group is big
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-08'), groupQty : 30397, rowShip : d('2026-12-15'), rowQty : 343 }), false);
+    // …another colour of the SAME 08/12 delivery joins, however big the group
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-08'), groupQty : 30397, rowShip : new Date('2026-12-08T10:00:00'), rowQty : 5379 }), true);
+    // 2620BES060-like: small rows, deliveries 7 days apart → together (first delivery counts)
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-21'), groupQty : 2400, rowShip : d('2026-12-28'), rowQty : 1800 }), true);
+    // …but the row that would take the group over 10,000 opens its own group
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-21'), groupQty : 8200, rowShip : d('2026-12-28'), rowQty : 1900 }), false);
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-21'), groupQty : 8200, rowShip : d('2026-12-28'), rowQty : 1800 }), true);
+    // exactly 10 days later still inside the window; 11 days is a later wave
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-21'), groupQty : 100, rowShip : d('2026-12-31'), rowQty : 100 }), true);
+    assert.equal(joinsDeliveryGroup({ groupShip : d('2026-12-21'), groupQty : 100, rowShip : d('2027-01-01'), rowQty : 100 }), false);
+    // no date → no group
+    assert.equal(joinsDeliveryGroup({ groupShip : null, groupQty : 1, rowShip : d('2026-12-21'), rowQty : 1 }), false);
+});
