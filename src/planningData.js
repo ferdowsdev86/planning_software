@@ -960,11 +960,15 @@ export function buildDayStartLines() {
 }
 
 // Off-day columns for the whole plan window (teal crosshatch on the board)
-export function buildOffDayRanges() {
+// `to`: the board's axis end when it runs past the default window — the
+// marks must cover every day the board can show (planner, 2026-11-22: Fridays
+// after Feb 2027 had no 0-hour colour)
+export function buildOffDayRanges(to = VIEW_END) {
     const ranges = [];
     let i = 0;
     const d = new Date(VIEW_START);
-    while (d < VIEW_END) {
+    const end = to > VIEW_END ? new Date(to) : VIEW_END;
+    while (d < end) {
         const end = new Date(d);
         end.setDate(end.getDate() + 1);
         if (isOffDay(d)) {

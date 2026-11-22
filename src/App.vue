@@ -1752,7 +1752,7 @@ async function runLiveOrderPlan(s, {
         const from = new Date(minS.getFullYear(), minS.getMonth(), 1);
         const to   = new Date(maxE.getFullYear(), maxE.getMonth() + 2, 1);
         if (from < s.startDate) s.startDate = from;
-        if (to > s.endDate) s.endDate = to;
+        widenAxisEnd(s, to);
     }
 
     const plannedIds = new Set(placements.map(p => String(p.order.id)));
@@ -2304,7 +2304,7 @@ function expandTimeAxisForEvents(s) {
     const from = new Date(minStart.getFullYear(), minStart.getMonth(), 1);
     const to   = new Date(maxEnd.getFullYear(), maxEnd.getMonth() + 2, 1);
     if (from < s.startDate) s.startDate = from;
-    if (to > s.endDate) s.endDate = to;
+    widenAxisEnd(s, to);
 }
 
 let boardLoadedUnitId = null;
@@ -3234,7 +3234,8 @@ function applyLineHourRanges(s = getInstance()) {
     if (olds.length) st.remove(olds);
     const ranges = [];
     const lines = s.resourceStore.records.filter(r => r.data?.lineRow);
-    for (const d0 = new Date(VIEW_START); d0 < VIEW_END; d0.setDate(d0.getDate() + 1)) {
+    const axisEnd = axisEndOf(s);
+    for (const d0 = new Date(VIEW_START); d0 < axisEnd; d0.setDate(d0.getDate() + 1)) {
         const day = new Date(d0); day.setHours(0, 0, 0, 0);
         const next = new Date(day); next.setDate(next.getDate() + 1);
         const ymd = ymdOf(day);
@@ -3256,6 +3257,57 @@ function applyLineHourRanges(s = getInstance()) {
     if (ranges.length) st.add(ranges);
 }
 const applyLineOffRanges = applyLineHourRanges;   // former name (line-only off / hours marks)
+
+// The last day the off-day marks must reach: the board's time axis grows past
+// the default window (Jul 2026 – Feb 2027) when bars are planned beyond it —
+// every day the axis shows carries its Friday / 0-hour colour (planner,
+// 2026-11-22: "the Fridays are 0 hours but the colour is not there — set it
+// for ALL upcoming Fridays")
+function axisEndOf(s) {
+    const e = s?.endDate instanceof Date ? s.endDate : null;
+    return e && e > VIEW_END ? e : VIEW_END;
+}
+// Non-working intervals of the board's calendar: one static interval per OFF
+// DATE of the axis — weekly off days and zeroed dates alike, an overridden-
+// to-working date (a Friday given 11:00) simply left out. A recurrent "every
+// Friday" rule beat a static working override in Bryntum's calendar no matter
+// the priority, so such a Friday stayed non-working in the grid.
+function applyFactoryCalendarIntervals(s) {
+    const intervals = [];
+    const axisEnd = axisEndOf(s);
+    for (const d = new Date(VIEW_START); d < axisEnd; d.setDate(d.getDate() + 1)) {
+        if (!isOffDay(d)) continue;
+        const d0 = new Date(d);
+        d0.setHours(0, 0, 0, 0);
+        const d1 = new Date(d0);
+        d1.setDate(d1.getDate() + 1);
+        intervals.push({ startDate : d0, endDate : d1, isWorking : false });
+    }
+    s.project.calendarManagerStore.data = [{ id : 'factory', name : calendarState.name, intervals }];
+    s.project.calendar = 'factory';
+}
+// Off-day column crosshatch over the whole axis (the current-time line is
+// kept; the start-up today column goes, as before)
+function applyOffDayColumns(s) {
+    const keep = s.project.timeRangeStore.records
+        .filter(r => !String(r.id).startsWith('off-') && r.id !== 'today-col')
+        .map(r => ({ ...r.data }));
+    s.project.timeRangeStore.data = [...keep, ...buildOffDayRanges(axisEndOf(s))];
+}
+// Widen the time axis to `to` (never shorter) and carry the off-day marks —
+// calendar intervals, column crosshatch, line × day hour colours — out to the
+// new end; the ONLY way the axis end should grow
+function widenAxisEnd(s, to) {
+    if (!s || !(to instanceof Date) || !(to > s.endDate)) return false;
+    s.endDate = to;
+    try {
+        applyFactoryCalendarIntervals(s);
+        applyOffDayColumns(s);
+        applyLineHourRanges(s);
+    }
+    catch (e) { console.warn('[calendar] off-day marks after widening the axis', e); }
+    return true;
+}
 
 // FastReact "Line 10 + 10": the change lands on the ticked lines only. Each
 // line keeps its own date -> hours map (planning_calendar_intervals rows
@@ -15592,7 +15644,7 @@ async function placeCarried(date, resourceRecord) {
             if (ev.endDate && ev.endDate > maxEnd) maxEnd = ev.endDate;
         }
         if (s.endDate && maxEnd > s.endDate) {
-            s.endDate = addCalDays(maxEnd, 14);
+            widenAxisEnd(s, addCalDays(maxEnd, 14));
         }
     }
 
@@ -15732,22 +15784,9 @@ function applyCalendarToBoard({ pack = true, reflow = true } = {}) {
     const s = getInstance();
     if (!s) return;
 
-    // One static non-working interval per OFF DATE of the plan window —
-    // weekly off days and zeroed dates alike, an overridden-to-working date
-    // (a Friday given 11:00) simply left out. A recurrent "every Friday"
-    // rule beat a static working override in Bryntum's calendar no matter
-    // the priority, so such a Friday stayed non-working in the grid.
-    const intervals = [];
-    for (const d = new Date(VIEW_START); d < VIEW_END; d.setDate(d.getDate() + 1)) {
-        if (!isOffDay(d)) continue;
-        const d0 = new Date(d);
-        d0.setHours(0, 0, 0, 0);
-        const d1 = new Date(d0);
-        d1.setDate(d1.getDate() + 1);
-        intervals.push({ startDate : d0, endDate : d1, isWorking : false });
-    }
-    s.project.calendarManagerStore.data = [{ id : 'factory', name : calendarState.name, intervals }];
-    s.project.calendar = 'factory';
+    // One static non-working interval per OFF DATE of the axis (see
+    // applyFactoryCalendarIntervals)
+    applyFactoryCalendarIntervals(s);
 
     // Visible day window on the axis = calendar start → the LONGEST working
     // day anywhere in the plan (weekly hours, changed-hours dates, a line's
@@ -15804,11 +15843,8 @@ function applyCalendarToBoard({ pack = true, reflow = true } = {}) {
             .map(r => ({ id : r.id, manpower : r.data.manpower }))
     );
 
-    // Off-day column crosshatch (keep the current-time line record)
-    const keep = s.project.timeRangeStore.records
-        .filter(r => r.id === 'currentTime')
-        .map(r => ({ ...r.data }));
-    s.project.timeRangeStore.data = [...keep, ...buildOffDayRanges()];
+    // Off-day column crosshatch over the whole axis (keeps the current-time line)
+    applyOffDayColumns(s);
     applyLineOffRanges(s);
 
     // Reflow every bar to the new calendar (FastReact rule): starts snap off
