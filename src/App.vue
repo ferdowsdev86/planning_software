@@ -12305,8 +12305,47 @@ function lpCell(r, k) {
     if (k === 'pcd' || k === 'ship' || k === 'close') return r[k] ? fmtDdMmYy(r[k]) : '';
     return String(r[k] ?? '');
 }
+// Column search + sort on the table (planner, 2026-11-22: "ascending /
+// descending on the columns, search by buyer, style, order"): a search box
+// under every header — text = contains; SMV / Order Qty / Delay also take
+// >, <, >=, <=, = (">10000", "<-30"); a header click sorts asc → desc → off
+// (off = most late first). Both apply to the rows the run produced; Excel
+// exports the table as shown.
+const lpFilters = ref(Object.fromEntries(LP_COLS.map(c => [c.k, ''])));
+const lpSort    = ref({ key : '', dir : 1 });
+function lpClearFilters() { for (const c of LP_COLS) lpFilters.value[c.k] = ''; }
+function lpToggleSort(k) {
+    const s = lpSort.value;
+    lpSort.value = s.key !== k ? { key : k, dir : 1 } : s.dir === 1 ? { key : k, dir : -1 } : { key : '', dir : 1 };
+}
+const lpSortVal = (r, k) => {
+    if (k === 'smv' || k === 'qty' || k === 'delay') return Number(r[k]) || 0;
+    if (k === 'pcd' || k === 'ship' || k === 'close') return r[k] instanceof Date ? r[k].getTime() : 0;
+    return String(r[k] ?? '').toLowerCase();
+};
+const lpView = computed(() => {
+    const active = LP_COLS.map(c => ({ c, q : String(lpFilters.value[c.k] || '').trim() })).filter(x => x.q);
+    let rows = !active.length ? lpRows.value : lpRows.value.filter(r => active.every(({ c, q }) => {
+        if (c.num) {
+            const m = /^(>=|<=|>|<|=)?\s*(-?[\d,.]+)$/.exec(q);
+            if (m) {
+                const val = Number(m[2].replace(/,/g, ''));
+                if (Number.isFinite(val)) return cmpApply(m[1] || '=', Number(r[c.k]) || 0, val);
+            }
+        }
+        return lpCell(r, c.k).toLowerCase().includes(q.toLowerCase());
+    }));
+    const { key, dir } = lpSort.value;
+    if (key) {
+        rows = [...rows].sort((a, b) => {
+            const av = lpSortVal(a, key), bv = lpSortVal(b, key);
+            return av < bv ? -dir : av > bv ? dir : 0;
+        });
+    }
+    return rows;
+});
 function exportLatePlanExcel() {
-    const rows = lpRows.value;
+    const rows = lpView.value;
     if (!rows.length) { toast('No late plan to export', 'warn'); return; }
     const th = LP_COLS.map(c => `<th>${dpEsc(c.label)}</th>`).join('');
     const body = rows.map(r => `<tr>${LP_COLS.map(c => `<td${c.num ? ' style="text-align:right"' : ''}>${dpEsc(lpCell(r, c.k))}</td>`).join('')}</tr>`).join('');
@@ -17493,7 +17532,7 @@ const findSummary = computed(() => {
 const toolbar = [
     { fa : 'fa-xmark', cls : 'fr-tb-red', title : 'Close view', action : 'close' },
     { fa : 'fa-house', title : 'Go to current date', action : 'home' },
-    { fa : 'fa-magnifying-glass', cls : 'fr-tb-find', toggle : 'find', title : 'Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)', action : 'find' },
+    // the Find strips button sits AFTER the search box (planner, 2026-11-22) — see the toolbar template
     { sep : true },
     { fa : 'fa-magnifying-glass-minus', title : 'Horizontal zoom out — narrower days (up to 16 weeks on screen)', action : 'hZoomOut' },
     { fa : 'fa-magnifying-glass-plus',  title : 'Horizontal zoom in — wider days (the board opens at 8 weeks)', action : 'hZoomIn' },
@@ -17786,6 +17825,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     placeholder="Search buyer, PO, style…"
                 >
             </label>
+            <!-- Find strips: beside the search box (planner, 2026-11-22: "put the search icon there") -->
+            <button class="fr-tb-btn fr-tb-find fr-tb-find-after" :class="{ 'fr-tb-on' : findOpen || findIds }" title="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" aria-label="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" :aria-pressed="String(findOpen)" @click="act('find')">
+                <i class="fa-solid fr-tb-fa fa-magnifying-glass" aria-hidden="true"></i>
+            </button>
         </div>
 
         <!-- Board -->
@@ -18839,24 +18882,15 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="cal-dialog od-dialog lp-dialog">
                 <div class="cal-title">
                     Late plan — {{ lpInfo.unit || 'board' }}
-                    <span class="pu-units">· as of {{ lpInfo.at }} · {{ lpInfo.range }} · {{ lpRows.length }} late order row(s)</span>
+                    <span class="pu-units">· as of {{ lpInfo.at }} · {{ lpInfo.range }} · {{ lpView.length === lpRows.length ? lpRows.length : `${lpView.length} of ${lpRows.length}` }} late order row(s)</span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="lpMin = true">—</span>
                         <span class="cal-x" @click="lpOpen = false">✕</span>
                     </span>
                 </div>
-                <div class="dp-toolbar">
-                    <span class="lp-rule" title="The target sewing end is delivery − 7 calendar days. A minus figure = the planned sewing close is that many days AFTER the target; the report lists those rows, most late first.">
-                        <b>Delay in Days</b> = (Delivery − 7) − Sewing Close Plan · minus = late
-                    </span>
-                    <span class="lp-note">{{ lpInfo.onTime }} order row(s) close on time
-                        <template v-if="lpInfo.held"> · {{ lpInfo.held }} strip(s) on the Holding Row not counted</template></span>
-                    <button class="dp-act dp-act-xls" :disabled="!lpRows.length" @click="exportLatePlanExcel">📊 Excel</button>
-                </div>
-                <div class="st-body od-body dp-body">
-                    <div v-if="!lpRows.length" class="ls-dim">No late plan for {{ lpInfo.range }} on this board — every planned order of those deliveries closes by delivery − 7.</div>
-                    <table v-else class="st-table lp-table">
-                    <label class="dp-range" title="Orders whose delivery date is on or after this day (empty = no lower limit)">Delivery from
+                <!-- top bar: the delivery date range the report runs for -->
+                <div class="lp-filterbar">
+                    <label class="dp-range" title="Orders whose delivery date is on or after this day (empty = no lower limit)">Delivery date from
                         <input v-model="lpFrom" class="cal-in dp-date" type="date" @keydown.enter="buildLatePlanRows">
                     </label>
                     <label class="dp-range" title="Orders whose delivery date is on or before this day (empty = no upper limit)">to
@@ -18864,11 +18898,42 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </label>
                     <button class="dp-act dp-act-gen" title="Run the report for the picked delivery dates" @click="buildLatePlanRows">⟳ Run</button>
                     <button v-if="lpFrom || lpTo" class="dp-act dp-act-close" title="Clear the delivery dates and run for every delivery" @click="lpFrom = ''; lpTo = ''; buildLatePlanRows()">✕ All dates</button>
+                    <span class="lp-note">{{ lpInfo.onTime }} order row(s) close on time
+                        <template v-if="lpInfo.held"> · {{ lpInfo.held }} strip(s) on the Holding Row not counted</template></span>
+                </div>
+                <div class="dp-toolbar">
+                    <span class="lp-rule" title="The target sewing end is delivery − 7 calendar days. A minus figure = the planned sewing close is that many days AFTER the target; the report lists those rows, most late first.">
+                        <b>Delay in Days</b> = (Delivery − 7) − Sewing Close Plan · minus = late
+                    </span>
+                    <span class="lp-hint">Click a column header to sort (asc → desc → off) · type under a header to search; SMV / Order Qty / Delay also take &gt;, &lt; (e.g. &lt;-30)</span>
+                    <button v-if="LP_COLS.some(c => lpFilters[c.k])" class="dp-act dp-act-close" title="Clear every column search" @click="lpClearFilters">✕ Clear search</button>
+                    <button class="dp-act dp-act-xls" :disabled="!lpView.length" title="Export the table as shown (search and sort applied)" @click="exportLatePlanExcel">📊 Excel</button>
+                </div>
+                <div class="st-body od-body dp-body">
+                    <div v-if="!lpRows.length" class="ls-dim">No late plan for {{ lpInfo.range }} on this board — every planned order of those deliveries closes by delivery − 7.</div>
+                    <table v-else class="st-table lp-table">
                         <thead>
-                            <tr><th v-for="c in LP_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th></tr>
+                            <tr>
+                                <th v-for="c in LP_COLS" :key="c.k" class="od-sortable" :class="{ 'od-num' : c.num, 'od-sorted' : lpSort.key === c.k }"
+                                    title="Click to sort (asc → desc → off)" @click="lpToggleSort(c.k)">
+                                    {{ c.label }}
+                                    <span class="od-sort-btns">
+                                        <span class="od-sort-b" :class="{ 'od-sort-on' : lpSort.key === c.k && lpSort.dir === 1 }" title="Sort ascending" @click.stop="lpSort = { key : c.k, dir : 1 }">▲</span>
+                                        <span class="od-sort-b" :class="{ 'od-sort-on' : lpSort.key === c.k && lpSort.dir === -1 }" title="Sort descending" @click.stop="lpSort = { key : c.k, dir : -1 }">▼</span>
+                                    </span>
+                                </th>
+                            </tr>
+                            <tr class="od-filterrow">
+                                <th v-for="c in LP_COLS" :key="c.k">
+                                    <input v-model="lpFilters[c.k]" class="od-filter" type="text" placeholder="🔍"
+                                        :title="c.num ? `Search ${c.label} — a number, or >, <, >=, <=, = before it` : `Search ${c.label} (contains)`"
+                                        @keydown.escape="lpFilters[c.k] = ''">
+                                </th>
+                            </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in lpRows" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
+                            <tr v-if="!lpView.length"><td :colspan="LP_COLS.length" class="ls-dim">No row matches the search.</td></tr>
+                            <tr v-for="r in lpView" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
                                 <td v-for="c in LP_COLS" :key="c.k" :class="{ 'od-num' : c.num, 'lp-late' : c.k === 'delay' }">{{ lpCell(r, c.k) }}</td>
                             </tr>
                         </tbody>
@@ -21767,6 +21832,7 @@ body {
 .fnd-po { display : block; font-size : 10px; color : #5b6673; }
 .fnd-none { padding : 10px; color : #a35b00; }
 .fr-tb-find.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
+.fr-tb-find-after { margin-left : 6px; }
 
 /* Consolidate orders toggle (toolbar) — pressed look while ON */
 .fr-tb-btn.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
@@ -21848,6 +21914,20 @@ body {
 .lp-dialog { width : min(1180px, 96vw); }
 .lp-rule { font-size : 12px; color : #444; background : #fff8e1; border : 1px solid #ffcc80; border-radius : 5px; padding : 3px 8px; }
 .lp-note { font-size : 12px; color : #666; margin-left : auto; }
+/* the delivery date range the report runs for — its own bar under the title, one line */
+.lp-filterbar {
+    display       : flex;
+    align-items   : center;
+    flex-wrap     : nowrap;
+    gap           : 10px;
+    padding       : 8px 12px;
+    background    : #eef3fb;
+    border-bottom : 1px solid #c9d3e6;
+}
+.lp-filterbar .dp-range { white-space : nowrap; }
+.lp-hint { font-size : 11.5px; color : #777; }
+.lp-table thead th { position : sticky; top : 0; z-index : 1; }
+.lp-table .od-filterrow th { top : 28px; }
 .lp-table th { text-align : center; white-space : nowrap; }
 .lp-table td { text-align : center; white-space : nowrap; }
 .lp-table td.od-num { text-align : right; }
@@ -23242,6 +23322,7 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 }
 .ch-time  { width : 90px; text-align : center; }
 .cal-in.ch-date { width : 168px; }   /* beats .cal-in's 70 px — the whole mm/dd/yyyy shows (it read "02/01/202") */
+.cal-in.dp-date { width : 168px; }   /* the report toolbars' date fields (Late plan, Day Plan, production update) — the same cut year ("11/01/20") */
 /* period + target in one row; the line list under it, side by side */
 .ch-where { margin-bottom : 10px; }
 .ch-where-row { display : flex; flex-wrap : wrap; align-items : center; gap : 6px 10px; }
@@ -23263,7 +23344,6 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
     margin      : 10px 0 4px;
 }
 .ch-apply { width : auto; margin : 0; padding : 7px 26px; }
-.cal-in.dp-date { width : 168px; }   /* the report toolbars' date fields (Late plan, Day Plan, production update) — the same cut year ("11/01/20") */
 .ch-note  { color : #333; }
 /* colour legend of the line × day marks (same paints as the board) */
 .ch-legend { margin-top : 4px; }
