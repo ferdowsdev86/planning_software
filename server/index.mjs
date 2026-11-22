@@ -5018,44 +5018,69 @@ const restoreSnapshotHandler = async (req, res) => {
                 await conn.query(`DELETE FROM planning_assignments WHERE event_id IN (${ph})`, gone);
                 cancelled = gone.length;
             }
-            // 2. every bar of the backup returns to its saved state
+            // 2. every bar of the backup returns to its saved state — in BATCHES:
+            //    one read of the current rows, multi-row writes of 200. Bar by
+            //    bar (4 queries each) a 936-bar board took over 3 minutes on
+            //    the remote DB, longer than a proxy waits — the screen said
+            //    "Restore failed" while the server was still restoring
+            //    (planner, 2026-11-22)
+            const CHUNK = 200;
+            const chunks = list => { const out = []; for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK)); return out; };
+            const curById = new Map();
+            for (const part of chunks(bars.map(b => Number(b.id)).filter(Boolean))) {
+                const [cr] = await conn.query(`SELECT id, planning_order_id, notes FROM planning_events WHERE id IN (${part.map(() => '?').join(',')})`, part);
+                for (const c of cr) curById.set(Number(c.id), c);
+            }
+            const fullRows = [], summaryBars = [], assignRows = [];
             for (const b of bars) {
                 const id = Number(b.id);
                 if (!resOk.has(Number(b.lineId))) { missing.push({ order : b.order, reason : `line ${b.line} no longer exists` }); continue; }
-                const [[cur]] = await conn.query('SELECT id, planning_order_id, notes FROM planning_events WHERE id = ?', [id]);
+                const cur = curById.get(id);
                 if (cur) { if (cur.planning_order_id) touched.add(Number(cur.planning_order_id)); noteIds(cur.notes).forEach(i => touched.add(i)); }
                 if (b.row) {
-                    const cols = EVENT_COLS.filter(c => c in b.row);
-                    const vals = cols.map(c => b.row[c]);
-                    if (cur) {
-                        await conn.query(`UPDATE planning_events SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [...vals, b.row.updated_at || snap.taken_at, id]);
-                        restored++;
-                    }
-                    else {
-                        await conn.query(`INSERT INTO planning_events (id, ${cols.join(', ')}, updated_at) VALUES (?, ${cols.map(() => '?').join(', ')}, ?)`, [id, ...vals, b.row.updated_at || snap.taken_at]);
-                        recreated++;
-                    }
+                    fullRows.push({ id, row : b.row, exists : !!cur });
                     if (b.row.planning_order_id) planned.add(Number(b.row.planning_order_id));
                     noteIds(b.row.notes).forEach(i => planned.add(i));
                 }
                 else {
                     // older backup (summary only): position, quantity and status
                     if (!cur) { missing.push({ order : b.order, reason : 'bar was deleted and this older backup has no full copy of it' }); continue; }
-                    await conn.query(
-                        `UPDATE planning_events SET start_date = ?, end_date = ?,
-                                duration = ROUND(TIMESTAMPDIFF(MINUTE, ?, ?) / 1440, 2),
-                                planned_quantity = ?, event_status = ?,
-                                notes = JSON_REMOVE(COALESCE(NULLIF(notes, ''), '{}'), '$.madeBase'),
-                                updated_at = ? WHERE id = ?`,
-                        [`${b.start}:00`, `${b.end}:00`, `${b.start}:00`, `${b.end}:00`, Number(b.qty) || 0, b.status || 'draft', snap.taken_at, id]);
-                    restored++;
+                    summaryBars.push(b);
                     if (cur.planning_order_id) planned.add(Number(cur.planning_order_id));
                     noteIds(cur.notes).forEach(i => planned.add(i));
                 }
-                await conn.query('DELETE FROM planning_assignments WHERE event_id = ?', [id]);
+                assignRows.push([id, Number(b.lineId), 100, Number(b.qty) || 0]);
+            }
+            // full rows: insert the missing ones and overwrite the existing ones in one statement per chunk
+            if (fullRows.length) {
+                const cols = EVENT_COLS.filter(c => c in fullRows[0].row);
+                const upd  = [...cols.map(c => `${c} = VALUES(${c})`), 'updated_at = VALUES(updated_at)'].join(', ');
+                for (const part of chunks(fullRows)) {
+                    const vals = part.flatMap(f => [f.id, ...cols.map(c => f.row[c]), f.row.updated_at || snap.taken_at]);
+                    await conn.query(
+                        `INSERT INTO planning_events (id, ${cols.join(', ')}, updated_at)
+                         VALUES ${part.map(() => `(?, ${cols.map(() => '?').join(', ')}, ?)`).join(',')}
+                         ON DUPLICATE KEY UPDATE ${upd}`, vals);
+                }
+                restored  += fullRows.filter(f => f.exists).length;
+                recreated += fullRows.filter(f => !f.exists).length;
+            }
+            for (const b of summaryBars) {
                 await conn.query(
-                    'INSERT INTO planning_assignments (event_id, resource_id, units, assigned_quantity, created_at) VALUES (?, ?, 100, ?, NOW())',
-                    [id, Number(b.lineId), Number(b.qty) || 0]);
+                    `UPDATE planning_events SET start_date = ?, end_date = ?,
+                            duration = ROUND(TIMESTAMPDIFF(MINUTE, ?, ?) / 1440, 2),
+                            planned_quantity = ?, event_status = ?,
+                            notes = JSON_REMOVE(COALESCE(NULLIF(notes, ''), '{}'), '$.madeBase'),
+                            updated_at = ? WHERE id = ?`,
+                    [`${b.start}:00`, `${b.end}:00`, `${b.start}:00`, `${b.end}:00`, Number(b.qty) || 0, b.status || 'draft', snap.taken_at, Number(b.id)]);
+                restored++;
+            }
+            // assignments: drop the current ones of every restored bar, write the backup's
+            for (const part of chunks(assignRows)) {
+                await conn.query(`DELETE FROM planning_assignments WHERE event_id IN (${part.map(() => '?').join(',')})`, part.map(a => a[0]));
+                await conn.query(
+                    `INSERT INTO planning_assignments (event_id, resource_id, units, assigned_quantity, created_at)
+                     VALUES ${part.map(() => '(?, ?, ?, ?, NOW())').join(',')}`, part.flat());
             }
             // 3. order list status follows the restored board
             const setStatus = async (ids, status) => {

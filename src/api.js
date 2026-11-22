@@ -618,10 +618,22 @@ export async function createBoardSnapshot(unitId, by) {
 // Restore the board to a backup (server checks the permission and takes a
 // 'pre-restore' backup of the current plan first)
 export async function restoreBoardSnapshot(id, by) {
-    const res = await apiFetch(`${API_BASE}/board-snapshots/${id}/restore`, {
-        method : 'POST', headers : { 'Content-Type' : 'application/json' },
-        body : JSON.stringify({ by })
-    });
+    // a big board takes a while; the server restores in one transaction, so a
+    // dropped connection (proxy timeout) does not mean the restore failed
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10 * 60 * 1000);
+    let res;
+    try {
+        res = await apiFetch(`${API_BASE}/board-snapshots/${id}/restore`, {
+            method : 'POST', headers : { 'Content-Type' : 'application/json' },
+            body : JSON.stringify({ by }), signal : ctl.signal
+        });
+    }
+    catch (e) {
+        throw new Error(`the connection dropped while the server was restoring (${e.name === 'AbortError' ? 'no answer in 10 minutes' : e.message}) — the restore runs as one transaction on the server: reload the board in a minute and check Board backup & compare before trying again`);
+    }
+    finally { clearTimeout(timer); }
+    if (res.status === 502 || res.status === 504) throw new Error(`the proxy stopped waiting (HTTP ${res.status}) while the server was restoring — reload the board in a minute and check Board backup & compare before trying again`);
     const j = await res.json();
     if (!j.success) throw new Error(j.error || 'restore failed');
     return j;
