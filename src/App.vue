@@ -12309,41 +12309,49 @@ function lpCell(r, k) {
 // descending on the columns, search by buyer, style, order"): a search box
 // under every header — text = contains; SMV / Order Qty / Delay also take
 // >, <, >=, <=, = (">10000", "<-30"); a header click sorts asc → desc → off
-// (off = most late first). Both apply to the rows the run produced; Excel
-// exports the table as shown.
-const lpFilters = ref(Object.fromEntries(LP_COLS.map(c => [c.k, ''])));
-const lpSort    = ref({ key : '', dir : 1 });
-function lpClearFilters() { for (const c of LP_COLS) lpFilters.value[c.k] = ''; }
-function lpToggleSort(k) {
-    const s = lpSort.value;
-    lpSort.value = s.key !== k ? { key : k, dir : 1 } : s.dir === 1 ? { key : k, dir : -1 } : { key : '', dir : 1 };
-}
-const lpSortVal = (r, k) => {
-    if (k === 'smv' || k === 'qty' || k === 'delay') return Number(r[k]) || 0;
-    if (k === 'pcd' || k === 'ship' || k === 'close') return r[k] instanceof Date ? r[k].getTime() : 0;
-    return String(r[k] ?? '').toLowerCase();
-};
-const lpView = computed(() => {
-    const active = LP_COLS.map(c => ({ c, q : String(lpFilters.value[c.k] || '').trim() })).filter(x => x.q);
-    let rows = !active.length ? lpRows.value : lpRows.value.filter(r => active.every(({ c, q }) => {
-        if (c.num) {
-            const m = /^(>=|<=|>|<|=)?\s*(-?[\d,.]+)$/.exec(q);
-            if (m) {
-                const val = Number(m[2].replace(/,/g, ''));
-                if (Number.isFinite(val)) return cmpApply(m[1] || '=', Number(r[c.k]) || 0, val);
+// (off = the run's own order). Both apply to the rows the run produced; Excel
+// exports the table as shown. Shared by the report tables (Late plan, Plan
+// before PCD): cols carry num / date flags, cellOf is the table's text.
+function reportTable(cols, rowsRef, cellOf) {
+    const filters = ref(Object.fromEntries(cols.map(c => [c.k, ''])));
+    const sort    = ref({ key : '', dir : 1 });
+    const clear   = () => { for (const c of cols) filters.value[c.k] = ''; };
+    const toggle  = k => {
+        const s = sort.value;
+        sort.value = s.key !== k ? { key : k, dir : 1 } : s.dir === 1 ? { key : k, dir : -1 } : { key : '', dir : 1 };
+    };
+    const byKey = Object.fromEntries(cols.map(c => [c.k, c]));
+    const sortVal = (r, k) => {
+        const c = byKey[k];
+        if (c?.num)  return Number(r[k]) || 0;
+        if (c?.date) return r[k] instanceof Date ? r[k].getTime() : 0;
+        return String(r[k] ?? '').toLowerCase();
+    };
+    const view = computed(() => {
+        const active = cols.map(c => ({ c, q : String(filters.value[c.k] || '').trim() })).filter(x => x.q);
+        let rows = !active.length ? rowsRef.value : rowsRef.value.filter(r => active.every(({ c, q }) => {
+            if (c.num) {
+                const m = /^(>=|<=|>|<|=)?\s*(-?[\d,.]+)$/.exec(q);
+                if (m) {
+                    const val = Number(m[2].replace(/,/g, ''));
+                    if (Number.isFinite(val)) return cmpApply(m[1] || '=', Number(r[c.k]) || 0, val);
+                }
             }
+            return cellOf(r, c.k).toLowerCase().includes(q.toLowerCase());
+        }));
+        const { key, dir } = sort.value;
+        if (key) {
+            rows = [...rows].sort((a, b) => {
+                const av = sortVal(a, key), bv = sortVal(b, key);
+                return av < bv ? -dir : av > bv ? dir : 0;
+            });
         }
-        return lpCell(r, c.k).toLowerCase().includes(q.toLowerCase());
-    }));
-    const { key, dir } = lpSort.value;
-    if (key) {
-        rows = [...rows].sort((a, b) => {
-            const av = lpSortVal(a, key), bv = lpSortVal(b, key);
-            return av < bv ? -dir : av > bv ? dir : 0;
-        });
-    }
-    return rows;
-});
+        return rows;
+    });
+    const searching = computed(() => cols.some(c => String(filters.value[c.k] || '').trim()));
+    return { filters, sort, clear, toggle, view, searching };
+}
+const { filters : lpFilters, sort : lpSort, clear : lpClearFilters, toggle : lpToggleSort, view : lpView, searching : lpSearching } = reportTable(LP_COLS, lpRows, lpCell);
 function exportLatePlanExcel() {
     const rows = lpView.value;
     if (!rows.length) { toast('No late plan to export', 'warn'); return; }
@@ -12466,8 +12474,12 @@ function ppCell(r, k) {
     if (k === 'pcd' || k === 'ship' || k === 'start' || k === 'close') return r[k] ? fmtDdMmYy(r[k]) : '';
     return String(r[k] ?? '');
 }
+// column search + sort, as on the Late plan report (planner, 2026-11-22,
+// screenshot of this report: "ascending / descending on the columns, so
+// buyer, style, order can be searched")
+const { filters : ppFilters, sort : ppSort, clear : ppClearFilters, toggle : ppToggleSort, view : ppView, searching : ppSearching } = reportTable(PP_COLS, ppRows, ppCell);
 function exportPlanBeforePcdExcel() {
-    const rows = ppRows.value;
+    const rows = ppView.value;
     if (!rows.length) { toast('No order planned before PCD + 7 to export', 'warn'); return; }
     const th = PP_COLS.map(c => `<th>${dpEsc(c.label)}</th>`).join('');
     const body = rows.map(r => `<tr>${PP_COLS.map(c => `<td${c.num ? ' style="text-align:right"' : ''}>${dpEsc(ppCell(r, c.k))}</td>`).join('')}</tr>`).join('');
@@ -18947,7 +18959,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="cal-dialog od-dialog lp-dialog">
                 <div class="cal-title">
                     Plan before PCD — {{ ppInfo.unit || 'board' }}
-                    <span class="pu-units">· as of {{ ppInfo.at }}<template v-if="ppInfo.range"> · delivery {{ ppInfo.range }}</template> · {{ ppRows.length }} order row(s) start before PCD + 7</span>
+                    <span class="pu-units">· as of {{ ppInfo.at }}<template v-if="ppInfo.range"> · delivery {{ ppInfo.range }}</template> · {{ ppView.length === ppRows.length ? ppRows.length : `${ppView.length} of ${ppRows.length}` }} order row(s) start before PCD + 7</span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="ppMin = true">—</span>
                         <span class="cal-x" @click="ppOpen = false">✕</span>
@@ -18961,12 +18973,14 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <input v-model="ppTo" class="cal-in ch-date" type="date" @keydown.enter="buildPlanBeforePcdRows">
                     </label>
                     <button class="dp-act dp-act-gen" title="Run the report on the selected delivery date range (blank = every delivery)" @click="buildPlanBeforePcdRows">▶ Run</button>
-                    <button class="dp-act dp-act-xls" :disabled="!ppRows.length" @click="exportPlanBeforePcdExcel">📊 Excel</button>
+                    <button class="dp-act dp-act-xls" :disabled="!ppView.length" title="Export the table as shown (search and sort applied)" @click="exportPlanBeforePcdExcel">📊 Excel</button>
                 </div>
                 <div class="dp-toolbar">
                     <span class="lp-rule" title="Sewing start date = the day the order's first strip starts on a line. A minus figure = sewing starts that many days before PCD + 7 (the planner's example: PCD 08/11, start 12/11 → 4 − 7 = −3); the report lists those rows, the earliest first.">
                         <b>Plan Before PCD</b> = (Sewing start date − PCD) − 7 · minus = starts inside the 7 days after PCD
                     </span>
+                    <span class="lp-hint">Click a column header to sort (asc → desc → off) · type under a header to search; SMV / Order Qty / Plan Before PCD also take &gt;, &lt;</span>
+                    <button v-if="ppSearching" class="dp-act dp-act-close" title="Clear every column search" @click="ppClearFilters">✕ Clear search</button>
                     <span class="lp-note">{{ ppInfo.ok }} order row(s) start on or after PCD + 7
                         <template v-if="ppInfo.noPcd"> · {{ ppInfo.noPcd }} without a PCD</template>
                         <template v-if="ppInfo.outside"> · {{ ppInfo.outside }} outside the delivery range</template>
@@ -18976,10 +18990,27 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div v-if="!ppRows.length" class="ls-dim">No order on this board starts sewing before PCD + 7.</div>
                     <table v-else class="st-table lp-table">
                         <thead>
-                            <tr><th v-for="c in PP_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th></tr>
+                            <tr>
+                                <th v-for="c in PP_COLS" :key="c.k" class="od-sortable" :class="{ 'od-num' : c.num, 'od-sorted' : ppSort.key === c.k }"
+                                    title="Click to sort (asc → desc → off)" @click="ppToggleSort(c.k)">
+                                    {{ c.label }}
+                                    <span class="od-sort-btns">
+                                        <span class="od-sort-b" :class="{ 'od-sort-on' : ppSort.key === c.k && ppSort.dir === 1 }" title="Sort ascending" @click.stop="ppSort = { key : c.k, dir : 1 }">▲</span>
+                                        <span class="od-sort-b" :class="{ 'od-sort-on' : ppSort.key === c.k && ppSort.dir === -1 }" title="Sort descending" @click.stop="ppSort = { key : c.k, dir : -1 }">▼</span>
+                                    </span>
+                                </th>
+                            </tr>
+                            <tr class="od-filterrow">
+                                <th v-for="c in PP_COLS" :key="c.k">
+                                    <input v-model="ppFilters[c.k]" class="od-filter" type="text" placeholder="🔍"
+                                        :title="c.num ? `Search ${c.label} — a number, or >, <, >=, <=, = before it` : `Search ${c.label} (contains)`"
+                                        @keydown.escape="ppFilters[c.k] = ''">
+                                </th>
+                            </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in ppRows" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
+                            <tr v-if="!ppView.length"><td :colspan="PP_COLS.length" class="ls-dim">No row matches the search.</td></tr>
+                            <tr v-for="r in ppView" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
                                 <td v-for="c in PP_COLS" :key="c.k" :class="{ 'od-num' : c.num, 'lp-late' : c.k === 'before' }">{{ ppCell(r, c.k) }}</td>
                             </tr>
                         </tbody>
