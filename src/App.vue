@@ -696,6 +696,8 @@ const openWindows = computed(() => [
     { id : 'dayplan',  icon : '📄', title : 'Day Plan Report',     open : dpOpen.value,       min : dpMin.value },
     { id : 'avail',    icon : '📦', title : 'Available Order',     open : availOpen.value,    min : availMin.value },
     { id : 'produpd',  icon : '🏭', title : 'Production update',   open : puOpen.value,       min : puMin.value },
+    { id : 'lateplan', icon : '⚠️', title : 'Late plan',           open : lpOpen.value,       min : lpMin.value },
+    { id : 'pbpcd',    icon : '⏱', title : 'Plan before PCD',     open : ppOpen.value,       min : ppMin.value },
     { id : 'stripprod', icon : '🏭', title : `Production update — ${spHead.value?.po || 'strip'}`, open : spOpen.value, min : spMin.value },
     { id : 'settings', icon : '⚙️', title : 'Settings',            open : settingsOpen.value, min : settingsMin.value },
     { id : 'roles',    icon : '👤', title : 'Planning roles',      open : rolesOpen.value,    min : rolesMin.value },
@@ -714,6 +716,8 @@ function restoreWin(id) {
     if (id === 'dayplan')  dpMin.value = false;
     if (id === 'avail')    availMin.value = false;
     if (id === 'produpd')  puMin.value = false;
+    if (id === 'lateplan') lpMin.value = false;
+    if (id === 'pbpcd')    ppMin.value = false;
     if (id === 'stripprod') spMin.value = false;
     if (id === 'settings') settingsMin.value = false;
     if (id === 'roles')    rolesMin.value = false;
@@ -731,6 +735,8 @@ function closeWin(id) {
     if (id === 'orders')   ordersOpen.value = false;
     if (id === 'dayplan')  dpOpen.value = false;
     if (id === 'produpd')  puOpen.value = false;
+    if (id === 'lateplan') lpOpen.value = false;
+    if (id === 'pbpcd')    ppOpen.value = false;
     if (id === 'stripprod') spOpen.value = false;
     if (id === 'settings') settingsOpen.value = false;
     if (id === 'roles')    rolesOpen.value = false;
@@ -12197,6 +12203,234 @@ ${table}
 }
 
 // ---------------------------------------------------------------------------
+// Late plan report (Reports menu; planner, 2026-11-22, spreadsheet format:
+// ERP number · Buyer · Style · Item/Garments type · SMV · Order Qty · PCD ·
+// Delivery · Sewing Close Plan · Delay in Days). One row per ERP order and
+// delivery date of the LOADED board, from the bars on its sewing lines
+// (Holding Row bars are parked, not planned, and stay out — their count is
+// shown). Sewing Close Plan = the day the order's last strip ends.
+// Delay in Days = (Delivery − 7) − Sewing Close Plan, in calendar days: the
+// target sewing end is delivery − 7 (SEW_END_BEFORE_DELIVERY_DAYS), so a MINUS
+// figure = the plan closes that many days AFTER the target (the planner's
+// example: delivery 10/12, close 05/12 → −2). The report lists the late rows
+// (delay < 0), most late first.
+// ---------------------------------------------------------------------------
+const lpOpen = ref(false);
+const lpMin  = ref(false);
+const lpRows = ref([]);
+const lpInfo = ref({ unit : '', at : '', onTime : 0, held : 0 });
+const LP_COLS = [
+    { k : 'erp',    label : 'ERP number' },
+    { k : 'buyer',  label : 'Buyer' },
+    { k : 'style',  label : 'Style' },
+    { k : 'item',   label : 'Item/ Garments type' },
+    { k : 'smv',    label : 'SMV', num : true },
+    { k : 'qty',    label : 'Order Qty', num : true },
+    { k : 'pcd',    label : 'PCD', date : true },
+    { k : 'ship',   label : 'Delivery', date : true },
+    { k : 'close',  label : 'Sewing Close Plan', date : true },
+    { k : 'delay',  label : 'Delay in Days', num : true }
+];
+// the calendar day a strip's sewing ends on (an end at 00:00 belongs to the day before)
+function lpCloseDay(end) {
+    const e = new Date(end);
+    if (Number.isNaN(e.getTime())) return null;
+    if (e.getHours() === 0 && e.getMinutes() === 0) e.setDate(e.getDate() - 1);
+    e.setHours(0, 0, 0, 0);
+    return e;
+}
+function buildLatePlanRows() {
+    const s = getInstance();
+    const groups = new Map();
+    let held = 0;
+    for (const ev of s?.eventStore?.records || []) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || raw.status === 'completed' || !raw.ship) continue;
+        const lid = lineIdOf(s, ev);
+        if (!lid) continue;
+        if (isHoldId(lid)) { held++; continue; }
+        const close = lpCloseDay(ev.endDate);
+        if (!close) continue;
+        const ship = new Date(raw.ship);
+        if (Number.isNaN(ship.getTime())) continue;
+        const erp = String(raw.mbmOrder || raw.id || '').trim();
+        const key = `${erp}|${ymdOf(ship)}`;
+        let g = groups.get(key);
+        if (!g) {
+            g = { erp, buyer : raw.buyer || '', style : raw.style || '', item : raw.productType || '',
+                smv : Number(raw.smv) || 0, qty : 0, pcd : raw.pcd ? new Date(raw.pcd) : null,
+                ship, close, lines : new Set(), bars : 0 };
+            groups.set(key, g);
+        }
+        g.bars++;
+        g.lines.add(s.resourceStore.getById(lid)?.name || lid);
+        if (close > g.close) g.close = close;
+        if (!g.smv && Number(raw.smv) > 0) g.smv = Number(raw.smv);
+        // the order's quantity: the whole-order figure when the bar carries one
+        const oq = Number(raw.fullOrderQty) || Number(raw.orderQty) || Number(raw.baseQty) || Number(raw.qty) || 0;
+        if (oq > g.qty) g.qty = oq;
+        if (raw.pcd && (!g.pcd || new Date(raw.pcd) < g.pcd)) g.pcd = new Date(raw.pcd);
+    }
+    const all = [...groups.values()].map(g => {
+        const target = sewTargetDay(g.ship);
+        const delay = target ? Math.round((+target - +g.close) / 86400000) : 0;
+        return { ...g, lines : [...g.lines].sort().join(', '), delay };
+    });
+    const late = all.filter(r => r.delay < 0).sort((a, b) => a.delay - b.delay || a.ship - b.ship || a.erp.localeCompare(b.erp));
+    lpRows.value = late;
+    lpInfo.value = { unit : currentBoard.value?.unitName || unitLabel(boardLoadedUnitId ?? currentBoard.value?.unitId) || '',
+        at : fmtDdMmYy(boardToday()), onTime : all.length - late.length, held };
+}
+function openLatePlanReport() {
+    openMenu.value = null;
+    if (!getInstance()) { toast('Open a planning board first — the report reads the loaded board', 'warn'); return; }
+    buildLatePlanRows();
+    lpOpen.value = true;
+    lpMin.value = false;
+}
+function lpCell(r, k) {
+    if (k === 'smv')   return r.smv ? String(Math.round(r.smv * 100) / 100) : '';
+    if (k === 'qty')   return fmtQty(r.qty);
+    if (k === 'delay') return String(r.delay);
+    if (k === 'pcd' || k === 'ship' || k === 'close') return r[k] ? fmtDdMmYy(r[k]) : '';
+    return String(r[k] ?? '');
+}
+function exportLatePlanExcel() {
+    const rows = lpRows.value;
+    if (!rows.length) { toast('No late plan to export', 'warn'); return; }
+    const th = LP_COLS.map(c => `<th>${dpEsc(c.label)}</th>`).join('');
+    const body = rows.map(r => `<tr>${LP_COLS.map(c => `<td${c.num ? ' style="text-align:right"' : ''}>${dpEsc(lpCell(r, c.k))}</td>`).join('')}</tr>`).join('');
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8"><style>
+  table { border-collapse: collapse; font-family: Calibri, Arial, sans-serif; font-size: 10pt; }
+  th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; text-align: center; }
+  th { font-weight: bold; }
+</style></head><body>
+<h2 style="margin:0">Late plan — ${dpEsc(lpInfo.value.unit)} · ${dpEsc(lpInfo.value.at)}</h2>
+<div style="margin:4px 0 8px;font-size:9pt">Delay in Days = (Delivery − 7) − Sewing Close Plan · minus = the plan closes that many days after the target sewing end (delivery − 7)</div>
+<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
+</body></html>`;
+    const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `LatePlan_${(lpInfo.value.unit || 'board').replace(/\W+/g, '')}_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${rows.length} late order row(s) to Excel`, 'ok');
+}
+
+// ---------------------------------------------------------------------------
+// Plan before PCD report (Reports menu; planner, 2026-11-22, spreadsheet
+// format: ERP Number · Buyer · Style · Item/Garments type · SMV · Order Qty ·
+// PCD · Delivery · Sewing start date · Sewing Close Plan · Plan Before PCD).
+// Same rows as the Late plan report — one per ERP order and delivery date of
+// the LOADED board, from the bars on its sewing lines (Holding Row bars are
+// parked, not planned, and stay out — their count is shown). Sewing start
+// date = the day the order's first strip starts, Sewing Close Plan = the day
+// its last strip ends. Plan Before PCD = (Sewing start date − PCD) − 7, in
+// calendar days (the planner's example: PCD 08/11, start 12/11 → 4 − 7 = −3):
+// a MINUS figure = sewing starts inside the 7 days after PCD (before PCD + 7),
+// the report lists those rows, the earliest first.
+// ---------------------------------------------------------------------------
+const ppOpen = ref(false);
+const ppMin  = ref(false);
+const ppRows = ref([]);
+const ppInfo = ref({ unit : '', at : '', ok : 0, held : 0 });
+const PP_COLS = [
+    { k : 'erp',    label : 'ERP Number' },
+    { k : 'buyer',  label : 'Buyer' },
+    { k : 'style',  label : 'Style' },
+    { k : 'item',   label : 'Item/ Garments type' },
+    { k : 'smv',    label : 'SMV', num : true },
+    { k : 'qty',    label : 'Order Qty', num : true },
+    { k : 'pcd',    label : 'PCD', date : true },
+    { k : 'ship',   label : 'Delivery', date : true },
+    { k : 'start',  label : 'Sewing start date', date : true },
+    { k : 'close',  label : 'Sewing Close Plan', date : true },
+    { k : 'before', label : 'Plan Before PCD', num : true }
+];
+const PP_AFTER_PCD_DAYS = 7;
+function buildPlanBeforePcdRows() {
+    const s = getInstance();
+    const groups = new Map();
+    let held = 0;
+    for (const ev of s?.eventStore?.records || []) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage || raw.status === 'completed' || !raw.ship) continue;
+        const lid = lineIdOf(s, ev);
+        if (!lid) continue;
+        if (isHoldId(lid)) { held++; continue; }
+        const close = lpCloseDay(ev.endDate);
+        const start = new Date(ev.startDate);
+        if (!close || Number.isNaN(start.getTime())) continue;
+        start.setHours(0, 0, 0, 0);
+        const erp = String(raw.mbmOrder || raw.id || '').trim();
+        const key = `${erp}|${ymdOf(new Date(raw.ship))}`;   // raw.ship may be a string on a loaded bar
+        let g = groups.get(key);
+        if (!g) {
+            g = { erp, buyer : raw.buyer || '', style : raw.style || '', item : raw.productType || '',
+                smv : Number(raw.smv) || 0, qty : 0, pcd : raw.pcd ? new Date(raw.pcd) : null,
+                ship : new Date(raw.ship), start, close, lines : new Set(), bars : 0 };
+            groups.set(key, g);
+        }
+        g.bars++;
+        g.lines.add(s.resourceStore.getById(lid)?.name || lid);
+        if (start < g.start) g.start = start;
+        if (close > g.close) g.close = close;
+        if (!g.smv && Number(raw.smv) > 0) g.smv = Number(raw.smv);
+        const oq = Number(raw.fullOrderQty) || Number(raw.orderQty) || Number(raw.baseQty) || Number(raw.qty) || 0;
+        if (oq > g.qty) g.qty = oq;
+        if (raw.pcd && (!g.pcd || new Date(raw.pcd) < g.pcd)) g.pcd = new Date(raw.pcd);
+    }
+    const all = [...groups.values()].filter(g => g.pcd && !Number.isNaN(g.pcd.getTime())).map(g => {
+        const pcd = new Date(g.pcd); pcd.setHours(0, 0, 0, 0);
+        const before = Math.round((+g.start - +pcd) / 86400000) - PP_AFTER_PCD_DAYS;
+        return { ...g, pcd, lines : [...g.lines].sort().join(', '), before };
+    });
+    const early = all.filter(r => r.before < 0).sort((a, b) => a.before - b.before || a.start - b.start || a.erp.localeCompare(b.erp));
+    ppRows.value = early;
+    ppInfo.value = { unit : currentBoard.value?.unitName || unitLabel(boardLoadedUnitId ?? currentBoard.value?.unitId) || '',
+        at : fmtDdMmYy(boardToday()), ok : all.length - early.length, held, noPcd : groups.size - all.length };
+}
+function openPlanBeforePcdReport() {
+    openMenu.value = null;
+    if (!getInstance()) { toast('Open a planning board first — the report reads the loaded board', 'warn'); return; }
+    buildPlanBeforePcdRows();
+    ppOpen.value = true;
+    ppMin.value = false;
+}
+function ppCell(r, k) {
+    if (k === 'smv')    return r.smv ? String(Math.round(r.smv * 100) / 100) : '';
+    if (k === 'qty')    return fmtQty(r.qty);
+    if (k === 'before') return String(r.before);
+    if (k === 'pcd' || k === 'ship' || k === 'start' || k === 'close') return r[k] ? fmtDdMmYy(r[k]) : '';
+    return String(r[k] ?? '');
+}
+function exportPlanBeforePcdExcel() {
+    const rows = ppRows.value;
+    if (!rows.length) { toast('No order planned before PCD + 7 to export', 'warn'); return; }
+    const th = PP_COLS.map(c => `<th>${dpEsc(c.label)}</th>`).join('');
+    const body = rows.map(r => `<tr>${PP_COLS.map(c => `<td${c.num ? ' style="text-align:right"' : ''}>${dpEsc(ppCell(r, c.k))}</td>`).join('')}</tr>`).join('');
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8"><style>
+  table { border-collapse: collapse; font-family: Calibri, Arial, sans-serif; font-size: 10pt; }
+  th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; text-align: center; }
+  th { font-weight: bold; }
+</style></head><body>
+<h2 style="margin:0">Plan before PCD — ${dpEsc(ppInfo.value.unit)} · ${dpEsc(ppInfo.value.at)}</h2>
+<div style="margin:4px 0 8px;font-size:9pt">Plan Before PCD = (Sewing start date − PCD) − 7 · minus = sewing starts inside the 7 days after PCD</div>
+<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
+</body></html>`;
+    const blob = new Blob(['﻿' + html], { type : 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `PlanBeforePCD_${(ppInfo.value.unit || 'board').replace(/\W+/g, '')}_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${rows.length} order row(s) to Excel`, 'ok');
+}
+
+// ---------------------------------------------------------------------------
 // Daily production update: line-wise actual output per day. Saved quantities
 // are subtracted on the board - the strip shows the remaining pieces.
 // ---------------------------------------------------------------------------
@@ -17353,6 +17587,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <div class="fr-dd-item" @click="openProdUpdate">
                         <i class="fa-solid fa-industry fr-dd-fa" aria-hidden="true"></i> Daily production update
                     </div>
+                    <div class="fr-dd-item" title="Orders of the loaded board whose planned sewing close is after delivery − 7" @click="openLatePlanReport">
+                        <i class="fa-solid fa-triangle-exclamation fr-dd-fa" aria-hidden="true"></i> Late plan
+                    </div>
+                    <div class="fr-dd-item" title="Orders of the loaded board whose sewing starts inside the 7 days after PCD: Plan Before PCD = (Sewing start date − PCD) − 7" @click="openPlanBeforePcdReport">
+                        <i class="fa-solid fa-hourglass-start fr-dd-fa" aria-hidden="true"></i> Plan before PCD
+                    </div>
                     <div class="fr-dd-item" @click="openBoardBackup">
                         <i class="fa-solid fa-clock-rotate-left fr-dd-fa" aria-hidden="true"></i> Board backup &amp; compare (daily 23:30)
                     </div>
@@ -18569,6 +18809,79 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                         <button class="cal-btn st-btn" @click="spOpen = false">✕ Close</button>
                     </div>
                     <div class="st-hint">Prod qty = ওই দিনের actual output · strip-এর যেকোনো দিনে দেওয়া যায় · ERP থেকে আসা দিন read-only · Save করলে strip-এর remaining qty board-এ কমে · Cum. = শুরু থেকে জমা · Variance = cum. actual − cum. plan</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Late plan report: orders of the loaded board that close after delivery − 7 -->
+        <div v-if="lpOpen && !lpMin" class="cal-overlay" @click.self="lpOpen = false">
+            <div class="cal-dialog od-dialog lp-dialog">
+                <div class="cal-title">
+                    Late plan — {{ lpInfo.unit || 'board' }}
+                    <span class="pu-units">· as of {{ lpInfo.at }} · {{ lpRows.length }} late order row(s)</span>
+                    <span class="cal-title-btns">
+                        <span class="cal-x cal-minbtn" @click="lpMin = true">—</span>
+                        <span class="cal-x" @click="lpOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="dp-toolbar">
+                    <span class="lp-rule" title="The target sewing end is delivery − 7 calendar days. A minus figure = the planned sewing close is that many days AFTER the target; the report lists those rows, most late first.">
+                        <b>Delay in Days</b> = (Delivery − 7) − Sewing Close Plan · minus = late
+                    </span>
+                    <span class="lp-note">{{ lpInfo.onTime }} order row(s) close on time
+                        <template v-if="lpInfo.held"> · {{ lpInfo.held }} strip(s) on the Holding Row not counted</template></span>
+                    <button class="dp-act dp-act-gen" @click="buildLatePlanRows">⟳ Refresh</button>
+                    <button class="dp-act dp-act-xls" :disabled="!lpRows.length" @click="exportLatePlanExcel">📊 Excel</button>
+                </div>
+                <div class="st-body od-body dp-body">
+                    <div v-if="!lpRows.length" class="ls-dim">No late plan on this board — every planned order closes by delivery − 7.</div>
+                    <table v-else class="st-table lp-table">
+                        <thead>
+                            <tr><th v-for="c in LP_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="r in lpRows" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
+                                <td v-for="c in LP_COLS" :key="c.k" :class="{ 'od-num' : c.num, 'lp-late' : c.k === 'delay' }">{{ lpCell(r, c.k) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plan before PCD report: orders of the loaded board whose sewing starts before PCD + 7 -->
+        <div v-if="ppOpen && !ppMin" class="cal-overlay" @click.self="ppOpen = false">
+            <div class="cal-dialog od-dialog lp-dialog">
+                <div class="cal-title">
+                    Plan before PCD — {{ ppInfo.unit || 'board' }}
+                    <span class="pu-units">· as of {{ ppInfo.at }} · {{ ppRows.length }} order row(s) start before PCD + 7</span>
+                    <span class="cal-title-btns">
+                        <span class="cal-x cal-minbtn" @click="ppMin = true">—</span>
+                        <span class="cal-x" @click="ppOpen = false">✕</span>
+                    </span>
+                </div>
+                <div class="dp-toolbar">
+                    <span class="lp-rule" title="Sewing start date = the day the order's first strip starts on a line. A minus figure = sewing starts that many days before PCD + 7 (the planner's example: PCD 08/11, start 12/11 → 4 − 7 = −3); the report lists those rows, the earliest first.">
+                        <b>Plan Before PCD</b> = (Sewing start date − PCD) − 7 · minus = starts inside the 7 days after PCD
+                    </span>
+                    <span class="lp-note">{{ ppInfo.ok }} order row(s) start on or after PCD + 7
+                        <template v-if="ppInfo.noPcd"> · {{ ppInfo.noPcd }} without a PCD</template>
+                        <template v-if="ppInfo.held"> · {{ ppInfo.held }} strip(s) on the Holding Row not counted</template></span>
+                    <button class="dp-act dp-act-gen" @click="buildPlanBeforePcdRows">⟳ Refresh</button>
+                    <button class="dp-act dp-act-xls" :disabled="!ppRows.length" @click="exportPlanBeforePcdExcel">📊 Excel</button>
+                </div>
+                <div class="st-body od-body dp-body">
+                    <div v-if="!ppRows.length" class="ls-dim">No order on this board starts sewing before PCD + 7.</div>
+                    <table v-else class="st-table lp-table">
+                        <thead>
+                            <tr><th v-for="c in PP_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="r in ppRows" :key="r.erp + '|' + +r.ship" :title="`${r.bars} strip(s) on ${r.lines}`">
+                                <td v-for="c in PP_COLS" :key="c.k" :class="{ 'od-num' : c.num, 'lp-late' : c.k === 'before' }">{{ ppCell(r, c.k) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -21493,6 +21806,15 @@ body {
 .sp-st-pend { background : #ffe0b2; }
 .sp-st-fut { background : #eee; }
 .sp-complete { display : flex; align-items : center; gap : 6px; font-size : 12px; margin : 10px 0 2px; }
+
+/* Late plan report */
+.lp-dialog { width : min(1180px, 96vw); }
+.lp-rule { font-size : 12px; color : #444; background : #fff8e1; border : 1px solid #ffcc80; border-radius : 5px; padding : 3px 8px; }
+.lp-note { font-size : 12px; color : #666; margin-left : auto; }
+.lp-table th { text-align : center; white-space : nowrap; }
+.lp-table td { text-align : center; white-space : nowrap; }
+.lp-table td.od-num { text-align : right; }
+.lp-table td.lp-late { color : #b71c1c; font-weight : 700; }
 
 /* Daily production update */
 .pu-in {
