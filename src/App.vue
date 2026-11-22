@@ -12218,7 +12218,14 @@ ${table}
 const lpOpen = ref(false);
 const lpMin  = ref(false);
 const lpRows = ref([]);
-const lpInfo = ref({ unit : '', at : '', onTime : 0, held : 0 });
+const lpInfo = ref({ unit : '', at : '', onTime : 0, held : 0, range : '' });
+// the report runs for a DELIVERY date range the planner picks (planner,
+// 2026-11-22: "the report should be run on a selected delivery date") —
+// both ends inclusive, an empty end = open
+const lpFrom = ref('');
+const lpTo   = ref('');
+const lpRangeLabel = computed(() => lpFrom.value && lpTo.value ? `delivery ${fmtDdMmYy(lpFrom.value)} – ${fmtDdMmYy(lpTo.value)}`
+    : lpFrom.value ? `delivery from ${fmtDdMmYy(lpFrom.value)}` : lpTo.value ? `delivery up to ${fmtDdMmYy(lpTo.value)}` : 'every delivery date');
 const LP_COLS = [
     { k : 'erp',    label : 'ERP number' },
     { k : 'buyer',  label : 'Buyer' },
@@ -12243,16 +12250,19 @@ function buildLatePlanRows() {
     const s = getInstance();
     const groups = new Map();
     let held = 0;
+    const from = lpFrom.value ? new Date(`${lpFrom.value}T00:00:00`) : null;
+    const to   = lpTo.value   ? new Date(`${lpTo.value}T23:59:59`)   : null;
     for (const ev of s?.eventStore?.records || []) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage || raw.status === 'completed' || !raw.ship) continue;
+        const ship = new Date(raw.ship);
+        if (Number.isNaN(ship.getTime())) continue;
+        if ((from && ship < from) || (to && ship > to)) continue;     // not the picked delivery dates
         const lid = lineIdOf(s, ev);
         if (!lid) continue;
         if (isHoldId(lid)) { held++; continue; }
         const close = lpCloseDay(ev.endDate);
         if (!close) continue;
-        const ship = new Date(raw.ship);
-        if (Number.isNaN(ship.getTime())) continue;
         const erp = String(raw.mbmOrder || raw.id || '').trim();
         const key = `${erp}|${ymdOf(ship)}`;
         let g = groups.get(key);
@@ -12279,7 +12289,7 @@ function buildLatePlanRows() {
     const late = all.filter(r => r.delay < 0).sort((a, b) => a.delay - b.delay || a.ship - b.ship || a.erp.localeCompare(b.erp));
     lpRows.value = late;
     lpInfo.value = { unit : currentBoard.value?.unitName || unitLabel(boardLoadedUnitId ?? currentBoard.value?.unitId) || '',
-        at : fmtDdMmYy(boardToday()), onTime : all.length - late.length, held };
+        at : fmtDdMmYy(boardToday()), onTime : all.length - late.length, held, range : lpRangeLabel.value };
 }
 function openLatePlanReport() {
     openMenu.value = null;
@@ -12306,7 +12316,7 @@ function exportLatePlanExcel() {
   th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; text-align: center; }
   th { font-weight: bold; }
 </style></head><body>
-<h2 style="margin:0">Late plan — ${dpEsc(lpInfo.value.unit)} · ${dpEsc(lpInfo.value.at)}</h2>
+<h2 style="margin:0">Late plan — ${dpEsc(lpInfo.value.unit)} · ${dpEsc(lpInfo.value.at)} · ${dpEsc(lpInfo.value.range)}</h2>
 <div style="margin:4px 0 8px;font-size:9pt">Delay in Days = (Delivery − 7) − Sewing Close Plan · minus = the plan closes that many days after the target sewing end (delivery − 7)</div>
 <table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
 </body></html>`;
@@ -18818,7 +18828,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="cal-dialog od-dialog lp-dialog">
                 <div class="cal-title">
                     Late plan — {{ lpInfo.unit || 'board' }}
-                    <span class="pu-units">· as of {{ lpInfo.at }} · {{ lpRows.length }} late order row(s)</span>
+                    <span class="pu-units">· as of {{ lpInfo.at }} · {{ lpInfo.range }} · {{ lpRows.length }} late order row(s)</span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="lpMin = true">—</span>
                         <span class="cal-x" @click="lpOpen = false">✕</span>
@@ -18830,12 +18840,19 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </span>
                     <span class="lp-note">{{ lpInfo.onTime }} order row(s) close on time
                         <template v-if="lpInfo.held"> · {{ lpInfo.held }} strip(s) on the Holding Row not counted</template></span>
-                    <button class="dp-act dp-act-gen" @click="buildLatePlanRows">⟳ Refresh</button>
                     <button class="dp-act dp-act-xls" :disabled="!lpRows.length" @click="exportLatePlanExcel">📊 Excel</button>
                 </div>
                 <div class="st-body od-body dp-body">
-                    <div v-if="!lpRows.length" class="ls-dim">No late plan on this board — every planned order closes by delivery − 7.</div>
+                    <div v-if="!lpRows.length" class="ls-dim">No late plan for {{ lpInfo.range }} on this board — every planned order of those deliveries closes by delivery − 7.</div>
                     <table v-else class="st-table lp-table">
+                    <label class="dp-range" title="Orders whose delivery date is on or after this day (empty = no lower limit)">Delivery from
+                        <input v-model="lpFrom" class="cal-in dp-date" type="date" @keydown.enter="buildLatePlanRows">
+                    </label>
+                    <label class="dp-range" title="Orders whose delivery date is on or before this day (empty = no upper limit)">to
+                        <input v-model="lpTo" class="cal-in dp-date" type="date" @keydown.enter="buildLatePlanRows">
+                    </label>
+                    <button class="dp-act dp-act-gen" title="Run the report for the picked delivery dates" @click="buildLatePlanRows">⟳ Run</button>
+                    <button v-if="lpFrom || lpTo" class="dp-act dp-act-close" title="Clear the delivery dates and run for every delivery" @click="lpFrom = ''; lpTo = ''; buildLatePlanRows()">✕ All dates</button>
                         <thead>
                             <tr><th v-for="c in LP_COLS" :key="c.k" :class="{ 'od-num' : c.num }">{{ c.label }}</th></tr>
                         </thead>
@@ -23225,6 +23242,7 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
     margin      : 10px 0 4px;
 }
 .ch-apply { width : auto; margin : 0; padding : 7px 26px; }
+.cal-in.dp-date { width : 168px; }   /* the report toolbars' date fields (Late plan, Day Plan, production update) — the same cut year ("11/01/20") */
 .ch-note  { color : #333; }
 /* colour legend of the line × day marks (same paints as the board) */
 .ch-legend { margin-top : 4px; }
