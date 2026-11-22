@@ -3104,18 +3104,31 @@ function chApply() {
     saveCalendarOverridesDb({ ...calendarState.overrides }, calendarState.id || 1, JSON.parse(JSON.stringify(calendarState.lineOverrides)))
         .catch(e => toast(`Working hours kept in this browser only — DB save failed: ${e.message}`, 'warn'));
     if (lineCleared) toast(`${lineCleared} line-specific hour(s) on those dates removed — every line follows the ${calendarState.name} now`, 'ok');
-    applyCalendarToBoard();
-    const s = getInstance();
+    // The hours are saved above; from here on the board follows them. The
+    // dialog closes whatever happens on the board side, and a failure there
+    // is said out loud — it never looks as if Apply did nothing (planner,
+    // 2026-11-22: "I change February's working days to 10 but it cannot
+    // update, the colour does not come")
+    chOpen.value = false;
     let rs = null;
-    if (s) {
-        // The planner changed the hours → bars running through those dates
-        // follow (start kept, end = when the qty is made on the new hours)
-        const toEnd = new Date(to);
-        toEnd.setDate(toEnd.getDate() + 1);
-        if (!boardReadOnly.value) rs = resizeBars(s, ev => ev.startDate < toEnd && ev.endDate > from);
-        recalcCapacity(s);
-        refreshGrandTotals(s);
-        s.refreshRows?.();
+    const s = getInstance();
+    try {
+        applyCalendarToBoard();
+        if (s) {
+            // The planner changed the hours → bars running through those dates
+            // follow (start kept, end = when the qty is made on the new hours)
+            const toEnd = new Date(to);
+            toEnd.setDate(toEnd.getDate() + 1);
+            if (!boardReadOnly.value) rs = resizeBars(s, ev => ev.startDate < toEnd && ev.endDate > from);
+            recalcCapacity(s);
+            refreshGrandTotals(s);
+            s.refreshRows?.();
+            chRevealPeriod(s, from, toEnd);
+        }
+    }
+    catch (e) {
+        console.error('[change working hours] board refresh failed', e);
+        toast(`Hours saved to the ${calendarState.name}, but the board could not be refreshed: ${e.message} — reload the board`, 'error');
     }
     if (rs && (rs.shrunk || rs.grown)) {
         toast(`${rs.shrunk + rs.grown} bar(s) re-sized to the new hours (${rs.shrunk} shorter, ${rs.grown} longer${rs.pushed ? `, ${rs.pushed} follower(s) shifted` : ''}) — Save to keep`, 'ok');
@@ -3124,7 +3137,18 @@ function chApply() {
     if (!changedDates.length && sameDates.length && chAction.value === 'zero') {
         toast('To make a WORKING day a holiday tick that weekday (or "All days of the week") and set the period to the date(s) — a weekly off day needs no change', 'warn');
     }
-    chOpen.value = false;
+}
+// After Apply the board shows the period that was changed: when none of it
+// is on screen (February changed while November is in view) the view scrolls
+// to its first day, so the planner sees the new colours at once
+function chRevealPeriod(s, from, toEnd) {
+    try {
+        const vr = s.visibleDateRange;
+        if (vr?.startDate && vr?.endDate && (from >= vr.endDate || toEnd <= vr.startDate)) {
+            s.scrollToDate(from, { block : 'start', animate : false });
+        }
+    }
+    catch { /* the axis may not hold the date yet */ }
 }
 
 // Same change on another unit's calendar (picked under "Apply changes to"):
@@ -22831,7 +22855,7 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
     flex-wrap   : wrap;
 }
 .ch-time  { width : 90px; text-align : center; }
-.ch-date  { width : 140px; }
+.cal-in.ch-date { width : 168px; }   /* beats .cal-in's 70 px — the whole mm/dd/yyyy shows (it read "02/01/202") */
 /* period + target in one row; the line list under it, side by side */
 .ch-where { margin-bottom : 10px; }
 .ch-where-row { display : flex; flex-wrap : wrap; align-items : center; gap : 6px 10px; }

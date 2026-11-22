@@ -1332,23 +1332,31 @@ app.put(`${BASE}/calendars/:id/overrides`, async (req, res) => {
         await conn.query(
             `DELETE FROM planning_calendar_intervals WHERE calendar_id = ? AND recurrent_rule = ?${lov ? '' : ' AND resource_id IS NULL'}`,
             [calId, CAL_OVERRIDE]);
-        let n = 0;
-        const insert = async (rid, d, h) => {
+        // One multi-row INSERT per 500 rows — a row-by-row insert of a
+        // calendar's ~1,200 override dates took 60–70 s against the remote DB,
+        // so Change working hours looked stuck (planner, 2026-11-22:
+        // "cannot update, not smooth")
+        const rows = [];
+        const add = (rid, d, h) => {
             if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Number(h)) || Number(h) < 0 || Number(h) > 24) return;
-            await conn.query(
-                `INSERT INTO planning_calendar_intervals
-                    (calendar_id, resource_id, interval_type, interval_name, recurrent_rule, start_date, end_date, created_at, updated_at)
-                 VALUES (?, ?, 'overtime', ?, ?, ?, ?, NOW(), NOW())`,
-                [calId, rid, `HOURS=${Number(h)}`, CAL_OVERRIDE, `${d} 00:00:00`, `${d} 23:59:59`]);
-            n++;
+            rows.push([calId, rid, 'overtime', `HOURS=${Number(h)}`, CAL_OVERRIDE, `${d} 00:00:00`, `${d} 23:59:59`]);
         };
-        for (const [d, h] of Object.entries(ov)) await insert(null, d, h);
+        for (const [d, h] of Object.entries(ov)) add(null, d, h);
         if (lov) {
             for (const [rid, map] of Object.entries(lov)) {
                 if (!(Number(rid) > 0) || !map || typeof map !== 'object') continue;
-                for (const [d, h] of Object.entries(map)) await insert(Number(rid), d, h);
+                for (const [d, h] of Object.entries(map)) add(Number(rid), d, h);
             }
         }
+        for (let i = 0; i < rows.length; i += 500) {
+            const chunk = rows.slice(i, i + 500);
+            await conn.query(
+                `INSERT INTO planning_calendar_intervals
+                    (calendar_id, resource_id, interval_type, interval_name, recurrent_rule, start_date, end_date, created_at, updated_at)
+                 VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, NOW(), NOW())').join(',')}`,
+                chunk.flat());
+        }
+        const n = rows.length;
         await conn.commit();
         res.json({ success : true, saved : n });
     }
