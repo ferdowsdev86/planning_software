@@ -8964,7 +8964,7 @@ function orderSortVal(r, k) {
 // are counted over the list as the search / column filters leave it
 // (baseErpOrders), never over the tile's own rows.
 //   projected / confirm       rows of that type
-//   planned / holding / unplanned
+//   planned / holding / unplanned / totalUnplanned (= holding + unplanned)
 //                              rows with a share of that quantity (rowShares)
 //   today / last3             orders created today / in the last 3 days
 // The two quantity tiles (Order Qty, PO Qty) sort, as before.
@@ -8978,7 +8978,7 @@ function recentCutoff(mode) {
     return mode === 'today' ? startToday : new Date(+startToday - 2 * 86400000);
 }
 
-const ORDER_TILES = new Set(['projected', 'confirm', 'planned', 'holding', 'unplanned', 'today', 'last3']);
+const ORDER_TILES = new Set(['projected', 'confirm', 'planned', 'holding', 'unplanned', 'totalUnplanned', 'today', 'last3']);
 function tileAction(what) {
     if (what === 'orderQty')  { toggleOrderSort('orderQty'); return; }
     if (what === 'poQty')     { toggleOrderSort('qty'); return; }
@@ -8993,7 +8993,9 @@ function rowInTile(r, tile, countedType) {
     // a quantity tile: the rows it is counted from, with a share of it
     if ((r.orderType === 'confirm' ? 'confirm' : 'projected') !== countedType) return false;
     const sh = rowShares(r);
-    return (tile === 'planned' ? sh.line + sh.sewn : tile === 'holding' ? sh.hold : sh.lock + sh.fresh) > 0;
+    const notOnLine = sh.lock + sh.fresh;
+    return (tile === 'planned' ? sh.line + sh.sewn : tile === 'holding' ? sh.hold
+        : tile === 'totalUnplanned' ? sh.hold + notOnLine : notOnLine) > 0;
 }
 
 // The list as the search and the column filters leave it — what the tiles count
@@ -9242,6 +9244,10 @@ const ordersSummary = computed(() => {
         // sewn already (off the board) counts as Planned; what is not on the
         // board — lock or not — is Unplanned: the three add up to the Order Qty
         plannedQty : T.line + T.sewn, holdingQty : T.hold, unplannedQty : T.lock + T.fresh,
+        // everything NOT on a sewing line: Holding Qty + Unplanned (planner,
+        // 2026-11-22: "add another button at the top, Total unplanned =
+        // holding + unplanned")
+        totalUnplannedQty : T.hold + T.lock + T.fresh,
         sewnQty : T.sewn, lockQty : T.lock, freshQty : T.fresh, todayQty, last3Qty };
 });
 
@@ -17778,6 +17784,9 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             + (ordersSummary.freshQty > 0 ? ` · ${fmtQty(ordersSummary.freshQty)} pcs: the part of an order no PO has been issued for yet, or a new order the board's Auto plan has not placed yet` : '')
                             + ' — click to show the rows it comes from'"
                         @click="tileAction('unplanned')">Unplanned <b>{{ fmtQty(ordersSummary.unplannedQty) }}</b></span>
+                    <span class="od-sum-tile od-sum-tunpl od-sum-click" :class="{ 'od-sum-on' : ordersTile === 'totalUnplanned' }"
+                        :title="`Everything not on a sewing line = Holding Qty ${fmtQty(ordersSummary.holdingQty)} + Unplanned ${fmtQty(ordersSummary.unplannedQty)} — click to show the rows it comes from`"
+                        @click="tileAction('totalUnplanned')">Total unplanned <b>{{ fmtQty(ordersSummary.totalUnplannedQty) }}</b></span>
                     <span class="od-sum-tile od-sum-qty od-sum-click"
                         :title="'Order qty of the open orders (= Available + Planned in Available Order) = Planned + Holding Qty + Unplanned — click to sort'
                             + (ordersSummary.doneOrderQty ? ` · completed orders not counted: ${fmtQty(ordersSummary.doneOrderQty)}` : '')"
@@ -20646,6 +20655,8 @@ body {
 .od-sum-done  { background : #eceff1; border-color : #b0bec5; }
 .od-sum-unpl  { background : #ffebee; border-color : #ef9a9a; }
 .od-sum-hold  { background : #fff8e1; border-color : #ffcc80; }
+/* Total unplanned = Holding + Unplanned: the two colours side by side */
+.od-sum-tunpl { background : linear-gradient(90deg, #fff8e1 0 50%, #ffebee 50% 100%); border-color : #e57373; }
 .od-onboard.od-onboard-lock { color : #b71c1c; }
 .od-sum-recent { background : #e8f5e9; border-color : #81c784; }
 .od-sum-on { outline : 2px solid #1e88e5; outline-offset : 1px; }
