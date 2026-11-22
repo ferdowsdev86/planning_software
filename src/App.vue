@@ -12346,6 +12346,10 @@ const ppOpen = ref(false);
 const ppMin  = ref(false);
 const ppRows = ref([]);
 const ppInfo = ref({ unit : '', at : '', ok : 0, held : 0 });
+// the report runs on a DELIVERY DATE range (planner, 2026-11-22: "the report
+// should run on a selected delivery date") — blank = every delivery
+const ppFrom = ref('');
+const ppTo   = ref('');
 const PP_COLS = [
     { k : 'erp',    label : 'ERP Number' },
     { k : 'buyer',  label : 'Buyer' },
@@ -12392,7 +12396,13 @@ function buildPlanBeforePcdRows() {
         if (oq > g.qty) g.qty = oq;
         if (raw.pcd && (!g.pcd || new Date(raw.pcd) < g.pcd)) g.pcd = new Date(raw.pcd);
     }
-    const all = [...groups.values()].filter(g => g.pcd && !Number.isNaN(g.pcd.getTime())).map(g => {
+    // the delivery date range the planner selected (blank end = open)
+    const from = ppFrom.value ? new Date(ppFrom.value + 'T00:00:00') : null;
+    const to   = ppTo.value   ? new Date(ppTo.value   + 'T23:59:59') : null;
+    if (from && to && from > to) { toast('Delivery date range: from must be on or before to', 'warn'); return; }
+    const inRange = g => (!from || g.ship >= from) && (!to || g.ship <= to);
+    const picked = [...groups.values()].filter(inRange);
+    const all = picked.filter(g => g.pcd && !Number.isNaN(g.pcd.getTime())).map(g => {
         const pcd = new Date(g.pcd); pcd.setHours(0, 0, 0, 0);
         const before = Math.round((+g.start - +pcd) / 86400000) - PP_AFTER_PCD_DAYS;
         return { ...g, pcd, lines : [...g.lines].sort().join(', '), before };
@@ -12400,7 +12410,8 @@ function buildPlanBeforePcdRows() {
     const early = all.filter(r => r.before < 0).sort((a, b) => a.before - b.before || a.start - b.start || a.erp.localeCompare(b.erp));
     ppRows.value = early;
     ppInfo.value = { unit : currentBoard.value?.unitName || unitLabel(boardLoadedUnitId ?? currentBoard.value?.unitId) || '',
-        at : fmtDdMmYy(boardToday()), ok : all.length - early.length, held, noPcd : groups.size - all.length };
+        at : fmtDdMmYy(boardToday()), ok : all.length - early.length, held, noPcd : picked.length - all.length,
+        outside : groups.size - picked.length, range : from || to ? `${from ? fmtDdMmYy(from) : '…'} → ${to ? fmtDdMmYy(to) : '…'}` : '' };
 }
 function openPlanBeforePcdReport() {
     openMenu.value = null;
@@ -12427,7 +12438,7 @@ function exportPlanBeforePcdExcel() {
   th, td { border: 1px solid #000; white-space: nowrap; padding: 2px 6px; text-align: center; }
   th { font-weight: bold; }
 </style></head><body>
-<h2 style="margin:0">Plan before PCD — ${dpEsc(ppInfo.value.unit)} · ${dpEsc(ppInfo.value.at)}</h2>
+<h2 style="margin:0">Plan before PCD — ${dpEsc(ppInfo.value.unit)} · ${dpEsc(ppInfo.value.at)}${ppInfo.value.range ? ` · delivery ${dpEsc(ppInfo.value.range)}` : ''}</h2>
 <div style="margin:4px 0 8px;font-size:9pt">Plan Before PCD = (Sewing start date − PCD) − 7 · minus = sewing starts inside the 7 days after PCD</div>
 <table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>
 </body></html>`;
@@ -18871,11 +18882,21 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
             <div class="cal-dialog od-dialog lp-dialog">
                 <div class="cal-title">
                     Plan before PCD — {{ ppInfo.unit || 'board' }}
-                    <span class="pu-units">· as of {{ ppInfo.at }} · {{ ppRows.length }} order row(s) start before PCD + 7</span>
+                    <span class="pu-units">· as of {{ ppInfo.at }}<template v-if="ppInfo.range"> · delivery {{ ppInfo.range }}</template> · {{ ppRows.length }} order row(s) start before PCD + 7</span>
                     <span class="cal-title-btns">
                         <span class="cal-x cal-minbtn" @click="ppMin = true">—</span>
                         <span class="cal-x" @click="ppOpen = false">✕</span>
                     </span>
+                </div>
+                <div class="dp-toolbar">
+                    <label class="pp-range">Delivery from
+                        <input v-model="ppFrom" class="cal-in ch-date" type="date" @keydown.enter="buildPlanBeforePcdRows">
+                    </label>
+                    <label class="pp-range">to
+                        <input v-model="ppTo" class="cal-in ch-date" type="date" @keydown.enter="buildPlanBeforePcdRows">
+                    </label>
+                    <button class="dp-act dp-act-gen" title="Run the report on the selected delivery date range (blank = every delivery)" @click="buildPlanBeforePcdRows">▶ Run</button>
+                    <button class="dp-act dp-act-xls" :disabled="!ppRows.length" @click="exportPlanBeforePcdExcel">📊 Excel</button>
                 </div>
                 <div class="dp-toolbar">
                     <span class="lp-rule" title="Sewing start date = the day the order's first strip starts on a line. A minus figure = sewing starts that many days before PCD + 7 (the planner's example: PCD 08/11, start 12/11 → 4 − 7 = −3); the report lists those rows, the earliest first.">
@@ -18883,9 +18904,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     </span>
                     <span class="lp-note">{{ ppInfo.ok }} order row(s) start on or after PCD + 7
                         <template v-if="ppInfo.noPcd"> · {{ ppInfo.noPcd }} without a PCD</template>
+                        <template v-if="ppInfo.outside"> · {{ ppInfo.outside }} outside the delivery range</template>
                         <template v-if="ppInfo.held"> · {{ ppInfo.held }} strip(s) on the Holding Row not counted</template></span>
-                    <button class="dp-act dp-act-gen" @click="buildPlanBeforePcdRows">⟳ Refresh</button>
-                    <button class="dp-act dp-act-xls" :disabled="!ppRows.length" @click="exportPlanBeforePcdExcel">📊 Excel</button>
                 </div>
                 <div class="st-body od-body dp-body">
                     <div v-if="!ppRows.length" class="ls-dim">No order on this board starts sewing before PCD + 7.</div>
@@ -21832,6 +21852,7 @@ body {
 .lp-table td { text-align : center; white-space : nowrap; }
 .lp-table td.od-num { text-align : right; }
 .lp-table td.lp-late { color : #b71c1c; font-weight : 700; }
+.pp-range { font-size : 12px; display : flex; align-items : center; gap : 6px; }
 
 /* Daily production update */
 .pu-in {
