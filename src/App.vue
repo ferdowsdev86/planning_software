@@ -16309,7 +16309,13 @@ function applyCalendarToBoard({ pack = true, reflow = true } = {}) {
         for (const m of Object.values(calendarState.lineOverrides || {})) for (const v of Object.values(m || {})) maxHours = Math.max(maxHours, Number(v) || 0);
         for (const r of s.resourceStore?.records || []) if (r.data?.lineRow && Number(r.data.hours) > maxHours) maxHours = Number(r.data.hours);
         const toHour = Math.ceil(fromHour + maxHours);
-        s.workingTime = { fromHour, toHour : Math.min(24, Math.max(fromHour + 1, toHour)) };
+        // toHour never 24 (planner, 2026-11-24, MBM board: months of the axis were
+        // squeezed to ~1 px a day, "1111" / "222" in the header, a solid maroon
+        // block): a 22-hour changed-hours date in the MBM calendar made
+        // fromHour 8 + 22 → toHour 24, and Bryntum 7.3.5's working-time axis
+        // collapses with toHour = 24 (uniform 25 px a day again at 23 or less;
+        // checked on the live MBM data)
+        s.workingTime = { fromHour, toHour : Math.min(23, Math.max(fromHour + 1, toHour)) };
     }
 
     // Standard day = longest configured working day; a line's own hours
