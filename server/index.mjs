@@ -4633,6 +4633,49 @@ app.delete(`${BASE}/strip-notes/:id`, async (req, res) => {
     catch (e) { res.status(500).json({ success : false, error : e.message }); }
 });
 
+// A projection bar (event_code 'ev-proj:<order>') stands for the ORDER, never
+// for one PO row. Rows written before 2026-10 carried the first PO's id in
+// planning_order_id; the board then loaded such a bar as a confirm bar of
+// that one PO (2627G-S138: 115 pcs on CEIL Line 05) and planned the order's
+// other POs as a second group — one order on two rows (planner, 2026-11-23).
+// Idempotent start-up repair: the link goes; a PO row that no live bar covers
+// any more (by planning_order_id or notes.idList) returns to the pool.
+async function repairLegacyProjectionLinks() {
+    // the other start-up jobs (ERP sync, snapshots) write the same tables: a
+    // deadlock is retried, small statements, after a short delay
+    await new Promise(r => setTimeout(r, 20000));
+    const retry = async (fn, tries = 5) => {
+        for (let k = 1; ; k++) {
+            try { return await fn(); }
+            catch (e) { if (e.code !== 'ER_LOCK_DEADLOCK' || k >= tries) throw e; await new Promise(r => setTimeout(r, 1500 * k)); }
+        }
+    };
+    const [rows] = await pool.query(
+        `SELECT id, planning_order_id FROM planning_events WHERE event_code LIKE 'ev-proj:%' AND planning_order_id IS NOT NULL`);
+    if (!rows.length) return;
+    const ids = [...new Set(rows.map(r => Number(r.planning_order_id)).filter(Boolean))];
+    for (let i = 0; i < rows.length; i += 100) {
+        const part = rows.slice(i, i + 100).map(r => r.id);
+        await retry(() => pool.query(`UPDATE planning_events SET planning_order_id = NULL WHERE id IN (${part.map(() => '?').join(',')})`, part));
+    }
+    let freed = 0;
+    for (let i = 0; i < ids.length; i += 100) {
+        const part = ids.slice(i, i + 100);
+        const ph = part.map(() => '?').join(',');
+        const [r] = await retry(() => pool.query(
+            `UPDATE planning_orders po SET po.planning_status = 'unplanned', po.updated_at = NOW()
+              WHERE po.id IN (${ph}) AND po.planning_status = 'fully_planned'
+                AND (po.erp_po_id IS NULL OR po.erp_po_id NOT LIKE 'proj-%')   /* a projection's own row follows its ev-proj bar */
+                AND NOT EXISTS (SELECT 1 FROM planning_events pe
+                                 WHERE pe.event_status <> 'cancelled'
+                                   AND (pe.planning_order_id = po.id
+                                        OR JSON_CONTAINS(COALESCE(JSON_EXTRACT(pe.notes, '$.idList'), '[]'), CAST(po.id AS CHAR))
+                                        OR JSON_CONTAINS(COALESCE(JSON_EXTRACT(pe.notes, '$.idList'), '[]'), JSON_QUOTE(CAST(po.id AS CHAR)))))`, part));
+        freed += r.affectedRows;
+    }
+    console.log(`[repair] ${rows.length} legacy projection event(s) unlinked from a PO row; ${freed} PO row(s) back in the pool`);
+}
+
 async function ensureSnapshotTable() {
     await pool.query(`CREATE TABLE IF NOT EXISTS planning_board_snapshots (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -5658,6 +5701,7 @@ app.listen(PORT, () => {
     ensureStripNotesTable().catch(e => console.error('[strip-notes] table init failed:', e.message));
     ensureBuyerColorsTable().catch(e => console.error('[buyer-colors] table init failed:', e.message));
     ensurePlanLocksTable().catch(e => console.error('[plan-lock] table init failed:', e.message));
+    repairLegacyProjectionLinks().catch(e => console.error('[repair] projection links failed:', e.message));
     ensureSnapshotTable()
         .then(() => { setInterval(snapshotTick, 60000); console.log(`[snapshot] daily board backup at ${SNAP_TIME} ${SNAP_TZ}`); })
         .then(() => ensureWhatIfTable())

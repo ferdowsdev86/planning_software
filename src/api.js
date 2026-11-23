@@ -296,12 +296,17 @@ function orderRowId(planningOrderId) {
 }
 
 function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, status) {
-    const orderId = e.planning_order_id || null;
-    // Projection events persist with event_code 'ev-proj:<order_code>' and no
-    // planning_order_id — recover their stable identity so auto-plan re-runs
-    // recognise them on the board instead of planning a duplicate block.
-    const projId = !orderId && String(e.event_code || '').startsWith('ev-proj:')
-        ? String(e.event_code).slice(3) : null;
+    // Projection events persist with event_code 'ev-proj:<order_code>' —
+    // recover their stable identity so auto-plan re-runs recognise them on
+    // the board instead of planning a duplicate block. A LEGACY projection
+    // row that still carries a planning_order_id (2627G-S138, 2026-11-23: the
+    // bar loaded as a confirm bar of its first PO, 115 pcs, while the other
+    // 16 POs became a separate confirm group — one order on two rows) is a
+    // projection all the same: the PO link is ignored here and the server
+    // clears it at start-up.
+    const isProj  = String(e.event_code || '').startsWith('ev-proj:');
+    const orderId = isProj ? null : (e.planning_order_id || null);
+    const projId  = isProj ? String(e.event_code).slice(3) : null;
     // A single-PO confirm bar can never carry MORE than its PO's quantity —
     // clamp stale group quantities left over from before groups were persisted
     // (split strips keep their smaller planned quantity untouched)

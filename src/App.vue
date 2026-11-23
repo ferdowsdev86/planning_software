@@ -10538,6 +10538,20 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
             n += pieces.length;
             continue;
         }
+        // Confirm bars on the board AND confirm groups still in the pool that
+        // TOGETHER (with what the ERP has sewn of the bars) make the whole
+        // order (2627G-S138, 2026-11-23: a 1,266-pc confirm bar on the Holding
+        // Row + the 115-pc PO that the legacy projection held): the projection
+        // has nothing left to stand for — it goes, the groups are planned by
+        // the full-quantity rule below, beside the order's bars
+        const sewnOnBars = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.groupSewn) || 0), 0);
+        if (evQty > 0 && grpList.length && hit.kind === 'event' && !pieces.includes(hit.ev)
+            && qtyEqual(evQty + grpQty + planQtyOf(sewnOnBars), fullQty)) {
+            for (const ev of pieces) { delete ev.data.raw.confirmMismatch; dropEvents.push(ev); }
+            rememberReplaced(raw0, hit.raw);
+            n += pieces.length;
+            continue;
+        }
         if (!(evQty === 0 && grpList.length && qtyEqual(grpQty, fullQty))) {
             for (const ev of pieces) ev.data.raw.confirmMismatch = { confirmed : evQty + grpQty, full : fullQty };
             continue;
@@ -10640,6 +10654,45 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                 if (!lid || isHoldId(lid) || !s.resourceStore.getById(lid)?.data?.lineRow) continue;
                 if (!lineBars.has(lid)) lineBars.set(lid, []);
                 lineBars.get(lid).push(ev);
+            }
+            // the order's bars all stand on a Holding Row (parked / late): its
+            // remaining groups join them there — one order, one row — instead
+            // of waiting in the pool (2627G-S138, 2026-11-23)
+            const holdBars = (confirmEvents.get(key) || []).filter(ev => { const lid = lineIdOf(s, ev, idx); return lid && isHoldId(lid) && !dropped.has(ev) && ev.data?.raw?.status !== 'completed'; });
+            if (!lineBars.size && holdBars.length) {
+                const refBar = holdBars.reduce((a, b) => (b.endDate > a.endDate ? b : a));
+                const holdId = lineIdOf(s, refBar, idx);
+                for (const g of groups) {
+                    if (dropUnplanned.has(String(g.id)) || g.status === 'completed') continue;
+                    if (unit && g.unitId && g.unitId !== unit) continue;
+                    const qty = Number(g.qty ?? g.orderQty) || 0;
+                    if (!(qty > 0)) continue;
+                    const evId = `ev-${g.id}`;
+                    if (s.eventStore.getById(evId)) continue;
+                    const raw2 = confirmRawFor(g, refBar.data.raw);
+                    raw2.qty = qty;
+                    raw2.orderQty = Number(g.orderQty ?? g.baseQty ?? qty) || qty;
+                    raw2.baseQty = Number(g.baseQty) > 0 ? Number(g.baseQty) : undefined;
+                    raw2.unitId = unit ?? g.unitId ?? null;
+                    raw2.parked = true;
+                    raw2.holdReason = refBar.data.raw.holdReason || 'Parked with the order\'s other strips';
+                    raw2.suggestedStart = refBar.data.raw.suggestedStart;
+                    raw2.start = new Date(refBar.startDate); raw2.end = new Date(refBar.endDate);
+                    raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
+                    const [rec] = s.eventStore.add({
+                        id : evId, startDate : raw2.start, endDate : raw2.end,
+                        duration : elapsedDays(raw2.start, raw2.end), durationUnit : 'day',
+                        manuallyScheduled : true, name : `${raw2.buyer || ''} | ${raw2.mbmOrder || raw2.po}`,
+                        percentDone : 0, raw : raw2
+                    });
+                    if (!rec) continue;
+                    assignEventToLine(s, rec, holdId);
+                    pendingSwapIds.add(evId);
+                    dropUnplanned.add(String(g.id));
+                    lastConfirmCompletion.groups++; lastConfirmCompletion.qty += qty;
+                    if (!lastConfirmCompletion.orders.includes(key)) lastConfirmCompletion.orders.push(key);
+                }
+                continue;
             }
             if (!lineBars.size) continue;
             for (const g of groups) {
