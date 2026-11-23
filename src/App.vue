@@ -17860,6 +17860,10 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     <span v-if="b.action === 'save' && unsavedCount" class="fr-tb-badge" aria-hidden="true">{{ unsavedCount > 99 ? '99+' : unsavedCount }}</span>
                 </button>
             </template>
+            <!-- Find strips: just LEFT of the search box (planner, 2026-11-23: "point the search icon to the left of the search bar") -->
+            <button class="fr-tb-btn fr-tb-find fr-tb-find-before" :class="{ 'fr-tb-on' : findOpen || findIds }" title="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" aria-label="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" :aria-pressed="String(findOpen)" @click="act('find')">
+                <i class="fa-solid fr-tb-fa fa-magnifying-glass" aria-hidden="true"></i>
+            </button>
             <label class="fr-tb-search">
                 <i class="fa-solid fa-magnifying-glass fr-tb-search-ico" aria-hidden="true"></i>
                 <input
@@ -17868,10 +17872,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                     placeholder="Search buyer, PO, style…"
                 >
             </label>
-            <!-- Find strips: beside the search box (planner, 2026-11-22: "put the search icon there") -->
-            <button class="fr-tb-btn fr-tb-find fr-tb-find-after" :class="{ 'fr-tb-on' : findOpen || findIds }" title="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" aria-label="Find strips — style, order, product, buyer, shipment dates, floor, unit (wildcards * ?)" :aria-pressed="String(findOpen)" @click="act('find')">
-                <i class="fa-solid fr-tb-fa fa-magnifying-glass" aria-hidden="true"></i>
-            </button>
         </div>
 
         <!-- Board -->
@@ -21841,9 +21841,13 @@ body {
    class, so the wrapper's descendants are the reliable target) */
 .mb-pf-pick .mb-sched-wrap, .mb-pf-pick .mb-sched-wrap *,
 .mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched * {
-    /* the toolbar's ⇤ icon as the pointer: BLACK long arrow to the left with
-       the "from-line" bar on the right, white halo; hotspot = the arrow tip */
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><rect x='24' y='4.5' width='7' height='23' rx='2' fill='%23fff'/><path d='M4 16H25M4 16L13 7M4 16L13 25' fill='none' stroke='%23000' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/><rect x='26' y='6' width='3' height='20' rx='1' fill='%23000'/></svg>") 4 16, crosshair !important;
+    /* ⇤ as the pointer (planner, 2026-11-23, zoom of the old one: "the icon
+       as tall as a bar; the round thing goes; the bar where the red mark
+       is"): a BLACK stop-bar at the arrow TIP — 20 px tall, the height of a
+       strip (rowHeight 48 × BAR_H_RATIO 0.42) — and the long arrow pointing
+       into it; the old rounded "from-line" on the right is gone. Hotspot =
+       the stop-bar: the pulled bar starts exactly where it stands. White halo */
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='34' height='24' viewBox='0 0 34 24'><rect x='0.5' y='0.5' width='7' height='23' fill='%23fff'/><path d='M7 12H31M7 12L15 4.5M7 12L15 19.5' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='square' stroke-linejoin='round'/><rect x='2' y='2' width='3' height='20' fill='%23000'/><path d='M7 12H31M7 12L15 4.5M7 12L15 19.5' fill='none' stroke='%23000' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/></svg>") 3 12, crosshair !important;
 }
 /* the toolbar button stays lit while pick mode is on */
 .fr-tb-btn.fr-tb-pull.fr-tb-on {
@@ -21910,7 +21914,7 @@ body {
 .fnd-po { display : block; font-size : 10px; color : #5b6673; }
 .fnd-none { padding : 10px; color : #a35b00; }
 .fr-tb-find.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
-.fr-tb-find-after { margin-left : 6px; }
+.fr-tb-find-before { margin : 0 4px 0 6px; }
 
 /* Consolidate orders toggle (toolbar) — pressed look while ON */
 .fr-tb-btn.fr-tb-on { background : #cfe0ff; box-shadow : inset 0 0 0 1px #1b52ad; color : #1b52ad; }
