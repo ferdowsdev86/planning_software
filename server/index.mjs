@@ -1177,7 +1177,29 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
             if (adj) adjusted.push(adj);
         }
 
+        // event_code is UNIQUE. A bar renamed on the board (a split piece, a
+        // re-keyed strip) to a code ANOTHER row still holds — mostly a
+        // cancelled row of an earlier plan — made the whole Save fail with
+        // "Duplicate entry 'EV-…-SEW-2' for key 'event_code'" and the screen's
+        // changes were lost (planner, 2026-11-24, 58 changes). The rename is
+        // then skipped: the row keeps its own code, everything else of the bar
+        // is saved. One lookup for the whole batch (the DB is a WAN hop away).
+        const codeOwner = new Map();
+        {
+            const want = [...new Set((events.updated || []).map(e => e.eventCode).filter(Boolean).map(String))];
+            for (let i = 0; i < want.length; i += 500) {
+                const part = want.slice(i, i + 500);
+                const [rows] = await conn.query(
+                    `SELECT id, event_code FROM planning_events WHERE event_code IN (${part.map(() => '?').join(',')})`, part);
+                for (const r of rows) codeOwner.set(String(r.event_code), Number(r.id));
+            }
+        }
         for (const ev of events.updated || []) {
+            const holder  = ev.eventCode ? codeOwner.get(String(ev.eventCode)) : undefined;
+            const keepOwn = holder !== undefined && holder !== Number(ev.id);
+            if (keepOwn) console.warn(`[scheduler-sync] event ${ev.id}: code ${ev.eventCode} is held by event ${holder} — the bar keeps its own code`);
+            const newCode = keepOwn ? null : (ev.eventCode ?? null);
+            if (newCode) codeOwner.set(String(newCode), Number(ev.id));
             const [oldRows] = await conn.query(
                 'SELECT start_date, end_date, duration FROM planning_events WHERE id = ?',
                 [ev.id]
@@ -1202,7 +1224,7 @@ app.post(`${BASE}/projects/:id/scheduler-sync`, async (req, res) => {
                  ev.manuallyScheduled != null ? (ev.manuallyScheduled ? 1 : 0) : null,
                  ev.manuallyScheduled != null ? (ev.manuallyScheduled ? 1 : 0) : null,
                  ev.orderId ?? null,
-                 ev.eventCode ?? null,
+                 newCode,
                  ev.id]
             );
             let eventId = ev.id;
