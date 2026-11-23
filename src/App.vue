@@ -10745,11 +10745,17 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                 }
                 continue;
             }
-            if (!complete || !lineBars.size) continue;
+            if (!lineBars.size) continue;
             for (const g0 of groups) {
                 if (dropUnplanned.has(String(g0.id)) || g0.status === 'completed') continue;
                 const g = uncoveredGroup(g0, barIds);
                 if (!g) { dropUnplanned.add(String(g0.id)); continue; }
+                // on an ordinary pass only the REST of a group that is already
+                // partly on the order's line(s) is placed — right after the
+                // order's bars there (2627G-S138, 2026-11-23: 16 POs on a line,
+                // the 17th PO's 115 pcs had no bar at all); whole new groups
+                // wait for the completion run / the Auto plan
+                if (!complete && !(g0.restOfGroup || g !== g0)) continue;
                 if (unit && g.unitId && g.unitId !== unit) continue;
                 const qty = Number(g.qty ?? g.orderQty) || 0;
                 if (!(qty > 0) || !(Number(g.smv) > 0)) continue;       // qty = remaining sewing quantity (fully sewn → 0)
@@ -10797,16 +10803,38 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                     const c = tryLine(lid, evs);
                     if (c && (!best || c.end < best.end)) best = c;
                 }
-                // the order's own lines cannot make the delivery: any sewing
-                // line of the board that finishes the group earlier takes it
+                // the order's own lines cannot make the delivery: another
+                // sewing line takes the group only when IT makes the delivery
+                // — late everywhere, the rest stays with the order on its own
+                // line (planner, 2026-11-23: the 115 pcs of 2627G-S138 went to
+                // Line 23 while the order ran on Line 03)
                 if (!best || isLateVsTarget(best.end, ship)) {
+                    let alt = null;
                     for (const res of s.resourceStore.records) {
                         if (!res.data?.lineRow || lineBars.has(res.id)) continue;
                         const c = tryLine(res.id, []);
-                        if (c && (!best || c.end < best.end)) best = c;
+                        if (c && (!alt || c.end < alt.end)) alt = c;
                     }
+                    if (alt && (!best || !isLateVsTarget(alt.end, ship))) best = alt;
                 }
                 if (!best) continue;
+                // the REST of a group (ordinary pass) goes FLUSH after the order's
+                // last bar on that line and the bars behind move later — as a
+                // dropped bar does — not into the first free gap weeks away
+                // (2627G-S138, 2026-11-23: the 115 pcs landed in February on a
+                // line the order ran on in November)
+                if (!complete && lineBars.has(best.lid)) {
+                    const evs = lineBars.get(best.lid) || [];
+                    const ref = evs.length ? evs.reduce((a, b) => (b.endDate > a.endDate ? b : a)) : null;
+                    if (ref) {
+                        const want = new Date(Math.max(+nextStartAfter(ref.endDate), +floor));
+                        const dur0 = Number(best.raw.dur) > 0 ? Number(best.raw.dur) : Math.max(1 / 24, elapsedDays(best.start, best.end));
+                        const ins = computeInsertStart(s, best.lid, want, dur0, null);
+                        let end = ins.end;
+                        try { const sim = simulateStrip(s, best.raw, best.lid, ins.start); if (sim?.finish && sim.finish > ins.start) end = new Date(sim.finish); } catch { /* the formula end stays */ }
+                        best = { ...best, start : ins.start, end, flush : true };
+                    }
+                }
                 const raw2 = best.raw;
                 raw2.start = best.start; raw2.end = best.end;
                 raw2.reqMin = Math.round(raw2.qty * (Number(raw2.smv) || 0));
@@ -10823,6 +10851,7 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                 if (!rec) continue;
                 assignEventToLine(s, rec, best.lid);
                 invalidateBarsByLine();
+                if (best.flush) { try { pushFollowers(s, best.lid, rec); } catch (e) { console.warn('[rest of group] followers not pushed:', e); } }
                 pendingSwapIds.add(evId);
                 if (!occ.has(best.lid)) occ.set(best.lid, []);
                 occ.get(best.lid).push({ start : best.start, end : best.end });
