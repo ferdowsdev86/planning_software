@@ -21923,11 +21923,13 @@ body {
        FastReact screen beside ours: "make the icon like the red circle, and
        let it point exactly at the GAP between the strip and the arrow"):
        a black stop-bar on the left, 20 px tall (a strip's height: rowHeight
-       48 × BAR_H_RATIO 0.42), a 4 px gap, then a HOLLOW arrow (white fill,
-       black outline) pointing left into the gap. Hotspot = the middle of the
-       gap (x 8, y 12): the pulled bar starts exactly where the gap stands.
-       White halo under the stop-bar so it reads on a dark strip */
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='34' height='24' viewBox='0 0 34 24'><rect x='0.5' y='0.5' width='7' height='23' fill='%23fff'/><rect x='2.5' y='2' width='3' height='20' fill='%23000'/><path d='M10.5 12L19 4.5V8.5H31.5V15.5H19V19.5Z' fill='%23fff' stroke='%23000' stroke-width='1.8' stroke-linejoin='round'/></svg>") 8 12, crosshair !important;
+       48 × BAR_H_RATIO 0.42), a 2 px gap (planner, 2026-11-23 again: "a
+       little less gap, and point between the arrow's end and the bar"), then
+       a HOLLOW arrow (white fill, black outline) pointing left into the gap.
+       Hotspot = the middle of the gap (bar ends at x 5, the tip's outline
+       starts at x 7 → x 6, y 12): the pulled bar starts exactly where the
+       gap stands. White halo under the stop-bar so it reads on a dark strip */
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='33' height='24' viewBox='0 0 33 24'><rect x='0.5' y='0.5' width='6' height='23' fill='%23fff'/><rect x='2' y='2' width='3' height='20' fill='%23000'/><path d='M8 12L16.5 4.5V8.5H29V15.5H16.5V19.5Z' fill='%23fff' stroke='%23000' stroke-width='1.8' stroke-linejoin='round'/></svg>") 6 12, crosshair !important;
 }
 /* the toolbar button stays lit while pick mode is on */
 .fr-tb-btn.fr-tb-pull.fr-tb-on {
