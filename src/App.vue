@@ -20011,7 +20011,13 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
         <!-- Plan Pull Forward (FastReact): remove gaps per line -->
         <Teleport to="body">
         <div v-if="pfOpen" class="cal-overlay" @click.self="pfOpen = false">
-            <div class="cal-dialog pf-dialog">
+            <!-- laid out like FastReact's Configure dialog (planner, 2026-11-23,
+                 screenshot of FastReact beside ours: "arrange the view like
+                 FastReact, remove the marked texts"): scope radios left,
+                 Selected dates right, the Move-to-mouse tick and the Line
+                 pick under them, Save and Apply at the bottom right — the
+                 explanations live in tooltips now -->
+            <div class="cal-dialog pf-dialog pf-compact">
                 <div class="cal-title">
                     ⏪ Plan Pull Forward
                     <span class="cal-title-btns"><span class="cal-x" @click="pfOpen = false">✕</span></span>
@@ -20019,14 +20025,12 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                 <div class="st-body">
                     <div class="pf-top">
                         <fieldset class="pf-scope">
-                            <legend>Scope</legend>
+                            <legend>{{ pfMouse ? 'From mouse position to' : 'Scope' }}</legend>
                             <label class="pf-radio pf-disabled"><input type="radio" disabled> Current day only <span class="msh-soon">phase 2</span></label>
                             <label class="pf-radio pf-disabled"><input type="radio" disabled> Current week <span class="msh-soon">phase 2</span></label>
                             <label class="pf-radio pf-disabled"><input type="radio" disabled> Current month <span class="msh-soon">phase 2</span></label>
-                            <label class="pf-radio"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
-                            <label class="pf-radio"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
-                            <label class="pf-radio pf-mouse"><input type="checkbox" v-model="pfMouse"> Move to mouse position</label>
-                            <div v-if="pfMouse" class="pf-line-hint">Save and Apply → cursor হবে ⇤ icon, toolbar-এর ⇤ button lit থাকবে · board-এ যে line-এ যে point-এ click করবেন, ওই line-এর তার পরের সব bar সেই point পর্যন্ত টেনে আসবে — একাধিক line-এ পরপর করা যায়, প্রতিবার কোনো confirmation নয় · শেষে ⇤ button আবার click বা Esc → একবার save confirmation <b v-if="pfScope === 'range'">· Date range বাছাই করা আছে: শুধু From–To-র ভিতরে শুরু হওয়া bar সরবে, To-র পরের bar নড়বে না; click-ও এই তারিখের ভিতরে করতে হবে</b> <b v-if="pfLine !== 'all'">· Line বাছাই করা আছে: শুধু ওই line-এ click কাজ করবে</b></div>
+                            <label class="pf-radio" title="Every gap on the line is closed, whatever the dates"><input type="radio" value="entire" v-model="pfScope"> Entire plan</label>
+                            <label class="pf-radio" title="Only bars that start between From and To move; a bar after To stays — in mouse mode the click must fall inside the dates too"><input type="radio" value="range" v-model="pfScope"> Specify date range</label>
                         </fieldset>
                         <fieldset class="pf-dates">
                             <legend>Selected dates</legend>
@@ -20034,22 +20038,24 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             <label>To <input type="date" v-model="pfTo" :disabled="pfScope !== 'range'"></label>
                             <div v-if="!pfRangeValid" class="pf-err">From date must not be after To date</div>
                         </fieldset>
-                        <fieldset class="pf-dates pf-lines">
-                            <legend>Line</legend>
-                            <label>Line
+                    </div>
+                    <div class="pf-bottom">
+                        <div class="pf-opts">
+                            <label class="pf-radio" title="Save and Apply closes the dialog and the pointer becomes ⇤: a click on a line pulls every bar after that point up to it, line after line, no question per click — the ⇤ toolbar button or Esc finishes, then one save confirmation"><input type="checkbox" v-model="pfMouse"> Move to mouse position</label>
+                            <label class="pf-radio pf-line-row" :title="pfLine === 'all' ? 'Gaps are closed on every line (in mouse mode: the line you click)' : 'Only this line is pulled forward — other lines stay untouched; in mouse mode only a click on this line works'">Line
                                 <select v-model="pfLine" class="cal-in st-select pf-line-select" @change="pfPrev = null">
                                     <option value="all">All lines</option>
                                     <option v-for="l in pfLineList" :key="l.id" :value="l.id">{{ l.name }}</option>
                                 </select>
                             </label>
-                            <div class="pf-line-hint">{{ pfLine === 'all' ? 'Gaps are closed on every line' : 'Only this line is pulled forward — other lines stay untouched' }}</div>
-                        </fieldset>
-                    </div>
-
-                    <div class="st-actions">
-                        <button class="cal-btn st-btn" :disabled="!pfRangeValid || pfMouse" @click="pfPreview">🔍 Preview</button>
-                        <button class="cal-btn cal-btn-primary st-btn" :disabled="!pfRangeValid" @click="applyPullForward()">{{ pfMouse ? '🖱 Save and Apply — pick the point on the board' : '💾 Save and Apply' }}</button>
-                        <button class="cal-btn st-btn" @click="pfOpen = false">Close</button>
+                        </div>
+                        <div class="pf-btns">
+                            <button v-if="!pfMouse" class="cal-btn st-btn" :disabled="!pfRangeValid" title="Show what would move before applying" @click="pfPreview">🔍 Preview</button>
+                            <button class="cal-btn cal-btn-primary st-btn pf-save" :disabled="!pfRangeValid"
+                                :title="pfMouse ? 'Close the dialog and pick the point on the board (⇤ pointer); the pulled bars are saved once you finish with the ⇤ button or Esc' : 'Pull every bar in the scope forward and save to the DB at once'"
+                                @click="applyPullForward()">💾 Save and Apply</button>
+                            <button class="cal-btn st-btn" @click="pfOpen = false">Close</button>
+                        </div>
                     </div>
 
                     <div v-if="pfPrev" class="pf-preview">
@@ -20075,11 +20081,6 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </table>
                         </div>
                         <div v-else class="ls-dim">No removable gaps in this scope</div>
-                    </div>
-                    <div class="st-hint">
-                        প্রতিটি line আলাদাভাবে: gap থাকলে পরের bar আগের bar-এর ঠিক পরের working point-এ টেনে আনা হয় ·
-                        কোনো bar কখনো পরে যায় না, line/sequence বদলায় না · শুধু completed bar স্থির থাকে
-                        (production চলা bar-ও টেনে আনা হয়) · PCD-র কোনো বাধা নেই: bar PCD + 8-এর আগেও টেনে আনা যায় (শুধু আজকের আগে নয়) · Save and Apply (scope mode) = সরানোর পর সাথে সাথে DB-তে save হয় · mouse mode = pick mode শেষে একবার save confirmation
                     </div>
                 </div>
             </div>
@@ -23474,6 +23475,19 @@ body.mb-dq-header .mb-hdr-dq.mb-hdr-dq-off { color : #888; font-weight : normal;
 
 /* Plan Pull Forward */
 .pf-dialog { width : 760px; max-width : 96vw; max-height : 90vh; overflow-y : auto; }
+/* Plan Pull Forward, FastReact's Configure layout: narrow; the preview table widens it */
+.cal-dialog.pf-compact { width : 580px; min-width : 0; }
+.pf-compact .st-body { padding : 10px 12px 12px; }
+.pf-btns .cal-btn { white-space : nowrap; width : auto; }
+.pf-compact .pf-top { margin-bottom : 6px; }
+.pf-compact .pf-scope { flex : 0 0 auto; }
+.pf-compact .pf-dates { flex : 1 1 auto; }
+.pf-compact .pf-dates label { justify-content : space-between; }
+.pf-bottom { display : flex; justify-content : space-between; align-items : flex-end; gap : 14px; padding : 4px 2px 2px; }
+.pf-opts { display : flex; flex-direction : column; gap : 2px; }
+.pf-line-row select { height : 26px; }
+.pf-btns { display : flex; gap : 8px; align-items : center; }
+.pf-compact .pf-preview { margin-top : 10px; }
 .ap-review { width : 1240px; }
 .ap-rev-h { margin-top : 8px; font-weight : 700; color : #17356b; }
 .ap-rev-tbl { max-height : 260px; overflow : auto; }
