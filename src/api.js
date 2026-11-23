@@ -1500,15 +1500,29 @@ export async function loadFromApi(unitId = null) {
     }),
         ...extraUnplanned.filter(u => !unplannedPos.has(String(u.po || '')))
     ].filter(u => String(u.buyer || '').trim())
-        .filter(u => {
+        .map(u => {
             // DB-backed rows dedupe by row identity; demo rows (no dbId) by PO
-            if (u.dbId != null) {
-                if (onBoardOrderIds.has(Number(u.dbId))) return false;
-                if ((u.idList || []).some(id => onBoardOrderIds.has(Number(id)))) return false;
-                return true;
-            }
-            return !onBoardPo.has(String(u.po || ''));
-        });
+            if (u.dbId == null) return onBoardPo.has(String(u.po || '')) ? null : u;
+            const onBoard = id => onBoardOrderIds.has(Number(id));
+            if (!onBoard(u.dbId) && !(u.idList || []).some(onBoard)) return u;   // nothing of it on the board
+            // PART of the group is on a bar: the pool keeps the rows that are
+            // NOT — before, the whole group row was dropped and its uncovered
+            // rows were on neither the board nor the list (2627G-S138,
+            // 2026-11-23: 16 of 17 POs on a Holding bar, the 17th PO's 115 pcs
+            // vanished from both; "Total unplanned 0")
+            const det  = (Array.isArray(u.poDetails) ? u.poDetails : []).filter(d => d && d.id != null);
+            const rows = det.filter(d => !onBoard(d.id));
+            if (!det.length || !rows.length) return null;              // every row on a bar (or rows unknown)
+            const base = rows.reduce((t, d) => t + (d.remaining != null && Number.isFinite(Number(d.remaining)) ? Math.max(0, Number(d.remaining)) : (Number(d.qty) || 0)), 0);
+            if (!(base > 0)) return null;
+            const ids  = rows.map(d => Number(d.id)).filter(Boolean);
+            const pos  = [...new Set(rows.map(d => d.po).filter(Boolean))];
+            const dbId = Math.min(...ids);
+            return { ...u, id : `dbo-${dbId}`, dbId, po : pos[0] ?? u.po, poList : pos.length ? pos : u.poList, idList : ids, poCount : pos.length || 1,
+                poDetails : rows, qty : planQtyOf(base), baseQty : base, orderQty : rows.reduce((t, d) => t + (Number(d.qty) || 0), 0),
+                sewn : 0, sewnDays : 0, restOfGroup : true };
+        })
+        .filter(Boolean);
 
     const assignments = events
         .filter(ev => ev.resourceId)

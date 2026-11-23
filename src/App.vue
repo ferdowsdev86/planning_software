@@ -10270,6 +10270,19 @@ function scheduleQtyUpdates(s) {
         let r = null;
         try { r = applyErpQtyUpdates(sb); }
         catch (e) { console.warn('[qty update] not applied:', e); return; }
+        // the projection → confirm swap runs on every load as well (it used to
+        // ride on the old auto-plan-on-load pass, which is off): a projection
+        // whose confirm bars + pool rows make the whole order goes, and the
+        // remaining rows of an order parked on the Holding Row join it there
+        // (2627G-S138, 2026-11-23 — one order was a projection on Line 05 AND
+        // a confirm bar on the Holding Row until Auto plan ran)
+        if (!qtyUpdateAfterLock) {
+            try {
+                const swapped = replaceProjectionsWithConfirms(sb);
+                if (swapped) toast(`${swapped} projection bar(s) replaced by their confirm orders on the board — Undo takes it back; Save keeps it`, 'ok');
+            }
+            catch (e) { console.warn('[projection swap] skipped:', e); }
+        }
         syncOrdersListFromBoard();
         if (r.applied.length) {
             const names = r.applied.slice(0, 4).map(a => `${a.order} ${fmtQty(a.from)} → ${fmtQty(a.to)}${a.toHold ? ` (${fmtQty(a.toHold)} to the Holding Row)` : ''}`).join(', ');
@@ -10500,6 +10513,37 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
     // Equal = same quantity (1 pc / 0.5% rounding tolerance)
     const qtyEqual = (a, b) => b > 0 && Math.abs(a - b) <= Math.max(1, b * 0.005);
 
+    // The pool groups a confirm order's PO rows per colour WHATEVER is already
+    // on the board (a Holding Row bar's rows are 'unplanned' in the DB), so a
+    // pool group can hold rows a bar already carries. The PO-row ids the
+    // order's confirm bars carry, and a group reduced to the rows NOT on any
+    // bar (its uncovered rows, their remaining quantity) — null when nothing
+    // of it is left (2627G-S138, 2026-11-23: 16 of 17 rows on the Holding
+    // bar, the 115-pc row of the legacy projection the only one left)
+    const barIdsOf = key => {
+        const ids = new Set();
+        for (const e2 of confirmEvents.get(key) || []) {
+            const r2 = e2.data?.raw || {};
+            (Array.isArray(r2.idList) ? r2.idList : []).forEach(i => ids.add(String(i)));
+            if (r2.dbId != null) ids.add(String(r2.dbId));
+        }
+        return ids;
+    };
+    const uncoveredGroup = (g, barIds) => {
+        const det = Array.isArray(g.poDetails) ? g.poDetails.filter(d => d && d.id != null) : [];
+        if (!det.length || !barIds.size) return g;                    // nothing known of its rows / no bar: the whole group
+        if (!det.some(d => barIds.has(String(d.id)))) return g;       // none of its rows on a bar: the whole group
+        const rows = det.filter(d => !barIds.has(String(d.id)));
+        if (!rows.length) return null;                                // every row already on a bar
+        const base = rows.reduce((t, d) => t + (d.remaining != null && Number.isFinite(Number(d.remaining)) ? Math.max(0, Number(d.remaining)) : (Number(d.qty) || 0)), 0);
+        if (!(base > 0)) return null;
+        const ids = rows.map(d => Number(d.id)).filter(Boolean);
+        const pos = [...new Set(rows.map(d => d.po).filter(Boolean))];
+        const dbId = Math.min(...ids);
+        return { ...g, id : `dbo-${dbId}`, dbId, po : pos[0] ?? g.po, poList : pos.length ? pos : g.poList, poCount : pos.length || 1,
+            idList : ids, poDetails : rows, qty : planQtyOf(base), orderQty : base, baseQty : base, sewn : undefined, srcId : String(g.id) };
+    };
+
     // RULE (planner, 2026-10-11): the confirm order replaces the projection
     // PIECE BY PIECE. A projection planned in several pieces (a line and the
     // Holding Row, two lines, two spots on one line) keeps every piece where
@@ -10545,8 +10589,10 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
         // has nothing left to stand for — it goes, the groups are planned by
         // the full-quantity rule below, beside the order's bars
         const sewnOnBars = (confirmEvents.get(key) || []).reduce((t, e2) => t + (Number(e2.data?.raw?.groupSewn) || 0), 0);
-        if (evQty > 0 && grpList.length && hit.kind === 'event' && !pieces.includes(hit.ev)
-            && qtyEqual(evQty + grpQty + planQtyOf(sewnOnBars), fullQty)) {
+        const barIds = barIdsOf(key);
+        const grpUncovQty = grpList.reduce((t, g) => { const u = uncoveredGroup(g, barIds); return t + (u ? (Number(u.qty ?? u.orderQty) || 0) : 0); }, 0);
+        if (evQty > 0 && hit.kind === 'event' && !pieces.includes(hit.ev)
+            && qtyEqual(evQty + grpUncovQty + planQtyOf(sewnOnBars), fullQty)) {
             for (const ev of pieces) { delete ev.data.raw.confirmMismatch; dropEvents.push(ev); }
             rememberReplaced(raw0, hit.raw);
             n += pieces.length;
@@ -10616,7 +10662,9 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
     // after its delivery is flagged late. Left to the planner: a group whose
     // delivery date has passed, and an order that still has a projection bar
     // on the board (the swap above / the quantity-mismatch highlight).
-    if (complete && !whatIfActive.value) {
+    // (the Holding Row part below runs on every pass — one order, one row — the
+    // line placement only in a completion run)
+    if (!whatIfActive.value) {
         const dropped = new Set(dropEvents);
         const projStill = new Set();
         const occ = new Map();          // line → [{ start, end }]
@@ -10659,11 +10707,14 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
             // remaining groups join them there — one order, one row — instead
             // of waiting in the pool (2627G-S138, 2026-11-23)
             const holdBars = (confirmEvents.get(key) || []).filter(ev => { const lid = lineIdOf(s, ev, idx); return lid && isHoldId(lid) && !dropped.has(ev) && ev.data?.raw?.status !== 'completed'; });
+            const barIds = barIdsOf(key);
             if (!lineBars.size && holdBars.length) {
                 const refBar = holdBars.reduce((a, b) => (b.endDate > a.endDate ? b : a));
                 const holdId = lineIdOf(s, refBar, idx);
-                for (const g of groups) {
-                    if (dropUnplanned.has(String(g.id)) || g.status === 'completed') continue;
+                for (const g0 of groups) {
+                    if (dropUnplanned.has(String(g0.id)) || g0.status === 'completed') continue;
+                    const g = uncoveredGroup(g0, barIds);
+                    if (!g) { dropUnplanned.add(String(g0.id)); continue; }      // every row already on the order's bars
                     if (unit && g.unitId && g.unitId !== unit) continue;
                     const qty = Number(g.qty ?? g.orderQty) || 0;
                     if (!(qty > 0)) continue;
@@ -10688,15 +10739,17 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                     if (!rec) continue;
                     assignEventToLine(s, rec, holdId);
                     pendingSwapIds.add(evId);
-                    dropUnplanned.add(String(g.id));
+                    dropUnplanned.add(String(g0.id));
                     lastConfirmCompletion.groups++; lastConfirmCompletion.qty += qty;
                     if (!lastConfirmCompletion.orders.includes(key)) lastConfirmCompletion.orders.push(key);
                 }
                 continue;
             }
-            if (!lineBars.size) continue;
-            for (const g of groups) {
-                if (dropUnplanned.has(String(g.id)) || g.status === 'completed') continue;
+            if (!complete || !lineBars.size) continue;
+            for (const g0 of groups) {
+                if (dropUnplanned.has(String(g0.id)) || g0.status === 'completed') continue;
+                const g = uncoveredGroup(g0, barIds);
+                if (!g) { dropUnplanned.add(String(g0.id)); continue; }
                 if (unit && g.unitId && g.unitId !== unit) continue;
                 const qty = Number(g.qty ?? g.orderQty) || 0;
                 if (!(qty > 0) || !(Number(g.smv) > 0)) continue;       // qty = remaining sewing quantity (fully sewn → 0)
@@ -10775,7 +10828,7 @@ function replaceProjectionsWithConfirms(s, { complete = false, onlyComplete = fa
                 occ.get(best.lid).push({ start : best.start, end : best.end });
                 if (!lineBars.has(best.lid)) lineBars.set(best.lid, []);
                 lineBars.get(best.lid).push(rec);
-                dropUnplanned.add(String(g.id));
+                dropUnplanned.add(String(g0.id));
                 lastConfirmCompletion.groups++;
                 lastConfirmCompletion.qty += qty;
                 if (raw2.latePlan) lastConfirmCompletion.late++;
@@ -16460,7 +16513,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, newOrderPlan : { run : () => autoPlanNewOrders(getInstance()), last : () => lastNewOrderPlan }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, replaceProjections : (o = {}) => replaceProjectionsWithConfirms(getInstance(), o), shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, newOrderPlan : { run : () => autoPlanNewOrders(getInstance()), last : () => lastNewOrderPlan }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
