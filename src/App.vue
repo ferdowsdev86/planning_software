@@ -21866,13 +21866,15 @@ body {
    class, so the wrapper's descendants are the reliable target) */
 .mb-pf-pick .mb-sched-wrap, .mb-pf-pick .mb-sched-wrap *,
 .mb-pf-pick .fr-sched, .mb-pf-pick .fr-sched * {
-    /* ⇤ as the pointer (planner, 2026-11-23, zoom of the old one: "the icon
-       as tall as a bar; the round thing goes; the bar where the red mark
-       is"): a BLACK stop-bar at the arrow TIP — 20 px tall, the height of a
-       strip (rowHeight 48 × BAR_H_RATIO 0.42) — and the long arrow pointing
-       into it; the old rounded "from-line" on the right is gone. Hotspot =
-       the stop-bar: the pulled bar starts exactly where it stands. White halo */
-    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='34' height='24' viewBox='0 0 34 24'><rect x='0.5' y='0.5' width='7' height='23' fill='%23fff'/><path d='M7 12H31M7 12L15 4.5M7 12L15 19.5' fill='none' stroke='%23fff' stroke-width='8' stroke-linecap='square' stroke-linejoin='round'/><rect x='2' y='2' width='3' height='20' fill='%23000'/><path d='M7 12H31M7 12L15 4.5M7 12L15 19.5' fill='none' stroke='%23000' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/></svg>") 3 12, crosshair !important;
+    /* FastReact's pull-forward pointer (planner, 2026-11-23, photo of the
+       FastReact screen beside ours: "make the icon like the red circle, and
+       let it point exactly at the GAP between the strip and the arrow"):
+       a black stop-bar on the left, 20 px tall (a strip's height: rowHeight
+       48 × BAR_H_RATIO 0.42), a 4 px gap, then a HOLLOW arrow (white fill,
+       black outline) pointing left into the gap. Hotspot = the middle of the
+       gap (x 8, y 12): the pulled bar starts exactly where the gap stands.
+       White halo under the stop-bar so it reads on a dark strip */
+    cursor : url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='34' height='24' viewBox='0 0 34 24'><rect x='0.5' y='0.5' width='7' height='23' fill='%23fff'/><rect x='2.5' y='2' width='3' height='20' fill='%23000'/><path d='M10.5 12L19 4.5V8.5H31.5V15.5H19V19.5Z' fill='%23fff' stroke='%23000' stroke-width='1.8' stroke-linejoin='round'/></svg>") 8 12, crosshair !important;
 }
 /* the toolbar button stays lit while pick mode is on */
 .fr-tb-btn.fr-tb-pull.fr-tb-on {
