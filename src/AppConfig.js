@@ -2449,7 +2449,6 @@ export const schedulerProConfig = {
                 const enc  = StringHelper.encodeHtml;
                 const d    = r.data || r;
                 const code = floorLabelOf(d.unit, d.floor);
-                const ico = '<span class="fr-line-ico"></span>';
                 // Selected line (Ctrl+click): FastReact's ☒ box in the cell
                 const sel = !!(d.lineRow && uiHooks.lineSel?.has(String(d.id)));
                 cellElement?.classList.toggle('mb-line-on', sel);
@@ -2464,7 +2463,10 @@ export const schedulerProConfig = {
                 const sInst = uiHooks.instance;
                 const xp = !d.subtotalRow && isLineExpanded(r);
                 cellElement?.classList.toggle('mb-xp-open', xp);
-                const arrow = d.subtotalRow ? '' : `<span class="mb-xp-arrow${xp ? ' mb-xp-arrow-open' : ''}" title="${xp ? 'Collapse the row — its strips back on one band' : 'Expand the row — every strip on its own band, with its detail'}">${xp ? '▴' : '▾'}</span>`;
+                // the blue ⬇ of the cell IS the toggle (planner, 2026-11-23: "no
+                // new arrow — a click on the blue arrow expands the line, and
+                // the Holding Row gets the same"); open = the arrow turned up
+                const arrow = d.subtotalRow ? '' : `<span class="fr-line-ico mb-xp-arrow${xp ? ' mb-xp-arrow-open' : ''}" title="${xp ? 'Collapse the row — its strips back on one band' : 'Expand the row — every strip on its own band, with its detail'}"></span>`;
                 const xpList = () => {
                     if (!xp || !sInst) return '';
                     const band = xpBand(sInst);
@@ -2514,7 +2516,7 @@ export const schedulerProConfig = {
                 return wrap(`<div class="fr-line"${headStyle}>
                     <span class="fr-line-chip fr-line-chip-red">${enc(n)}</span>
                     <div class="fr-line-mid">
-                        <div class="fr-line-name">${arrow}${d.lineRow ? ico : ''}${enc(d.name)}</div>
+                        <div class="fr-line-name">${arrow}${enc(d.name)}</div>
                         <div class="fr-line-sub">${enc(code)}</div>
                     </div>
                     ${selBox}${nums(d.manpower ?? 0, 0, d.machines ?? 0)}

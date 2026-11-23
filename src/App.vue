@@ -23115,8 +23115,10 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
 .b-grid-cell.mb-linecell { padding : 1px 4px 1px 3px; }
 /* Expanded row (FastReact ▲ / ▼): the line cell stacks the header band and
    one entry per strip, on the same bands as the bars in the timeline */
-.mb-xp-arrow { display : inline-block; width : 14px; margin-right : 2px; cursor : pointer; color : #1b52ad; font-size : 13px; line-height : 1; user-select : none; text-align : center; }
-.mb-xp-arrow:hover { color : #e53935; }
+/* the blue ⬇ of the line / Holding Row cell is the expand toggle; open = turned up */
+.fr-line-ico.mb-xp-arrow { cursor : pointer; margin-right : 4px; user-select : none; transition : transform 0.15s; }
+.fr-line-ico.mb-xp-arrow:hover { background : #e53935; }
+.fr-line-ico.mb-xp-arrow-open { transform : rotate(180deg); }
 .b-grid-cell.mb-linecell.mb-xp-open { align-items : flex-start; padding-top : 0; padding-bottom : 0; }
 .b-grid-cell.mb-linecell.mb-xp-open > .b-grid-cell-content, .b-grid-cell.mb-linecell.mb-xp-open > div { width : 100%; }
 .mb-xp-wrap { width : 100%; min-width : 0; }
