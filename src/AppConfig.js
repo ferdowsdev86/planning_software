@@ -20,6 +20,51 @@ import { fitBarLabel, tinyLabelLines, TINY_MAX_WIDTH } from './barLabelFit.mjs';
 export const BAR_H_RATIO = 0.42;
 
 // ---------------------------------------------------------------------------
+// EXPANDED ROWS (FastReact's ▲ / ▼ on every line and Holding Row — planner,
+// 2026-11-23: "click the arrow of a row and its strips show one after the
+// other in detail, so the planning of the small strips is understood").
+// A collapsed row is the board as always (every bar on the row's top band).
+// An expanded row lays its bars out by start date, each on its own BAND:
+// band 0 is the row's header line, strip i sits on band i + 1 — and the line
+// cell lists the strips on the same bands (order · style::PO · qty), so the
+// left panel reads like FastReact's. Pure layout: no event, assignment or
+// saved field changes; the bars keep their dates, lines and sizes.
+// ---------------------------------------------------------------------------
+export const XP_GAP = 4;                                  // px between bands
+export const xpBarH = s => Math.max(12, Math.round((s?.rowHeight || 48) * BAR_H_RATIO));
+export const xpBand = s => xpBarH(s) + XP_GAP;
+// band 0 = the row's header line (name, floor, manpower) — never thinner than
+// the two text lines need
+export const xpHead = s => Math.max(xpBand(s) + XP_GAP, 40);
+export const isLineExpanded = res => !!(res && uiHooks.xpLines.has(String(res.id)));
+// the row's bars in the order they are laid out when expanded (by start, then id)
+export const xpBarsOf = res => [...(res?.events || [])]
+    .filter(e => e?.data?.raw && !e.data.raw.stage)
+    .sort((a, b) => (+a.startDate - +b.startDate) || String(a.id).localeCompare(String(b.id)));
+// Bryntum's custom layout: `items` are the row's event render data
+// ({ eventRecord, top, height … }); the function sets top / height and
+// returns the row height. Called for every row, expanded or not.
+export function xpLayoutFn(items, resource, scheduler) {
+    const barH = xpBarH(scheduler);
+    if (!isLineExpanded(resource)) {
+        for (const it of items) { it.top = 0; it.height = barH; }
+        return scheduler.rowHeight;
+    }
+    const band  = barH + XP_GAP;
+    const head  = xpHead(scheduler);
+    const order = new Map(xpBarsOf(resource).map((e, i) => [String(e.id), i]));
+    let n = 0;
+    for (const it of items) {
+        const i = order.get(String(it.eventRecord?.id));
+        const slot = i == null ? n : i;
+        it.top = head + slot * band + XP_GAP;
+        it.height = barH;
+        n = Math.max(n, slot + 1);
+    }
+    return Math.max(scheduler.rowHeight, head + n * band + XP_GAP * 2);
+}
+
+// ---------------------------------------------------------------------------
 // Flush bars (FastReact): a bar that ends at its line's working-day end and
 // is followed by a bar that starts the next working morning is DRAWN up to
 // that bar's left edge — the overnight hours the axis still shows (longer
@@ -594,6 +639,11 @@ export const uiHooks = {
     onBeforeEdit     : null,   // (label) → the board records an undo step before a menu edit
     modifierHeld     : false,  // Ctrl / ⌘ is down (multi-select): no tooltip, no bar menu
     lineSel          : null,   // Set of selected LINE ids (Ctrl+click on the line cell) — the cell shows the ☒ box
+    // Expanded rows (FastReact's ▲ / ▼ on a line — planner, 2026-11-23): the
+    // ids of the lines / Holding Rows whose strips are laid out one under the
+    // other, each on its own band, with the strip list in the line cell
+    xpLines          : new Set(),
+    onToggleLineExpand : null, // (resourceRecord) → expand / collapse that row
     onLineCtrlClick  : null,   // (resourceRecord) → toggle that line in the selection
     onLineClick      : null,   // (resourceRecord) → plain click on a line cell (clears the selection)
     consol           : null,   // Consolidate orders ON: Map(eventId → group) — the head bar is drawn over the whole group, the others are hidden
@@ -2301,7 +2351,9 @@ export const schedulerProConfig = {
     rowHeight    : 48,
     headerHeight : 46,
     barMargin   : 0,
-    eventLayout : 'none',
+    // every bar on the row's top band (as 'none' did) — and an EXPANDED row's
+    // bars one under the other (xpLayoutFn, FastReact's ▲ / ▼)
+    eventLayout : { type : 'layoutFn', layoutFn : xpLayoutFn },
     eventStyle  : null,
     eventColor  : null,
 
@@ -2407,6 +2459,30 @@ export const schedulerProConfig = {
                         <div><span class="fr-n-red">${red}</span> <span class="fr-n-blue">${blue}</span></div>
                         <div class="fr-n-black">${black}</div>
                     </div>`;
+                // FastReact's ▲ / ▼: expanded = the strips one under the other
+                // (xpLayoutFn), the cell lists them on the same bands
+                const sInst = uiHooks.instance;
+                const xp = !d.subtotalRow && isLineExpanded(r);
+                cellElement?.classList.toggle('mb-xp-open', xp);
+                const arrow = d.subtotalRow ? '' : `<span class="mb-xp-arrow${xp ? ' mb-xp-arrow-open' : ''}" title="${xp ? 'Collapse the row — its strips back on one band' : 'Expand the row — every strip on its own band, with its detail'}">${xp ? '▴' : '▾'}</span>`;
+                const xpList = () => {
+                    if (!xp || !sInst) return '';
+                    const band = xpBand(sInst);
+                    const items = xpBarsOf(r).map((e, i) => {
+                        const raw = e.data.raw;
+                        const po = raw.po ? String(raw.po) : '';
+                        const style = barStyleOf(raw) || raw.style || '';
+                        const code = barOrderNo(raw) || raw.mbmOrder || '';
+                        const label = [style, po].filter(Boolean).join('::');
+                        return `<div class="mb-xp-item" style="height:${band}px" title="${enc(code)} · ${enc(label)} · ${enc(fmtQty(raw.qty || 0))} pcs · ${enc(fmtDate(e.startDate))} → ${enc(fmtDate(e.endDate))}${raw.color ? ' · ' + enc(raw.color) : ''}">
+                            <span class="mb-xp-n">${i + 1}</span><span class="mb-xp-code">${enc(code)}</span><span class="mb-xp-label">${enc(label || raw.name || '')}</span><span class="mb-xp-qty">${enc(fmtQty(raw.qty || 0))}</span>
+                        </div>`;
+                    });
+                    return `<div class="mb-xp-list">${items.join('') || '<div class="mb-xp-item mb-xp-empty">no strip on this row</div>'}</div>`;
+                };
+                const headStyle = xp && sInst ? ` style="height:${xpHead(sInst)}px"` : '';
+                // expanded: header band + strip list stacked (the cell itself is a flex row)
+                const wrap = html => (xp ? `<div class="mb-xp-wrap">${html}</div>` : html);
                 if (d.holdingRow || d.subtotalRow) {
                     const s = uiHooks.instance;
                     // a floor's Holding Row sums that floor's lines only (a
@@ -2425,24 +2501,24 @@ export const schedulerProConfig = {
                         black = fmtQty(Number(d.availMin) || 0);
                     }
                     const id = d.holdingRow ? String(50000 + mc) : String(mc);
-                    return `<div class="fr-line">
+                    return wrap(`<div class="fr-line"${headStyle}>
                         <span class="fr-line-chip fr-line-chip-red">${enc(id)}</span>
                         <div class="fr-line-mid">
-                            <div class="fr-line-name">${enc(d.name)}</div>
+                            <div class="fr-line-name">${arrow}${enc(d.name)}</div>
                             <div class="fr-line-sub">${enc(code)}</div>
                         </div>
                         ${nums(mp, blue, black)}
-                    </div>`;
+                    </div>${xpList()}`);
                 }
                 const n = String(d.id || '').replace(/\D/g, '') || '0';
-                return `<div class="fr-line">
+                return wrap(`<div class="fr-line"${headStyle}>
                     <span class="fr-line-chip fr-line-chip-red">${enc(n)}</span>
                     <div class="fr-line-mid">
-                        <div class="fr-line-name">${d.lineRow ? ico : ''}${enc(d.name)}</div>
+                        <div class="fr-line-name">${arrow}${d.lineRow ? ico : ''}${enc(d.name)}</div>
                         <div class="fr-line-sub">${enc(code)}</div>
                     </div>
                     ${selBox}${nums(d.manpower ?? 0, 0, d.machines ?? 0)}
-                </div>`;
+                </div>${xpList()}`);
             }
         }
     ],
@@ -3126,6 +3202,13 @@ export const schedulerProConfig = {
     // Line cell (locked grid): Ctrl / ⌘ + click toggles the line in the
     // selection (several lines together), a plain click clears it
     onCellClick({ record, event }) {
+        // the ▲ / ▼ of a line or Holding Row: expand / collapse, nothing else
+        if (event?.target?.closest?.('.mb-xp-arrow')) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            uiHooks.onToggleLineExpand?.(record);
+            return;
+        }
         if (!record?.data?.lineRow) return;
         if (event?.ctrlKey || event?.metaKey) {
             event.preventDefault?.();

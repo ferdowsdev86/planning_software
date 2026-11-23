@@ -3044,6 +3044,21 @@ function clearLineSel(quiet = false) {
 uiHooks.onLineCtrlClick = toggleLineSel;
 uiHooks.onLineClick = () => clearLineSel();
 
+// FastReact's ▲ / ▼ on a line or Holding Row (planner, 2026-11-23): expanded =
+// the row's strips one under the other, each on its own band (xpLayoutFn in
+// AppConfig), the line cell lists them. A layout-only state: no bar, line or
+// saved field changes; the row's class marks it in both sub-grids.
+function toggleLineExpand(res) {
+    const s = getInstance();
+    if (!s || !res) return;
+    const id = String(res.id);
+    const open = !uiHooks.xpLines.has(id);
+    if (open) uiHooks.xpLines.add(id); else uiHooks.xpLines.delete(id);
+    try { res.set('cls', open ? 'mb-xp-open' : ''); } catch { /* read-only model */ }
+    s.refreshRows?.();
+}
+uiHooks.onToggleLineExpand = toggleLineExpand;
+
 function chApply() {
     const from = new Date(chFrom.value + 'T00:00:00');
     const to   = new Date(chTo.value + 'T00:00:00');
@@ -23034,6 +23049,24 @@ select.pl-groupby { width : 100%; max-width : 100%; font-size : 12px; text-align
 /* Locked grid                                                        */
 /* ------------------------------------------------------------------ */
 .b-grid-cell.mb-linecell { padding : 1px 4px 1px 3px; }
+/* Expanded row (FastReact ▲ / ▼): the line cell stacks the header band and
+   one entry per strip, on the same bands as the bars in the timeline */
+.mb-xp-arrow { display : inline-block; width : 14px; margin-right : 2px; cursor : pointer; color : #1b52ad; font-size : 13px; line-height : 1; user-select : none; text-align : center; }
+.mb-xp-arrow:hover { color : #e53935; }
+.b-grid-cell.mb-linecell.mb-xp-open { align-items : flex-start; padding-top : 0; padding-bottom : 0; }
+.b-grid-cell.mb-linecell.mb-xp-open > .b-grid-cell-content, .b-grid-cell.mb-linecell.mb-xp-open > div { width : 100%; }
+.mb-xp-wrap { width : 100%; min-width : 0; }
+.mb-xp-open .fr-line { box-sizing : border-box; overflow : hidden; min-height : 0; }
+.mb-xp-list { border-top : 1px solid #c9c5b8; }
+.mb-xp-item { display : flex; align-items : center; gap : 5px; box-sizing : border-box; padding : 0 2px; font-size : 10.5px; line-height : 1.1; white-space : nowrap; overflow : hidden; border-top : 1px dashed #e3e0d6; }
+.mb-xp-item:first-child { border-top : none; }
+.mb-xp-n     { flex : 0 0 14px; text-align : right; color : #888; font-size : 9.5px; }
+.mb-xp-code  { flex : 0 0 auto; font-weight : 700; color : #1b3f8f; }
+.mb-xp-label { flex : 1 1 auto; overflow : hidden; text-overflow : ellipsis; color : #333; }
+.mb-xp-qty   { flex : 0 0 auto; color : #555; font-size : 10px; }
+.mb-xp-empty { color : #999; font-style : italic; }
+/* a hand-parked bar keeps its lower-lane offset only on a collapsed Holding Row */
+.b-grid-row.mb-xp-open .b-sch-event-wrap.mb-hold-manual { margin-top : 0 !important; }
 
 .fr-line {
     display     : flex;
