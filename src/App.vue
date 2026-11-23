@@ -4125,7 +4125,8 @@ const apStats       = computed(() => {
         const lid = lineIdOf(s, ev, statIndex);
         const onLine = lid && !isHoldId(lid);
         const locked = useLock && onLine && overlapsLock(ev.startDate, ev.endDate, lock);
-        const past = useLock && onLine && !locked && ev.endDate <= lock.from;       // ended before today: history, stays
+        // ended before today WITH output: history, stays (a past bar with nothing sewn is blanked like any other)
+        const past = useLock && onLine && !locked && ev.endDate <= lock.from && (Number(r.made) > 0 || Number(r.erpMade) > 0);
         if (locked) lockedN++;
         if (past) pastN++;
         if (locked || past || r.status === 'completed' || (apKeepStarted.value && Number(r.made) > 0)) keep++;
@@ -4179,7 +4180,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
     };
     const gone = [], kept = [], frozen = [];
     const past = new Set();    // bars that ended before today: stay as history, cover nothing
-    let lockedN = 0, ambiguousN = 0, pastN = 0;
+    let lockedN = 0, ambiguousN = 0, pastN = 0, pastGoneN = 0;
     const ambiguous = new Map();   // order row → { order, color, issue }
     for (const ev of bars) {
         const r = ev.data.raw;
@@ -4189,12 +4190,20 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         if (lock && lid && !isHoldId(lid) && overlapsLock(ev.startDate, ev.endDate, lock)) {
             r.apLocked = true; lockedN++; frozen.push(ev); kept.push(ev); continue;
         }
-        // …and so does a bar that ended before today: it is the history the
-        // locked bars run on (a locked bar's Build up curve continues from the
-        // bar before it — taking that away would restart the curve). It
-        // covers nothing any more: what was not sewn on it is planned again.
+        // …and so does a bar that ended before today WITH output on it: it is
+        // the history the locked bars run on (a locked bar's Build up curve
+        // continues from the bar before it — taking that away would restart
+        // the curve). It covers nothing any more: what was not sewn on it is
+        // planned again. A past bar with NOTHING sewn on it (no board
+        // production, no ERP output) is no history: it is blanked like any
+        // other bar and its quantity planned once (planner, 2026-11-23,
+        // 26H1LEV1008: a 1,611-pc bar moved back to 04/11–08/11 with zero
+        // output stayed on Line 01 as "history" while the run planned the
+        // full 1,611 again on Line 06 — the board showed 3,222; the same
+        // doubled ~20 CEIL orders in the 10:03 run).
         if (lock && lid && !isHoldId(lid) && ev.endDate <= lock.from && r.status !== 'completed') {
-            r.apLocked = true; pastN++; frozen.push(ev); past.add(ev); continue;
+            if (Number(r.made) > 0 || Number(r.erpMade) > 0) { r.apLocked = true; pastN++; frozen.push(ev); past.add(ev); continue; }
+            pastGoneN++; gone.push(ev); continue;
         }
         if (r.status === 'completed' || (keepStarted && Number(r.made) > 0)) { kept.push(ev); continue; }
         // a PO whose sewing output cannot be reconciled takes no NEW
@@ -4212,7 +4221,7 @@ function blankBoardForAutoPlan(s, keepStarted, lock = null) {
         ids    : frozen.map(ev => ev.data.dbId ?? (String(ev.id).startsWith('db-') ? Number(String(ev.id).slice(3).split('-')[0]) : null)).filter(v => v != null),
         snap   : apSnapshotBars(s, frozen)
     };
-    const stats = { gone : gone.length, kept : kept.length + past.size, dupParked : 0, restored : 0, restoredQty : 0, locked : lockedN, past : pastN, ambiguousBars : ambiguousN,
+    const stats = { gone : gone.length, kept : kept.length + past.size, dupParked : 0, restored : 0, restoredQty : 0, locked : lockedN, past : pastN, pastGone : pastGoneN, ambiguousBars : ambiguousN,
         ambiguous : [...ambiguous.values()], sewnQty : 0, coveredQty : 0, fullySewn : 0, reconciled : 0, reduced : 0, reducedQty : 0 };
 
     // ---- Remaining sewing quantity per PO group (order row) ---------------
@@ -4902,7 +4911,7 @@ async function runAutoPlanAvail() {
     // rows still waiting in the run's delivery window (a replaced projection is planned as its confirm POs)
     const left = apReview.value?.summary ? apReview.value.summary.unplannedOrders
         : unplanned.value.filter(u => !(currentUnitId.value && u.unitId && u.unitId !== currentUnitId.value) && u.status !== 'completed' && !u.replaced && u.status !== 'replaced').length;
-    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${r?.gapFill?.pieces ? ` · NO IDLE LINE: ${r.gapFill.pieces} piece(s) of ${r.gapFill.orders} waiting order(s) (${fmtQty(r.gapFill.qty)} pcs) fill ${r.gapFill.gaps} idle stretch(es)` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the ${lock?.days || apLockDays.value}-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
+    toast(`Auto plan: ${blanked.gone} bar(s) removed${blanked.pastGone ? ` (${blanked.pastGone} of them past bars with nothing sewn — their quantity is planned again, once)` : ''}${blanked.kept ? `, ${blanked.kept} kept` : ''}${blanked.dupParked ? ` (${blanked.dupParked} Holding Row leftover(s) of orders planned from their rows — cancelled on Save)` : ''}${blanked.restored ? ` · ${blanked.restored} order(s) planned for their FULL PO quantity again (+${fmtQty(blanked.restoredQty)} pcs an earlier run had left out)` : ''} · ${r?.planned || 0} order(s) planned (${r?.tight || 0} tight)${r?.filledLate ? ` · ${r.filledLate} late plan(s), flagged` : ''}${r?.gapFill?.pieces ? ` · NO IDLE LINE: ${r.gapFill.pieces} piece(s) of ${r.gapFill.orders} waiting order(s) (${fmtQty(r.gapFill.qty)} pcs) fill ${r.gapFill.gaps} idle stretch(es)` : ''}${blanked.locked ? ` · ${blanked.locked} bar(s) kept by the ${lock?.days || apLockDays.value}-day lock` : ''}${apReview.value?.held?.length ? ` · ${apReview.value.held.length} in Holding${r?.parked ? ` (${r.parked} on the Holding Row — ${AP_HOLD_SPACE})` : ''}` : ''}${apReview.value?.infeasible?.filter(x => x.noSpace).length ? ` · ${apReview.value.infeasible.filter(x => x.noSpace).length} ${AP_NO_SPACE}` : ''}${apReview.value?.issues?.length ? ` · ${apReview.value.issues.length} PO(s) not reconciled` : ''} — Save to keep, Undo to go back`, (apReview.value?.infeasible?.length || r?.filledLate || apReview.value?.issues?.length) ? 'warn' : 'ok');
 }
 // The run's review (planner spec 2026-11-12): line plan is the board itself;
 // here the shipment check per bar (PCD, earliest sewing start, latest sewing
