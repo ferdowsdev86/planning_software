@@ -76,9 +76,25 @@ export const calendarState = {
     lineOverrides : {}
 };
 
-// The hours a specific line was given for that date, undefined when none
+// The hours a specific line was given for that date, undefined when none.
+// A HOLDING ROW has no figure of its own: it follows the unit's LINES on that
+// date — the most hours any line was given (planner, 2026-11-24, MBM Friday
+// 04/12: every line set to 10 h under "Selected lines", the unit calendar
+// still 0 → a parked bar's day plan showed 0 pcs on a day the factory works).
+// No line figure → the unit calendar, as before.
 export function lineOverrideOf(date, lineId) {
     if (!lineId) return undefined;
+    if (String(lineId).startsWith('hold')) {
+        const ymd = ymdOf(date);
+        let best;
+        for (const m of Object.values(calendarState.lineOverrides || {})) {
+            const v = m?.[ymd];
+            if (v == null || v === '') continue;
+            const h = Number(v) || 0;
+            if (best === undefined || h > best) best = h;
+        }
+        return best;
+    }
     const dbId = LINE_BY_ID[lineId]?.dbId;
     if (!dbId) return undefined;
     const v = calendarState.lineOverrides[dbId]?.[ymdOf(date)];
