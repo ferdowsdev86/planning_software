@@ -417,6 +417,10 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // gone / other unit) — shown on the bar, never acted on by the sync
         erpFlag      : noteGroup.erpFlag ? String(noteGroup.erpFlag) : undefined,
         dbId     : orderId,
+        // the whole order's quantity in planning_orders NOW (every confirm PO
+        // of the order code) — the saved fullOrderQty above is what it was
+        // when the bar was planned; the duplicate check takes the larger
+        orderTotalQty : orderId && Number(e.order_total_qty) > 0 ? Number(e.order_total_qty) : undefined,
         // what the bar's PO rows hold NOW (ERP qty; every piece of a split
         // order carries the same figure) and the plan qty of its pieces that
         // left the board finished — the re-plan restores the difference
@@ -425,6 +429,9 @@ function buildEventRaw(e, effUnitId, qty, orderQty, smv, dur, start, end, ship, 
         // ({ id, po, qty, sewn, remaining, ship }): Auto plan plans the bar
         // again as its confirm order rows (order + colour + delivery date)
         poRows    : orderId && Array.isArray(e.group_rows) && e.group_rows.length ? e.group_rows : undefined,
+        // every PO row of the bar with its ERP quantity ({ id, qty }) — the
+        // duplicate check (one PO row on two bars, dedupeConfirmBars)
+        rowQty    : orderId && Array.isArray(e.group_row_qty) && e.group_row_qty.length ? e.group_row_qty : undefined,
         groupDone : orderId ? (Number(e.group_done) || 0) : undefined,
         // actual sewing output of those PO rows (ERP daily_productions) and
         // the POs whose output could not be reconciled (no new allocation)

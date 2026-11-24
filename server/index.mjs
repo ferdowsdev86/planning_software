@@ -453,6 +453,9 @@ async function attachGroupTotals(events) {
         // plan plans such a bar again as its confirm order rows (order +
         // colour + delivery date), each for its own delivery
         if (new Set(ships.map(x => +new Date(x.ship))).size > 1) e.group_rows = ships;
+        // …and every row's own quantity: the duplicate check on the board
+        // (one PO row on two bars) shares a bar's quantity out by its rows
+        e.group_row_qty = [...ids].filter(i => qtyOf.has(i)).map(i => ({ id : i, qty : qtyOf.get(i) }));
         e.group_qty   = q;
         e.group_done  = d;
         e.group_sewn  = sewn;

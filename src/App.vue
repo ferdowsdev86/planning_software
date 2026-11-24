@@ -24,6 +24,7 @@ import { planAutoV2, AP2_NO_SPACE, scheduleMetrics } from './autoPlanV2.mjs';
 import { balanceSplits } from './equalOrderService.mjs';
 import { curveLag, consumePlan } from './learningCurveService.mjs';
 import { planQtyChange, orderShares, qtyTol } from './qtyUpdateService.mjs';
+import { planDedupe, uncoveredRows } from './dedupeService.mjs';
 import { splitByDelivery, mergeSameSource } from './deliveryRows.mjs';
 import { allotByPieces, queueGroupsIntoPieces } from './confirmReplaceService.mjs';
 import {
@@ -322,6 +323,10 @@ const pendingSwapIds = new Set();
 // baseline snapshot — force-include them in the next save or they never
 // persist. Kept separate from swaps so the dialog labels them honestly.
 const pendingRepairIds = new Set();
+// Bars the duplicate check (dedupeConfirmBars) cut down or took off the board
+// after the load: id → { removed, po, name, lineName, qty } — the baseline may
+// be re-taken after the post-load job, so they are force-listed and saved
+const pendingDedupe = new Map();
 uiHooks.notePositionRepair = id => {
     if (String(id).startsWith('db-')) pendingRepairIds.add(String(id));
 };
@@ -355,6 +360,20 @@ function collectPendingChanges(s) {
             toLine   : now.lineName
         });
     }
+    for (const [id, d] of pendingDedupe) {
+        if (pendingSwapIds.has(id)) continue;
+        const now = current[id];
+        if (d.removed ? !!now : !now) continue;      // back on the board (Undo) / gone another way
+        swapChanges.push({
+            eventId  : id,
+            type     : d.removed ? 'dup-removed' : 'dup-cut',
+            po       : now?.po || d.po,
+            name     : now?.name || d.name,
+            fromLine : d.lineName,
+            toLine   : d.removed ? '—' : (now?.lineName || d.lineName),
+            qty      : now?.qty ?? d.qty
+        });
+    }
     if (!boardBaseline) {
         return Object.values(current).map(now => ({
             eventId  : now.id,
@@ -366,8 +385,10 @@ function collectPendingChanges(s) {
         }));
     }
     const changes = [...swapChanges];
+    const forced = new Set(swapChanges.map(c => String(c.eventId)));
     const ids = new Set([...Object.keys(boardBaseline), ...Object.keys(current)]);
     for (const id of ids) {
+        if (forced.has(id)) continue;
         const was = boardBaseline[id];
         const now = current[id];
         if (!was && now) {
@@ -444,6 +465,8 @@ function formatSaveConfirm(changes) {
         if (ch.type === 'rescheduled') return `• ${label}: rescheduled on ${ch.toLine}`;
         if (ch.type === 'replaced') return `• ${label}: confirm order replaced its projection on ${ch.toLine}`;
         if (ch.type === 'repaired') return `• ${label}: position adjusted (overlap repair) on ${ch.toLine}`;
+        if (ch.type === 'dup-removed') return `• ${label}: duplicate of the order (its PO rows were on another bar) removed from ${ch.fromLine}`;
+        if (ch.type === 'dup-cut') return `• ${label}: duplicate part cut — ${fmtQty(ch.qty)} pcs left on ${ch.toLine}`;
         if (ch.type === 'retuned') return `• ${label}: efficiency changed on ${ch.toLine}`;
         if (ch.type === 'split') return `• ${label}: qty split (${fmtQty(ch.qty)} pcs on ${ch.toLine})`;
         return `• ${label}: ${ch.fromLine} → ${ch.toLine}`;
@@ -526,6 +549,7 @@ function finishBoardLoad(uid, data, s) {
         setBoardBaseline(s);
         loadQuietUntil = Date.now() + 3000;
         pendingRepairIds.clear();
+        pendingDedupe.clear();
         // …and that is CHECKED, not assumed: every bar must stand where the
         // DB row holds it (start, end, line). A difference is a bug in the
         // load path — it is shouted at once, never silently saved later.
@@ -10253,6 +10277,161 @@ function applyErpQtyUpdates(s) {
 }
 const QTY_HOLD_REASON = 'Order quantity increased in the ERP — no room behind its bar on the line';
 
+// ---------------------------------------------------------------------------
+// ONE ORDER NEVER STANDS ON THE BOARD FOR MORE THAN ITS QUANTITY (planner,
+// 2026-11-24, 26H1LEV701: a 5,080-pc order was TWO strips on MBM Line 06+07 —
+// 4,905 for its four 19/12 POs and 5,232 for the whole order, the same PO
+// rows on both; the live DB held 16 such orders). The confirm bars of one
+// order together may carry its plan quantity (+3 %); what is over is a
+// duplicate: the Holding Row bars give first (latest start first), then the
+// line bars from the latest start backwards — a bar cut to nothing goes, a
+// bar cut in part keeps its start, shrinks to what is left and keeps the PO
+// rows no other bar of the order holds. Never cut: a bar with production, a
+// completed bar, a bar under the plan lock (the excess is reported instead).
+// Pure maths in dedupeService (node-tested). The board's own edit after the
+// load: unsaved changes with a toast, one Undo step, Save writes them.
+// ---------------------------------------------------------------------------
+let lastDedupe = { orders : [], removed : 0, cut : 0, left : [] };
+// a bar's PO rows (idList + its anchor row) and, when every one of them has
+// a quantity (server rowQty / poRows, a fresh bar's poDetails), the rows
+// with their ERP quantities for the row-wise check
+function barRowsOf(raw) {
+    const ids = [...new Set([...(Array.isArray(raw.idList) ? raw.idList : []), raw.dbId].filter(i => Number(i) > 0).map(Number))];
+    const q = new Map();
+    for (const src of [raw.rowQty, raw.poRows, raw.poDetails]) {
+        for (const r of (Array.isArray(src) ? src : [])) if (r && r.id != null && Number.isFinite(Number(r.qty)) && !q.has(Number(r.id))) q.set(Number(r.id), Number(r.qty));
+    }
+    const rows = ids.filter(i => q.has(i)).map(i => ({ id : i, qty : q.get(i) }));
+    return { ids, rows : rows.length && rows.length === ids.length ? rows : [] };
+}
+function dedupeConfirmBars(s) {
+    const out = { orders : [], removed : 0, cut : 0, left : [] };
+    lastDedupe = out;
+    if (!s || whatIfActive.value || boardFrozenNow()) return out;
+    const lock = qtyLockWindow();
+    const idx  = buildLineIndex(s);
+    const groups = new Map();
+    for (const ev of s.eventStore.records) {
+        const raw = ev.data?.raw;
+        if (!raw || raw.stage) continue;
+        if (orderTypeOf(raw.po, raw.orderType) !== 'confirm') continue;
+        const code = String(raw.mbmOrder || '').trim().toLowerCase();
+        if (!code || code === 'mbm-0') continue;
+        const lid = lineIdOf(s, ev, idx);
+        if (!lid) continue;
+        let g = groups.get(code);
+        if (!g) { g = { code : String(raw.mbmOrder).trim(), total : 0, bars : [] }; groups.set(code, g); }
+        g.total = Math.max(g.total, Number(raw.fullOrderQty) || 0, Number(raw.orderTotalQty) || 0);
+        const hold  = isHoldId(lid);
+        const fixed = raw.status === 'completed' || Number(raw.made) > 0 || Number(raw.progress) > 0
+            || (!hold && !!lock && overlapsLock(ev.startDate, ev.endDate, lock));
+        g.bars.push({ ev, raw, lid, hold, fixed, ...barRowsOf(raw) });
+    }
+    const factor = planQtyOf(1000) / 1000;
+    const todo = [];
+    for (const g of groups.values()) {
+        if (g.bars.length < 2) continue;
+        // the rows' quantities known for every bar → row by row; else the order's quantity
+        const plan = planDedupe({ need : g.total > 0 ? planQtyOf(g.total) : 0, factor,
+            bars : g.bars.map(b => ({ key : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, start : +b.ev.startDate, rows : b.rows })) });
+        if (plan.excess > 0 || plan.left > 0) {
+            (out.detail ||= []).push({ order : g.code, mode : plan.mode, total : g.total, have : plan.have, excess : plan.excess, left : plan.left,
+                bars : g.bars.map(b => ({ id : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, made : Number(b.raw.made) || 0, progress : Number(b.raw.progress) || 0, status : b.raw.status, rows : b.rows.length, ids : b.ids.length })),
+                changes : plan.changes });
+        }
+        if (plan.left > 0) out.left.push({ order : g.code, excess : plan.left });
+        if (plan.changes.length) todo.push({ g, plan });
+    }
+    if (!todo.length) return out;
+    pushUndo(s, 'duplicate bars of an order');
+    const gone = [];
+    const touched = new Set();
+    for (const { g, plan } of todo) {
+        const byKey = new Map(g.bars.map(b => [String(b.ev.id), b]));
+        const goneKeys = new Set(plan.changes.filter(c => c.qty === 0).map(c => String(c.key)));
+        // the rows' quantities where the bars know them (order mode)
+        const rowQty = new Map();
+        for (const b of g.bars) for (const r of b.rows) rowQty.set(r.id, r.qty);
+        const rec = { order : g.code, removed : 0, cut : 0, lines : new Set() };
+        for (const c of plan.changes) {
+            const b = byKey.get(String(c.key));
+            if (!b) continue;
+            rec.lines.add(lineLabel(s, b.lid));
+            touched.add(b.lid);
+            pendingDedupe.set(String(b.ev.id), { removed : c.qty === 0, po : b.raw.po || '', name : b.ev.name, lineName : lineLabel(s, b.lid), qty : c.qty });
+            if (c.qty === 0) { gone.push(b.ev); rec.removed++; out.removed++; continue; }
+            const raw = b.raw;
+            const newBase = Math.max(1, Math.round(c.qty / factor));
+            if (b.hold) {
+                const q0 = Number(raw.qty) || 1;
+                const dur = Math.max(1 / 60, (Number(raw.dur) > 0 ? Number(raw.dur) : elapsedDays(b.ev.startDate, b.ev.endDate)) * c.qty / q0);
+                raw.qty = c.qty; raw.reqMin = Math.round(c.qty * (Number(raw.smv) || 0)); raw.dur = dur;
+                const end = endOfWork(new Date(b.ev.startDate), dur);
+                raw.end = end;
+                b.ev.set({ endDate : end, duration : elapsedDays(b.ev.startDate, end) });
+            }
+            else {
+                const end = sizeBarForQty(s, raw, b.lid, b.ev.startDate, c.qty);
+                raw.end = end;
+                b.ev.set({ endDate : end, duration : elapsedDays(b.ev.startDate, end) });
+            }
+            raw.orderQty = newBase;
+            if (Number(raw.baseQty) > 0) raw.baseQty = newBase;
+            // its PO rows: the ones it still carries something of (row mode),
+            // else the ones no bar that stays holds (26H1LEV701: the
+            // whole-order bar keeps only the 318-pc 22/02 PO)
+            let keepIds = null;
+            if (Array.isArray(c.rows)) {
+                if (c.rows.length && c.rows.length < b.ids.length) keepIds = c.rows;
+            }
+            else {
+                const others = new Set();
+                for (const o of g.bars) if (o !== b && !goneKeys.has(String(o.ev.id))) o.ids.forEach(i => others.add(i));
+                const u = uncoveredRows({ idList : b.ids, others, rowQty : rowQty.size ? rowQty : null, base : newBase });
+                if (u.apply) keepIds = u.ids;
+            }
+            if (keepIds) {
+                const oldIds = (Array.isArray(raw.idList) ? raw.idList : []).map(Number);
+                const oldPos = Array.isArray(raw.poList) ? raw.poList : [];
+                const poOf = new Map();
+                if (oldPos.length === oldIds.length) oldIds.forEach((i, k) => poOf.set(i, oldPos[k]));
+                for (const src of [raw.poRows, raw.poDetails]) for (const r of (Array.isArray(src) ? src : [])) if (r && r.id != null && r.po) poOf.set(Number(r.id), r.po);
+                raw.idList = keepIds;
+                const pos = keepIds.map(i => poOf.get(i)).filter(Boolean);
+                if (pos.length === keepIds.length) { raw.poList = pos; raw.po = pos[0]; }
+                raw.poCount = keepIds.length;
+                if (Array.isArray(raw.poDetails)) raw.poDetails = raw.poDetails.filter(d => d && keepIds.includes(Number(d.id)));
+                if (Array.isArray(raw.poRows))    raw.poRows    = raw.poRows.filter(r => r && keepIds.includes(Number(r.id)));
+                if (Array.isArray(raw.rowQty))    raw.rowQty    = raw.rowQty.filter(r => r && keepIds.includes(Number(r.id)));
+                if (!keepIds.includes(Number(raw.dbId))) { raw.dbId = keepIds[0]; if (String(raw.id || '').startsWith('dbo-')) raw.id = `dbo-${keepIds[0]}`; }
+            }
+            rec.cut += c.qty; out.cut += c.qty;
+        }
+        rec.lines = [...rec.lines];
+        out.orders.push(rec);
+    }
+    if (gone.length) {
+        for (const ev of gone) {
+            const sid = String(ev.id);
+            if (sid.startsWith('db-') && !sid.includes('-sp')) {
+                const dbId = Number(sid.slice(3).split('-')[0]);
+                if (dbId) removedDbEventIds.add(dbId);
+            }
+            const asgn = s.assignmentStore?.records?.filter(a => String(a.eventId ?? a.event?.id) === sid) || [];
+            if (asgn.length) s.assignmentStore.remove(asgn);
+        }
+        s.eventStore.remove(gone);
+        if (boardDbState) for (const ev of gone) delete boardDbState[String(ev.id)];
+    }
+    invalidateBarsByLine();
+    try { applyLearningCurves(s, { lineIds : [...touched].filter(l => !isHoldId(l)) }); } catch { /* annotation only */ }
+    recalcCapacity(s);
+    markBoardDirty();
+    touchBoardCache(s);
+    s.refreshRows?.();
+    return out;
+}
+
 // Asked for after a board load and when the edit lock arrives: one pass,
 // debounced, never under a strip in the planner's hand or while the
 // finished-strip sweep is saving
@@ -10277,6 +10456,18 @@ function scheduleQtyUpdates(s) {
         // (2627G-S138, 2026-11-23 — one order was a projection on Line 05 AND
         // a confirm bar on the Holding Row until Auto plan ran)
         if (!qtyUpdateAfterLock) {
+            // an order standing on the board for MORE than its quantity (the
+            // same PO rows on two bars) loses the duplicate first (26H1LEV701,
+            // 2026-11-24) — the swap below then sees the order's true bars
+            try {
+                const dd = dedupeConfirmBars(sb);
+                if (dd.orders.length) {
+                    const names = dd.orders.slice(0, 4).map(o => `${o.order}${o.removed ? ` (${o.removed} bar${o.removed > 1 ? 's' : ''} removed)` : ''}${o.cut ? ` → ${fmtQty(o.cut)} left on the bar` : ''}`).join(', ');
+                    toast(`${dd.orders.length} order(s) stood on the board for more than their quantity — the duplicate bars are gone: ${names}${dd.orders.length > 4 ? ` … +${dd.orders.length - 4} more` : ''}. Undo takes it back; Save keeps it`, 'ok');
+                }
+                if (dd.left.length) toast(`${dd.left.length} order(s) still hold more than their quantity — the extra bars have production or stand under the plan lock: ${dd.left.slice(0, 4).map(x => `${x.order} +${fmtQty(x.excess)}`).join(', ')}`, 'warn');
+            }
+            catch (e) { console.warn('[duplicate bars] skipped:', e); }
             try {
                 const swapped = replaceProjectionsWithConfirms(sb);
                 if (swapped) toast(`${swapped} projection bar(s) replaced by their confirm orders on the board — Undo takes it back; Save keeps it`, 'ok');
@@ -16548,7 +16739,7 @@ onMounted(() => {
     };
 
     // Dev-console access for diagnostics
-    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, replaceProjections : (o = {}) => replaceProjectionsWithConfirms(getInstance(), o), shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, newOrderPlan : { run : () => autoPlanNewOrders(getInstance()), last : () => lastNewOrderPlan }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
+    window.__mbm = { prof, syncOpts, autoPlan : autoPlanUnitBoard, save : () => saveToDb(), apiBase : () => API_BASE, settle : scheduleBoardSettle, pendingChanges : () => collectPendingChanges(getInstance()), boardState : () => snapshotBoardState(getInstance()), pickUp, placeCarried, cancelCarry, carried, uiHooks, carryDurOnLine, computeCarryPreview, runPlan : (o = {}) => runLiveOrderPlan(getInstance(), o), barDayQty, showDayPlanChips, clearDayPlanChips, resizeBars, snapSelectedToDayStart, boardReadOnly, boardLockHolder, syncBoardLock, groupMembersOf, consolidate, whatIfView, whatIfActive, applyLineHourRanges, apLockWindow, apGuard : () => apLockGuard, apReview : () => apReview.value, apPlanNotes : () => apPlanNotes.value, loadDiff : () => loadDiffFromDb(getInstance()), saveCheck : () => verifySavedPlan(getInstance()), applyStored : rows => applyStoredPositions(getInstance(), rows), apHorizon, confirmCompletion : () => lastConfirmCompletion, replaceProjections : (o = {}) => replaceProjectionsWithConfirms(getInstance(), o), dedupe : { run : () => dedupeConfirmBars(getInstance()), last : () => lastDedupe }, shortGroups : () => shortConfirmGroups(getInstance()), qtyUpdates : { run : () => applyErpQtyUpdates(getInstance()), last : () => lastQtyUpdate, schedule : () => scheduleQtyUpdates(getInstance()) }, newOrderPlan : { run : () => autoPlanNewOrders(getInstance()), last : () => lastNewOrderPlan }, ordersSummary : () => ordersSummary.value, ordersTile, tileAction, listRows : () => filteredErpOrders.value, rowShares, forecast : { feed : () => sewingFeed, refresh : () => loadSewingActualsForBoard(getInstance()), of : id => getInstance()?.eventStore.getById(id)?.data?.raw?.fc || null, window : FORECAST_WINDOW_DAYS },
         api : { saveProdUpdatesDb, syncToApi, addStripNoteDb, loadProdUpdatesDb },
         unplanned, orderKeysOf, orderBoardKeys, erpOrderInfo, currentUnitId, enforceSewStartFloor, retireSewnProjections,
         ap  : { open : openAutoPlanAvail, run : runAutoPlanAvail, from : apFrom, to : apTo, lock : apApplyLock, keepStarted : apKeepStarted, busy : apBusy, last : () => apLastRun },
@@ -16810,6 +17001,7 @@ async function saveToDbInner(s) {
             skippedDbEvents.length = 0;
             pendingSwapIds.clear();
             pendingRepairIds.clear();
+            pendingDedupe.clear();
             // the Auto Plan run is saved: its 10-day lock guard ends here
             if (lockIds) apClearLockGuard(s);
             scheduleUnsavedRefresh();
