@@ -74,7 +74,27 @@ test('rows: a bar over its own rows is cut down to them — a merged duplicate, 
     assert.equal(over.excess, 500);
 });
 
-test('rows: Holding Row bars give first; bars with production / under the lock never — the excess is reported', () => {
+test('rows: a past line bar with nothing made gives first; a bar with production keeps what it made', () => {
+    // 26H1LEV803 (2026-11-25): the order's old bar from 10/11 (893, 12 made) beside the 881-pc rest the
+    // Auto plan planned again on 24/11 — the past bar shrinks to its 12 pcs, the rest stays whole
+    const r = planDedupe({ bars : [
+        { key : 'old', qty : 893, start : d('2026-11-10'), past : true, min : 12, rows : [{ id : 1, qty : 464 }, { id : 2, qty : 403 }] },
+        { key : 'rest', qty : 881, start : d('2026-11-24'), rows : [{ id : 1, qty : 464 }, { id : 2, qty : 403 }] }
+    ] });
+    assert.deepEqual(r.changes, [{ key : 'old', qty : 12, rows : [1, 2] }]);
+    // …and after the planner merged the two: ONE 1,774-pc bar with 12 made → 893
+    const m = planDedupe({ bars : [{ key : 'db-12085', qty : 1774, start : d('2026-11-24'), min : 12, rows : [{ id : 1, qty : 464 }, { id : 2, qty : 403 }] }] });
+    assert.deepEqual(m.changes, [{ key : 'db-12085', qty : 893, rows : [1, 2] }]);
+    // a bar that made everything it holds is not cut below it, never removed
+    const p = planDedupe({ bars : [
+        { key : 'a', qty : 500, start : 1, min : 500, rows : [{ id : 1, qty : 485 }] },
+        { key : 'b', qty : 500, start : 2, min : 500, rows : [{ id : 1, qty : 485 }] }
+    ] });
+    assert.deepEqual(p.changes, []);
+    assert.equal(p.left, 500);
+});
+
+test('rows: Holding Row bars give first; completed bars never — the excess is reported', () => {
     // 26H1LEV746: 10,300 on a line + a 1,970 "rest" parked after the order was restored in full
     const r = planDedupe({ bars : [
         { key : 'line', qty : 10300, start : d('2026-11-24'), rows : [{ id : 1, qty : 10000 }] },

@@ -18,9 +18,9 @@
 // start first), then the line bars from the latest start backwards. A bar
 // cut to nothing goes; a bar cut in part keeps its start, shrinks to what is
 // left and keeps only the rows it still carries something of (26H1LEV701:
-// the whole-order bar keeps the 318-pc 22/02 PO). Never cut: a bar with
-// production, a completed bar, a bar under the plan lock — the excess they
-// hold is reported instead. Synchronized split pieces share their rows and
+// the whole-order bar keeps the 318-pc 22/02 PO). A bar with production is
+// cut down to what it made, never below; a completed bar is never cut — the
+// excess it holds is reported instead. Synchronized split pieces share their rows and
 // add up to the order — nothing to cut.
 // Without the rows' quantities (a projection bar, a bar saved by an older
 // version, rows gone) the ORDER's quantity decides: the bars together carry
@@ -35,15 +35,21 @@
 // rounding of the +3 % pieces across several split pieces is no duplicate
 export const dupTol = need => Math.max(10, Math.round((Number(need) || 0) * 0.015));
 
-const byPriority = (a, b) => (Number(b.hold) - Number(a.hold)) || (b.start - a.start) || String(b.key).localeCompare(String(a.key));
+// cut order: a LINE bar that ended in the past with less than its plan made
+// first (the past cannot make it any more — 26H1LEV803: the order's old bar
+// from 10/11 with 12 pcs made stood beside the rest the Auto plan planned
+// again; the planner merged the two into 1,774 for 867), then the Holding Row
+// bars, then the line bars from the latest start backwards
+const byPriority = (a, b) => (Number(b.past) - Number(a.past)) || (Number(b.hold) - Number(a.hold)) || (b.start - a.start) || String(b.key).localeCompare(String(a.key));
 
 /**
  * @param {number} need — plan quantity the whole order may have on the board
  *        (used only when the rows' quantities are not known)
- * @param {Array<{key, qty, hold?, fixed?, start?, rows?:Array<{id, qty}>}>} bars
- *        — the order's confirm bars: qty = plan pieces, hold = on the Holding
- *        Row, fixed = may not be cut (production on record, completed, under
- *        the plan lock), start = start time (ms), rows = its PO rows with
+ * @param {Array<{key, qty, hold?, fixed?, past?, min?, start?, rows?:Array<{id, qty}>}>} bars
+ *        — the order's bars: qty = plan pieces, hold = on the Holding Row,
+ *        fixed = may not be cut at all (completed), past = a line bar that
+ *        ended before today (cut first), min = pieces made (the bar never
+ *        goes below them), start = start time (ms), rows = its PO rows with
  *        their ERP quantity
  * @param {number} factor — plan pieces per ERP piece (1.03)
  * @returns {{mode:'rows'|'order'|'none', need, have, excess, tol,
@@ -54,8 +60,10 @@ const byPriority = (a, b) => (Number(b.hold) - Number(a.hold)) || (b.start - a.s
  */
 export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
     const list = (bars || []).map(b => ({
-        key : b.key, hold : !!b.hold, fixed : !!b.fixed,
+        key : b.key, hold : !!b.hold, fixed : !!b.fixed, past : !!b.past && !b.hold,
         qty : Math.max(0, Math.round(Number(b.qty) || 0)),
+        // made pieces: the bar never goes below them, and never away with them
+        min : Math.min(Math.max(0, Math.round(Number(b.min) || 0)), Math.max(0, Math.round(Number(b.qty) || 0))),
         start : Number(b.start) || 0,
         rows : (Array.isArray(b.rows) ? b.rows : []).map(r => ({ id : Number(r?.id), qty : Number(r?.qty) }))
             .filter(r => r.id > 0 && Number.isFinite(r.qty) && r.qty >= 0)
@@ -102,10 +110,12 @@ export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
             let cut = 0;
             for (const r of b.rows) cut += Math.min(a.get(r.id) || 0, excess.get(r.id) || 0);
             if (cut <= 0) continue;
-            const scale = cut > budget ? budget / cut : 1;    // only what the order is over by
+            // only what the order is over by, never into what the bar has made
+            const scale = Math.min(1, cut > budget ? budget / cut : 1, cut > b.qty - b.min ? (b.qty - b.min) / cut : 1);
             cut *= scale;
+            if (!(cut > 0)) continue;
             const rest = b.qty - cut;
-            if (rest <= out.tol) {
+            if (rest <= out.tol && b.min === 0) {
                 // a sliver left over is rounding, not a plan — the bar goes with it
                 for (const r of b.rows) if (excess.has(r.id)) excess.set(r.id, Math.max(0, excess.get(r.id) - (a.get(r.id) || 0)));
                 out.changes.push({ key : b.key, qty : 0 });
@@ -118,7 +128,7 @@ export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
                 if (take > 0) excess.set(r.id, excess.get(r.id) - take);
                 if ((a.get(r.id) || 0) - take > 0.5) rows.push(r.id);
             }
-            out.changes.push({ key : b.key, qty : Math.round(rest), rows });
+            out.changes.push({ key : b.key, qty : Math.max(b.min, Math.round(rest)), rows : rows.length ? rows : b.rows.map(r => r.id) });
             budget -= cut;
         }
         out.left = Math.min(total(), Math.max(0, budget)) > out.tol ? Math.round(Math.min(total(), budget)) : 0;
@@ -135,10 +145,11 @@ export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
     let cut = have - want;
     for (const b of list.filter(x => !x.fixed).sort(byPriority)) {
         if (cut <= out.tol) break;
-        const take = Math.min(b.qty, cut);
+        const take = Math.min(b.qty - b.min, cut);
+        if (!(take > 0)) continue;
         const rest = b.qty - take;
-        if (rest <= out.tol) { out.changes.push({ key : b.key, qty : 0 }); cut -= b.qty; }
-        else { out.changes.push({ key : b.key, qty : rest }); cut -= take; }
+        if (rest <= out.tol && b.min === 0) { out.changes.push({ key : b.key, qty : 0 }); cut -= b.qty; }
+        else { out.changes.push({ key : b.key, qty : Math.max(b.min, rest) }); cut -= take; }
     }
     out.left = cut > out.tol ? cut : 0;
     return out;

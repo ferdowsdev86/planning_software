@@ -1858,6 +1858,27 @@ export function splitBarIntoPieces(scheduler, rec, n) {
 // Several bars of ONE order (same PO / order / colour) on ONE row → one bar:
 // the earliest keeps its place, quantities add up, the length follows the
 // row's capacity, the other bars leave (cancelled in the DB on Save).
+// The plan quantity the PO rows behind a set of bars allow (their ERP
+// quantities + 3 %) and those quantities' sum; cap 0 = rows unknown. Two bars
+// of one order that merge never make more than their rows (planner,
+// 2026-11-25, 26H1LEV803: a stale 893-pc bar + the 881-pc rest planned again
+// were merged into 1,774 for an 867-pc order).
+export function rowsPlanCapOf(raws) {
+    const ids = new Set(), q = new Map();
+    for (const raw of raws || []) {
+        if (!raw) continue;
+        for (const i of [...(Array.isArray(raw.idList) ? raw.idList : []), raw.dbId]) if (Number(i) > 0) ids.add(Number(i));
+        for (const src of [raw.rowQty, raw.poRows, raw.poDetails]) {
+            for (const r of (Array.isArray(src) ? src : [])) if (r && r.id != null && Number.isFinite(Number(r.qty)) && !q.has(Number(r.id))) q.set(Number(r.id), Number(r.qty));
+        }
+    }
+    if (!ids.size) return { cap : 0, base : 0 };
+    let base = 0;
+    for (const i of ids) { if (!q.has(i)) return { cap : 0, base : 0 }; base += q.get(i); }
+    return { cap : base > 0 ? planQtyOf(base) : 0, base };
+}
+const capTol = cap => Math.max(10, Math.round(cap * 0.015));
+
 export function mergeBars(scheduler, recs) {
     const list = (recs || []).filter(r => r?.data?.raw && !r.data.raw.stage);
     if (list.length < 2) return { ok : false, msg : 'Select at least two bars of the same order (Ctrl+click)' };
@@ -1885,6 +1906,16 @@ export function mergeBars(scheduler, recs) {
         progW += (Number(x.progress) || 0) * (Number(x.qty) || 0);
         dur  += Number(x.dur) || elapsedDays(new Date(r.startDate), new Date(r.endDate));
     }
+    // never more than the order's rows: the part over them was a duplicate
+    const { cap, base : rowsBase } = rowsPlanCapOf(list.map(r => r.data.raw));
+    let capped = 0;
+    if (cap > 0 && qty > cap + capTol(cap)) {
+        capped = qty - Math.max(cap, made);
+        qty = Math.max(cap, made);
+        base = Math.min(base, rowsBase);
+        order = Math.min(order, rowsBase);
+        progW = Math.min(progW, qty * 100);
+    }
     r0.qty = qty;
     if (base > 0) r0.baseQty = base;
     if (order > 0) r0.orderQty = order;
@@ -1903,7 +1934,7 @@ export function mergeBars(scheduler, recs) {
     const pushed = isHoldId(lid) ? 0 : pushFollowers(scheduler, lid, first);
     recalcCapacity(scheduler);
     uiHooks.onBoardEdited?.();
-    return { ok : true, qty, merged : others.length, pushed, rec : first };
+    return { ok : true, qty, merged : others.length, pushed, rec : first, capped };
 }
 
 // ---------------------------------------------------------------------------
@@ -1950,9 +1981,20 @@ export function tryMergeAdjacent(scheduler, rec, targetLineId = null) {
         const rp = prev.data.raw, rn = next.data.raw;
         // "Keep separate from other strips" (strip properties) blocks re-join
         if (rp.keepSeparate || rn.keepSeparate) continue;
-        const qty  = rp.qty + rn.qty;
-        const prog = Math.round((rp.progress * rp.qty + rn.progress * rn.qty) / Math.max(1, qty));
-        const dur  = rp.dur + rn.dur;
+        let qty  = rp.qty + rn.qty;
+        let dur  = rp.dur + rn.dur;
+        // never more than the order's rows (the part over them was a duplicate)
+        const { cap, base : rowsBase } = rowsPlanCapOf([rp, rn]);
+        if (cap > 0 && qty > cap + capTol(cap)) {
+            const madeAll = (Number(rp.made) || 0) + (Number(rn.made) || 0);
+            const q2 = Math.max(cap, madeAll);
+            dur = dur * q2 / Math.max(1, qty);
+            qty = q2;
+            if (Number(rp.baseQty) > 0 || Number(rn.baseQty) > 0) rp.baseQty = rowsBase;
+            rp.orderQty = rowsBase;
+            uiHooks.onMergeCapped?.({ po : rp.po, order : rp.mbmOrder, qty, cap });
+        }
+        const prog = Math.min(100, Math.round((rp.progress * rp.qty + rn.progress * rn.qty) / Math.max(1, qty)));
         const start = new Date(prev.startDate);
         const end   = endOfWork(start, dur);
         rp.qty      = qty;

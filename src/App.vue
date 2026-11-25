@@ -10314,7 +10314,7 @@ function dedupeConfirmBars(s) {
     const out = { orders : [], removed : 0, cut : 0, left : [] };
     lastDedupe = out;
     if (!s || whatIfActive.value || boardFrozenNow()) return out;
-    const lock = qtyLockWindow();
+    const today = boardToday();
     const idx  = buildLineIndex(s);
     const groups = new Map();
     for (const ev of s.eventStore.records) {
@@ -10334,13 +10334,18 @@ function dedupeConfirmBars(s) {
         // never cuts a bar that is right
         g.total = Math.max(g.total, Number(raw.fullOrderQty) || 0, Number(raw.orderTotalQty) || 0, typ === 'projection' ? (Number(raw.erpQty) || 0) : 0);
         const hold  = isHoldId(lid);
-        const fixed = raw.status === 'completed' || Number(raw.made) > 0 || Number(raw.progress) > 0
-            || (!hold && !!lock && overlapsLock(ev.startDate, ev.endDate, lock));
-        g.bars.push({ ev, raw, lid, hold, fixed, proj : typ === 'projection', ...barRowsOf(raw) });
+        // only a completed bar is never cut; a bar with production keeps what
+        // it made (min); a line bar that ended before today with less made
+        // than planned gives first (26H1LEV803, 2026-11-25) — the plan lock
+        // does not protect a duplicate: a cut moves no bar
+        const fixed = raw.status === 'completed';
+        const past  = !hold && ev.endDate < today;
+        const min   = Math.max(0, Math.round(Number(raw.made) || 0));
+        g.bars.push({ ev, raw, lid, hold, fixed, past, min, proj : typ === 'projection', ...barRowsOf(raw) });
     }
     const factor = planQtyOf(1000) / 1000;
     const todo = [];
-    const asInput = b => ({ key : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, start : +b.ev.startDate, rows : b.proj ? [] : b.rows });
+    const asInput = b => ({ key : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, past : b.past, min : b.min, start : +b.ev.startDate, rows : b.proj ? [] : b.rows });
     for (const g of groups.values()) {
         const conf = g.bars.filter(b => !b.proj), proj = g.bars.filter(b => b.proj);
         // a lone projection piece with no order figure: its own planned order quantity
@@ -15902,7 +15907,7 @@ uiHooks.onMergeSelected = rec => {
     markBoardDirty();
     touchBoardCache(s);
     s.refreshRows?.();
-    toast(`${r.merged + 1} bars merged into one — ${fmtQty(r.qty)} pcs${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, 'ok');
+    toast(`${r.merged + 1} bars merged into one — ${fmtQty(r.qty)} pcs${r.capped ? ` (${fmtQty(r.capped)} pcs over the order's PO rows left out — one order never holds more than its quantity)` : ''}${r.pushed ? ` · ${r.pushed} follower(s) shifted later` : ''} — Save to keep`, r.capped ? 'warn' : 'ok');
 };
 function multiSelectMembers(s, rec) {
     if (!multiSel.has(String(rec.id))) return [];
@@ -16740,6 +16745,8 @@ onMounted(() => {
     uiHooks.onOpenSchedule = openPlannedSchedule;
     uiHooks.onOpenProps = openStripProps;
 
+    // two flush strips of one order re-joined to more than the order's PO rows: the part over was left out
+    uiHooks.onMergeCapped = ({ order, po, qty, cap }) => toast(`${order || po}: the two strips joined to more than the order — kept at ${fmtQty(qty)} pcs (the order's PO rows allow ${fmtQty(cap)})`, 'warn');
     uiHooks.onBoardEdited = () => {
         markBoardDirty();
         touchBoardCache(getInstance());
