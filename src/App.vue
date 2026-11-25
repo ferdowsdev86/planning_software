@@ -10144,15 +10144,20 @@ function applyErpQtyUpdates(s) {
     const lock   = qtyLockWindow();
     const idx    = buildLineIndex(s);
     const groups = new Map();
+    const confOnBoard = new Map();   // order code → plan qty on its confirm bars
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
         delete raw.qtyLock;
-        if (raw.status === 'completed' || orderTypeOf(raw.po, raw.orderType) === 'confirm') continue;
+        if (raw.status === 'completed') continue;
         const pid  = String(raw.id || '');
         const code = String(raw.mbmOrder || '').trim() || (pid.startsWith('proj:') ? pid.slice(5).replace(/-\d{1,2}$/, '') : '');
         const lid  = lineIdOf(s, ev, idx);
         if (!code || !lid) continue;
+        // the order's CONFIRM bars carry part of it already: the projection
+        // pieces only stand for the rest (27H1LEV043, 2026-11-25: 14,856 on
+        // confirm bars — the projection was grown to the whole 16,314 beside them)
+        if (orderTypeOf(raw.po, raw.orderType) === 'confirm') { confOnBoard.set(code, (confOnBoard.get(code) || 0) + (Number(raw.qty) || 0)); continue; }
         let g = groups.get(code);
         if (!g) { g = { code, erpQty : 0, pieces : [], skip : false }; groups.set(code, g); }
         // confirm POs are arriving for the order: the projection → confirm swap decides
@@ -10165,7 +10170,8 @@ function applyErpQtyUpdates(s) {
     for (const g of groups.values()) {
         if (g.skip || !(g.erpQty > 0)) continue;
         g.pieces.sort((a, b) => a.ev.startDate - b.ev.startDate);
-        const need = planQtyOf(g.erpQty);
+        const need = Math.max(0, planQtyOf(g.erpQty) - (confOnBoard.get(g.code) || 0));
+        if (!(need > 0)) continue;             // the confirm bars carry the order: the swap / the duplicate check decide
         const have = g.pieces.reduce((t, p) => t + (Number(p.raw.qty) || 0), 0);
         if (Math.abs(need - have) <= qtyTol(need)) continue;
         // The board holds MORE than the order: only the plain case is taken —
@@ -10255,7 +10261,7 @@ function applyErpQtyUpdates(s) {
         // every piece carries its own share of the ERP quantity (plan qty =
         // share + 3 %), the shares add up to the order; several pieces also
         // carry the whole order
-        let left = g.erpQty;
+        let left = Math.round(need / factor);   // the projection's part of the order (minus its confirm bars)
         kept.forEach((p, i) => {
             const share = i === kept.length - 1 ? Math.max(0, left) : Math.min(left, Math.round((Number(p.raw.qty) || 0) / factor));
             left -= share;
@@ -10314,39 +10320,60 @@ function dedupeConfirmBars(s) {
     for (const ev of s.eventStore.records) {
         const raw = ev.data?.raw;
         if (!raw || raw.stage) continue;
-        if (orderTypeOf(raw.po, raw.orderType) !== 'confirm') continue;
+        const typ = orderTypeOf(raw.po, raw.orderType);
+        if (typ !== 'confirm' && typ !== 'projection') continue;
         const code = String(raw.mbmOrder || '').trim().toLowerCase();
         if (!code || code === 'mbm-0') continue;
         const lid = lineIdOf(s, ev, idx);
         if (!lid) continue;
         let g = groups.get(code);
         if (!g) { g = { code : String(raw.mbmOrder).trim(), total : 0, bars : [] }; groups.set(code, g); }
-        g.total = Math.max(g.total, Number(raw.fullOrderQty) || 0, Number(raw.orderTotalQty) || 0);
+        // the order's quantity: the confirm rows behind its bars (NOW), what a
+        // projection bar's order holds in the ERP now (erpQty), what the bars
+        // were planned for (fullOrderQty) — the largest, so a stale figure
+        // never cuts a bar that is right
+        g.total = Math.max(g.total, Number(raw.fullOrderQty) || 0, Number(raw.orderTotalQty) || 0, typ === 'projection' ? (Number(raw.erpQty) || 0) : 0);
         const hold  = isHoldId(lid);
         const fixed = raw.status === 'completed' || Number(raw.made) > 0 || Number(raw.progress) > 0
             || (!hold && !!lock && overlapsLock(ev.startDate, ev.endDate, lock));
-        g.bars.push({ ev, raw, lid, hold, fixed, ...barRowsOf(raw) });
+        g.bars.push({ ev, raw, lid, hold, fixed, proj : typ === 'projection', ...barRowsOf(raw) });
     }
     const factor = planQtyOf(1000) / 1000;
     const todo = [];
+    const asInput = b => ({ key : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, start : +b.ev.startDate, rows : b.proj ? [] : b.rows });
     for (const g of groups.values()) {
-        if (g.bars.length < 2) continue;
-        // the rows' quantities known for every bar → row by row; else the order's quantity
-        const plan = planDedupe({ need : g.total > 0 ? planQtyOf(g.total) : 0, factor,
-            bars : g.bars.map(b => ({ key : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, start : +b.ev.startDate, rows : b.rows })) });
-        if (plan.excess > 0 || plan.left > 0) {
-            (out.detail ||= []).push({ order : g.code, mode : plan.mode, total : g.total, have : plan.have, excess : plan.excess, left : plan.left,
-                bars : g.bars.map(b => ({ id : String(b.ev.id), qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, made : Number(b.raw.made) || 0, progress : Number(b.raw.progress) || 0, status : b.raw.status, rows : b.rows.length, ids : b.ids.length })),
-                changes : plan.changes });
+        const conf = g.bars.filter(b => !b.proj), proj = g.bars.filter(b => b.proj);
+        // a lone projection piece with no order figure: its own planned order quantity
+        if (!(g.total > 0) && proj.length === 1 && !conf.length) g.total = Number(proj[0].raw.orderQty) || 0;
+        const total = g.total;
+        // the confirm bars: the rows' quantities known for every bar → row by
+        // row; else the order's quantity (never without one)
+        const planC = conf.length && (conf.every(b => b.rows.length) || total > 0)
+            ? planDedupe({ need : total > 0 ? planQtyOf(total) : 0, factor, bars : conf.map(asInput) }) : null;
+        // the projection bars: what the order's plan quantity leaves after its
+        // confirm bars (27H1LEV043: 15,308 confirmed on bars of a 16,314-pc
+        // order — the projection pieces keep 1,495, not 16,803)
+        let planP = null;
+        if (proj.length && total > 0) {
+            const confAfter = conf.reduce((t, b) => { const c = planC?.changes.find(x => String(x.key) === String(b.ev.id)); return t + (c ? c.qty : (Number(b.raw.qty) || 0)); }, 0);
+            planP = planDedupe({ need : Math.max(0, planQtyOf(total) - confAfter), factor, bars : proj.map(asInput) });
         }
-        if (plan.left > 0) out.left.push({ order : g.code, excess : plan.left });
-        if (plan.changes.length) todo.push({ g, plan });
+        const changes = [...(planC?.changes || []), ...(planP?.changes || [])];
+        const left = (planC?.left || 0) + (planP?.left || 0);
+        const excess = (planC?.excess || 0) + (planP?.excess || 0);
+        if (excess > 0 || left > 0) {
+            (out.detail ||= []).push({ order : g.code, mode : [planC?.mode, planP?.mode].filter(Boolean).join('+'), total, have : g.bars.reduce((t, b) => t + (Number(b.raw.qty) || 0), 0), excess, left,
+                bars : g.bars.map(b => ({ id : String(b.ev.id), typ : b.proj ? 'proj' : 'conf', qty : Number(b.raw.qty) || 0, hold : b.hold, fixed : b.fixed, made : Number(b.raw.made) || 0, progress : Number(b.raw.progress) || 0, status : b.raw.status, rows : b.rows.length, ids : b.ids.length })),
+                changes });
+        }
+        if (left > 0) out.left.push({ order : g.code, excess : left });
+        if (changes.length) todo.push({ g, plan : { changes }, total, projPieces : proj.length });
     }
     if (!todo.length) return out;
     pushUndo(s, 'duplicate bars of an order');
     const gone = [];
     const touched = new Set();
-    for (const { g, plan } of todo) {
+    for (const { g, plan, total, projPieces } of todo) {
         const byKey = new Map(g.bars.map(b => [String(b.ev.id), b]));
         const goneKeys = new Set(plan.changes.filter(c => c.qty === 0).map(c => String(c.key)));
         // the rows' quantities where the bars know them (order mode)
@@ -10358,7 +10385,8 @@ function dedupeConfirmBars(s) {
             if (!b) continue;
             rec.lines.add(lineLabel(s, b.lid));
             touched.add(b.lid);
-            pendingDedupe.set(String(b.ev.id), { removed : c.qty === 0, po : b.raw.po || '', name : b.ev.name, lineName : lineLabel(s, b.lid), qty : c.qty });
+            // (a bar this load made and now takes away again was never in the DB: nothing to list or save)
+            if (c.qty !== 0 || String(b.ev.id).startsWith('db-')) pendingDedupe.set(String(b.ev.id), { removed : c.qty === 0, po : b.raw.po || '', name : b.ev.name, lineName : lineLabel(s, b.lid), qty : c.qty });
             if (c.qty === 0) { gone.push(b.ev); rec.removed++; out.removed++; continue; }
             const raw = b.raw;
             const newBase = Math.max(1, Math.round(c.qty / factor));
@@ -10377,6 +10405,9 @@ function dedupeConfirmBars(s) {
             }
             raw.orderQty = newBase;
             if (Number(raw.baseQty) > 0) raw.baseQty = newBase;
+            // a projection piece: no PO rows — its share of the order changed,
+            // the whole order stays on it for the swap
+            if (b.proj) { if (projPieces > 1 && total > 0) raw.fullOrderQty = total; rec.cut += c.qty; out.cut += c.qty; continue; }
             // its PO rows: the ones it still carries something of (row mode),
             // else the ones no bar that stays holds (26H1LEV701: the
             // whole-order bar keeps only the 318-pc 22/02 PO)

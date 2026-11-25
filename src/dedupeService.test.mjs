@@ -47,15 +47,31 @@ test('rows: split pieces sharing their rows add up to the order — nothing to c
     assert.equal(four.left, 0);
 });
 
-test('rows: rows held by one bar only are never touched (an order that shrank is no duplicate)', () => {
-    const r = planDedupe({ bars : [
+test('rows: a bar over its own rows is cut down to them — a merged duplicate, an order that shrank', () => {
+    // 26H1LEV975: ONE 7,573-pc bar for a 5,121-pc order (a 2,298-pc rest bar was merged into it)
+    const r = planDedupe({ bars : [{ key : 'db-12221', qty : 7573, start : 1, rows : [{ id : 1, qty : 737 }, { id : 2, qty : 2038 }, { id : 3, qty : 2146 }, { id : 4, qty : 200 }] }] });
+    assert.equal(r.mode, 'rows');
+    assert.equal(r.changes.length, 1);
+    assert.ok(Math.abs(r.changes[0].qty - 5275) <= 1, String(r.changes[0].qty));
+    assert.deepEqual(r.changes[0].rows, [1, 2, 3, 4]);
+    // two colour bars, one over its row: only that one is cut
+    const t = planDedupe({ bars : [
         { key : 'black', qty : 1030, start : 1, rows : [{ id : 1, qty : 800 }] },
-        { key : 'blue',  qty : 1030, start : 2, rows : [{ id : 2, qty : 700 }] }
+        { key : 'blue',  qty : 721,  start : 2, rows : [{ id : 2, qty : 700 }] }
     ] });
-    assert.equal(r.excess, 0);
-    assert.deepEqual(r.changes, []);
-    // one bar alone is never a duplicate of itself
-    assert.deepEqual(planDedupe({ bars : [{ key : 1, qty : 5000, rows : [{ id : 1, qty : 1000 }] }] }).changes, []);
+    assert.deepEqual(t.changes, [{ key : 'black', qty : 824, rows : [1] }]);
+    // within the rounding: nothing
+    assert.deepEqual(planDedupe({ bars : [{ key : 1, qty : 1035, rows : [{ id : 1, qty : 1000 }] }] }).changes, []);
+    // 27H1LEV043: a 9,119-pc bar on 5,270 pcs of rows — but the ORDER (16,314) is 1,495 short on
+    // its bars: the planner's distribution, nothing to cut; over by 500 → only 500 comes off
+    const conf = [
+        { key : 'a', qty : 6189, start : 1, rows : [{ id : 1, qty : 6000 }] },
+        { key : 'b', qty : 9119, start : 2, rows : [{ id : 2, qty : 5270 }] }
+    ];
+    assert.deepEqual(planDedupe({ need : 16803, bars : conf }).changes, []);
+    const over = planDedupe({ need : 15308 - 500, bars : conf });
+    assert.deepEqual(over.changes, [{ key : 'b', qty : 8619, rows : [2] }]);
+    assert.equal(over.excess, 500);
 });
 
 test('rows: Holding Row bars give first; bars with production / under the lock never — the excess is reported', () => {
@@ -86,6 +102,12 @@ test('order mode (rows unknown): the bars of one order carry at most its quantit
     // a sliver would be left: the bar goes with it
     const s = planDedupe({ need : 1000, bars : [{ key : 'a', qty : 1000, start : 1 }, { key : 'b', qty : 1005, start : 2 }] });
     assert.deepEqual(s.changes, [{ key : 'b', qty : 0 }]);
+    // projection pieces of an order whose confirm bars carry it all (need 0): every piece goes
+    const z = planDedupe({ need : 0, bars : [{ key : 'p1', qty : 9874, start : 2 }, { key : 'p2', qty : 3239, start : 1 }, { key : 'p3', qty : 3690, hold : true, start : 3 }] });
+    assert.deepEqual(z.changes, [{ key : 'p3', qty : 0 }, { key : 'p1', qty : 0 }, { key : 'p2', qty : 0 }]);
+    // 27H1LEV043: confirm bars carry 15,308 of 16,803 — the projection keeps 1,495, the later pieces go
+    const m = planDedupe({ need : 16803 - 15308, bars : [{ key : 'p1', qty : 9874, start : 3 }, { key : 'p2', qty : 3239, start : 2 }, { key : 'p3', qty : 3690, hold : true, start : 1 }] });
+    assert.deepEqual(m.changes, [{ key : 'p3', qty : 0 }, { key : 'p1', qty : 0 }, { key : 'p2', qty : 1495 }]);
     // under the lock: nothing is cut, the excess is reported
     const f = planDedupe({ need : 5232, bars : [{ key : 'a', qty : 4905, start : 1, fixed : true }, { key : 'b', qty : 5232, start : 2, fixed : true }] });
     assert.deepEqual(f.changes, []);

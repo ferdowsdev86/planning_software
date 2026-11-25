@@ -7,22 +7,26 @@
 // bar, a second Auto plan run that parked an order already parked, the rest
 // of an order that had meanwhile been restored in full.
 //
-// Rule: every PO row carries its plan quantity (+3 %) on the board at most
-// once. A bar's quantity is shared out over its PO rows by their ERP
-// quantities; a row held by TWO OR MORE bars that together carry more than
-// its plan quantity has a duplicate — the excess comes off the bars that hold
-// it: the Holding Row bars first (the latest start first), then the line bars
-// from the latest start backwards. A bar cut to nothing goes; a bar cut in
-// part keeps its start, shrinks to what is left and keeps only the rows it
-// still carries something of (26H1LEV701: the whole-order bar keeps the
-// 318-pc 22/02 PO). Never cut: a bar with production, a completed bar, a bar
-// under the plan lock — the excess they hold is reported instead. Rows held
-// by one bar only are never touched (an order that shrank in the ERP is the
-// quantity update's business, not a duplicate); synchronized split pieces
-// share their rows and add up to the order — nothing to cut.
-// Without the rows' quantities (a bar saved by an older version, rows gone)
-// the ORDER's quantity decides: the bars of one order together carry at most
-// its plan quantity, the excess comes off in the same order.
+// Rule (planner, 2026-11-25: "whatever order stands on the board, projected
+// or confirm, the sum of its bars is never more than the order"): every PO
+// row carries its plan quantity (+3 %) on the board at most once. A bar's
+// quantity is shared out over its PO rows by their ERP quantities; a row
+// whose bars together carry more than its plan quantity is over-planned —
+// the same rows on two bars (26H1LEV701), a duplicate merged into the
+// order's bar (26H1LEV975: one 7,573-pc bar for 5,121) — and the excess
+// comes off the bars that hold it: the Holding Row bars first (the latest
+// start first), then the line bars from the latest start backwards. A bar
+// cut to nothing goes; a bar cut in part keeps its start, shrinks to what is
+// left and keeps only the rows it still carries something of (26H1LEV701:
+// the whole-order bar keeps the 318-pc 22/02 PO). Never cut: a bar with
+// production, a completed bar, a bar under the plan lock — the excess they
+// hold is reported instead. Synchronized split pieces share their rows and
+// add up to the order — nothing to cut.
+// Without the rows' quantities (a projection bar, a bar saved by an older
+// version, rows gone) the ORDER's quantity decides: the bars together carry
+// at most `need` plan pieces, the excess comes off in the same order. The
+// board uses this for an order's PROJECTION bars with need = the order's
+// plan quantity minus what its confirm bars already carry.
 //
 // Pure maths — the board supplies the bars and sizes / removes them;
 // node-tested without Bryntum.
@@ -58,19 +62,15 @@ export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
     }));
     const have = list.reduce((t, b) => t + b.qty, 0);
     const out = { mode : 'none', need : Math.max(0, Math.round(Number(need) || 0)), have, excess : 0, tol : 0, changes : [], left : 0 };
-    if (list.length < 2) return out;
+    if (!list.length) return out;
     const f = Number(factor) > 0 ? Number(factor) : 1.03;
 
     if (list.every(b => b.rows.length)) {
         out.mode = 'rows';
-        // the rows two or more bars hold, with their quantity
-        const holders = new Map(), rowQty = new Map();
-        for (const b of list) for (const r of b.rows) {
-            holders.set(r.id, (holders.get(r.id) || 0) + 1);
-            rowQty.set(r.id, Math.max(rowQty.get(r.id) || 0, r.qty));
-        }
-        const shared = new Set([...holders].filter(([, n]) => n >= 2).map(([id]) => id));
-        if (!shared.size) return out;
+        // the rows the bars hold, with their quantity
+        const rowQty = new Map();
+        for (const b of list) for (const r of b.rows) rowQty.set(r.id, Math.max(rowQty.get(r.id) || 0, r.qty));
+        const shared = new Set(rowQty.keys());
         // a bar's quantity shared out over its rows by their ERP quantities
         const attr = new Map();
         for (const b of list) {
@@ -89,38 +89,48 @@ export function planDedupe({ need, bars = [], factor = 1.03 } = {}) {
         }
         const total = () => [...excess.values()].reduce((t, x) => t + x, 0);
         out.tol = dupTol(capSum);
-        if (total() <= out.tol) return out;
-        out.excess = Math.round(total());
+        // never more than the ORDER is over by (need known): a bar that holds
+        // more than its own rows while the order's other rows wait off the
+        // board is the planner's distribution, not a duplicate (27H1LEV043:
+        // a 9,119-pc bar on 5,270 pcs of rows, the order itself 1,495 short)
+        let budget = out.need > 0 ? Math.max(0, have - out.need) : Infinity;
+        if (Math.min(total(), budget) <= out.tol) return out;
+        out.excess = Math.round(Math.min(total(), budget));
         for (const b of list.filter(x => !x.fixed).sort(byPriority)) {
-            if (total() <= out.tol) break;
+            if (total() <= out.tol || budget <= out.tol) break;
             const a = attr.get(b.key);
             let cut = 0;
             for (const r of b.rows) cut += Math.min(a.get(r.id) || 0, excess.get(r.id) || 0);
             if (cut <= 0) continue;
+            const scale = cut > budget ? budget / cut : 1;    // only what the order is over by
+            cut *= scale;
             const rest = b.qty - cut;
             if (rest <= out.tol) {
                 // a sliver left over is rounding, not a plan — the bar goes with it
                 for (const r of b.rows) if (excess.has(r.id)) excess.set(r.id, Math.max(0, excess.get(r.id) - (a.get(r.id) || 0)));
                 out.changes.push({ key : b.key, qty : 0 });
+                budget -= b.qty;
                 continue;
             }
             const rows = [];
             for (const r of b.rows) {
-                const take = Math.min(a.get(r.id) || 0, excess.get(r.id) || 0);
+                const take = Math.min(a.get(r.id) || 0, excess.get(r.id) || 0) * scale;
                 if (take > 0) excess.set(r.id, excess.get(r.id) - take);
                 if ((a.get(r.id) || 0) - take > 0.5) rows.push(r.id);
             }
             out.changes.push({ key : b.key, qty : Math.round(rest), rows });
+            budget -= cut;
         }
-        out.left = total() > out.tol ? Math.round(total()) : 0;
+        out.left = Math.min(total(), Math.max(0, budget)) > out.tol ? Math.round(Math.min(total(), budget)) : 0;
         return out;
     }
 
-    // the rows' quantities are not known: the ORDER's quantity decides
+    // the rows' quantities are not known: the ORDER's quantity decides (need
+    // 0 = nothing of the order is left for these bars — they all go)
     out.mode = 'order';
     const want = out.need;
     out.tol = dupTol(want);
-    if (!want || have - want <= out.tol) return out;
+    if (have - want <= out.tol) return out;
     out.excess = have - want;
     let cut = have - want;
     for (const b of list.filter(x => !x.fixed).sort(byPriority)) {
