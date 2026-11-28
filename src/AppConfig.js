@@ -1358,15 +1358,30 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
         const typeKeyById = new Map(seq.map(x => [x.id, x.typeKey]));
         const plan = curve ? buildLineLearning(seq, curve) : new Map();
         let runRef = null;
+        let runKey = null, runStartEv = null;   // the repeated-style run the bar belongs to
         for (const ev of bars) {
             const raw = ev.data.raw;
+            const myKey = typeKeyById.get(ev.id);
+            const follower = runKey !== null && myKey === runKey;
+            if (!follower) { runKey = myKey; runStartEv = ev; }
             // A manually applied Build up curve (context menu) overrides the
-            // automatic changeover derivation and always ramps from day 1
+            // automatic changeover derivation and ramps from day 1 — except on
+            // a strip that repeats the style of the strip before it: there it
+            // continues the run's curve (planner, 2026-11-28: same style one
+            // after another on a line → only the first takes the curve, the
+            // rest continue at peak, as FastReact's repeat order)
             const manual = raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length
                 ? raw.lcManual : null;
-            let info = manual
+            let info;
+            if (manual && follower) {
+                const per = Number(manual.period) || manual.pct.length;
+                const off = Math.max(0, workDayIndexOf(ev.startDate) - workDayIndexOf(runStartEv.startDate));
+                info = { applied : off < per, reason : off < per ? 'continuation' : 'same-product',
+                    dayOffset : Math.min(off, per), typeKey : myKey || raw.productType || '_Default' };
+            }
+            else info = manual
                 ? { applied : true, reason : 'manual', dayOffset : 0,
-                    typeKey : typeKeyById.get(ev.id) || raw.productType || '_Default' }
+                    typeKey : myKey || raw.productType || '_Default' }
                 : plan.get(ev.id);
             if (!info) { delete raw.lc; continue; }
             // the line-sequence decision itself (before the days already
@@ -1386,7 +1401,7 @@ export function applyLearningCurves(scheduler, { lineIds = null } = {}) {
             // every later strip of the same style + product on the line is
             // auto-linked to it (live) instead of ramping again. Links a
             // user made by hand are never touched.
-            const isRunStart = info.reason === 'product-change' || info.reason === 'first-on-line' || manual;
+            const isRunStart = info.reason === 'product-change' || info.reason === 'first-on-line' || (manual && !follower);
             if (isRunStart) {
                 runRef = { id : ev.id, order : mbmOrderNo(raw.po, raw.mbmOrder) };
                 if (raw.lcLink?.auto) delete raw.lcLink;
@@ -1466,14 +1481,37 @@ function rampAfter(seq, done, per) {
  * writes raw.lc so applyLineFormulaDuration computes a curve-aware duration
  * BEFORE the bar is inserted. Only the placed bar's geometry ever changes.
  */
+// Working days from the start of the repeated-style run this bar continues
+// (the bars right before it on the line with the same style + product), or
+// null when the bar starts a run (first on the line / after another style)
+function repeatRunOffset(scheduler, raw, lineId, startDate) {
+    const myKey = lcRunKey(raw, lineId);
+    const prev = barsOnLine(scheduler, lineId)
+        .filter(ev => ev.data?.raw && !ev.data.raw.stage && ev.data.raw !== raw
+            && ev.data.raw !== raw._cloneOf && ev.startDate < startDate)
+        .sort((a, b) => b.startDate - a.startDate);
+    if (!prev.length || lcRunKey(prev[0].data.raw, lineId) !== myKey) return null;
+    let runStart = prev[0];
+    for (let i = 1; i < prev.length && lcRunKey(prev[i].data.raw, lineId) === myKey; i++) runStart = prev[i];
+    return Math.max(0, workDayIndexOf(startDate) - workDayIndexOf(runStart.startDate));
+}
+
 export function deriveLcForPlacement(scheduler, raw, lineId, startDate) {
     if (!scheduler || !raw || !lineId || isHoldId(lineId) || !startDate) return;
     lcProfCache = null;
     // A manually applied Build up curve travels with the bar — moving it
     // never clears or re-derives the manual ramp
     if (raw.lcManual && Array.isArray(raw.lcManual.pct) && raw.lcManual.pct.length) {
-        const seq = { applied : true, reason : 'manual', dayOffset : 0 };
         const per = Number(raw.lcManual.period) || raw.lcManual.pct.length;
+        // Repeated style (planner, 2026-11-28, 009QW on CEIL Line 01): a strip
+        // right after the same style + product on the line continues the
+        // run's curve from the run's first strip — it never ramps from day 1
+        // again, even with a curve on it (a linked / synced curve put one on
+        // every strip of the run); past the curve days it runs at peak
+        const cont = repeatRunOffset(scheduler, raw, lineId, startDate);
+        const seq = cont == null
+            ? { applied : true, reason : 'manual', dayOffset : 0 }
+            : { applied : cont < per, reason : cont < per ? 'continuation' : 'same-product', dayOffset : Math.min(cont, per) };
         raw.lc = {
             ...seq,
             // the days of this curve the bar's own production has already run

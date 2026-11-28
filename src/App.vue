@@ -3944,7 +3944,7 @@ function mshImplement() {
     markBoardDirty();
     touchBoardCache(s);
     s.refreshRows?.();
-    let msg = `🔗 ${audit.length} strip(s) linked to "${snap.name}" (${mshLive.value ? 'live' : 'copy'}) — each runs the curve from its OWN start date. Save to keep it.`;
+    let msg = `🔗 ${audit.length} strip(s) linked to "${snap.name}" (${mshLive.value ? 'live' : 'copy'}) — each runs the curve from its OWN start date; a strip right after the same style on its line continues that run instead (no new ramp). Save to keep it.`;
     if (pushedTotal) msg += ` ${pushedTotal} follower(s) shifted later.`;
     toast(msg, 'ok');
     if (skipped.length) window.alert(`Skipped:\n\n${skipped.join('\n')}`);
