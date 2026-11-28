@@ -12977,6 +12977,13 @@ const puView = computed(() => {
 });
 
 // Totals of the visible (filtered) rows — Prod Qty follows what is typed
+// Prod Qty of the visible rows per unit ("all units": the Total is AQL + CEIL
+// + MBM together — planner, 2026-11-28: "37 thousand against 43 thousand?")
+const puUnitTotals = computed(() => {
+    const m = new Map();
+    for (const r of puView.value) m.set(r.unit, (m.get(r.unit) || 0) + (Number(r.prodQty) || 0));
+    return [...m].map(([unit, prodQty]) => ({ unit, prodQty })).sort((a, b) => String(a.unit).localeCompare(String(b.unit)));
+});
 const puTotals = computed(() => {
     const t = { orderQty : 0, planQty : 0, made : 0, rest : 0, prodQty : 0 };
     for (const r of puView.value) {
@@ -19592,7 +19599,8 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                                 <td :colspan="PU_COLS.length" class="dp-empty">No row matches the filters — <a href="#" @click.prevent="puClearFilters">clear filters</a></td>
                             </tr>
                             <tr class="dp-grand pu-total">
-                                <td colspan="8">Total ({{ puView.length }}{{ puFiltered ? ' of ' + puRows.length : '' }} rows)<a v-if="puFiltered" href="#" class="pu-clear" @click.prevent="puClearFilters">✕ clear filters</a></td>
+                                <td colspan="8">Total ({{ puView.length }}{{ puFiltered ? ' of ' + puRows.length : '' }} rows)<a v-if="puFiltered" href="#" class="pu-clear" @click.prevent="puClearFilters">✕ clear filters</a>
+                                    <span v-if="puUnitTotals.length > 1" class="pu-unit-tot" title="Prod Qty per unit — the Total is every unit together; filter the Unit column for one unit">· Prod Qty by unit: <b v-for="u in puUnitTotals" :key="u.unit">{{ u.unit }} {{ fmtQty(u.prodQty) }}</b></span></td>
                                 <td class="od-num">{{ fmtQty(puTotals.orderQty) }}</td>
                                 <td class="od-num">{{ fmtQty(puTotals.made) }}</td>
                                 <td class="od-num">{{ fmtQty(puTotals.rest) }}</td>
@@ -22462,6 +22470,8 @@ body {
 .pu-total td { text-align : right; }
 .pu-total td:first-child { text-align : left; }
 .pu-total .pu-total-prod { font-size : 13px; }
+.pu-unit-tot { margin-left : 14px; font-weight : normal; font-size : 11px; color : #345; }
+.pu-unit-tot b { margin-left : 8px; color : #1a5c2e; }
 .pu-mode { display : inline-flex; align-items : center; gap : 4px; margin-right : 10px; font-size : 12px; font-weight : 600; }
 .pu-rtable td, .pu-rtable th { white-space : nowrap; }
 /* ERP = MbmPlan check line of the Daily production update dialog */
