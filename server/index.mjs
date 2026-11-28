@@ -1607,6 +1607,17 @@ app.post(`${BASE}/production-updates`, async (req, res) => {
     try {
         await conn.beginTransaction();
         for (const r of rows) {
+            // the planner's figure for a bar / an ERP-only order on a date
+            // REPLACES what the ERP sync wrote for it that day (its per-PO
+            // rows, the rows booked on other lines) — the dialog shows one
+            // figure per bar and the saved table must read the same; the next
+            // ERP sync of that date writes the ERP's figures back
+            const ref = String(r.eventRef || '');
+            if (ref && !/:po\d+/.test(ref) && r.saveDate) {
+                await conn.query(
+                    `DELETE FROM day_production_update_plan WHERE save_date = ? AND event_ref LIKE CONCAT(?, ':po%')`,
+                    [r.saveDate, ref]);
+            }
             await conn.query(
                 `INSERT INTO day_production_update_plan
                     (event_id, event_ref, unit, floor, line, operation_type, style,

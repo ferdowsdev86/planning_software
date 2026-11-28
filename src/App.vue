@@ -2513,7 +2513,13 @@ function scheduleBackgroundPlan(s) {
 // only the figures typed in the production dialogs count. AQL keeps the
 // ERP feed. (The server no longer syncs MBM / CEIL; this guard also parks
 // the rows already in the table.)
-const MANUAL_PROD_UNITS = new Set(['MBM', 'CEIL']);
+// Units whose ERP-synced production rows the board IGNORES (hand-entered
+// only). Empty since 2026-11-28: the ERP production sync runs for every unit
+// (line / PO-wise, ERP = MbmPlan per unit) — with MBM and CEIL listed here the
+// Daily production dialog showed 0 for their lines while the "ERP vs MbmPlan"
+// line read CEIL 37,481 = 37,481 (planner, 26/11: "day output 37,481 but
+// production qty shows 5,058 — how?")
+const MANUAL_PROD_UNITS = new Set([]);
 const isAutoProdRow = r => /:po\d+/.test(String(r?.event_ref || ''));
 const prodRowApplies = r => !(isAutoProdRow(r) && MANUAL_PROD_UNITS.has(String(r?.unit || '').toUpperCase()));
 async function loadProdRowsApplied() {
@@ -13653,12 +13659,19 @@ async function puSyncErpNow() {
 // PLUS every bar that has production saved for that date in
 // day_production_update_plan (ERP-synced / manual) even if its bar is not
 // planned on that date — so the day's actual output is never hidden
+let puBuildGen = 0;
 async function buildPuRows() {
     const s = getInstance();
     const date = puDate.value;
+    // two builds at once (the dialog opening + a date change): only the
+    // latest one may fill the table
+    const gen = ++puBuildGen;
     loadPuRecon();                                   // the ERP = MbmPlan check, in parallel
     let dbRows = [];
-    try { dbRows = await loadProdRowsApplied(); } catch { /* offline — local store only */ }
+    let dbFailed = false;
+    try { dbRows = await loadProdRowsApplied(); } catch (e) { dbFailed = true; console.warn('[production update] saved rows not loaded:', e?.message); }
+    if (gen !== puBuildGen) return;
+    if (dbFailed) toast('The saved production rows could not be loaded — the figures below are not the DB\'s. Press ⟳ Load again', 'warn');
     // Fresh store from the DB (per-PO rows of a projection bar summed onto the bar)
     let store = loadProdStore();
     if (dbRows.length) {
@@ -13671,20 +13684,30 @@ async function buildPuRows() {
         }
         localStorage.setItem('mbm-prod-updates', JSON.stringify(store));
     }
-    // Output the ERP booked on ANOTHER line than the bar's ("db-<id>:po<po_id>:A04")
-    // is shown as its own read-only row under that line — the bar's row keeps
-    // only what ran on its own line, so the dialog matches the ERP line-wise
-    const otherLine = {};                                   // base ref → qty on other lines (this date)
-    const otherRows = [];
+    // RULE (planner, 2026-11-28): the ERP's output shows on the line the ERP
+    // booked it on when that line has a bar of the order / PO (the sync matched
+    // it there — "db-<id>:po<po_id>"); when that line has NO bar of the PO, the
+    // output shows on the line where the PO IS planned — the bar's own row
+    // ("db-<id>:po<po_id>:<erp line>" rows count on the bar, the ERP line is
+    // noted on the row); an order on no bar at all ("erp-…" rows) shows under
+    // the ERP line as its own row. The Prod Qty total is the day's whole output.
+    const erpOn = {};                                       // base ref → [{ line, qty }] booked elsewhere (this date)
     for (const r of dbRows) {
         if (String(r.save_date).slice(0, 10) !== date) continue;
-        const m = /^(.*?):po\d+:([A-Za-z]\d+)$/.exec(String(r.event_ref));
+        const m = /^(.*?):po\d+:(.+)$/.exec(String(r.event_ref));
         if (!m) continue;
-        const key = m[1];
-        otherLine[key] = (otherLine[key] || 0) + (Number(r.prod_qty) || 0);
-        otherRows.push({ base : key, r });
+        const list = (erpOn[m[1]] ||= []);
+        const hit = list.find(x => x.line === (r.line || m[2]));
+        if (hit) hit.qty += Number(r.prod_qty) || 0; else list.push({ line : r.line || m[2], qty : Number(r.prod_qty) || 0 });
     }
-    const dayQty = evId => Math.max(0, (store[evId]?.[date] || 0) - (otherLine[evId] || 0));
+    const dayQty = evId => Math.max(0, store[evId]?.[date] || 0);
+    const erpNoteOf = (evId, ownLine = null) => {
+        const list = erpOn[evId];
+        if (!list) return '';
+        const elsewhere = list.filter(x => !ownLine || x.line !== ownLine);
+        if (!elsewhere.length) return '';
+        return `ERP booked ${elsewhere.map(x => `${fmtQty(x.qty)} pcs on ${x.line}`).join(', ')}${ownLine ? ' — that line has no bar of this PO, so it counts here on the PO\'s line' : ''}`;
+    };
     const rows = [];
     const listed = new Set();
     // The other boards this planner may write (not the one open here): their
@@ -13695,6 +13718,7 @@ async function buildPuRows() {
     if (otherUnits.length) {
         try { otherBars = await loadProdDayBars(date, otherUnits); }
         catch (e) { toast(`Other boards' lines could not be loaded (${e.message}) — only the open board is listed`, 'warn'); }
+        if (gen !== puBuildGen) return;
     }
     if (s) {
         const day = new Date(date + 'T12:00:00');
@@ -13726,7 +13750,8 @@ async function buildPuRows() {
                 planQty  : puDayPlan(s, ev, date),
                 made,
                 rest     : Math.max(0, (Number(raw.qty) || 0) - made),
-                prodQty  : store[String(ev.id)]?.[date] == null ? '' : dayQty(String(ev.id))
+                prodQty  : store[String(ev.id)]?.[date] == null ? '' : dayQty(String(ev.id)),
+                erpNote  : erpNoteOf(String(ev.id), res?.name || lid)
             });
         }
     }
@@ -13743,15 +13768,16 @@ async function buildPuRows() {
             orderQty : b.orderQty, planQty : Number(b.dayPlanQty) || 0,
             made, rest : Math.max(0, (Number(b.orderQty) || 0) - made),
             prodQty : store[b.eventRef]?.[date] == null ? '' : dayQty(b.eventRef),
+            erpNote : erpNoteOf(b.eventRef, b.line || null),
             otherBoard : true
         });
     }
     // Saved production for this date whose bar is not running that day on
-    // the board (moved / finished earlier / other board)
+    // the board (moved / finished earlier / other board), and orders on no bar
+    // at all (ERP rows under the ERP's line)
     const extra = new Map();
     for (const r of dbRows) {
         if (String(r.save_date).slice(0, 10) !== date) continue;
-        if (/:po\d+:[A-Za-z]\d+$/.test(String(r.event_ref))) continue;   // other-line rows listed below
         const key = String(r.event_ref).split(':po')[0];
         if (listed.has(key)) continue;
         if (!extra.has(key)) {
@@ -13766,30 +13792,14 @@ async function buildPuRows() {
     }
     for (const c of extra.values()) {
         const made = madeOf(store, c.evId);
-        rows.push({ ...c, made, rest : Math.max(0, c.orderQty - made), prodQty : store[c.evId]?.[date] == null ? '' : dayQty(c.evId) });
+        rows.push({ ...c, made, rest : Math.max(0, c.orderQty - made), prodQty : store[c.evId]?.[date] == null ? '' : dayQty(c.evId), erpNote : erpNoteOf(c.evId, c.line) });
     }
-    // Same order / PO produced on another line that day (ERP line-wise) — read only
-    const byLine = new Map();
-    for (const { base, r } of otherRows) {
-        const k = `${base}@${r.line}`;
-        if (!byLine.has(k)) {
-            const made = madeOf(store, base);
-            byLine.set(k, {
-                evId : k, dbId : r.event_id ?? null, fromErp : true,
-                unit : r.unit || 'AQL', floor : r.floor || '—', line : r.line || '—',
-                opType : r.operation_type || 'Sewing', style : r.style || '—',
-                order : r.order_no || '—', po : r.po_number || '—', color : r.color || '—',
-                orderQty : Number(r.order_qty) || 0, planQty : 0, made, rest : Math.max(0, (Number(r.order_qty) || 0) - made), prodQty : 0
-            });
-        }
-        byLine.get(k).prodQty += Number(r.prod_qty) || 0;
-    }
-    rows.push(...byLine.values());
     // the open board's unit first, then the other boards, each unit line-wise
     const unitRank = u => (s && currentBoard.value && String(u).toUpperCase() === String(currentBoard.value.unitName || '').toUpperCase() ? 0 : 1);
     rows.sort((a, b) => unitRank(a.unit) - unitRank(b.unit) || String(a.unit).localeCompare(String(b.unit))
         || String(a.line).localeCompare(String(b.line), undefined, { numeric : true }) || String(a.po).localeCompare(String(b.po)));
     // only the units this planner may write (board write permission)
+    if (gen !== puBuildGen) return;
     puRows.value = rows.filter(r => puUnitAllowed(r.unit));
 }
 
@@ -19561,7 +19571,7 @@ const prioCls = p => p === 1 ? 'mb-prio-1' : p === 2 ? 'mb-prio-2' : 'mb-prio-3'
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="r in puView" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp, 'pu-other' : r.otherBoard }" :title="r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : r.otherBoard ? `${r.unit} board (not open here): bar from the saved plan — Day Plan Qty is the production model's estimate` : ''">
+                            <tr v-for="r in puView" :key="r.evId" :class="{ 'pu-fromdb' : r.fromDb, 'pu-fromerp' : r.fromErp, 'pu-other' : r.otherBoard, 'pu-erpline' : !!r.erpNote }" :title="[r.fromErp ? 'ERP: this order / PO was produced on this line that day (bar is planned on another line) — read only' : r.fromDb ? 'Production saved for this date — the bar is not planned on this day on the board' : r.otherBoard ? `${r.unit} board (not open here): bar from the saved plan — Day Plan Qty is the production model's estimate` : '', r.erpNote || ''].filter(Boolean).join('\n')">
                                 <td>{{ r.unit }}</td>
                                 <td>{{ r.floor }}</td>
                                 <td>{{ r.line }}</td>
@@ -22440,6 +22450,8 @@ body {
 .pf-line-select { min-width : 150px; height : 28px; margin-left : 6px; }
 .pf-line-hint { font-size : 11px; color : #5b6b84; margin-top : 6px; }
 .pu-fromerp td { background : #fff7e6; color : #7a5a00; }
+/* the ERP booked (part of) the day's output on a line without a bar of the PO — it counts here, on the PO's line */
+.pu-erpline td:nth-child(3) { box-shadow : inset 3px 0 0 #e0a500; }
 .rs-go { background : #b45309 !important; border-color : #92400e !important; color : #fff !important; }
 .rs-go:disabled { opacity : .45; }
 .ef-hold-row td { background : #ffff00 !important; border-bottom : 2px solid #8b1515; }

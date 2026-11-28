@@ -496,7 +496,9 @@ async function get(path, timeoutMs = 4000) {
 export async function loadProdUpdatesDb() {
     // a What-if copy on screen reads the production figures frozen with it
     const wiQ = whatIfView.id ? `?whatif=${whatIfView.id}&by=${encodeURIComponent(whatIfView.by || '')}` : '';
-    const data = await get(`/production-updates${wiQ}`);
+    // the whole production table (every unit, every date): well over the
+    // default 4 s on the WAN — a timeout here showed every line at 0
+    const data = await get(`/production-updates${wiQ}`, 30000);
     if (!data.success) throw new Error(data.error || 'load failed');
     return data.rows || [];
 }
