@@ -1794,6 +1794,14 @@ export function splitBar(scheduler, rec, { dur1 = null, qty2 = null }) {
         ...(base0  ? { baseQty  : base0 - raw.baseQty } : {}),
         ...(order0 ? { orderQty : order0 - raw.orderQty } : {}),
         start : start2, end : end2, progress : 0, status : 'draft',
+        // The new piece has sewn NOTHING — the parent's production stays on
+        // the parent (planner, 2026-11-28, GSL-251164 on CEIL Line 27: a
+        // 7,924-pc piece copied the parent's madeBase 6,576 and production
+        // anchor, so it counted as 6,576 sewn, got cut to one day, showed
+        // "remaining 1,348" and a schedule of 272 + 7,652 pcs in one day)
+        made : 0, erpMade : 0, madeBase : 0, origStart : undefined,
+        _cutStart : undefined, _cutMade : undefined, _lcBase : undefined, _prodCut : undefined,
+        lcT : undefined, lcLag : undefined, fc : undefined, actDays : undefined, forecastLate : undefined,
         eventCode : strip2Code,
         // The piece needs its OWN board identity — copying the parent's id
         // (e.g. 'proj:26XXX') would make the two parts indistinguishable
@@ -1863,6 +1871,24 @@ export function splitBarIntoPieces(scheduler, rec, n) {
 // of one order that merge never make more than their rows (planner,
 // 2026-11-25, 26H1LEV803: a stale 893-pc bar + the 881-pc rest planned again
 // were merged into 1,774 for an 867-pc order).
+// Production of a consolidated run (Consolidate orders ON — the head bar's
+// tooltip stands for every bar of the run): plan, made (each bar at most its
+// own qty), the unsewn rest, the ERP part, and the forecast remaining (a bar's
+// own forecast, else its unsewn rest)
+export function consolRunProduction(cg) {
+    const s = uiHooks.instance;
+    let plan = 0, made = 0, left = 0, erp = 0, fcLeft = 0;
+    for (const m of cg?.members || []) {
+        const mr = s?.eventStore?.getById?.(m.id)?.data?.raw;
+        const q  = Number(mr?.qty ?? m.qty) || 0;
+        const md = Math.min(q, Math.max(0, Number(mr?.made) || 0));
+        plan += q; made += md; left += Math.max(0, q - md);
+        erp  += Math.min(q, Math.max(0, Number(mr?.erpMade) || 0));
+        fcLeft += mr?.fc && mr.fc.remaining != null ? Math.max(0, Number(mr.fc.remaining) || 0) : Math.max(0, q - md);
+    }
+    return { plan, made, left, erp, fcLeft };
+}
+
 export function rowsPlanCapOf(raws) {
     const ids = new Set(), q = new Map();
     for (const raw of raws || []) {
@@ -3813,15 +3839,19 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
         })()}
         ${(() => {
             // Production update applied: what is DONE and, highlighted, what
-            // is STILL TO MAKE (the qty the bar now stands for)
-            const made = Number(r.made) || 0;
+            // is STILL TO MAKE (the qty the bar now stands for). A
+            // consolidated run counts ALL its bars (planner, 2026-11-28: two
+            // bars shown as one said "Remaining 3,994" — the first bar only)
+            const run = cg?.head ? consolRunProduction(cg) : null;
+            const made = run ? run.made : (Number(r.made) || 0);
             if (!(made > 0)) return '';
-            const plan = Number(r.qty) || 0;
-            const left = Math.max(0, plan - made);
+            const plan = run ? run.plan : (Number(r.qty) || 0);
+            const left = run ? run.left : Math.max(0, plan - made);
+            const erp  = run ? run.erp : (Number(r.erpMade) || 0);
             const pct  = plan > 0 ? Math.min(100, Math.round(made / plan * 100)) : 0;
-            return R('Production',
+            return R(run ? `Production · ${cg.count} bars` : 'Production',
                 `<span class="t4-prod">` +
-                    `<span class="t4-done" title="quantity produced (production update / ERP)">✔ Done <b>${enc(fmtQty(made))}</b>${Number(r.erpMade) > 0 ? ` <span class="t4dim" title="actual sewing output of the ERP (Daily Production, sewing out) for this bar's PO — not entered on the board">· ERP ${enc(fmtQty(r.erpMade))}</span>` : ''}</span>` +
+                    `<span class="t4-done" title="quantity produced (production update / ERP)${run ? ' — all bars of the consolidated run' : ''}">✔ Done <b>${enc(fmtQty(made))}</b>${erp > 0 ? ` <span class="t4dim" title="actual sewing output of the ERP (Daily Production, sewing out) for this bar's PO — not entered on the board">· ERP ${enc(fmtQty(erp))}</span>` : ''}</span>` +
                     `<span class="t4-left${left <= 0 ? ' t4-left-zero' : ''}" title="quantity still to be sewn — the bar now stands for this">⏳ Remaining <b>${enc(fmtQty(left))}</b></span>` +
                     `<span class="t4-bar" title="${pct}% of plan qty made"><i style="width:${pct}%"></i></span><span class="t4-pct">${pct}%</span>` +
                 `</span>`, 't4-full t4-prodrow');
@@ -3837,14 +3867,17 @@ function renderTip4(e, r, { detail, poSummary, pending = false }) {
                 : `× ${Number(adj.ratio).toFixed(2)} from ${adj.sample} of ${adj.window} finalized day(s), ${adj.basis === 'efficiency' ? 'actual / expected efficiency' : 'output vs target — provisional, working time and manpower not normalized'}`;
             const late = !!fc.late;
             const cut = fc.cutoff ? `data to ${ddMon(fc.cutoff)}${fc.provisional ? ' · today provisional' : ''}` : 'no actual data yet';
-            const left = Number(fc.remaining) || 0;
+            // a consolidated run: the remaining of ALL its bars (a bar with no
+            // forecast still has its whole unsewn quantity to make)
+            const run = cg?.head ? consolRunProduction(cg) : null;
+            const left = run ? run.fcLeft : (Number(fc.remaining) || 0);
             const cv = fc.curve;
             const curveTxt = cv ? (cv.done ? 'curve done — peak from the next day' : `curve: next day D${cv.stage + 1} = ${cv.nextPct} % (set by the output)`) : '';
             return R('Forecast',
                 `<span class="t4-prod">` +
                     `<span class="${late ? 't4-left' : 't4-done'}" title="projected sewing end from the actual daily output (today's remaining shift, calendars, learning curve, other allocations)">${late ? '⚠' : '✔'} Forecast end <b>${enc(ddMon(fc.forecastEnd))}</b>${late ? ' <span class="t4dim">· after target</span>' : ''}</span>` +
                     `<span class="t4dim" title="saved bar end · target sewing end = delivery − 7">saved ${enc(ddMon(fc.savedEnd))} · target ${enc(fc.targetEnd ? ddMon(fc.targetEnd) : '—')}</span>` +
-                    `<span class="t4dim" title="remaining sewing quantity = plan qty − verified cumulative actual">⏳ remaining <b>${enc(fmtQty(left))}</b>${fc.unattributed > 0 ? ` · ${enc(fmtQty(fc.unattributed))} PO-level (line not attributed)` : ''}</span>` +
+                    `<span class="t4dim" title="remaining sewing quantity = plan qty − verified cumulative actual${run ? ' — all bars of the consolidated run; the forecast end is the first bar\'s' : ''}">⏳ remaining <b>${enc(fmtQty(left))}</b>${run ? ` <span class="t4dim">(${cg.count} bars)</span>` : ''}${fc.unattributed > 0 ? ` · ${enc(fmtQty(fc.unattributed))} PO-level (line not attributed)` : ''}</span>` +
                     `<span class="t4dim" title="${enc(adj.note || '')}">adj ${enc(adjTxt)} · ${enc(cut)}</span>` +
                     (curveTxt ? `<span class="t4dim" title="adaptive learning curve: each production day's output against the line's full-day capacity sets the stage the next day expects">${enc(curveTxt)}</span>` : '') +
                 `</span>`, 't4-full t4-prodrow');
