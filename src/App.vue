@@ -2589,6 +2589,7 @@ async function reloadBoardForUnit(b, { force = false } = {}) {
     }
 
     setBoardLoad(true, `Loading ${b.unitName || 'unit'} orders…`, 15);
+    staleAfterLock = false;                 // a fresh load shows the saved plan
     try {
         const data = await loadBoardWithRetry(uid);
         storeUnitCache(uid, {
@@ -7413,6 +7414,9 @@ let   lockInFlight    = null;        // the acquire currently on the wire (relea
 let   lockHeldAt      = 0;           // last heartbeat that confirmed OUR edit lock
 let   lockLostAt      = null;        // when our lock was last reported lost (a blip until LOCK_BLIP_MS)
 const LOCK_BLIP_MS    = 3 * 60 * 1000;
+// the board was read-only for a long spell and holds unsaved test changes:
+// the saved plan may have moved on meanwhile — the next Save asks first
+let   staleAfterLock  = false;
 
 async function syncBoardLock() {
     if (!lockActive) return;
@@ -7461,20 +7465,20 @@ async function syncBoardLock() {
                 if (sb) scheduleQtyUpdates(sb);
             }
             if (wasReadOnly) {
-                // RULE (planner, 2026-11-18): the board never reloads by itself
-                // while the planner works. The edit lock coming back after a
-                // short gap (a heartbeat that did not get through, an API
-                // restart) is a blip — the planner's unsaved work stays. Only a
-                // long read-only spell WITH test changes on the screen starts
-                // again from the saved plan (test changes must never be saved)
-                const blip = lockLostAt && Date.now() - lockLostAt < LOCK_BLIP_MS;
-                if (blip || !boardHasUnsaved()) {
-                    toast('Edit access back — your board stays as it is', 'ok');
+                // RULE (planner, 2026-11-18, made absolute 2026-11-28: "the
+                // board never loads or reloads by itself — only when I do").
+                // The edit lock coming back NEVER reloads the board: the
+                // planner's screen stays as it is. After a long read-only spell
+                // with test changes on the screen (they must not be saved
+                // blindly — the saved plan may have moved on) the next Save
+                // asks first, and the planner opens the board again from the
+                // Planning menu to see the saved plan.
+                const long = lockLostAt && Date.now() - lockLostAt >= LOCK_BLIP_MS;
+                if (long && boardHasUnsaved()) {
+                    staleAfterLock = true;
+                    toast('Edit access back — your screen stays as it is. It was read-only for a while and holds unsaved test changes: Save will ask first; open the board again from the Planning menu to see the saved plan', 'warn');
                 }
-                else {
-                    toast('Edit access granted — board reloading from the saved plan (test changes discarded)', 'ok');
-                    if (currentBoard.value) reloadBoardForUnit(currentBoard.value, { force : true });
-                }
+                else toast('Edit access back — your board stays as it is', 'ok');
             }
             lockLostAt = null;
             lockHeldAt = Date.now();
@@ -16985,6 +16989,9 @@ async function saveToDbInner(s) {
         if (!window.confirm(`⚠ The planning API (${API_BASE}) did not answer in time.\n\nTry to save anyway?`)) return;
     }
     if (!pfSaveNoConfirm && !window.confirm(formatSaveConfirm(changes))) return;
+    // changes made while the board was read-only for a long spell: the saved
+    // plan may have changed meanwhile (another planner saved) — ask once
+    if (staleAfterLock && !window.confirm('⚠ This board was read-only for a while and these changes were made in that time.\nAnother planner may have saved this board meanwhile — your screen may be older than the saved plan.\n\nSave your screen anyway?\n(Cancel → open the board again from the Planning menu to see the saved plan first)')) return;
     toast(`Saving ${changes.length} change(s)…`, 'ok');
     const userIds = changes.map(c => c.eventId).filter(Boolean).map(String);
     for (const id of userIds) {
@@ -17040,6 +17047,7 @@ async function saveToDbInner(s) {
             pendingSwapIds.clear();
             pendingRepairIds.clear();
             pendingDedupe.clear();
+            staleAfterLock = false;
             // the Auto Plan run is saved: its 10-day lock guard ends here
             if (lockIds) apClearLockGuard(s);
             scheduleUnsavedRefresh();
@@ -17052,14 +17060,15 @@ async function saveToDbInner(s) {
             // RULE (planner, 2026-11-17 — "after Save a reload must never show a
             // blank board"): the saved plan is READ BACK and compared with the
             // screen; a bar the DB does not hold, holds elsewhere, or holds
-            // without the screen is reported at once and the board is
-            // reloaded from the DB — never discovered two reloads later
+            // without the screen is reported at once. RULE (planner,
+            // 2026-11-28: "the board never loads or reloads by itself"): it is
+            // REPORTED, never reloaded — the planner opens the board again
+            // from the Planning menu when they want the saved plan on screen
             const chk = await verifySavedPlan(s);
             if (chk.error) toast(`⚠ Saved, but the read-back check could not run: ${chk.error}`, 'warn');
             else if (chk.missing.length || chk.extra.length) {
                 console.warn('[save check] screen ≠ saved plan', chk);
-                toast(`⚠ SAVE CHECK: ${chk.missing.length} bar(s) on the screen are NOT in the saved plan, ${chk.extra.length} in the DB but not on the screen — reloading the saved plan (details: console [save check])`, 'error');
-                await reloadBoardForUnit(currentBoard.value, { force : true });
+                toast(`⚠ SAVE CHECK: ${chk.missing.length} bar(s) on the screen are NOT in the saved plan, ${chk.extra.length} in the DB but not on the screen — the screen is left as it is; open the board again from the Planning menu to see the saved plan (details: console [save check])`, 'error');
                 return;
             }
             else if (chk.moved.length) {
