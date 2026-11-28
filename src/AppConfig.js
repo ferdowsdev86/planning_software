@@ -3022,7 +3022,12 @@ export const schedulerProConfig = {
             try { right = this.getCoordinateFromDate(cg.lastEnd, true); } catch { right = null; }
             if (right != null && right > renderData.left + renderData.width) renderData.width = right - renderData.left;
             renderData.cls.add('mb-consol-head');
-            consolHtml = `<span class="mb-consol-badge" title="Consolidated — ${cg.count} bars of the same order · ${StringHelper.encodeHtml(fmtQty(cg.qty))} pcs">⧉${cg.count} · ${StringHelper.encodeHtml(fmtQty(cg.qty))}</span>`;
+            // the strip shows what is still to sew over the whole run (planner,
+            // 2026-11-28: "consolidated → the strip shows the remaining qty")
+            // — the same figure as the tooltip's Production · N bars Remaining
+            const run  = consolRunProduction(cg);
+            const encQ = n => StringHelper.encodeHtml(fmtQty(n));
+            consolHtml = `<span class="mb-consol-badge" title="Consolidated — ${cg.count} bars of the same order · ${encQ(run.plan)} pcs · done ${encQ(run.made)} · remaining ${encQ(run.left)}">⧉${cg.count} · ⏳${encQ(run.left)}</span>`;
         }
         // The joint of two orders (planner, 2026-11-21, FastReact beside
         // MbmPlan): where the next bar on the line starts where this one ends,
